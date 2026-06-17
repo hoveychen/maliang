@@ -25,6 +25,20 @@ func _process(_delta: float) -> bool:
 	# 注入一个目标逻辑坐标，让 chunk/wrap 体现出来
 	if _frames == 5 and _world != null and (_mx != 0.0 or _mz != 0.0):
 		_world.player_logical = WorldGrid.wrap_pos(Vector2(_mx, _mz))
+	# 合成一次点击，命中第一个 NPC，验证拾取 + 进交互模式
+	if _frames == 10 and OS.get_environment("SHOT_TAP") == "1" and _world != null:
+		var npc = _world.npcs[0]["node"]
+		var sp: Vector2 = _world.camera.unproject_position(npc.global_position + Vector3(0, 1.6, 0))
+		var ev := InputEventScreenTouch.new()
+		ev.index = 0
+		ev.pressed = true
+		ev.position = sp
+		get_root().push_input(ev)
+	if _frames == 14 and OS.get_environment("SHOT_TAP") == "1" and _world != null:
+		if _world.selected != null:
+			printerr("SELECTED=%s EAR_VISIBLE=%s" % [_world.selected.char_name, str(_world.ear_icon.visible)])
+		else:
+			printerr("SELECTED=<none>")
 	if _frames == _shoot_at:
 		var img := get_root().get_viewport().get_texture().get_image()
 		img.save_png("res://_%s.png" % _name)
