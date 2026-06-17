@@ -7,23 +7,19 @@ extends Node3D
 
 const PLAYER_SPEED := 12.0
 const CAM_OFFSET := Vector3(0.0, 15.0, 13.0)
-const RENDER_RADIUS := 130.0  ## 超出此半径的地标暂时隐藏
 
 ## 玩家在环面世界上的逻辑坐标（世界单位，Vector2(x, z)）。
 var player_logical := Vector2.ZERO
 
 var camera: Camera3D
-var world_root: Node3D
-var landmarks: Array = []  ## [{ node, logical:Vector2 }]
+var chunk_manager: ChunkManager
 var coord_label: Label
 
 func _ready() -> void:
 	_setup_environment()
-	world_root = Node3D.new()
-	world_root.name = "WorldRoot"
-	add_child(world_root)
-	_setup_ground()
-	_setup_landmarks()
+	chunk_manager = ChunkManager.new()
+	chunk_manager.name = "ChunkManager"
+	add_child(chunk_manager)
 	_setup_player()
 	_setup_camera()
 	_setup_hud()
@@ -45,41 +41,6 @@ func _setup_environment() -> void:
 	env.ambient_light_energy = 0.55
 	we.environment = env
 	add_child(we)
-
-func _setup_ground() -> void:
-	## P2 临时：一块跟随玩家原点的大草地（P3 换成 chunk 流送的真地形）。
-	var ground := MeshInstance3D.new()
-	ground.name = "Ground"
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(300.0, 300.0)
-	plane.subdivide_width = 60
-	plane.subdivide_depth = 60
-	ground.mesh = plane
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.46, 0.72, 0.40)
-	mat.roughness = 0.95
-	ground.material_override = mat
-	add_child(ground)  ## 直接挂在原点下，恒在玩家脚下
-
-func _setup_landmarks() -> void:
-	var span := WorldGrid.WORLD_SPAN
-	var defs := [
-		{ "logical": Vector2(0.0, 0.0), "color": Color(0.3, 0.8, 0.3) },        # 起点
-		{ "logical": Vector2(24.0, 0.0), "color": Color(0.9, 0.3, 0.3) },       # 东
-		{ "logical": Vector2(0.0, 24.0), "color": Color(0.3, 0.5, 0.95) },      # 北
-		{ "logical": Vector2(span - 24.0, 0.0), "color": Color(0.95, 0.85, 0.2) }, # 接缝西侧
-		{ "logical": Vector2(12.0, span - 12.0), "color": Color(0.7, 0.35, 0.85) }, # 接缝南侧
-	]
-	for d in defs:
-		var pillar := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = Vector3(1.6, 5.0, 1.6)
-		pillar.mesh = box
-		var m := StandardMaterial3D.new()
-		m.albedo_color = d["color"]
-		pillar.material_override = m
-		world_root.add_child(pillar)
-		landmarks.append({ "node": pillar, "logical": d["logical"] })
 
 func _setup_player() -> void:
 	var body := MeshInstance3D.new()
@@ -120,19 +81,8 @@ func _physics_process(delta: float) -> void:
 		player_logical = WorldGrid.wrap_pos(player_logical + input * PLAYER_SPEED * delta)
 
 func _process(_delta: float) -> void:
-	_reposition_world()
+	chunk_manager.update(player_logical)
 	_update_hud()
-
-## 以玩家为中心：每个地标放到离渲染原点最近的等价位置。
-func _reposition_world() -> void:
-	for lm in landmarks:
-		var d: Vector2 = WorldGrid.shortest_delta(player_logical, lm["logical"])
-		var node: MeshInstance3D = lm["node"]
-		if d.length() > RENDER_RADIUS:
-			node.visible = false
-		else:
-			node.visible = true
-			node.position = Vector3(d.x, 2.5, d.y)
 
 func _update_hud() -> void:
 	if coord_label == null:
