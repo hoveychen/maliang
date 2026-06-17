@@ -29,7 +29,7 @@ func _setup_environment() -> void:
 	light.name = "Sun"
 	light.rotation_degrees = Vector3(-55.0, -40.0, 0.0)
 	light.light_energy = 1.15
-	light.shadow_enabled = true
+	light.shadow_enabled = false  # 弯曲后阴影投影会错位，改用 P5 的假地面阴影
 	add_child(light)
 
 	var we := WorldEnvironment.new()
@@ -50,9 +50,7 @@ func _setup_player() -> void:
 	caps.height = 1.6
 	body.mesh = caps
 	body.position = Vector3(0.0, 0.8, 0.0)  ## 固定在渲染原点
-	var pmat := StandardMaterial3D.new()
-	pmat.albedo_color = Color(0.92, 0.52, 0.32)
-	body.material_override = pmat
+	body.material_override = BendMat.make(Color(0.92, 0.52, 0.32))
 	add_child(body)
 
 func _setup_camera() -> void:
