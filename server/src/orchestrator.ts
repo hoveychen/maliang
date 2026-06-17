@@ -5,9 +5,11 @@ import type { Character, CharacterSpec, CreateCharacterInput, GenStage } from '.
 
 /** 内容审核拦截。stage 指明在文字还是图片环节被拦。 */
 export class ModerationError extends Error {
-  constructor(public readonly stage: 'text' | 'image', reason?: string) {
+  readonly stage: 'text' | 'image';
+  constructor(stage: 'text' | 'image', reason?: string) {
     super(`moderation blocked at ${stage}: ${reason ?? 'unspecified'}`);
     this.name = 'ModerationError';
+    this.stage = stage;
   }
 }
 
