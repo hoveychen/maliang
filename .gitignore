@@ -1,0 +1,13 @@
+# Godot 4
+.godot/
+/android/
+export.cfg
+export_presets.cfg
+*.translation
+
+# Fleet / agent scratch
+.worktrees/
+TASKS.md
+
+# OS
+.DS_Store
