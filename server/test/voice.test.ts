@@ -74,3 +74,35 @@ test('handleVoice 指令：去某地 → 带 behaviorScript 且即时生效', as
   assert.ok(r.behaviorScript, '去某地应带行为脚本');
   assert.equal(store.getCharacter('w1', 'c1')!.behaviorScript.commands[0]?.type, 'move_to');
 });
+
+test('handleVoice：把近 N 轮历史 + 长期记忆喂给 routeIntent（角色有上下文）', async () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  const c = seedChar(store, 'w1', 'c1');
+  c.chatHistory.push({ role: 'child', text: '我叫朵朵', ts: 0 });
+  c.chatHistory.push({ role: 'npc', text: '你好朵朵！', ts: 0 });
+  c.memory.push('小朋友叫朵朵');
+  store.saveCharacter(c);
+
+  const base = createMockAdapters();
+  let captured = null;
+  const adapters = {
+    ...base,
+    llm: {
+      ...base.llm,
+      async routeIntent(t, ctx) {
+        captured = ctx;
+        return base.llm.routeIntent(t, ctx);
+      },
+    },
+  };
+  await handleVoice(
+    { worldId: 'w1', characterId: 'c1', audio: { bytes: new Uint8Array([1]), mime: 'audio/wav' } },
+    adapters,
+    store,
+  );
+  assert.ok(captured, 'routeIntent 应被调用');
+  assert.deepEqual(captured.memory, ['小朋友叫朵朵'], '长期记忆应进入上下文');
+  assert.equal(captured.recentHistory.length, 2, '近 N 轮历史应进入上下文');
+  assert.equal(captured.recentHistory[0].text, '我叫朵朵');
+});

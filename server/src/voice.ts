@@ -8,6 +8,9 @@ export interface VoiceInput {
   audio: AudioBlob;
 }
 
+const RECENT_TURNS = 6; // 回喂给角色的近期对话轮数（child+npc 各算一条）
+const MEMORY_CAP = 40; // 单角色长期记忆条数上限（超出丢最旧）
+
 export class CharacterNotFoundError extends Error {
   constructor(worldId: string, characterId: string) {
     super(`character not found: ${worldId}/${characterId}`);
@@ -34,6 +37,8 @@ export async function handleVoice(
     characterName: character.name,
     personality: character.personality,
     abilities: character.abilities,
+    recentHistory: character.chatHistory.slice(-RECENT_TURNS), // 这轮之前的近 N 轮
+    memory: character.memory,
   });
 
   // 回应文字落地前过审核；不通过则温和改口。

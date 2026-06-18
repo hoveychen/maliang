@@ -60,17 +60,26 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
   }
 
   async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
+    const memoryLine = ctx.memory && ctx.memory.length > 0
+      ? `\n你记得关于小朋友的事：${ctx.memory.join('；')}。回应时自然地体现你记得这些。`
+      : '';
     const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。
 小朋友对你说了一句话，判断这是「闲聊」还是「让你做一件你会做的事」。
-你会做的事(abilities)：${ctx.abilities.join('、')}（move_to=去某地，deliver_message=给某角色带话）。
+你会做的事(abilities)：${ctx.abilities.join('、')}（move_to=去某地，deliver_message=给某角色带话）。${memoryLine}
 严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
-- replyText 用简单、温暖、童趣的中文，符合角色个性。
+- replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - 绝不包含暴力、恐怖、成人内容。`;
+    // 把近 N 轮历史按角色映射成对话消息，让回应有上下文
+    const historyMsgs = (ctx.recentHistory ?? []).map((t) => ({
+      role: t.role === 'child' ? ('user' as const) : ('assistant' as const),
+      content: t.text,
+    }));
     const content = await this.#client.chatText(
       this.#model,
       [
         { role: 'system', content: system },
+        ...historyMsgs,
         { role: 'user', content: transcript },
       ],
       { jsonObject: true },
