@@ -36,8 +36,16 @@ export interface CutoutAdapter {
 }
 
 /** 语音识别：音频 → 中文文字。真实实现接讯飞。 */
+/** 流式识别会话：录音中持续 feed 分片（实时发往讯飞），finish 收尾并返回最终转写。 */
+export interface ASRStream {
+  feed(chunk: Uint8Array): void;
+  finish(): Promise<string>;
+}
+
 export interface ASRAdapter {
   transcribe(audio: AudioBlob): Promise<string>;
+  /** 边说边识别：voice_start 时开流，分片随到随发，voice_end 调 finish 拿转写。 */
+  openStream(): ASRStream;
 }
 
 /** 语音合成：文字 + 音色 → 音频。真实实现接讯飞。 */
