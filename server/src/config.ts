@@ -10,7 +10,7 @@ export function loadConfig(): Config {
   return {
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
     llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'moonshotai/kimi-k2.6',
-    imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image-preview',
+    imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image',
   };
 }
 
