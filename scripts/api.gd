@@ -25,6 +25,21 @@ func create_world() -> Dictionary:
 	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
 	return data if typeof(data) == TYPE_DICTIONARY else {}
 
+## 拉取指定世界状态（含角色）。失败返回空字典。
+func get_world(id: String) -> Dictionary:
+	var http := HTTPRequest.new()
+	add_child(http)
+	var err := http.request(base + "/worlds/" + id)
+	if err != OK:
+		http.queue_free()
+		return {}
+	var res: Array = await http.request_completed
+	http.queue_free()
+	if int(res[1]) != 200:
+		return {}
+	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
+	return data if typeof(data) == TYPE_DICTIONARY else {}
+
 ## 拉取资源 hash → Texture2D（PNG）。失败返回 null。
 func fetch_texture(asset_hash: String) -> Texture2D:
 	if asset_hash.is_empty():

@@ -401,11 +401,12 @@ func _setup_backend() -> void:
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 func _bootstrap() -> void:
-	var world: Dictionary = await api.create_world()
+	# 加载固定的 default 世界（含预生成村民），不再每次新建
+	var world: Dictionary = await api.get_world("default")
 	if world.is_empty():
 		return # 离线：保留 hardcoded demo NPC
 	online = true
-	world_id = String(world.get("id", ""))
+	world_id = String(world.get("id", "default"))
 	backend.url = (api.base as String).replace("http", "ws") + "/ws"
 	backend.connect_to_server()
 	for n in npcs:
