@@ -48,7 +48,9 @@ export class OpenRouterClient {
     messages: ChatMessage[],
     opts: { jsonObject?: boolean } = {},
   ): Promise<string> {
-    const body: Record<string, unknown> = { model, messages };
+    // kimi-k2.6 默认开启 reasoning，实测使单次调用从 ~1.8s 涨到 ~8s；语音链路两次 LLM 调用
+    // （routeIntent + 文字审核）会累计到十几秒。幼儿对话不需要思考链，统一禁用。
+    const body: Record<string, unknown> = { model, messages, reasoning: { enabled: false } };
     if (opts.jsonObject) body.response_format = { type: 'json_object' };
     const json = await this.#post(body);
     const content = json.choices?.[0]?.message?.content;

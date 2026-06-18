@@ -25,6 +25,7 @@ var camera: Camera3D
 var chunk_manager: ChunkManager
 var coord_label: Label
 var banner: Label
+var heard_label: Label   ## 顶部显示 ASR 识别到的文字（"👂 听到：…"）
 
 var critter_tex: Texture2D
 var ear_tex: Texture2D
@@ -186,6 +187,17 @@ func _setup_hud() -> void:
 	_style_label(banner, 28)
 	banner.visible = false
 	layer.add_child(banner)
+
+	# 顶部「听到的文字」反馈：让大人能确认 ASR 是否识别成功
+	heard_label = Label.new()
+	heard_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	heard_label.offset_top = 36.0
+	heard_label.offset_bottom = 96.0
+	heard_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heard_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_style_label(heard_label, 24)
+	heard_label.visible = false
+	layer.add_child(heard_label)
 
 	# 聆听 / 发送 按钮（交互模式下显示）
 	listen_btn = Button.new()
@@ -385,6 +397,7 @@ func _exit_interaction() -> void:
 	_target_pitch = GOD_PITCH_DEG
 	_target_dist = GOD_DIST
 	banner.visible = false
+	heard_label.visible = false
 	listen_btn.visible = false
 	send_btn.visible = false
 	thinking_label.visible = false
@@ -535,6 +548,12 @@ func _capture_pcm16k() -> PackedByteArray:
 
 func _on_character_response(data: Dictionary) -> void:
 	thinking_label.visible = false
+	var transcript := String(data.get("transcript", ""))
+	if transcript.is_empty():
+		heard_label.text = "👂 没听清，再说一次试试"
+	else:
+		heard_label.text = "👂 听到：%s" % transcript
+	heard_label.visible = true
 	banner.text = String(data.get("replyText", ""))
 	banner.visible = true
 	_show_emotion(String(data.get("emotion", "happy")))
