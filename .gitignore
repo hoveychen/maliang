@@ -2,8 +2,9 @@
 .godot/
 /android/
 export.cfg
-export_presets.cfg
 *.translation
+/build/
+# export_presets.cfg 纳入版控（含安卓包名/权限/架构，无敏感信息）
 
 # Fleet / agent scratch
 .worktrees/
