@@ -10,7 +10,7 @@ func _initialize() -> void:
 func _process(_d: float) -> bool:
 	f += 1
 	if w != null:
-		w.player_logical = WorldGrid.wrap_pos(w.player_logical + Vector2(4.0, 1.5))
+		w.focus_logical = WorldGrid.wrap_pos(w.focus_logical + Vector2(4.0, 1.5))
 	if f > 30:
 		acc += Engine.get_frames_per_second()
 		n += 1

@@ -4,11 +4,23 @@ extends Node3D
 ## 逻辑/数据是纯平铺环面；弯曲只在渲染。角色精灵不走 shader，改用 CPU 复算
 ## 弯曲量、沿相机上方向落到弯曲地表（曲面世界放置物体的通用解法）。
 
-const PLAYER_SPEED := 12.0
-const CAM_OFFSET := Vector3(0.0, 15.0, 13.0)
+const PAN_SPEED := 28.0           ## god 相机平移速度（世界单位/秒）
+const GOD_PITCH_DEG := 47.0       ## 默认 god 视角：地平线落屏幕 ~4/5 高度（约 20% 天空）
+const LOCK_PITCH_DEG := 30.0      ## lock 跟随：明显放平（3/4 平视，地平线 ~3/4、约 25% 天空）
+const SPRITE_LEAN_FACTOR := 0.55  ## 角色固定倾角 = (90-相机角)*该系数（站立感+面向相机折中）
+const GOD_DIST := 36.0
+const LOCK_DIST := 20.0
+const ZOOM_MIN := 16.0
+const ZOOM_MAX := 64.0
+const CAM_EASE := 6.0             ## 视角过渡速度（pitch/dist/focus 一起缓动）
 const PICK_RADIUS_PX := 80.0
 
-var player_logical := Vector2.ZERO
+var focus_logical := Vector2.ZERO ## god 相机在环面上聚焦的逻辑坐标（取代玩家）
+var _cur_pitch := GOD_PITCH_DEG
+var _cur_dist := GOD_DIST
+var _target_pitch := GOD_PITCH_DEG
+var _target_dist := GOD_DIST
+var _locked: PaperCharacter = null ## lock 跟随的角色（null=god 自由模式）
 var camera: Camera3D
 var chunk_manager: ChunkManager
 var coord_label: Label
@@ -16,11 +28,12 @@ var banner: Label
 
 var critter_tex: Texture2D
 var ear_tex: Texture2D
-var player_char: PaperCharacter
 var npcs: Array = []              ## [{ node:PaperCharacter, logical:Vector2 }]
 var selected: PaperCharacter = null
 var ear_icon: Sprite3D
-var _cam_up := Vector3.UP         ## 相机上方向（固定），弯曲补偿用
+var _cam_up := Vector3.UP         ## 相机上方向（弯曲补偿用，随相机更新）
+var _dragging := false
+var _press_pos := Vector2.ZERO
 
 # M2 语音交互
 var backend: Backend
@@ -50,7 +63,6 @@ func _ready() -> void:
 	chunk_manager.name = "ChunkManager"
 	add_child(chunk_manager)
 	_setup_camera()
-	_setup_player()
 	_setup_npcs()
 	_setup_ear()
 	_setup_hud()
@@ -92,24 +104,32 @@ func _setup_environment() -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.72, 0.78, 0.85)
 	env.ambient_light_energy = 0.6
+	# 深度雾：远处地面渐隐到天空色 → chunk 边界雾化进天空、自然无限地平线
+	env.fog_enabled = true
+	env.fog_mode = Environment.FOG_MODE_DEPTH
+	env.fog_light_color = Color(0.62, 0.82, 0.97)
+	env.fog_light_energy = 1.0
+	env.fog_depth_begin = 80.0
+	env.fog_depth_end = 230.0
+	env.fog_depth_curve = 1.0
 	we.environment = env
 	add_child(we)
 
 func _setup_camera() -> void:
 	camera = Camera3D.new()
 	camera.name = "Camera"
-	camera.fov = 58.0
-	camera.far = 600.0
+	camera.fov = 50.0
+	camera.far = 900.0
 	add_child(camera)
-	camera.global_position = CAM_OFFSET
-	camera.look_at(Vector3(0.0, 1.0, 0.0), Vector3.UP)
-	_cam_up = camera.global_transform.basis.y
+	_update_camera()
 
-func _setup_player() -> void:
-	player_char = PaperCharacter.new()
-	add_child(player_char)
-	player_char.setup(critter_tex, Color(0.96, 0.62, 0.42), "你")
-	_place_on_bent_ground(player_char, Vector3.ZERO)
+## 相机固定在渲染原点上方、看向原点；平移靠改 focus_logical（世界相对滚动），
+## 角度(pitch)/距离(dist) 由 god/lock 目标缓动得到。
+func _update_camera() -> void:
+	var pitch := deg_to_rad(_cur_pitch)
+	camera.global_position = Vector3(0.0, sin(pitch) * _cur_dist, cos(pitch) * _cur_dist)
+	camera.look_at(Vector3.ZERO, Vector3.UP)
+	_cam_up = camera.global_transform.basis.y
 
 func _setup_npcs() -> void:
 	var defs := [
@@ -122,11 +142,24 @@ func _setup_npcs() -> void:
 		add_child(npc)
 		npc.setup(critter_tex, d["color"], d["name"])
 		npcs.append({ "node": npc, "logical": d["logical"] })
+		_start_ambient_wander(npcs[npcs.size() - 1])
+
+## 让角色自主活动：循环「等一会 → 就近 wander」。
+func _start_ambient_wander(npc_dict: Dictionary) -> void:
+	var ex := BehaviorExecutor.new()
+	ex.setup(npc_dict, {
+		"commands": [
+			{ "type": "wait", "params": { "duration": randf_range(1.0, 3.5) } },
+			{ "type": "wander", "params": { "radius": 7.0 } },
+		],
+		"loop": true,
+	})
+	_executors.append(ex)
 
 func _setup_ear() -> void:
 	ear_icon = Sprite3D.new()
 	ear_icon.texture = ear_tex
-	ear_icon.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	ear_icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	ear_icon.pixel_size = 0.02
 	ear_icon.shaded = false
 	ear_icon.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
@@ -188,7 +221,7 @@ func _setup_hud() -> void:
 
 	# 角色头顶情绪气泡（占位：真实游戏用图标）
 	emotion_bubble = Label3D.new()
-	emotion_bubble.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	emotion_bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	emotion_bubble.pixel_size = 0.02
 	emotion_bubble.modulate = Color.WHITE
 	emotion_bubble.outline_size = 12
@@ -203,14 +236,24 @@ func _style_label(l: Label, size: int) -> void:
 	l.add_theme_constant_override("outline_size", 6)
 
 func _physics_process(delta: float) -> void:
+	# 方向键平移 god 相机聚焦点（拖拽平移在 _unhandled_input）
 	var input := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	if input != Vector2.ZERO:
-		player_logical = WorldGrid.wrap_pos(player_logical + input * PLAYER_SPEED * delta)
+		focus_logical = WorldGrid.wrap_pos(focus_logical + input * PAN_SPEED * delta)
 
 func _process(delta: float) -> void:
 	_step_executors(delta)
-	chunk_manager.update(player_logical)
-	_place_on_bent_ground(player_char, Vector3.ZERO)
+	# 视角缓动（god ↔ lock 的 pitch/dist 过渡）
+	var t := minf(1.0, CAM_EASE * delta)
+	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)
+	_cur_dist = lerpf(_cur_dist, _target_dist, t)
+	# lock 时聚焦缓动跟随选中角色（它可能在自主走动）
+	if _locked != null and is_instance_valid(_locked):
+		var lg: Vector2 = _find_npc_dict(_locked).get("logical", focus_logical)
+		var fd := WorldGrid.shortest_delta(focus_logical, lg)
+		focus_logical = WorldGrid.wrap_pos(focus_logical + fd * t)
+	_update_camera()
+	chunk_manager.update(focus_logical)
 	_reposition_npcs()
 	_update_ear()
 	_update_emotion_bubble()
@@ -222,9 +265,13 @@ func _step_executors(delta: float) -> void:
 	_executors = _executors.filter(func(e: BehaviorExecutor) -> bool: return not e.is_done())
 
 func _reposition_npcs() -> void:
+	# 固定小倾角：随当前相机角度调（站立感 + 面向相机的折中），绕脚底前倾
+	var lean := deg_to_rad((90.0 - _cur_pitch) * SPRITE_LEAN_FACTOR)
 	for n in npcs:
-		var d: Vector2 = WorldGrid.shortest_delta(player_logical, n["logical"])
-		_place_on_bent_ground(n["node"], Vector3(d.x, 0.0, d.y))
+		var d: Vector2 = WorldGrid.shortest_delta(focus_logical, n["logical"])
+		var node: Node3D = n["node"]
+		_place_on_bent_ground(node, Vector3(d.x, 0.0, d.y))
+		node.rotation = Vector3(-lean, 0.0, 0.0)
 
 ## 把节点放到「弯曲后」的地表位置：先算视图空间弯曲下沉量，再沿相机上方向补偿。
 func _place_on_bent_ground(node: Node3D, base_world: Vector3) -> void:
@@ -240,8 +287,8 @@ func _update_ear() -> void:
 		ear_icon.visible = false
 
 func _update_hud() -> void:
-	var t := WorldGrid.to_tile(player_logical)
-	coord_label.text = "tile (%d, %d)  /  %d×%d  环面循环" % [t.x, t.y, WorldGrid.GRID_TILES, WorldGrid.GRID_TILES]
+	var t := WorldGrid.to_tile(focus_logical)
+	coord_label.text = "god 视角  tile (%d, %d)  /  %d×%d  环面循环" % [t.x, t.y, WorldGrid.GRID_TILES, WorldGrid.GRID_TILES]
 
 func _unhandled_input(event: InputEvent) -> void:
 	# 调试：选中角色后按 Enter/空格。小神仙→造角色；其他→本地 move_to（离线演示）。
@@ -253,18 +300,53 @@ func _unhandled_input(event: InputEvent) -> void:
 			_show_emotion("wave")
 			_run_behavior(selected, { "commands": [{ "type": "move_to", "params": {} }], "loop": false })
 		return
-	var p := Vector2.INF
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		p = event.position
-	elif event is InputEventScreenTouch and event.pressed:
-		p = event.position
-	if p == Vector2.INF:
+	# 缩放（滚轮）
+	if event is InputEventMouseButton and event.pressed and _locked == null:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_target_dist = clampf(_target_dist - 3.0, ZOOM_MIN, ZOOM_MAX)
+			return
+		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_target_dist = clampf(_target_dist + 3.0, ZOOM_MIN, ZOOM_MAX)
+			return
+	# 鼠标：按下记录，移动判定为拖拽平移，松开若未拖拽则拾取
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_dragging = false
+			_press_pos = event.position
+		elif not _dragging:
+			_tap_pick(event.position)
 		return
-	var hit := _pick_npc(p)
+	if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		if event.position.distance_to(_press_pos) > 6.0:
+			_dragging = true
+		_pan_by_screen(event.relative)
+		return
+	# 触屏：拖动平移，点触拾取
+	if event is InputEventScreenDrag:
+		_dragging = true
+		_pan_by_screen(event.relative)
+		return
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			_dragging = false
+			_press_pos = event.position
+		elif not _dragging:
+			_tap_pick(event.position)
+		return
+
+func _tap_pick(screen_pos: Vector2) -> void:
+	var hit := _pick_npc(screen_pos)
 	if hit != null:
 		_enter_interaction(hit)
 	else:
 		_exit_interaction()
+
+## 屏幕拖动 → 世界平移（抓住地图拖的手感；高角俯视下屏幕 x→世界x，y→世界z）
+func _pan_by_screen(rel: Vector2) -> void:
+	if _locked != null:
+		return # lock 模式由跟随驱动，不手动平移
+	var k := _cur_dist * 0.0016
+	focus_logical = WorldGrid.wrap_pos(focus_logical - Vector2(rel.x, rel.y) * k)
 
 ## 屏幕空间拾取：精灵未弯曲，其屏幕位置 = unproject(实际渲染坐标)，与点击对比。
 func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
@@ -284,6 +366,10 @@ func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
 
 func _enter_interaction(npc: PaperCharacter) -> void:
 	selected = npc
+	# lock：相机平滑切到更低角(3/4)+拉近，聚焦跟随该角色
+	_locked = npc
+	_target_pitch = LOCK_PITCH_DEG
+	_target_dist = LOCK_DIST
 	banner.text = "%s 在听你说话呀" % npc.char_name
 	banner.visible = true
 	listen_btn.visible = true
@@ -293,6 +379,10 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 
 func _exit_interaction() -> void:
 	selected = null
+	# 切回 god 自由视角（平滑过渡）
+	_locked = null
+	_target_pitch = GOD_PITCH_DEG
+	_target_dist = GOD_DIST
 	banner.visible = false
 	listen_btn.visible = false
 	send_btn.visible = false
@@ -311,11 +401,12 @@ func _setup_backend() -> void:
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 func _bootstrap() -> void:
-	var world: Dictionary = await api.create_world()
+	# 加载固定的 default 世界（含预生成村民），不再每次新建
+	var world: Dictionary = await api.get_world("default")
 	if world.is_empty():
 		return # 离线：保留 hardcoded demo NPC
 	online = true
-	world_id = String(world.get("id", ""))
+	world_id = String(world.get("id", "default"))
 	backend.url = (api.base as String).replace("http", "ws") + "/ws"
 	backend.connect_to_server()
 	for n in npcs:
@@ -324,10 +415,10 @@ func _bootstrap() -> void:
 	var chars: Array = world.get("characters", [])
 	for c in chars:
 		await _spawn_server_character(c as Dictionary, Vector2.INF)
-	# 玩家落到世界中心（小神仙所在），让初始就在小神仙旁边
+	# 相机聚焦到世界中心（小神仙所在）
 	var fairy := _find_fairy()
 	if not fairy.is_empty():
-		player_logical = fairy["logical"]
+		focus_logical = fairy["logical"]
 
 func _find_fairy() -> Dictionary:
 	for n in npcs:
@@ -362,6 +453,8 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 		var pos: Dictionary = c.get("position", {})
 		logical = Vector2(float(pos.get("tileX", 500)), float(pos.get("tileY", 500))) * WorldGrid.TILE_SIZE
 	npcs.append({ "node": npc, "logical": logical, "id": String(c.get("id", "")), "is_fairy": bool(c.get("isFairy", false)) })
+	if not bool(c.get("isFairy", false)):
+		_start_ambient_wander(npcs[npcs.size() - 1])
 
 func _on_gen_progress(stage: String) -> void:
 	thinking_label.text = "施法中… (%s)" % stage
@@ -371,7 +464,7 @@ func _on_gen_complete(character: Dictionary) -> void:
 	thinking_label.visible = false
 	# 新角色在小神仙旁边降生
 	var fairy := _find_fairy()
-	var anchor: Vector2 = fairy["logical"] if not fairy.is_empty() else player_logical
+	var anchor: Vector2 = fairy["logical"] if not fairy.is_empty() else focus_logical
 	var spawn_at: Vector2 = anchor + Vector2(6.0, 4.0)
 	await _spawn_server_character(character, spawn_at)
 	banner.text = "%s 来啦！" % String(character.get("name", "新朋友"))

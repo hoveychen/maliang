@@ -8,7 +8,11 @@ extends Node3D
 const CHUNK_TILES := 25
 const CHUNK_WORLD := float(CHUNK_TILES) * WorldGrid.TILE_SIZE          ## 50.0
 const CHUNKS_PER_SIDE := WorldGrid.GRID_TILES / CHUNK_TILES            ## 40
-const R := 5                                                          ## 半径（区块数）→ 11×11
+const R := 7                                                          ## 半径（区块数）→ 15×15（更平视角铺到地平线）
+const RENDER_RADIUS := float(R) * 50.0 - 25.0                         ## 圆形渲染半径(≈325)，超出隐藏
+## world-bending 在 GPU 位移顶点，但视锥裁剪按原始 AABB → 高处/远处网格会被误剔除。
+## 给所有弯曲网格设大裁剪边距，避免接近屏幕边缘时整块消失。
+const CULL_MARGIN := 220.0
 
 ## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
@@ -28,6 +32,7 @@ func _make_slot() -> Dictionary:
 	plane.subdivide_depth = 12
 	tile.mesh = plane
 	tile.material_override = BendMat.make(Color.WHITE)
+	tile.extra_cull_margin = CULL_MARGIN
 	root.add_child(tile)
 	var deco := Node3D.new()
 	root.add_child(deco)
@@ -49,6 +54,8 @@ func update(player_logical: Vector2) -> void:
 			var slot: Dictionary = _slots[idx]
 			var root: Node3D = slot["root"]
 			root.position = Vector3(d.x, 0.0, d.y)
+			# 圆形裁剪：超出半径的区块隐藏 → 圆形地平线，无正方形四角对角缺口
+			root.visible = d.length() < RENDER_RADIUS
 			# wrap 后的区块索引决定外观
 			var wrapped := Vector2i(
 				posmod(cx, CHUNKS_PER_SIDE),
@@ -100,6 +107,7 @@ func _add_house(parent: Node3D, pos: Vector3, h: int) -> void:
 	body.mesh = box
 	var walls := [Color(0.96, 0.86, 0.7), Color(0.92, 0.8, 0.85), Color(0.8, 0.88, 0.96)]
 	body.material_override = BendMat.make(walls[posmod(h, walls.size())])
+	body.extra_cull_margin = CULL_MARGIN
 	body.position = pos + Vector3(0.0, 2.0, 0.0)
 	parent.add_child(body)
 
@@ -111,6 +119,7 @@ func _add_house(parent: Node3D, pos: Vector3, h: int) -> void:
 	pyr.radial_segments = 4
 	roof.mesh = pyr
 	roof.material_override = BendMat.make(Color(0.82, 0.4, 0.32))
+	roof.extra_cull_margin = CULL_MARGIN
 	roof.position = pos + Vector3(0.0, 5.6, 0.0)
 	roof.rotation_degrees = Vector3(0.0, 45.0, 0.0)  # 对齐方形墙体
 	parent.add_child(roof)
@@ -124,6 +133,7 @@ func _add_tree(parent: Node3D, pos: Vector3, h: int) -> void:
 	cyl.height = height
 	trunk.mesh = cyl
 	trunk.material_override = BendMat.make(Color(0.45, 0.3, 0.18))
+	trunk.extra_cull_margin = CULL_MARGIN
 	trunk.position = pos + Vector3(0.0, height * 0.5, 0.0)
 	parent.add_child(trunk)
 
@@ -134,5 +144,6 @@ func _add_tree(parent: Node3D, pos: Vector3, h: int) -> void:
 	crown.mesh = sph
 	var g := 0.5 + float(h % 4) * 0.08
 	crown.material_override = BendMat.make(Color(0.2, g, 0.25))
+	crown.extra_cull_margin = CULL_MARGIN
 	crown.position = pos + Vector3(0.0, height + 0.6, 0.0)
 	parent.add_child(crown)

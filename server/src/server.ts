@@ -54,9 +54,14 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { id: world.id, characters: characterListView(store, world.id) };
   });
 
-  // 拉世界状态
+  // 拉世界状态。固定的 "default" 世界不存在时自动创建并种入小神仙
+  // （初始村民由 seed 脚本生成；客户端默认加载 default 世界）。
   app.get<{ Params: { id: string } }>('/worlds/:id', async (req, reply) => {
-    const world = store.getWorld(req.params.id);
+    let world = store.getWorld(req.params.id);
+    if (!world && req.params.id === 'default') {
+      world = store.createWorld('default');
+      store.addCharacter(seedFairy('default'));
+    }
     if (!world) return reply.code(404).send({ error: 'world not found' });
     return { id: world.id, characters: characterListView(store, world.id) };
   });
