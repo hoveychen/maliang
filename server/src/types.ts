@@ -75,6 +75,17 @@ export interface IntentContext {
   characterName: string;
   personality: string;
   abilities: string[];
+  recentHistory?: ChatTurn[]; // 近 N 轮对话，给角色上下文让回应连贯
+  memory?: string[]; // 角色长期记忆要点（自我累积，跨对话保留）
+}
+
+/** 对话后让角色「自己决定记什么」的上下文（extractMemory 用）。 */
+export interface MemoryExtractionContext {
+  characterName: string;
+  personality: string;
+  transcript: string; // 小朋友这轮说的
+  replyText: string; // 角色这轮的回应
+  existingMemory: string[]; // 已记住的，用于去重/避免重复记
 }
 
 /** voice_input 编排的返回（推给客户端 character_response）。 */

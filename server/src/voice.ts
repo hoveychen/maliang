@@ -8,6 +8,9 @@ export interface VoiceInput {
   audio: AudioBlob;
 }
 
+const RECENT_TURNS = 6; // 回喂给角色的近期对话轮数（child+npc 各算一条）
+const MEMORY_CAP = 40; // 单角色长期记忆条数上限（超出丢最旧）
+
 export class CharacterNotFoundError extends Error {
   constructor(worldId: string, characterId: string) {
     super(`character not found: ${worldId}/${characterId}`);
@@ -34,6 +37,8 @@ export async function handleVoice(
     characterName: character.name,
     personality: character.personality,
     abilities: character.abilities,
+    recentHistory: character.chatHistory.slice(-RECENT_TURNS), // 这轮之前的近 N 轮
+    memory: character.memory,
   });
 
   // 语音回复不再过文字审核（Boss 2026-06-18 决策：多一次 LLM 调用拖慢对话、伤体验）。
@@ -43,9 +48,25 @@ export async function handleVoice(
   const tts = await adapters.tts.synthesize(replyText, character.voiceId);
   const ttsAsset = store.putAsset(tts);
 
-  // 更新角色记忆与对话历史（持久化在 store 里的 character 对象上）。
+  // 更新对话历史（持久化在 store 里的 character 对象上）。
   character.chatHistory.push({ role: 'child', text: transcript, ts: 0 });
   character.chatHistory.push({ role: 'npc', text: replyText, ts: 0 });
+
+  // 对话后：让角色自己挑出值得长期记住的要点，去重 + 上限累积到 character.memory。
+  const remembered = await adapters.llm.extractMemory({
+    characterName: character.name,
+    personality: character.personality,
+    transcript,
+    replyText,
+    existingMemory: character.memory,
+  });
+  for (const item of remembered) {
+    const m = item.trim();
+    if (m && !character.memory.includes(m)) character.memory.push(m);
+  }
+  if (character.memory.length > MEMORY_CAP) {
+    character.memory = character.memory.slice(-MEMORY_CAP); // 超出丢最旧
+  }
 
   const response: VoiceResponse = {
     characterId: character.id,

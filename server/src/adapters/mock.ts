@@ -1,5 +1,5 @@
 import type { ServiceAdapters, ImageBlob, AudioBlob } from './types.ts';
-import type { CharacterSpec, IntentContext, IntentResult } from '../types.ts';
+import type { CharacterSpec, IntentContext, IntentResult, MemoryExtractionContext } from '../types.ts';
 
 // 1x1 透明 PNG，作为生图占位。
 const PNG_1x1 =
@@ -55,6 +55,15 @@ export function createMockAdapters(): ServiceAdapters {
           };
         }
         return { kind: 'chat', replyText: `（mock 回应）你说的是「${transcript}」对吗？`, emotion: 'happy' };
+      },
+      async extractMemory(ctx: MemoryExtractionContext): Promise<string[]> {
+        // mock：确定性地从「我叫X」「我喜欢X」抽要点，去重后返回（真实接 LLM 自由判断）
+        const facts: string[] = [];
+        const nameM = /我叫([^\s，。!！?？]{1,8})/.exec(ctx.transcript);
+        if (nameM) facts.push(`小朋友叫${nameM[1]}`);
+        const likeM = /我喜欢([^\s，。!！?？]{1,12})/.exec(ctx.transcript);
+        if (likeM) facts.push(`小朋友喜欢${likeM[1]}`);
+        return facts.filter((f) => !ctx.existingMemory.includes(f));
       },
       async respond(prompt: string): Promise<string> {
         return `（mock 回应）你说的是「${prompt}」对吗？`;
