@@ -1,5 +1,5 @@
 import type { LLMAdapter } from './types.ts';
-import type { CharacterSpec } from '../types.ts';
+import type { BehaviorScript, CharacterSpec, IntentContext, IntentResult } from '../types.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
 
 const DESIGNER_SYSTEM = `你是幼儿园游戏「maliang」的角色设计师。根据小朋友的口头想法，设计一个可爱、儿童友好的角色。
@@ -57,6 +57,45 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
       scale: 1.0,
       abilities: ['move_to', 'deliver_message'], // 系统预设能力，固定（不取 LLM 的flavor）
     };
+  }
+
+  async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
+    const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。
+小朋友对你说了一句话，判断这是「闲聊」还是「让你做一件你会做的事」。
+你会做的事(abilities)：${ctx.abilities.join('、')}（move_to=去某地，deliver_message=给某角色带话）。
+严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
+- chat 时不要 behaviorScript。
+- replyText 用简单、温暖、童趣的中文，符合角色个性。
+- 绝不包含暴力、恐怖、成人内容。`;
+    const content = await this.#client.chatText(
+      this.#model,
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: transcript },
+      ],
+      { jsonObject: true },
+    );
+    let raw: {
+      kind?: unknown;
+      replyText?: unknown;
+      emotion?: unknown;
+      behaviorScript?: unknown;
+    } = {};
+    try {
+      raw = JSON.parse(stripFences(content));
+    } catch {
+      raw = {};
+    }
+    const kind = raw.kind === 'command' ? 'command' : 'chat';
+    const result: IntentResult = {
+      kind,
+      replyText: str(raw.replyText, '嗯嗯，我在听呢！'),
+      emotion: str(raw.emotion, 'happy'),
+    };
+    if (kind === 'command' && raw.behaviorScript && typeof raw.behaviorScript === 'object') {
+      result.behaviorScript = raw.behaviorScript as BehaviorScript;
+    }
+    return result;
   }
 
   async respond(prompt: string): Promise<string> {

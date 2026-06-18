@@ -74,3 +74,28 @@ export interface ModerationResult {
   allowed: boolean;
   reason?: string;
 }
+
+/** 意图路由结果：闲聊还是预设能力指令。 */
+export interface IntentResult {
+  kind: 'chat' | 'command';
+  replyText: string; // 闲聊回应 / 指令的口头确认（中文）
+  behaviorScript?: BehaviorScript; // command 时
+  emotion: string; // happy | think | wave | ...（图标化情绪）
+}
+
+/** 意图路由的上下文（喂给 LLM）。 */
+export interface IntentContext {
+  characterName: string;
+  personality: string;
+  abilities: string[];
+}
+
+/** voice_input 编排的返回（推给客户端 character_response）。 */
+export interface VoiceResponse {
+  characterId: string;
+  transcript: string;
+  replyText: string;
+  ttsAsset: string; // 资源 hash（/assets/:hash）
+  behaviorScript?: BehaviorScript;
+  emotion: string;
+}

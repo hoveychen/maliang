@@ -6,6 +6,7 @@ import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, ModerationError } from './orchestrator.ts';
+import { handleVoice } from './voice.ts';
 import type { Character } from './types.ts';
 
 export interface ServerDeps {
@@ -82,7 +83,15 @@ async function handleWsMessage(
   adapters: ServiceAdapters,
   store: WorldStore,
 ): Promise<void> {
-  let msg: { type?: string; worldId?: string; intentText?: string; byFairy?: boolean };
+  let msg: {
+    type?: string;
+    worldId?: string;
+    intentText?: string;
+    byFairy?: boolean;
+    characterId?: string;
+    audio?: string; // base64
+    format?: string;
+  };
   try {
     msg = JSON.parse(raw);
   } catch {
@@ -90,24 +99,43 @@ async function handleWsMessage(
     return;
   }
 
-  if (msg.type !== 'create_character_request') {
-    socket.send(JSON.stringify({ type: 'error', error: `unknown type: ${msg.type}` }));
+  if (msg.type === 'create_character_request') {
+    const requestId = randomUUID();
+    const input = {
+      worldId: msg.worldId ?? '',
+      intentText: msg.intentText ?? '',
+      byFairy: msg.byFairy ?? true,
+    };
+    try {
+      const character = await createCharacter(input, adapters, store, (stage) => {
+        socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage }));
+      });
+      socket.send(JSON.stringify({ type: 'gen_complete', requestId, character }));
+    } catch (err) {
+      const reason = err instanceof ModerationError ? err.message : String(err);
+      socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
+    }
     return;
   }
 
-  const requestId = randomUUID();
-  const input = {
-    worldId: msg.worldId ?? '',
-    intentText: msg.intentText ?? '',
-    byFairy: msg.byFairy ?? true,
-  };
-  try {
-    const character = await createCharacter(input, adapters, store, (stage) => {
-      socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage }));
-    });
-    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character }));
-  } catch (err) {
-    const reason = err instanceof ModerationError ? err.message : String(err);
-    socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
+  if (msg.type === 'voice_input') {
+    try {
+      const audioBytes = Uint8Array.from(Buffer.from(msg.audio ?? '', 'base64'));
+      const response = await handleVoice(
+        {
+          worldId: msg.worldId ?? '',
+          characterId: msg.characterId ?? '',
+          audio: { bytes: audioBytes, mime: msg.format ?? 'audio/wav' },
+        },
+        adapters,
+        store,
+      );
+      socket.send(JSON.stringify({ type: 'character_response', ...response }));
+    } catch (err) {
+      socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
+    }
+    return;
   }
+
+  socket.send(JSON.stringify({ type: 'error', error: `unknown type: ${msg.type}` }));
 }

@@ -22,6 +22,16 @@ var selected: PaperCharacter = null
 var ear_icon: Sprite3D
 var _cam_up := Vector3.UP         ## 相机上方向（固定），弯曲补偿用
 
+# M2 语音交互
+var backend: Backend
+var listen_btn: Button
+var send_btn: Button
+var thinking_label: Label
+var emotion_bubble: Label3D
+var _recording := false
+var _executors: Array = []        ## 活跃的 BehaviorExecutor
+var world_id := ""
+
 func _ready() -> void:
 	critter_tex = load("res://assets/critter.svg")
 	ear_tex = load("res://assets/ear.svg")
@@ -34,6 +44,7 @@ func _ready() -> void:
 	_setup_npcs()
 	_setup_ear()
 	_setup_hud()
+	_setup_backend()
 
 func _setup_environment() -> void:
 	var light := DirectionalLight3D.new()
@@ -111,6 +122,49 @@ func _setup_hud() -> void:
 	banner.visible = false
 	layer.add_child(banner)
 
+	# 聆听 / 发送 按钮（交互模式下显示）
+	listen_btn = Button.new()
+	listen_btn.text = "🎤 聆听"
+	listen_btn.add_theme_font_size_override("font_size", 30)
+	listen_btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	listen_btn.offset_left = -210.0
+	listen_btn.offset_right = -30.0
+	listen_btn.offset_top = -150.0
+	listen_btn.offset_bottom = -100.0
+	listen_btn.visible = false
+	listen_btn.pressed.connect(_on_listen)
+	layer.add_child(listen_btn)
+
+	send_btn = Button.new()
+	send_btn.text = "✓ 发送"
+	send_btn.add_theme_font_size_override("font_size", 30)
+	send_btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	send_btn.offset_left = 30.0
+	send_btn.offset_right = 210.0
+	send_btn.offset_top = -150.0
+	send_btn.offset_bottom = -100.0
+	send_btn.visible = false
+	send_btn.disabled = true
+	send_btn.pressed.connect(_on_send)
+	layer.add_child(send_btn)
+
+	thinking_label = Label.new()
+	thinking_label.set_anchors_preset(Control.PRESET_CENTER)
+	_style_label(thinking_label, 30)
+	thinking_label.text = "思考中…"
+	thinking_label.visible = false
+	layer.add_child(thinking_label)
+
+	# 角色头顶情绪气泡（占位：真实游戏用图标）
+	emotion_bubble = Label3D.new()
+	emotion_bubble.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	emotion_bubble.pixel_size = 0.02
+	emotion_bubble.modulate = Color.WHITE
+	emotion_bubble.outline_size = 12
+	emotion_bubble.font_size = 96
+	emotion_bubble.visible = false
+	add_child(emotion_bubble)
+
 func _style_label(l: Label, size: int) -> void:
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", Color.WHITE)
@@ -122,12 +176,19 @@ func _physics_process(delta: float) -> void:
 	if input != Vector2.ZERO:
 		player_logical = WorldGrid.wrap_pos(player_logical + input * PLAYER_SPEED * delta)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_step_executors(delta)
 	chunk_manager.update(player_logical)
 	_place_on_bent_ground(player_char, Vector3.ZERO)
 	_reposition_npcs()
 	_update_ear()
+	_update_emotion_bubble()
 	_update_hud()
+
+func _step_executors(delta: float) -> void:
+	for ex in _executors:
+		ex.step(delta)
+	_executors = _executors.filter(func(e: BehaviorExecutor) -> bool: return not e.is_done())
 
 func _reposition_npcs() -> void:
 	for n in npcs:
@@ -152,6 +213,11 @@ func _update_hud() -> void:
 	coord_label.text = "tile (%d, %d)  /  %d×%d  环面循环" % [t.x, t.y, WorldGrid.GRID_TILES, WorldGrid.GRID_TILES]
 
 func _unhandled_input(event: InputEvent) -> void:
+	# 调试：选中角色后按 Enter/空格，本地下发一个 move_to（离线演示行为执行）。
+	if event.is_action_pressed("ui_accept") and selected != null:
+		_show_emotion("wave")
+		_run_behavior(selected, { "commands": [{ "type": "move_to", "params": {} }], "loop": false })
+		return
 	var p := Vector2.INF
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		p = event.position
@@ -183,9 +249,86 @@ func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
 
 func _enter_interaction(npc: PaperCharacter) -> void:
 	selected = npc
-	banner.text = "正在聆听 %s …    点一下开始说话  ·  点空白处退出" % npc.char_name
+	banner.text = "%s 在听你说话呀" % npc.char_name
 	banner.visible = true
+	listen_btn.visible = true
+	send_btn.visible = true
+	send_btn.disabled = true
+	thinking_label.visible = false
 
 func _exit_interaction() -> void:
 	selected = null
 	banner.visible = false
+	listen_btn.visible = false
+	send_btn.visible = false
+	thinking_label.visible = false
+	_recording = false
+
+# ── M2 语音交互 ──────────────────────────────────────────────────────────
+
+func _setup_backend() -> void:
+	backend = Backend.new()
+	backend.name = "Backend"
+	add_child(backend)
+	backend.character_response.connect(_on_character_response)
+	# 不自动连接：游戏内连接 + 世界引导(POST /worlds)属 M2-real 接线。
+	# WS 客户端本身已由 tools/test_backend_ws.gd headless 验证。
+
+func _on_listen() -> void:
+	# 点一下开始聆听：显示耳朵（_update_ear 已处理），开始录音。
+	_recording = true
+	send_btn.disabled = false
+	banner.text = "我在听… 说完点发送"
+	# TODO(device): AudioStreamMicrophone 采集；headless/无麦时由 _on_send 发占位音频。
+
+func _on_send() -> void:
+	if selected == null:
+		return
+	_recording = false
+	send_btn.disabled = true
+	thinking_label.visible = true
+	banner.visible = false
+	# TODO(device): 用真实录音字节；此处发占位音频，闭环靠后端 mock/真实驱动。
+	var stub_audio := Marshalls.raw_to_base64(PackedByteArray([0x52, 0x49, 0x46, 0x46]))
+	backend.send_voice(world_id, _selected_id(), stub_audio)
+
+func _on_character_response(data: Dictionary) -> void:
+	thinking_label.visible = false
+	banner.text = String(data.get("replyText", ""))
+	banner.visible = true
+	_show_emotion(String(data.get("emotion", "happy")))
+	var script: Variant = data.get("behaviorScript", null)
+	if typeof(script) == TYPE_DICTIONARY and selected != null:
+		_run_behavior(selected, script)
+	# TODO(device): 下载 /assets/ttsAsset 并用 AudioStreamPlayer 播放 TTS。
+
+func _show_emotion(emotion: String) -> void:
+	var glyphs := { "happy": "☺", "think": "?", "wave": "!", "sad": "…" }
+	var glyph: String = glyphs.get(emotion, "♪")
+	emotion_bubble.text = glyph
+	emotion_bubble.visible = true
+
+func _update_emotion_bubble() -> void:
+	if emotion_bubble.visible and selected != null and is_instance_valid(selected):
+		emotion_bubble.global_position = selected.global_position + Vector3(0.0, 4.6, 0.0)
+	elif selected == null:
+		emotion_bubble.visible = false
+
+## 在选中角色上执行行为脚本（移动等）。
+func _run_behavior(npc: PaperCharacter, script: Dictionary) -> void:
+	var dict := _find_npc_dict(npc)
+	if dict.is_empty():
+		return
+	var ex := BehaviorExecutor.new()
+	ex.setup(dict, script)
+	_executors.append(ex)
+
+func _find_npc_dict(npc: PaperCharacter) -> Dictionary:
+	for n in npcs:
+		if n["node"] == npc:
+			return n
+	return {}
+
+func _selected_id() -> String:
+	# MVP：用名字当临时 id（真实接入后用后端 character.id）。
+	return selected.char_name if selected != null else ""

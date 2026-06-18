@@ -32,6 +32,10 @@ export class WorldStore {
     return [...(this.worlds.get(worldId)?.characters.values() ?? [])];
   }
 
+  getCharacter(worldId: string, characterId: string): Character | undefined {
+    return this.worlds.get(worldId)?.characters.get(characterId);
+  }
+
   /** 存入资源，返回内容寻址 hash。 */
   putAsset(blob: ImageBlob): string {
     const hash = createHash('sha256').update(blob.bytes).digest('hex').slice(0, 16);

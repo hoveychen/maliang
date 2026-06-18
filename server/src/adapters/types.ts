@@ -1,13 +1,19 @@
-import type { CharacterSpec, ModerationResult } from '../types.ts';
+import type { CharacterSpec, IntentContext, IntentResult, ModerationResult } from '../types.ts';
 
 export interface ImageBlob {
   bytes: Uint8Array;
   mime: string;
 }
 
-/** LLM：造角色 spec / 角色对话。真实实现接 Claude API。 */
+export interface AudioBlob {
+  bytes: Uint8Array;
+  mime: string;
+}
+
+/** LLM：造角色 spec / 意图路由 / 角色对话。真实实现接 OpenRouter。 */
 export interface LLMAdapter {
   designCharacter(intentText: string, byFairy: boolean): Promise<CharacterSpec>;
+  routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult>;
   respond(prompt: string): Promise<string>;
 }
 
@@ -16,9 +22,19 @@ export interface ImageAdapter {
   generateSprite(visualDescription: string): Promise<ImageBlob>;
 }
 
-/** 抠图：纯色（绿幕）背景 → 透明 PNG。真实实现移植 worldlet 的 ChromaKey。 */
+/** 抠图：纯色（绿幕）背景 → 透明 PNG。 */
 export interface CutoutAdapter {
   removeBackground(input: ImageBlob): Promise<ImageBlob>;
+}
+
+/** 语音识别：音频 → 中文文字。真实实现接讯飞。 */
+export interface ASRAdapter {
+  transcribe(audio: AudioBlob): Promise<string>;
+}
+
+/** 语音合成：文字 + 音色 → 音频。真实实现接讯飞。 */
+export interface TTSAdapter {
+  synthesize(text: string, voiceId: string): Promise<AudioBlob>;
 }
 
 /** 内容审核：文字 + 图片，面向幼儿强制。 */
@@ -32,5 +48,7 @@ export interface ServiceAdapters {
   llm: LLMAdapter;
   image: ImageAdapter;
   cutout: CutoutAdapter;
+  asr: ASRAdapter;
+  tts: TTSAdapter;
   moderation: ModerationAdapter;
 }
