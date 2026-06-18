@@ -48,9 +48,25 @@ export async function handleVoice(
   const tts = await adapters.tts.synthesize(replyText, character.voiceId);
   const ttsAsset = store.putAsset(tts);
 
-  // 更新角色记忆与对话历史（持久化在 store 里的 character 对象上）。
+  // 更新对话历史（持久化在 store 里的 character 对象上）。
   character.chatHistory.push({ role: 'child', text: transcript, ts: 0 });
   character.chatHistory.push({ role: 'npc', text: replyText, ts: 0 });
+
+  // 对话后：让角色自己挑出值得长期记住的要点，去重 + 上限累积到 character.memory。
+  const remembered = await adapters.llm.extractMemory({
+    characterName: character.name,
+    personality: character.personality,
+    transcript,
+    replyText,
+    existingMemory: character.memory,
+  });
+  for (const item of remembered) {
+    const m = item.trim();
+    if (m && !character.memory.includes(m)) character.memory.push(m);
+  }
+  if (character.memory.length > MEMORY_CAP) {
+    character.memory = character.memory.slice(-MEMORY_CAP); // 超出丢最旧
+  }
 
   const response: VoiceResponse = {
     characterId: character.id,

@@ -1,5 +1,11 @@
 import type { LLMAdapter } from './types.ts';
-import type { BehaviorScript, CharacterSpec, IntentContext, IntentResult } from '../types.ts';
+import type {
+  BehaviorScript,
+  CharacterSpec,
+  IntentContext,
+  IntentResult,
+  MemoryExtractionContext,
+} from '../types.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
 
 const DESIGNER_SYSTEM = `你是幼儿园游戏「maliang」的角色设计师。根据小朋友的口头想法，设计一个可爱、儿童友好的角色。
@@ -105,6 +111,36 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
       result.behaviorScript = raw.behaviorScript as BehaviorScript;
     }
     return result;
+  }
+
+  async extractMemory(ctx: MemoryExtractionContext): Promise<string[]> {
+    const known = ctx.existingMemory.length > 0 ? ctx.existingMemory.join('；') : '（暂无）';
+    const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。你刚和小朋友说了一轮话。
+从这轮里挑出「值得你长期记住」的、关于小朋友或你们关系的要点（名字、喜好、约定、发生的事）。
+- 0~3 条，每条一句简短中文、第三人称（如「小朋友叫朵朵」「小朋友喜欢恐龙」）。
+- 只记新的、重要的；闲聊寒暄不必记；没有值得记的就空数组。
+- 不要重复已知记忆：${known}。
+严格只输出 JSON 对象：{"memories":["小朋友叫朵朵"]}，没有就 {"memories":[]}。`;
+    const content = await this.#client.chatText(
+      this.#model,
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: `小朋友说：${ctx.transcript}\n你回应：${ctx.replyText}` },
+      ],
+      { jsonObject: true },
+    );
+    try {
+      const raw = JSON.parse(stripFences(content)) as { memories?: unknown };
+      if (Array.isArray(raw.memories)) {
+        return raw.memories
+          .filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
+          .map((m) => m.trim())
+          .slice(0, 3);
+      }
+    } catch {
+      // 解析失败：本轮不记忆（宁可漏记，不写脏数据）
+    }
+    return [];
   }
 
   async respond(prompt: string): Promise<string> {

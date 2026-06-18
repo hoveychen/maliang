@@ -1,4 +1,10 @@
-import type { CharacterSpec, IntentContext, IntentResult, ModerationResult } from '../types.ts';
+import type {
+  CharacterSpec,
+  IntentContext,
+  IntentResult,
+  MemoryExtractionContext,
+  ModerationResult,
+} from '../types.ts';
 
 export interface ImageBlob {
   bytes: Uint8Array;
@@ -14,6 +20,8 @@ export interface AudioBlob {
 export interface LLMAdapter {
   designCharacter(intentText: string, byFairy: boolean): Promise<CharacterSpec>;
   routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult>;
+  /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条简短中文，去重后由 voice 落地）。 */
+  extractMemory(ctx: MemoryExtractionContext): Promise<string[]>;
   respond(prompt: string): Promise<string>;
 }
 

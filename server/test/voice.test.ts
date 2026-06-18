@@ -106,3 +106,53 @@ test('handleVoice：把近 N 轮历史 + 长期记忆喂给 routeIntent（角色
   assert.equal(captured.recentHistory.length, 2, '近 N 轮历史应进入上下文');
   assert.equal(captured.recentHistory[0].text, '我叫朵朵');
 });
+
+test('handleVoice：对话后角色自我累积记忆 + 去重', async () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  seedChar(store, 'w1', 'c1');
+  const base = createMockAdapters();
+  const adapters = {
+    ...base,
+    asr: {
+      async transcribe() {
+        return '我叫朵朵，我喜欢恐龙';
+      },
+    },
+  };
+  const input = { worldId: 'w1', characterId: 'c1', audio: { bytes: new Uint8Array([1]), mime: 'audio/wav' } };
+  await handleVoice(input, adapters, store);
+  const mem = store.getCharacter('w1', 'c1')!.memory;
+  assert.ok(mem.includes('小朋友叫朵朵'), '应记住名字');
+  assert.ok(mem.includes('小朋友喜欢恐龙'), '应记住喜好');
+  // 再说同样的话 → 不重复记
+  await handleVoice(input, adapters, store);
+  const mem2 = store.getCharacter('w1', 'c1')!.memory;
+  assert.equal(mem2.filter((m) => m === '小朋友叫朵朵').length, 1, '同一条记忆不应重复');
+});
+
+test('handleVoice：记忆条数有上限（不无限膨胀，挤出最旧）', async () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  const c = seedChar(store, 'w1', 'c1');
+  for (let i = 0; i < 40; i++) c.memory.push(`旧记忆${i}`);
+  store.saveCharacter(c);
+  const base = createMockAdapters();
+  const adapters = {
+    ...base,
+    asr: {
+      async transcribe() {
+        return '我叫朵朵';
+      },
+    },
+  };
+  await handleVoice(
+    { worldId: 'w1', characterId: 'c1', audio: { bytes: new Uint8Array([1]), mime: 'audio/wav' } },
+    adapters,
+    store,
+  );
+  const mem = store.getCharacter('w1', 'c1')!.memory;
+  assert.ok(mem.length <= 40, `记忆应有上限，实际 ${mem.length}`);
+  assert.ok(mem.includes('小朋友叫朵朵'), '新记忆应保留');
+  assert.ok(!mem.includes('旧记忆0'), '最旧的应被挤出');
+});
