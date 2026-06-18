@@ -83,6 +83,9 @@ test('handleVoice 指令：去某地 → 带 behaviorScript 且即时生效', as
       async transcribe() {
         return '去河边';
       },
+      openStream() {
+        return { feed() {}, async finish() { return '去河边'; } };
+      },
     },
   };
   const store = new WorldStore();

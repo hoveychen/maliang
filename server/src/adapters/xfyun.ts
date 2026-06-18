@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { ASRAdapter, TTSAdapter, AudioBlob } from './types.ts';
+import type { ASRAdapter, ASRStream, TTSAdapter, AudioBlob } from './types.ts';
 
 export interface XfyunCreds {
   appId: string;
@@ -132,5 +132,72 @@ export class XfyunASRAdapter implements ASRAdapter {
         reject(new Error('xfyun asr ws error'));
       };
     });
+  }
+
+  /** 边说边识别：开流后分片随到随发往讯飞，finish 时发结束帧并返回最终转写。 */
+  openStream(): ASRStream {
+    const creds = this.#creds;
+    const ws: any = new WebSocket(authUrl('iat-api.xfyun.cn', '/v2/iat', creds));
+    let text = '';
+    let open = false;
+    let first = true;
+    let finished = false;
+    const queue: Uint8Array[] = [];
+    let resolveFn: (v: string) => void;
+    let rejectFn: (e: Error) => void;
+    const result = new Promise<string>((res, rej) => { resolveFn = res; rejectFn = rej; });
+    const timer = setTimeout(() => {
+      rejectFn(new Error('xfyun asr stream timeout'));
+      try { ws.close(); } catch (_e) { /* ignore */ }
+    }, 25000);
+
+    const sendChunk = (chunk: Uint8Array): void => {
+      const audio = Buffer.from(chunk).toString('base64');
+      const msg = first
+        ? { common: { app_id: creds.appId }, business: { language: 'zh_cn', domain: 'iat', accent: 'mandarin', vad_eos: 3000 }, data: { status: 0, format: 'audio/L16;rate=16000', encoding: 'raw', audio } }
+        : { data: { status: 1, format: 'audio/L16;rate=16000', encoding: 'raw', audio } };
+      first = false;
+      ws.send(JSON.stringify(msg));
+    };
+    const sendEnd = (): void => {
+      ws.send(JSON.stringify({ data: { status: 2, format: 'audio/L16;rate=16000', encoding: 'raw', audio: '' } }));
+    };
+
+    ws.onopen = () => {
+      open = true;
+      while (queue.length > 0) sendChunk(queue.shift()!); // 连接前积压的分片补发
+      if (finished) sendEnd();
+    };
+    ws.onmessage = (m: any) => {
+      const d = JSON.parse(typeof m.data === 'string' ? m.data : m.data.toString());
+      if (d.code !== 0) {
+        clearTimeout(timer);
+        rejectFn(new Error(`xfyun asr ${d.code} ${d.message}`));
+        ws.close();
+        return;
+      }
+      if (d.data?.result) for (const w of d.data.result.ws) for (const c of w.cw) text += c.w;
+      if (d.data?.status === 2) {
+        clearTimeout(timer);
+        ws.close();
+        resolveFn(text);
+      }
+    };
+    ws.onerror = () => {
+      clearTimeout(timer);
+      rejectFn(new Error('xfyun asr ws error'));
+    };
+
+    return {
+      feed(chunk: Uint8Array): void {
+        if (open) sendChunk(chunk);
+        else queue.push(chunk); // 连接还没建好，先入队，onopen 时补发
+      },
+      finish(): Promise<string> {
+        finished = true;
+        if (open) sendEnd(); // 连接已开：分片都已实时发出，这里只补结束帧
+        return result; // 未开则 onopen 里补发结束帧
+      },
+    };
   }
 }
