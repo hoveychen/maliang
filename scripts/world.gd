@@ -473,8 +473,24 @@ func _run_behavior(npc: PaperCharacter, script: Dictionary) -> void:
 	if dict.is_empty():
 		return
 	var ex := BehaviorExecutor.new()
-	ex.setup(dict, script)
+	ex.setup(dict, script, Callable(self, "_resolve_char_pos"), Callable(self, "_deliver_message"))
 	_executors.append(ex)
+
+## deliver_message 用：按 id 或名字找角色逻辑坐标，找不到返回 Vector2.INF。
+func _resolve_char_pos(id: String) -> Vector2:
+	for n in npcs:
+		if String(n.get("id", "")) == id or (n["node"] as PaperCharacter).char_name == id:
+			return n["logical"]
+	return Vector2.INF
+
+## deliver_message 用：角色把话带到目标处时回调，目标显示气泡 + 横幅。
+func _deliver_message(target_id: String, message: String) -> void:
+	for n in npcs:
+		if String(n.get("id", "")) == target_id or (n["node"] as PaperCharacter).char_name == target_id:
+			var name := (n["node"] as PaperCharacter).char_name
+			banner.text = "%s 收到啦：%s" % [name, message]
+			banner.visible = true
+			return
 
 func _find_npc_dict(npc: PaperCharacter) -> Dictionary:
 	for n in npcs:

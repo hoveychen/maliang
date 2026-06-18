@@ -40,7 +40,7 @@ function characterListView(store: WorldStore, worldId: string) {
 
 export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstance> {
   const adapters = deps.adapters ?? createAdapters(loadConfig());
-  const store = deps.store ?? new WorldStore();
+  const store = deps.store ?? new WorldStore(process.env.MALIANG_DATA_DIR ?? './data');
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   await app.register(websocket);
 

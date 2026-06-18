@@ -2,6 +2,16 @@ extends SceneTree
 ## BehaviorExecutor 独立测试。
 ## 运行: Godot --headless --path . --script res://tools/test_behavior.gd
 
+var _delivered_id := ""
+var _delivered_msg := ""
+
+func _resolve(_id: String) -> Vector2:
+	return Vector2(30.0, 0.0) ## 目标角色在 world(30,0)
+
+func _deliver(id: String, msg: String) -> void:
+	_delivered_id = id
+	_delivered_msg = msg
+
 func _init() -> void:
 	var fails := 0
 	var span := WorldGrid.WORLD_SPAN
@@ -29,8 +39,25 @@ func _init() -> void:
 		s2 += 1
 	fails += _check("wait 后完成", ex2.is_done())
 
+	# deliver_message：走到目标角色处把话传到
+	var t3 := { "logical": Vector2(0.0, 0.0) }
+	var ex3 := BehaviorExecutor.new()
+	ex3.setup(
+		t3,
+		{ "commands": [{ "type": "deliver_message", "params": { "to_character_id": "c_blue", "message": "你好" } }], "loop": false },
+		Callable(self, "_resolve"),
+		Callable(self, "_deliver"),
+	)
+	var s3 := 0
+	while not ex3.is_done() and s3 < 2000:
+		ex3.step(0.1)
+		s3 += 1
+	fails += _check("deliver: 走到目标(30,0)附近", WorldGrid.shortest_delta(t3["logical"], Vector2(30.0, 0.0)).length() < 2.0)
+	fails += _check("deliver: 投递回调命中目标 id", _delivered_id == "c_blue")
+	fails += _check("deliver: 投递消息正确", _delivered_msg == "你好")
+
 	if fails == 0:
-		print("behavior tests PASS (4/4)")
+		print("behavior tests PASS (7/7)")
 	else:
 		printerr("behavior tests FAILED: %d" % fails)
 	quit(fails)
