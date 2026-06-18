@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
-import type { ServiceAdapters } from './adapters/types.ts';
+import type { ServiceAdapters, ASRStream } from './adapters/types.ts';
 import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
-import { handleVoice, accumulateMemory } from './voice.ts';
+import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
 import { RateLimiter } from './ratelimit.ts';
 import type { Character } from './types.ts';
 
@@ -111,17 +111,17 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   return app;
 }
 
-/** 边录边传的单连接语音会话：voice_start 开，voice_chunk 累积 PCM 分片，voice_end 合成走 handleVoice。 */
+/** 边说边识别的单连接语音会话：voice_start 开讯飞流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
 export interface VoiceSession {
   active: boolean;
   worldId: string;
   characterId: string;
-  chunks: Buffer[];
+  asr: ASRStream | null;
   gate: { release: () => void } | null;
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { active: false, worldId: '', characterId: '', chunks: [], gate: null };
+  return { active: false, worldId: '', characterId: '', asr: null, gate: null };
 }
 
 export async function handleWsMessage(
@@ -210,7 +210,7 @@ export async function handleWsMessage(
     return;
   }
 
-  // ── 边录边传：上传与孩子说话重叠，点「发送」时音频早已传完（见 voice-streaming 计划）──
+  // ── 边说边识别：分片随到随发讯飞，voice_end 时识别已基本完成（见 asr-live-stream 计划）──
   if (msg.type === 'voice_start') {
     if (session.gate) { session.gate.release(); session.gate = null; } // 上一会话没正常收尾，先释放
     const gate = limiter.tryAcquire(connKey, Date.now());
@@ -221,31 +221,27 @@ export async function handleWsMessage(
     session.active = true;
     session.worldId = msg.worldId ?? '';
     session.characterId = msg.characterId ?? '';
-    session.chunks = [];
+    session.asr = adapters.asr.openStream(); // 立即开讯飞流，分片随到随发
     session.gate = gate;
     return;
   }
 
   if (msg.type === 'voice_chunk') {
-    if (session.active && msg.audio) session.chunks.push(Buffer.from(msg.audio, 'base64'));
-    return; // 分片只累积，不回包
+    if (session.active && session.asr && msg.audio) session.asr.feed(Buffer.from(msg.audio, 'base64'));
+    return; // 分片实时喂讯飞，不回包
   }
 
   if (msg.type === 'voice_end') {
-    if (!session.active) {
+    if (!session.active || !session.asr) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: '没有进行中的录音会话' }));
       return;
     }
-    const { worldId, characterId } = session;
-    const audioBytes = Uint8Array.from(Buffer.concat(session.chunks));
+    const { worldId, characterId, asr } = session;
     session.active = false;
-    session.chunks = [];
+    session.asr = null;
     try {
-      const response = await handleVoice(
-        { worldId, characterId, audio: { bytes: audioBytes, mime: 'audio/L16;rate=16000' } },
-        adapters,
-        store,
-      );
+      const transcript = await asr.finish(); // 识别尾巴：流式期间已基本识完
+      const response = await respondToTranscript(worldId, characterId, transcript, adapters, store);
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
       void accumulateMemory(worldId, characterId, response.transcript, response.replyText, adapters, store).catch(() => {});
     } catch (err) {

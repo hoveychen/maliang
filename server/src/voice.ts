@@ -28,10 +28,23 @@ export async function handleVoice(
   adapters: ServiceAdapters,
   store: WorldStore,
 ): Promise<VoiceResponse> {
-  const character = store.getCharacter(input.worldId, input.characterId);
-  if (!character) throw new CharacterNotFoundError(input.worldId, input.characterId);
-
   const transcript = await adapters.asr.transcribe(input.audio);
+  return respondToTranscript(input.worldId, input.characterId, transcript, adapters, store);
+}
+
+/**
+ * ASR 之后的回复编排：意图路由 → TTS → 更新对话历史 → VoiceResponse。
+ * 抽出来供「边说边识别」路径复用（转写已由流式会话拿到，无需再 transcribe）。
+ */
+export async function respondToTranscript(
+  worldId: string,
+  characterId: string,
+  transcript: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+): Promise<VoiceResponse> {
+  const character = store.getCharacter(worldId, characterId);
+  if (!character) throw new CharacterNotFoundError(worldId, characterId);
 
   const intent = await adapters.llm.routeIntent(transcript, {
     characterName: character.name,
