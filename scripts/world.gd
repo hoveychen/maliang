@@ -48,6 +48,7 @@ var world_id := ""
 # M2-real 在线
 var api: Api
 var online := false
+var _villager_count := 0          ## 村民散开序号（避免堆叠在中心）
 
 # 音频 I/O（真机：麦克风采集 + TTS 播放）
 var _mic_player: AudioStreamPlayer
@@ -448,12 +449,19 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 		var h := float(tex.get_height())
 		npc.pixel_size = 6.0 / h
 		npc.offset = Vector2(0.0, h / 2.0)
+	var is_fairy := bool(c.get("isFairy", false))
 	var logical := at_logical
 	if logical == Vector2.INF:
 		var pos: Dictionary = c.get("position", {})
 		logical = Vector2(float(pos.get("tileX", 500)), float(pos.get("tileY", 500))) * WorldGrid.TILE_SIZE
-	npcs.append({ "node": npc, "logical": logical, "id": String(c.get("id", "")), "is_fairy": bool(c.get("isFairy", false)) })
-	if not bool(c.get("isFairy", false)):
+		# 村民后端默认位置都在中心 → 按序号散开成环，避免初始堆叠
+		if not is_fairy:
+			var k := _villager_count
+			_villager_count += 1
+			var ang := float(k) * 2.399963 # 黄金角
+			logical = WorldGrid.wrap_pos(logical + Vector2(cos(ang), sin(ang)) * (14.0 + float(k) * 3.5))
+	npcs.append({ "node": npc, "logical": logical, "id": String(c.get("id", "")), "is_fairy": is_fairy })
+	if not is_fairy:
 		_start_ambient_wander(npcs[npcs.size() - 1])
 
 func _on_gen_progress(stage: String) -> void:
