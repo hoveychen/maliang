@@ -14,10 +14,19 @@ var _state := "idle" ## idle | move | wait | done
 var _wait_t := 0.0
 var _move_to := Vector2.ZERO
 
-func setup(target: Dictionary, script: Dictionary) -> void:
+# deliver_message：走到目标角色处把话传到
+var _resolver := Callable()  ## (character_id:String) -> Vector2（找不到返回 Vector2.INF）
+var _deliverer := Callable() ## (target_id:String, message:String) -> void
+var _delivering := false
+var _deliver_id := ""
+var _deliver_msg := ""
+
+func setup(target: Dictionary, script: Dictionary, resolver := Callable(), deliverer := Callable()) -> void:
 	_target = target
 	_commands = script.get("commands", [])
 	_loop = bool(script.get("loop", false))
+	_resolver = resolver
+	_deliverer = deliverer
 	_idx = 0
 	_state = "idle" if not _commands.is_empty() else "done"
 
@@ -48,6 +57,18 @@ func _start(cmd: Dictionary) -> void:
 		"wait":
 			_wait_t = float(params.get("duration", 1.0))
 			_state = "wait"
+		"deliver_message":
+			_deliver_id = String(params.get("to_character_id", params.get("to", "")))
+			_deliver_msg = String(params.get("message", ""))
+			var p := Vector2.INF
+			if _resolver.is_valid():
+				p = _resolver.call(_deliver_id)
+			if p != Vector2.INF:
+				_move_to = p
+				_delivering = true
+				_state = "move"
+			else:
+				_advance() ## 解析不到目标角色 → 跳过
 		_:
 			_advance() ## say / emote / face 等暂跳过（动作由 UI 层处理）
 
@@ -65,6 +86,10 @@ func _step_move(delta: float) -> void:
 	var cur: Vector2 = _target["logical"]
 	var d := WorldGrid.shortest_delta(cur, _move_to)
 	if d.length() <= ARRIVE:
+		if _delivering:
+			_delivering = false
+			if _deliverer.is_valid():
+				_deliverer.call(_deliver_id, _deliver_msg)
 		_advance()
 		return
 	var step_vec := d.normalized() * SPEED * delta
