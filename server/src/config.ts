@@ -4,6 +4,7 @@ export interface Config {
   openrouterApiKey: string | undefined;
   llmModel: string;
   imageModel: string;
+  moderationTextModel: string;
   xfyunAppId: string | undefined;
   xfyunApiKey: string | undefined;
   xfyunApiSecret: string | undefined;
@@ -14,6 +15,7 @@ export function loadConfig(): Config {
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
     llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'moonshotai/kimi-k2.6',
     imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image',
+    moderationTextModel: process.env.OPENROUTER_MOD_TEXT_MODEL ?? 'moonshotai/kimi-k2.6',
     xfyunAppId: process.env.XFYUN_APP_ID,
     xfyunApiKey: process.env.XFYUN_API_KEY,
     xfyunApiSecret: process.env.XFYUN_API_SECRET,

@@ -86,9 +86,6 @@ export function createMockAdapters(): ServiceAdapters {
           ? { allowed: false, reason: '文字含不适宜内容' }
           : { allowed: true };
       },
-      async moderateImage(_input: ImageBlob) {
-        return { allowed: true };
-      },
     },
   };
 }

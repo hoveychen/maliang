@@ -46,22 +46,9 @@ export interface Character {
 }
 
 /** 造角色编排的阶段，顺序固定，用于进度推送。 */
-export type GenStage =
-  | 'spec'
-  | 'moderate_text'
-  | 'image'
-  | 'cutout'
-  | 'moderate_image'
-  | 'persist';
+export type GenStage = 'spec' | 'moderate_text' | 'image' | 'cutout' | 'persist';
 
-export const GEN_STAGES: readonly GenStage[] = [
-  'spec',
-  'moderate_text',
-  'image',
-  'cutout',
-  'moderate_image',
-  'persist',
-];
+export const GEN_STAGES: readonly GenStage[] = ['spec', 'moderate_text', 'image', 'cutout', 'persist'];
 
 export interface CreateCharacterInput {
   worldId: string;
