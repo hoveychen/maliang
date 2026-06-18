@@ -15,10 +15,13 @@ export function createAdapters(config: Config): ServiceAdapters {
     return createMockAdapters();
   }
   const client = new OpenRouterClient(config.openrouterApiKey as string);
+  const mock = createMockAdapters();
   return {
     llm: new OpenRouterLLMAdapter(client, config.llmModel),
     image: new OpenRouterImageAdapter(client, config.imageModel),
     cutout: new ChromaKeyCutoutAdapter(),
-    moderation: createMockAdapters().moderation, // TODO(M4): 真实文字+图片审核服务
+    asr: mock.asr, // TODO(M2-real): 接讯飞 ASR
+    tts: mock.tts, // TODO(M2-real): 接讯飞 TTS
+    moderation: mock.moderation, // TODO(M4): 真实文字+图片审核服务
   };
 }

@@ -1,5 +1,5 @@
-import type { ServiceAdapters, ImageBlob } from './types.ts';
-import type { CharacterSpec } from '../types.ts';
+import type { ServiceAdapters, ImageBlob, AudioBlob } from './types.ts';
+import type { CharacterSpec, IntentContext, IntentResult } from '../types.ts';
 
 // 1x1 透明 PNG，作为生图占位。
 const PNG_1x1 =
@@ -19,6 +19,14 @@ function pickName(intent: string): string {
 // 不适宜词（mock 审核用）。真实实现接专业审核服务。
 const BAD_WORDS = /(暴力|血腥|恐怖|武器|杀|枪|刀)/;
 
+// 口语里的「去/到/走」当成移动指令（mock 意图路由用）。
+const GO_WORDS = /(去|到|走去|过去)/;
+
+function audioStub(): AudioBlob {
+  // 极小的占位音频（mock TTS）。真实 TTS 由讯飞产出。
+  return { bytes: Uint8Array.from([0x52, 0x49, 0x46, 0x46]), mime: 'audio/wav' };
+}
+
 /** mock 适配器：不调用任何外部服务，跑通整条编排闭环。 */
 export function createMockAdapters(): ServiceAdapters {
   return {
@@ -34,8 +42,32 @@ export function createMockAdapters(): ServiceAdapters {
           abilities: ['move_to', 'deliver_message'],
         };
       },
+      async routeIntent(transcript: string, _ctx: IntentContext): Promise<IntentResult> {
+        if (GO_WORDS.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好的，我这就去！',
+            behaviorScript: {
+              commands: [{ type: 'move_to', params: { location_name: transcript } }],
+              loop: false,
+            },
+            emotion: 'wave',
+          };
+        }
+        return { kind: 'chat', replyText: `（mock 回应）你说的是「${transcript}」对吗？`, emotion: 'happy' };
+      },
       async respond(prompt: string): Promise<string> {
         return `（mock 回应）你说的是「${prompt}」对吗？`;
+      },
+    },
+    asr: {
+      async transcribe(_audio: AudioBlob): Promise<string> {
+        return '你好呀'; // mock：固定转写；真实接讯飞
+      },
+    },
+    tts: {
+      async synthesize(_text: string, _voiceId: string): Promise<AudioBlob> {
+        return audioStub();
       },
     },
     image: {
