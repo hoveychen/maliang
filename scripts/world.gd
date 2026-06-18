@@ -412,6 +412,17 @@ func _setup_backend() -> void:
 	backend.character_response.connect(_on_character_response)
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
+	backend.failed.connect(_on_failed)
+
+## 语音/造角色失败：清掉「思考中」，温和提示重试——否则客户端会一直卡在思考中。
+func _on_failed(reason: String) -> void:
+	thinking_label.visible = false
+	push_warning("voice/gen failed: %s" % reason)
+	if selected != null:
+		banner.text = "我没听清呀，再说一次好不好？"
+		banner.visible = true
+		send_btn.disabled = true
+		_recording = false
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 func _bootstrap() -> void:
