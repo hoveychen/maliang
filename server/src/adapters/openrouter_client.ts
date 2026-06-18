@@ -56,6 +56,32 @@ export class OpenRouterClient {
     return content;
   }
 
+  /** 多模态：文字 + 一张图（data URL），返回 message.content。用于图片审核。 */
+  async chatVision(
+    model: string,
+    text: string,
+    imageDataUrl: string,
+    opts: { jsonObject?: boolean } = {},
+  ): Promise<string> {
+    const body: Record<string, unknown> = {
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text },
+            { type: 'image_url', image_url: { url: imageDataUrl } },
+          ],
+        },
+      ],
+    };
+    if (opts.jsonObject) body.response_format = { type: 'json_object' };
+    const json = await this.#post(body);
+    const content = json.choices?.[0]?.message?.content;
+    if (!content) throw new Error('OpenRouter: empty content');
+    return content;
+  }
+
   /** 图像生成，返回首张图的 bytes + mime（从 data URL 解析）。 */
   async chatImage(model: string, prompt: string): Promise<{ bytes: Uint8Array; mime: string }> {
     const json = await this.#post({

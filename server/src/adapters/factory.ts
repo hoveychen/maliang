@@ -6,12 +6,12 @@ import { OpenRouterLLMAdapter } from './openrouter_llm.ts';
 import { OpenRouterImageAdapter } from './openrouter_image.ts';
 import { ChromaKeyCutoutAdapter } from './chroma_cutout.ts';
 import { XfyunASRAdapter, XfyunTTSAdapter } from './xfyun.ts';
+import { OpenRouterModerationAdapter } from './openrouter_moderation.ts';
 
 /**
  * 按配置选择适配器（各服务独立）：
- * - 有 OpenRouter key → 真实 LLM/生图/抠图；否则 mock。
+ * - 有 OpenRouter key → 真实 LLM/生图/抠图 + 内容审核（文字 LLM、图片视觉）；否则 mock。
  * - 有讯飞凭证 → 真实 ASR/TTS；否则 mock。
- * - 内容审核暂用 mock 占位（真实审核服务在 M4 接入）。
  */
 export function createAdapters(config: Config): ServiceAdapters {
   const mock = createMockAdapters();
@@ -38,6 +38,6 @@ export function createAdapters(config: Config): ServiceAdapters {
     cutout: new ChromaKeyCutoutAdapter(),
     asr,
     tts,
-    moderation: mock.moderation, // TODO(M4): 真实文字+图片审核服务
+    moderation: new OpenRouterModerationAdapter(client, config.moderationTextModel, config.moderationImageModel),
   };
 }
