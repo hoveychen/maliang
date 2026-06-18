@@ -19,8 +19,10 @@ function authUrl(host: string, path: string, creds: XfyunCreds): string {
 }
 
 const KNOWN_VCN = new Set(['xiaoyan', 'aisjiuxu', 'aisxping', 'aisjinger', 'aisbabyxu']);
-function resolveVcn(voiceId: string): string {
-  return KNOWN_VCN.has(voiceId) ? voiceId : 'xiaoyan';
+// 默认童声：幼儿游戏角色 voiceId 多为 'cn-child-default'（不在已知发音人集合），
+// 回落到 aisbabyxu（讯飞童声）而非成人播音腔 xiaoyan。账号已验证 aisbabyxu/aisjinger 可用。
+export function resolveVcn(voiceId: string): string {
+  return KNOWN_VCN.has(voiceId) ? voiceId : 'aisbabyxu';
 }
 
 /** 讯飞在线语音合成：文字 → 16k PCM（audio/L16，客户端可包成 AudioStreamWAV 播放）。 */
