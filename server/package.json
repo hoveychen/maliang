@@ -5,17 +5,19 @@
   "type": "module",
   "description": "maliang 后端代理：造角色编排、ASR/TTS/生图/审核代理、世界状态持久化",
   "scripts": {
-    "dev": "node --watch src/index.ts",
-    "start": "node src/index.ts",
+    "dev": "node --watch --env-file-if-exists=.env src/index.ts",
+    "start": "node --env-file-if-exists=.env src/index.ts",
     "build": "tsc --noEmit",
     "test": "node --test"
   },
   "dependencies": {
     "@fastify/websocket": "^11.0.2",
-    "fastify": "^5.2.1"
+    "fastify": "^5.2.1",
+    "pngjs": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/pngjs": "^6.0.5",
     "typescript": "^5.7.3"
   }
 }
