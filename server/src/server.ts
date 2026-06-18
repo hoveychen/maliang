@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { ServiceAdapters } from './adapters/types.ts';
-import { createMockAdapters } from './adapters/mock.ts';
+import { createAdapters } from './adapters/factory.ts';
+import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, ModerationError } from './orchestrator.ts';
 import type { Character } from './types.ts';
@@ -37,7 +38,7 @@ function characterListView(store: WorldStore, worldId: string) {
 }
 
 export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstance> {
-  const adapters = deps.adapters ?? createMockAdapters();
+  const adapters = deps.adapters ?? createAdapters(loadConfig());
   const store = deps.store ?? new WorldStore();
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   await app.register(websocket);
