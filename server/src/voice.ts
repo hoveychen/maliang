@@ -58,5 +58,6 @@ export async function handleVoice(
     response.behaviorScript = intent.behaviorScript;
     character.behaviorScript = intent.behaviorScript; // 指令即时生效
   }
+  store.saveCharacter(character); // 持久化 chatHistory/behaviorScript 变更
   return response;
 }
