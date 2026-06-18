@@ -2,7 +2,8 @@ class_name Api
 extends Node
 ## 后端 HTTP 客户端：引导世界、拉取生成的 sprite 资源。
 
-@export var base := "http://127.0.0.1:8080"
+## 默认指向 muvee 生产后端；本地开发用 MALIANG_API_BASE 环境变量覆盖。
+@export var base := "https://maliang-api.muveeai.com"
 
 func _ready() -> void:
 	var env := OS.get_environment("MALIANG_API_BASE")
