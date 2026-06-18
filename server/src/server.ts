@@ -6,7 +6,7 @@ import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
-import { handleVoice } from './voice.ts';
+import { handleVoice, accumulateMemory } from './voice.ts';
 import { RateLimiter } from './ratelimit.ts';
 import type { Character } from './types.ts';
 
@@ -173,6 +173,15 @@ async function handleWsMessage(
         store,
       );
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
+      // 长期记忆后台累积：在回复发出后再做，不阻塞对话；失败/超时只影响这次记忆。
+      void accumulateMemory(
+        msg.worldId ?? '',
+        msg.characterId ?? '',
+        response.transcript,
+        response.replyText,
+        adapters,
+        store,
+      ).catch(() => {});
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {

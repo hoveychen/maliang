@@ -52,21 +52,9 @@ export async function handleVoice(
   character.chatHistory.push({ role: 'child', text: transcript, ts: 0 });
   character.chatHistory.push({ role: 'npc', text: replyText, ts: 0 });
 
-  // 对话后：让角色自己挑出值得长期记住的要点，去重 + 上限累积到 character.memory。
-  const remembered = await adapters.llm.extractMemory({
-    characterName: character.name,
-    personality: character.personality,
-    transcript,
-    replyText,
-    existingMemory: character.memory,
-  });
-  for (const item of remembered) {
-    const m = item.trim();
-    if (m && !character.memory.includes(m)) character.memory.push(m);
-  }
-  if (character.memory.length > MEMORY_CAP) {
-    character.memory = character.memory.slice(-MEMORY_CAP); // 超出丢最旧
-  }
+  // 注意：长期记忆抽取（extractMemory，含一次 LLM 调用）已移出本函数的回复关键路径，
+  // 改由 WS 处理器在回复发出后后台调用 accumulateMemory —— 否则记忆调用变慢/卡住会
+  // 拖住整条回复，让客户端一直停在「思考中」。
 
   const response: VoiceResponse = {
     characterId: character.id,
@@ -81,4 +69,41 @@ export async function handleVoice(
   }
   store.saveCharacter(character); // 持久化 chatHistory/behaviorScript 变更
   return response;
+}
+
+/**
+ * 对话后让角色「自己挑出值得长期记住的要点」，去重 + 上限累积到 character.memory 并持久化。
+ * 设计为「尽力而为」：由 WS 处理器在回复发出后后台调用（不 await 进回复路径），
+ * 失败/超时只影响这次记忆、绝不影响角色回复。
+ */
+export async function accumulateMemory(
+  worldId: string,
+  characterId: string,
+  transcript: string,
+  replyText: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+): Promise<void> {
+  const character = store.getCharacter(worldId, characterId);
+  if (!character) return;
+  const remembered = await adapters.llm.extractMemory({
+    characterName: character.name,
+    personality: character.personality,
+    transcript,
+    replyText,
+    existingMemory: character.memory,
+  });
+  let changed = false;
+  for (const item of remembered) {
+    const m = item.trim();
+    if (m && !character.memory.includes(m)) {
+      character.memory.push(m);
+      changed = true;
+    }
+  }
+  if (character.memory.length > MEMORY_CAP) {
+    character.memory = character.memory.slice(-MEMORY_CAP); // 超出丢最旧
+    changed = true;
+  }
+  if (changed) store.saveCharacter(character);
 }

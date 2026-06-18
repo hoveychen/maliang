@@ -19,22 +19,35 @@ interface ChatResponse {
 
 export class OpenRouterClient {
   readonly #apiKey: string;
+  readonly #timeoutMs: number;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, timeoutMs = 25000) {
     this.#apiKey = apiKey;
+    this.#timeoutMs = timeoutMs;
   }
 
   async #post(body: Record<string, unknown>): Promise<ChatResponse> {
-    const res = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.#apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://maliang.game',
-        'X-Title': 'maliang',
-      },
-      body: JSON.stringify(body),
-    });
+    // 关键：给 fetch 加超时。否则 OpenRouter/Kimi 卡住时 await 永不返回，
+    // 整条语音回复挂起 → 客户端一直停在「思考中」。超时则拒绝，由上层转成 voice_failed。
+    let res: Response;
+    try {
+      res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.#apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://maliang.game',
+          'X-Title': 'maliang',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch (err) {
+      if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+        throw new Error(`OpenRouter timeout after ${this.#timeoutMs}ms`);
+      }
+      throw err;
+    }
     const json = (await res.json()) as ChatResponse;
     if (!res.ok || json.error) {
       throw new Error(`OpenRouter ${res.status}: ${json.error?.message ?? 'unknown error'}`);
