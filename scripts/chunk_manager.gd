@@ -63,24 +63,57 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	var tile: MeshInstance3D = slot["tile"]
 	var mat: ShaderMaterial = tile.material_override
 	var checker := posmod(wrapped.x + wrapped.y, 2) == 0
-	var col := Color(0.47, 0.73, 0.41) if checker else Color(0.41, 0.65, 0.35)
+	# 世界中心(chunk 20≈tile 500，小神仙出生处)一片 3×3 区块为草原村庄。
+	var in_village := absi(wrapped.x - 20) <= 1 and absi(wrapped.y - 20) <= 1
+	var col: Color
+	if in_village:
+		col = Color(0.55, 0.78, 0.48) if checker else Color(0.5, 0.72, 0.43)
+	else:
+		col = Color(0.47, 0.73, 0.41) if checker else Color(0.41, 0.65, 0.35)
 	mat.set_shader_parameter("albedo", col)
 
 	var deco: Node3D = slot["deco"]
 	for c in deco.get_children():
 		c.queue_free()
 
-	# 确定性 hash：同一 wrapped 区块永远长一样 → 跨接缝可辨认其连续性。
-	# 每块在整块范围内散布 2~3 棵树，保证可见区稳定有植被。
 	var base := hash(wrapped)
-	var count := 2 + posmod(base, 2)
-	for k in range(count):
-		var hk := hash(Vector3i(wrapped.x, wrapped.y, k))
-		if posmod(hk, 4) == 0:
-			continue  # 少量空位，避免太规整
-		var rx := (float(posmod(hk, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.85
-		var rz := (float(posmod(hk / 1000, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.85
-		_add_tree(deco, Vector3(rx, 0.0, rz), hk)
+	if in_village:
+		# 村庄区块：一栋房子 + 一棵点缀树
+		_add_house(deco, Vector3(0.0, 0.0, 0.0), base)
+		_add_tree(deco, Vector3(CHUNK_WORLD * 0.32, 0.0, CHUNK_WORLD * 0.32), base + 7)
+	else:
+		# 旷野区块：散布 2~3 棵树
+		var count := 2 + posmod(base, 2)
+		for k in range(count):
+			var hk := hash(Vector3i(wrapped.x, wrapped.y, k))
+			if posmod(hk, 4) == 0:
+				continue  # 少量空位，避免太规整
+			var rx := (float(posmod(hk, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.85
+			var rz := (float(posmod(hk / 1000, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.85
+			_add_tree(deco, Vector3(rx, 0.0, rz), hk)
+
+## 草原村庄的房子：彩色墙体 + 红屋顶（HD-2D 卡通风）。
+func _add_house(parent: Node3D, pos: Vector3, h: int) -> void:
+	var body := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(6.0, 4.0, 6.0)
+	body.mesh = box
+	var walls := [Color(0.96, 0.86, 0.7), Color(0.92, 0.8, 0.85), Color(0.8, 0.88, 0.96)]
+	body.material_override = BendMat.make(walls[posmod(h, walls.size())])
+	body.position = pos + Vector3(0.0, 2.0, 0.0)
+	parent.add_child(body)
+
+	var roof := MeshInstance3D.new()
+	var pyr := CylinderMesh.new()  # 4 边 + 顶半径 0 = 方锥屋顶
+	pyr.top_radius = 0.0
+	pyr.bottom_radius = 5.2
+	pyr.height = 3.2
+	pyr.radial_segments = 4
+	roof.mesh = pyr
+	roof.material_override = BendMat.make(Color(0.82, 0.4, 0.32))
+	roof.position = pos + Vector3(0.0, 5.6, 0.0)
+	roof.rotation_degrees = Vector3(0.0, 45.0, 0.0)  # 对齐方形墙体
+	parent.add_child(roof)
 
 func _add_tree(parent: Node3D, pos: Vector3, h: int) -> void:
 	var height := 2.5 + float(h % 7) * 0.5
