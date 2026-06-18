@@ -36,9 +36,9 @@ export async function handleVoice(
     abilities: character.abilities,
   });
 
-  // 回应文字落地前过审核；不通过则温和改口。
-  const mod = await adapters.moderation.moderateText(intent.replyText);
-  const replyText = mod.allowed ? intent.replyText : '我们聊点别的好不好？';
+  // 语音回复不再过文字审核（Boss 2026-06-18 决策：多一次 LLM 调用拖慢对话、伤体验）。
+  // 回复由 routeIntent 的儿童安全 system prompt 约束生成；造角色路径的 child 自由文本仍走审核。
+  const replyText = intent.replyText;
 
   const tts = await adapters.tts.synthesize(replyText, character.voiceId);
   const ttsAsset = store.putAsset(tts);
