@@ -24,7 +24,7 @@ func _process(_delta: float) -> bool:
 	_frames += 1
 	# 注入一个目标逻辑坐标，让 chunk/wrap 体现出来
 	if _frames == 5 and _world != null and (_mx != 0.0 or _mz != 0.0):
-		_world.player_logical = WorldGrid.wrap_pos(Vector2(_mx, _mz))
+		_world.focus_logical = WorldGrid.wrap_pos(Vector2(_mx, _mz))
 	# 合成一次点击，命中第一个 NPC，验证拾取 + 进交互模式
 	if _frames == 10 and OS.get_environment("SHOT_TAP") == "1" and _world != null:
 		var npc = _world.npcs[0]["node"]

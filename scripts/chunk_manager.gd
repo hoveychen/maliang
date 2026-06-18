@@ -8,7 +8,7 @@ extends Node3D
 const CHUNK_TILES := 25
 const CHUNK_WORLD := float(CHUNK_TILES) * WorldGrid.TILE_SIZE          ## 50.0
 const CHUNKS_PER_SIDE := WorldGrid.GRID_TILES / CHUNK_TILES            ## 40
-const R := 5                                                          ## 半径（区块数）→ 11×11
+const R := 7                                                          ## 半径（区块数）→ 15×15（更平视角铺到地平线）
 
 ## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
