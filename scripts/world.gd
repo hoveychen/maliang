@@ -14,6 +14,7 @@ const ZOOM_MIN := 16.0
 const ZOOM_MAX := 64.0
 const CAM_EASE := 6.0             ## 视角过渡速度（pitch/dist/focus 一起缓动）
 const PICK_RADIUS_PX := 80.0
+const THINK_TIMEOUT := 40.0       ## 「思考中」最长等待秒数；超时(响应丢失/网络/TLS)自动清除，杜绝永久卡死
 
 var focus_logical := Vector2.ZERO ## god 相机在环面上聚焦的逻辑坐标（取代玩家）
 var _cur_pitch := GOD_PITCH_DEG
@@ -41,6 +42,7 @@ var backend: Backend
 var listen_btn: Button
 var send_btn: Button
 var thinking_label: Label
+var _think_timer: Timer            ## 「思考中」兜底超时（响应没回来时自动解卡）
 var emotion_bubble: Label3D
 var _recording := false
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
@@ -419,9 +421,21 @@ func _setup_backend() -> void:
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.failed.connect(_on_failed)
+	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
+	# 也在 THINK_TIMEOUT 秒后自动解卡——这是无论后端如何都不再永久卡死的最后一道保险。
+	_think_timer = Timer.new()
+	_think_timer.one_shot = true
+	_think_timer.timeout.connect(_on_think_timeout)
+	add_child(_think_timer)
+
+func _on_think_timeout() -> void:
+	if thinking_label.visible:
+		_on_failed("响应超时（没收到回复）")
 
 ## 语音/造角色失败：清掉「思考中」，温和提示重试——否则客户端会一直卡在思考中。
 func _on_failed(reason: String) -> void:
+	if _think_timer != null:
+		_think_timer.stop()
 	thinking_label.visible = false
 	push_warning("voice/gen failed: %s" % reason)
 	if selected != null:
@@ -547,6 +561,7 @@ func _on_send() -> void:
 	if _mic_player != null:
 		_mic_player.stop()
 	backend.send_voice_end()
+	_think_timer.start(THINK_TIMEOUT)  # 兜底：响应没回来也会自动解卡
 
 ## 录音中周期性把采集缓冲攒成分片发出（上传与说话重叠，松手时音频已基本传完）。
 func _stream_recording(delta: float) -> void:
@@ -585,6 +600,8 @@ func _capture_pcm16k() -> PackedByteArray:
 	return out
 
 func _on_character_response(data: Dictionary) -> void:
+	if _think_timer != null:
+		_think_timer.stop()
 	thinking_label.visible = false
 	var transcript := String(data.get("transcript", ""))
 	if transcript.is_empty():
