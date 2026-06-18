@@ -13,7 +13,9 @@ export interface Config {
 export function loadConfig(): Config {
   return {
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
-    llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'moonshotai/kimi-k2.6',
+    // 默认对话/意图模型：qwen3.6-flash（实测 ~1.3s 稳，中文童趣最足、自带安全意识）。
+    // 旧默认 kimi-k2.6 实测 ~8s 且飘（默认开 reasoning），是语音延迟的主要变数。
+    llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'qwen/qwen3.6-flash',
     imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image',
     moderationTextModel: process.env.OPENROUTER_MOD_TEXT_MODEL ?? 'moonshotai/kimi-k2.6',
     xfyunAppId: process.env.XFYUN_APP_ID,
