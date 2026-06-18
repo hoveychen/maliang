@@ -32,6 +32,10 @@ var _recording := false
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
 var world_id := ""
 
+# M2-real 在线
+var api: Api
+var online := false
+
 func _ready() -> void:
 	critter_tex = load("res://assets/critter.svg")
 	ear_tex = load("res://assets/ear.svg")
@@ -45,6 +49,10 @@ func _ready() -> void:
 	_setup_ear()
 	_setup_hud()
 	_setup_backend()
+	api = Api.new()
+	api.name = "Api"
+	add_child(api)
+	_bootstrap() # 在线引导（best-effort，离线则保留占位 NPC）
 
 func _setup_environment() -> void:
 	var light := DirectionalLight3D.new()
@@ -213,10 +221,14 @@ func _update_hud() -> void:
 	coord_label.text = "tile (%d, %d)  /  %d×%d  环面循环" % [t.x, t.y, WorldGrid.GRID_TILES, WorldGrid.GRID_TILES]
 
 func _unhandled_input(event: InputEvent) -> void:
-	# 调试：选中角色后按 Enter/空格，本地下发一个 move_to（离线演示行为执行）。
+	# 调试：选中角色后按 Enter/空格。小神仙→造角色；其他→本地 move_to（离线演示）。
 	if event.is_action_pressed("ui_accept") and selected != null:
-		_show_emotion("wave")
-		_run_behavior(selected, { "commands": [{ "type": "move_to", "params": {} }], "loop": false })
+		var d := _find_npc_dict(selected)
+		if d.get("is_fairy", false) and online:
+			_request_create("一只戴帽子的小猫")
+		else:
+			_show_emotion("wave")
+			_run_behavior(selected, { "commands": [{ "type": "move_to", "params": {} }], "loop": false })
 		return
 	var p := Vector2.INF
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -271,8 +283,83 @@ func _setup_backend() -> void:
 	backend.name = "Backend"
 	add_child(backend)
 	backend.character_response.connect(_on_character_response)
-	# 不自动连接：游戏内连接 + 世界引导(POST /worlds)属 M2-real 接线。
-	# WS 客户端本身已由 tools/test_backend_ws.gd headless 验证。
+	backend.gen_progress.connect(_on_gen_progress)
+	backend.gen_complete.connect(_on_gen_complete)
+
+## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
+func _bootstrap() -> void:
+	var world: Dictionary = await api.create_world()
+	if world.is_empty():
+		return # 离线：保留 hardcoded demo NPC
+	online = true
+	world_id = String(world.get("id", ""))
+	backend.url = (api.base as String).replace("http", "ws") + "/ws"
+	backend.connect_to_server()
+	for n in npcs:
+		(n["node"] as Node).queue_free() # 清掉离线占位
+	npcs.clear()
+	var chars: Array = world.get("characters", [])
+	for c in chars:
+		await _spawn_server_character(c as Dictionary, Vector2.INF)
+	# 玩家落到世界中心（小神仙所在），让初始就在小神仙旁边
+	var fairy := _find_fairy()
+	if not fairy.is_empty():
+		player_logical = fairy["logical"]
+
+func _find_fairy() -> Dictionary:
+	for n in npcs:
+		if n.get("is_fairy", false):
+			return n
+	return {}
+
+## 从后端 Character 字典生成一个 PaperCharacter。at_logical 非 INF 时覆盖其逻辑坐标。
+func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
+	var npc := PaperCharacter.new()
+	add_child(npc)
+	var appearance: Dictionary = c.get("appearance", {})
+	var asset := String(appearance.get("spriteAsset", ""))
+	var tex: Texture2D = critter_tex
+	var color := Color.WHITE
+	var real := false
+	if not asset.is_empty():
+		var t := await api.fetch_texture(asset)
+		if t != null:
+			tex = t
+			real = true
+	if not real:
+		color = Color(0.85, 0.8, 1.0) if c.get("isFairy", false) else Color(0.92, 0.92, 0.92)
+	npc.setup(tex, color, String(c.get("name", "")))
+	if real:
+		# 生成图分辨率高，按高度归一化到约 6 单位，脚底对齐原点
+		var h := float(tex.get_height())
+		npc.pixel_size = 6.0 / h
+		npc.offset = Vector2(0.0, h / 2.0)
+	var logical := at_logical
+	if logical == Vector2.INF:
+		var pos: Dictionary = c.get("position", {})
+		logical = Vector2(float(pos.get("tileX", 500)), float(pos.get("tileY", 500))) * WorldGrid.TILE_SIZE
+	npcs.append({ "node": npc, "logical": logical, "id": String(c.get("id", "")), "is_fairy": bool(c.get("isFairy", false)) })
+
+func _on_gen_progress(stage: String) -> void:
+	thinking_label.text = "施法中… (%s)" % stage
+	thinking_label.visible = true
+
+func _on_gen_complete(character: Dictionary) -> void:
+	thinking_label.visible = false
+	# 新角色在小神仙旁边降生
+	var fairy := _find_fairy()
+	var anchor: Vector2 = fairy["logical"] if not fairy.is_empty() else player_logical
+	var spawn_at: Vector2 = anchor + Vector2(6.0, 4.0)
+	await _spawn_server_character(character, spawn_at)
+	banner.text = "%s 来啦！" % String(character.get("name", "新朋友"))
+	banner.visible = true
+
+## 小神仙造角色（在线）。
+func _request_create(intent: String) -> void:
+	if online:
+		thinking_label.text = "施法中…"
+		thinking_label.visible = true
+		backend.send_create_character(world_id, intent)
 
 func _on_listen() -> void:
 	# 点一下开始聆听：显示耳朵（_update_ear 已处理），开始录音。
@@ -330,5 +417,8 @@ func _find_npc_dict(npc: PaperCharacter) -> Dictionary:
 	return {}
 
 func _selected_id() -> String:
-	# MVP：用名字当临时 id（真实接入后用后端 character.id）。
-	return selected.char_name if selected != null else ""
+	if selected == null:
+		return ""
+	var d := _find_npc_dict(selected)
+	var id := String(d.get("id", ""))
+	return id if not id.is_empty() else selected.char_name
