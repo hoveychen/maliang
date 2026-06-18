@@ -97,21 +97,41 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   // WebSocket：造角色请求 → 进度推送 → 完成/失败
   app.get('/ws', { websocket: true }, (socket) => {
     const connKey = randomUUID(); // 每连接一个限流 key
+    const session = newVoiceSession(); // 边录边传：本连接的语音分片缓冲
     socket.on('message', (raw: Buffer) => {
-      void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey);
+      void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session);
+    });
+    // 连接断开时释放可能仍持有的限流名额（录到一半断线）
+    socket.on('close', () => {
+      if (session.gate) { session.gate.release(); session.gate = null; }
+      session.active = false;
     });
   });
 
   return app;
 }
 
-async function handleWsMessage(
+/** 边录边传的单连接语音会话：voice_start 开，voice_chunk 累积 PCM 分片，voice_end 合成走 handleVoice。 */
+export interface VoiceSession {
+  active: boolean;
+  worldId: string;
+  characterId: string;
+  chunks: Buffer[];
+  gate: { release: () => void } | null;
+}
+
+export function newVoiceSession(): VoiceSession {
+  return { active: false, worldId: '', characterId: '', chunks: [], gate: null };
+}
+
+export async function handleWsMessage(
   socket: { send: (data: string) => void },
   raw: string,
   adapters: ServiceAdapters,
   store: WorldStore,
   limiter: RateLimiter,
   connKey: string,
+  session: VoiceSession,
 ): Promise<void> {
   let msg: {
     type?: string;
@@ -186,6 +206,52 @@ async function handleWsMessage(
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {
       gate.release();
+    }
+    return;
+  }
+
+  // ── 边录边传：上传与孩子说话重叠，点「发送」时音频早已传完（见 voice-streaming 计划）──
+  if (msg.type === 'voice_start') {
+    if (session.gate) { session.gate.release(); session.gate = null; } // 上一会话没正常收尾，先释放
+    const gate = limiter.tryAcquire(connKey, Date.now());
+    if (!gate.ok) {
+      socket.send(JSON.stringify({ type: 'voice_failed', reason: gate.reason }));
+      return;
+    }
+    session.active = true;
+    session.worldId = msg.worldId ?? '';
+    session.characterId = msg.characterId ?? '';
+    session.chunks = [];
+    session.gate = gate;
+    return;
+  }
+
+  if (msg.type === 'voice_chunk') {
+    if (session.active && msg.audio) session.chunks.push(Buffer.from(msg.audio, 'base64'));
+    return; // 分片只累积，不回包
+  }
+
+  if (msg.type === 'voice_end') {
+    if (!session.active) {
+      socket.send(JSON.stringify({ type: 'voice_failed', reason: '没有进行中的录音会话' }));
+      return;
+    }
+    const { worldId, characterId } = session;
+    const audioBytes = Uint8Array.from(Buffer.concat(session.chunks));
+    session.active = false;
+    session.chunks = [];
+    try {
+      const response = await handleVoice(
+        { worldId, characterId, audio: { bytes: audioBytes, mime: 'audio/L16;rate=16000' } },
+        adapters,
+        store,
+      );
+      socket.send(JSON.stringify({ type: 'character_response', ...response }));
+      void accumulateMemory(worldId, characterId, response.transcript, response.replyText, adapters, store).catch(() => {});
+    } catch (err) {
+      socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
+    } finally {
+      if (session.gate) { session.gate.release(); session.gate = null; }
     }
     return;
   }

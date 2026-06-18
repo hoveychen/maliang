@@ -19,6 +19,16 @@ func connect_to_server() -> void:
 func send_voice(world_id: String, character_id: String, audio_b64: String, fmt := "audio/wav") -> void:
 	_send({ "type": "voice_input", "worldId": world_id, "characterId": character_id, "audio": audio_b64, "format": fmt })
 
+## 边录边传：录音开始即开会话，录音中持续发分片，松手发 voice_end 收尾。
+func send_voice_start(world_id: String, character_id: String) -> void:
+	_send({ "type": "voice_start", "worldId": world_id, "characterId": character_id })
+
+func send_voice_chunk(audio_b64: String) -> void:
+	_send({ "type": "voice_chunk", "audio": audio_b64 })
+
+func send_voice_end() -> void:
+	_send({ "type": "voice_end" })
+
 func send_create_character(world_id: String, intent_text: String) -> void:
 	_send({ "type": "create_character_request", "worldId": world_id, "intentText": intent_text, "byFairy": true })
 

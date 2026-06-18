@@ -56,6 +56,10 @@ var _mic_player: AudioStreamPlayer
 var _tts_player: AudioStreamPlayer
 var _capture: AudioEffectCapture
 var _rec_rate := 44100
+# 边录边传：录音时持续把采集到的 PCM 攒成小块发给后端（上传与说话重叠）
+var _pending_pcm := PackedByteArray()
+var _chunk_accum := 0.0   ## 距上次发分片的累计秒数
+var _streamed_any := false
 
 func _ready() -> void:
 	critter_tex = load("res://assets/critter.svg")
@@ -256,6 +260,8 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_step_executors(delta)
+	if _recording:
+		_stream_recording(delta)
 	# 视角缓动（god ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
 	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)
@@ -512,14 +518,18 @@ func _request_create(intent: String) -> void:
 		backend.send_create_character(world_id, intent)
 
 func _on_listen() -> void:
-	# 点一下开始聆听：显示耳朵（_update_ear 已处理），开始采集麦克风。
+	# 点一下开始聆听：显示耳朵（_update_ear 已处理），开始采集麦克风并开一个边录边传会话。
 	_recording = true
 	send_btn.disabled = false
 	banner.text = "我在听… 说完点发送"
+	_pending_pcm = PackedByteArray()
+	_chunk_accum = 0.0
+	_streamed_any = false
 	if _capture != null:
 		_capture.clear_buffer()
 	if _mic_player != null and not _mic_player.playing:
 		_mic_player.play()
+	backend.send_voice_start(world_id, _selected_id())
 
 func _on_send() -> void:
 	if selected == null:
@@ -528,12 +538,29 @@ func _on_send() -> void:
 	send_btn.disabled = true
 	thinking_label.visible = true
 	banner.visible = false
-	var pcm := _capture_pcm16k()
+	# 收尾：把残留缓冲 + 最后一截采集都发出去，再发 voice_end 触发识别/回复。
+	_pending_pcm.append_array(_capture_pcm16k())
+	_flush_pending_chunk()
+	if not _streamed_any:
+		# 无麦/空采集时塞个占位分片，闭环仍可由后端驱动（与旧行为一致）
+		backend.send_voice_chunk(Marshalls.raw_to_base64(PackedByteArray([0x52, 0x49, 0x46, 0x46])))
 	if _mic_player != null:
 		_mic_player.stop()
-	# 无麦/空采集时退化为占位字节，闭环仍可由后端驱动
-	var raw := pcm if pcm.size() > 0 else PackedByteArray([0x52, 0x49, 0x46, 0x46])
-	backend.send_voice(world_id, _selected_id(), Marshalls.raw_to_base64(raw), "audio/L16;rate=16000")
+	backend.send_voice_end()
+
+## 录音中周期性把采集缓冲攒成分片发出（上传与说话重叠，松手时音频已基本传完）。
+func _stream_recording(delta: float) -> void:
+	_pending_pcm.append_array(_capture_pcm16k())
+	_chunk_accum += delta
+	if _chunk_accum >= 0.15:
+		_flush_pending_chunk()
+		_chunk_accum = 0.0
+
+func _flush_pending_chunk() -> void:
+	if _pending_pcm.size() > 0:
+		backend.send_voice_chunk(Marshalls.raw_to_base64(_pending_pcm))
+		_pending_pcm = PackedByteArray()
+		_streamed_any = true
 
 ## 读采集缓冲 → 单声道 + 线性重采样到 16k 16bit PCM 字节。
 func _capture_pcm16k() -> PackedByteArray:

@@ -1,0 +1,55 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createMockAdapters } from '../src/adapters/mock.ts';
+import { WorldStore } from '../src/persistence.ts';
+import { RateLimiter } from '../src/ratelimit.ts';
+import { handleWsMessage, newVoiceSession } from '../src/server.ts';
+import type { Character } from '../src/types.ts';
+
+function seedChar(store: WorldStore, worldId: string, id: string): Character {
+  const c: Character = {
+    id, worldId, isFairy: false, name: '小兔', personality: '活泼开朗', voiceId: 'v1',
+    appearance: { visualDescription: '', spriteAsset: '', scale: 1 },
+    memory: [], chatHistory: [], state: 'idle',
+    behaviorScript: { commands: [], loop: false },
+    position: { tileX: 0, tileY: 0 }, abilities: ['move_to', 'deliver_message'], relationships: {},
+  };
+  store.addCharacter(c);
+  return c;
+}
+
+function setup() {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  seedChar(store, 'w1', 'c1');
+  const sent: any[] = [];
+  const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
+  const session = newVoiceSession();
+  const rest = [createMockAdapters(), store, new RateLimiter(100, 100), 'conn1', session] as const;
+  return { sent, socket, session, rest };
+}
+
+const b64 = (n: number) => Buffer.alloc(n).toString('base64');
+
+test('边录边传：voice_start→voice_chunk×N→voice_end 拼成完整音频走 handleVoice', async () => {
+  const { sent, socket, session, rest } = setup();
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_start', worldId: 'w1', characterId: 'c1' }), ...rest);
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_chunk', audio: b64(1280) }), ...rest);
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_chunk', audio: b64(1280) }), ...rest);
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_end' }), ...rest);
+
+  const resp = sent.find((m) => m.type === 'character_response');
+  assert.ok(resp, '应收到 character_response');
+  assert.equal(resp.transcript, '你好呀'); // mock ASR 固定转写
+  assert.ok(resp.ttsAsset, '应带 TTS 资源');
+  assert.equal(session.active, false, 'voice_end 后会话应重置');
+});
+
+test('voice_chunk/voice_end 在无活动会话时不崩；voice_end 回 voice_failed', async () => {
+  const { sent, socket, rest } = setup();
+  // 没有 voice_start 直接发 chunk + end
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_chunk', audio: b64(640) }), ...rest);
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_end' }), ...rest);
+  assert.ok(sent.some((m) => m.type === 'voice_failed'), 'voice_end 无会话应回 voice_failed');
+  assert.ok(!sent.some((m) => m.type === 'character_response'), '不应产出回复');
+});
