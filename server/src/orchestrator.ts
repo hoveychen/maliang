@@ -41,6 +41,20 @@ function buildCharacter(
 }
 
 /**
+ * 为已存在角色（如小神仙）生成一张 sprite：image → cutout → 存储，返回 assetHash。
+ * 与 createCharacter 的造角色管线不同——这里不新建角色、不跑文字审核（描述是固定的）。
+ */
+export async function generateSprite(
+  adapters: ServiceAdapters,
+  visualDescription: string,
+  store: WorldStore,
+): Promise<string> {
+  const raw = await adapters.image.generateSprite(visualDescription);
+  const cut = await adapters.cutout.removeBackground(raw);
+  return store.putAsset(cut);
+}
+
+/**
  * 造角色编排管线（见 docs/tech-design.md §5.3）。
  * 顺序：spec → moderate_text → image → cutout → moderate_image → persist。
  * 每阶段开始时回调 onProgress；审核不通过抛 ModerationError。
