@@ -7,9 +7,9 @@ extends Node3D
 
 const CHUNK_TILES := 25
 const CHUNK_WORLD := float(CHUNK_TILES) * WorldGrid.TILE_SIZE          ## 50.0
-const CHUNKS_PER_SIDE := WorldGrid.GRID_TILES / CHUNK_TILES            ## 40
-const R := 7                                                          ## 半径（区块数）→ 15×15（更平视角铺到地平线）
-const RENDER_RADIUS := float(R) * 50.0 - 25.0                         ## 圆形渲染半径(≈325)，超出隐藏
+const CHUNKS_PER_SIDE := WorldGrid.GRID_TILES / CHUNK_TILES            ## 3（75/25）
+const R := 1                                                          ## 半径(区块)→ 3×3 = 正好整个小世界一遍，无重复
+const RENDER_RADIUS := 110.0                                          ## 圆形渲染半径，覆盖全部 3×3（远处由雾渐隐）
 ## world-bending 在 GPU 位移顶点，但视锥裁剪按原始 AABB → 高处/远处网格会被误剔除。
 ## 给所有弯曲网格设大裁剪边距，避免接近屏幕边缘时整块消失。
 const CULL_MARGIN := 220.0
@@ -70,8 +70,8 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	var tile: MeshInstance3D = slot["tile"]
 	var mat: ShaderMaterial = tile.material_override
 	var checker := posmod(wrapped.x + wrapped.y, 2) == 0
-	# 世界中心(chunk 20≈tile 500，小神仙出生处)一片 3×3 区块为草原村庄。
-	var in_village := absi(wrapped.x - 20) <= 1 and absi(wrapped.y - 20) <= 1
+	# 世界中心(chunk 1 = 3×3 网格中央，小神仙出生处)一片 3×3 区块为草原村庄。
+	var in_village := absi(wrapped.x - 1) <= 1 and absi(wrapped.y - 1) <= 1
 	var col: Color
 	if in_village:
 		col = Color(0.55, 0.78, 0.48) if checker else Color(0.5, 0.72, 0.43)
@@ -85,9 +85,13 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 
 	var base := hash(wrapped)
 	if in_village:
-		# 村庄区块：一栋房子 + 一棵点缀树
-		_add_house(deco, Vector3(0.0, 0.0, 0.0), base)
-		_add_tree(deco, Vector3(CHUNK_WORLD * 0.32, 0.0, CHUNK_WORLD * 0.32), base + 7)
+		# 村庄区块：约一半放房子(其余点缀树)，避免小世界里全是屋顶
+		if posmod(wrapped.x + wrapped.y, 2) == 0:
+			_add_house(deco, Vector3(0.0, 0.0, 0.0), base)
+			_add_tree(deco, Vector3(CHUNK_WORLD * 0.34, 0.0, CHUNK_WORLD * 0.30), base + 7)
+		else:
+			_add_tree(deco, Vector3(-CHUNK_WORLD * 0.22, 0.0, CHUNK_WORLD * 0.24), base)
+			_add_tree(deco, Vector3(CHUNK_WORLD * 0.28, 0.0, -CHUNK_WORLD * 0.2), base + 3)
 	else:
 		# 旷野区块：散布 2~3 棵树
 		var count := 2 + posmod(base, 2)

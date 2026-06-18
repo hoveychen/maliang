@@ -4,9 +4,9 @@ extends RefCounted
 ## 世界是 GRID_TILES × GRID_TILES 个 tile 的有限网格，首尾循环。
 ## 逻辑坐标用世界单位表示（不是 tile 索引），范围 [0, WORLD_SPAN)。
 
-const GRID_TILES := 1000
+const GRID_TILES := 75
 const TILE_SIZE := 2.0
-const WORLD_SPAN := float(GRID_TILES) * TILE_SIZE  ## = 2000.0
+const WORLD_SPAN := float(GRID_TILES) * TILE_SIZE  ## = 150.0（god 一屏≈60 单位 → 左右拖约 2.5 屏绕回原点）
 
 ## 把单个坐标分量 wrap 回 [0, WORLD_SPAN)。
 static func wrap_scalar(v: float) -> float:

@@ -110,8 +110,8 @@ func _setup_environment() -> void:
 	env.fog_mode = Environment.FOG_MODE_DEPTH
 	env.fog_light_color = Color(0.62, 0.82, 0.97)
 	env.fog_light_energy = 1.0
-	env.fog_depth_begin = 80.0
-	env.fog_depth_end = 230.0
+	env.fog_depth_begin = 40.0
+	env.fog_depth_end = 95.0  ## 小世界(span 150)：~95 外渐隐进天空，藏住远端循环，保留无限地平线感
 	env.fog_depth_curve = 1.0
 	we.environment = env
 	add_child(we)
@@ -452,14 +452,16 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 	var is_fairy := bool(c.get("isFairy", false))
 	var logical := at_logical
 	if logical == Vector2.INF:
-		var pos: Dictionary = c.get("position", {})
-		logical = Vector2(float(pos.get("tileX", 500)), float(pos.get("tileY", 500))) * WorldGrid.TILE_SIZE
-		# 村民后端默认位置都在中心 → 按序号散开成环，避免初始堆叠
-		if not is_fairy:
+		# 小世界：忽略后端旧坐标(原 1000×1000 的 tile 500)，统一放到村庄中心(chunk2 = world 中心)
+		var center := Vector2(WorldGrid.WORLD_SPAN, WorldGrid.WORLD_SPAN) * 0.5
+		if is_fairy:
+			logical = center
+		else:
+			# 村民按黄金角散开成环，避免初始堆叠
 			var k := _villager_count
 			_villager_count += 1
-			var ang := float(k) * 2.399963 # 黄金角
-			logical = WorldGrid.wrap_pos(logical + Vector2(cos(ang), sin(ang)) * (14.0 + float(k) * 3.5))
+			var ang := float(k) * 2.399963
+			logical = WorldGrid.wrap_pos(center + Vector2(cos(ang), sin(ang)) * (10.0 + float(k) * 3.0))
 	npcs.append({ "node": npc, "logical": logical, "id": String(c.get("id", "")), "is_fairy": is_fairy })
 	if not is_fairy:
 		_start_ambient_wander(npcs[npcs.size() - 1])

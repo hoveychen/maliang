@@ -5,7 +5,7 @@ import type { ServiceAdapters } from './adapters/types.ts';
 import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
-import { createCharacter, ModerationError } from './orchestrator.ts';
+import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
 import { handleVoice } from './voice.ts';
 import { RateLimiter } from './ratelimit.ts';
 import type { Character } from './types.ts';
@@ -64,6 +64,21 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     }
     if (!world) return reply.code(404).send({ error: 'world not found' });
     return { id: world.id, characters: characterListView(store, world.id) };
+  });
+
+  // 为世界里的小神仙补一张真实 sprite（幂等：已有则跳过）。一次性 seed 用。
+  app.post<{ Params: { id: string } }>('/worlds/:id/fairy-sprite', async (req, reply) => {
+    const fairy = characterListView(store, req.params.id).find((c) => c.isFairy);
+    if (!fairy) return reply.code(404).send({ error: 'no fairy in world' });
+    if (fairy.appearance.spriteAsset) {
+      return { id: fairy.id, spriteAsset: fairy.appearance.spriteAsset, regenerated: false };
+    }
+    const desc =
+      '一个发光的可爱小精灵神仙，圆润 Q 版，柔和暖色光晕，温柔微笑，飘逸的小翅膀，儿童绘本插画风格，干净背景，全身立绘';
+    const hash = await generateSprite(adapters, desc, store);
+    fairy.appearance.spriteAsset = hash;
+    store.saveCharacter(fairy);
+    return { id: fairy.id, spriteAsset: hash, regenerated: true };
   });
 
   // 取生成的 sprite 资源
