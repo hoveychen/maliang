@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { handleVoice } from '../src/voice.ts';
-import type { Character } from '../src/types.ts';
+import type { Character, IntentContext } from '../src/types.ts';
 
 function seedChar(store: WorldStore, worldId: string, id: string): Character {
   const c: Character = {
@@ -107,13 +107,13 @@ test('handleVoice：把近 N 轮历史 + 长期记忆喂给 routeIntent（角色
   store.saveCharacter(c);
 
   const base = createMockAdapters();
-  let captured = null;
+  const calls: IntentContext[] = [];
   const adapters = {
     ...base,
     llm: {
       ...base.llm,
-      async routeIntent(t, ctx) {
-        captured = ctx;
+      async routeIntent(t: string, ctx: IntentContext) {
+        calls.push(ctx);
         return base.llm.routeIntent(t, ctx);
       },
     },
@@ -123,10 +123,11 @@ test('handleVoice：把近 N 轮历史 + 长期记忆喂给 routeIntent（角色
     adapters,
     store,
   );
-  assert.ok(captured, 'routeIntent 应被调用');
-  assert.deepEqual(captured.memory, ['小朋友叫朵朵'], '长期记忆应进入上下文');
-  assert.equal(captured.recentHistory.length, 2, '近 N 轮历史应进入上下文');
-  assert.equal(captured.recentHistory[0].text, '我叫朵朵');
+  assert.equal(calls.length, 1, 'routeIntent 应被调用一次');
+  const ctx = calls[0]!;
+  assert.deepEqual(ctx.memory, ['小朋友叫朵朵'], '长期记忆应进入上下文');
+  assert.equal(ctx.recentHistory!.length, 2, '近 N 轮历史应进入上下文');
+  assert.equal(ctx.recentHistory![0]!.text, '我叫朵朵');
 });
 
 test('handleVoice：对话后角色自我累积记忆 + 去重', async () => {
