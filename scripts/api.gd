@@ -42,3 +42,19 @@ func fetch_texture(asset_hash: String) -> Texture2D:
 	if img.load_png_from_buffer(res[3] as PackedByteArray) != OK:
 		return null
 	return ImageTexture.create_from_image(img)
+
+## 拉取资源 hash → 原始字节（如 TTS 音频）。失败返回空。
+func fetch_bytes(asset_hash: String) -> PackedByteArray:
+	if asset_hash.is_empty():
+		return PackedByteArray()
+	var http := HTTPRequest.new()
+	add_child(http)
+	var err := http.request(base + "/assets/" + asset_hash)
+	if err != OK:
+		http.queue_free()
+		return PackedByteArray()
+	var res: Array = await http.request_completed
+	http.queue_free()
+	if int(res[1]) != 200:
+		return PackedByteArray()
+	return res[3] as PackedByteArray

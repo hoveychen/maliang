@@ -1,27 +1,43 @@
-import type { ServiceAdapters } from './types.ts';
-import { type Config, hasOpenRouter } from '../config.ts';
+import type { ServiceAdapters, ASRAdapter, TTSAdapter } from './types.ts';
+import { type Config, hasOpenRouter, hasXfyun } from '../config.ts';
 import { createMockAdapters } from './mock.ts';
 import { OpenRouterClient } from './openrouter_client.ts';
 import { OpenRouterLLMAdapter } from './openrouter_llm.ts';
 import { OpenRouterImageAdapter } from './openrouter_image.ts';
 import { ChromaKeyCutoutAdapter } from './chroma_cutout.ts';
+import { XfyunASRAdapter, XfyunTTSAdapter } from './xfyun.ts';
 
 /**
- * 按配置选择适配器：有 OpenRouter key → 真实（LLM+生图+抠图）；否则全 mock。
- * 内容审核暂用 mock 占位（真实审核服务在 M4 接入）。
+ * 按配置选择适配器（各服务独立）：
+ * - 有 OpenRouter key → 真实 LLM/生图/抠图；否则 mock。
+ * - 有讯飞凭证 → 真实 ASR/TTS；否则 mock。
+ * - 内容审核暂用 mock 占位（真实审核服务在 M4 接入）。
  */
 export function createAdapters(config: Config): ServiceAdapters {
+  const mock = createMockAdapters();
+
+  let asr: ASRAdapter = mock.asr;
+  let tts: TTSAdapter = mock.tts;
+  if (hasXfyun(config)) {
+    const creds = {
+      appId: config.xfyunAppId as string,
+      apiKey: config.xfyunApiKey as string,
+      apiSecret: config.xfyunApiSecret as string,
+    };
+    asr = new XfyunASRAdapter(creds);
+    tts = new XfyunTTSAdapter(creds);
+  }
+
   if (!hasOpenRouter(config)) {
-    return createMockAdapters();
+    return { ...mock, asr, tts };
   }
   const client = new OpenRouterClient(config.openrouterApiKey as string);
-  const mock = createMockAdapters();
   return {
     llm: new OpenRouterLLMAdapter(client, config.llmModel),
     image: new OpenRouterImageAdapter(client, config.imageModel),
     cutout: new ChromaKeyCutoutAdapter(),
-    asr: mock.asr, // TODO(M2-real): 接讯飞 ASR
-    tts: mock.tts, // TODO(M2-real): 接讯飞 TTS
+    asr,
+    tts,
     moderation: mock.moderation, // TODO(M4): 真实文字+图片审核服务
   };
 }

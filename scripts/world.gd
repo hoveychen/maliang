@@ -36,6 +36,12 @@ var world_id := ""
 var api: Api
 var online := false
 
+# 音频 I/O（真机：麦克风采集 + TTS 播放）
+var _mic_player: AudioStreamPlayer
+var _tts_player: AudioStreamPlayer
+var _capture: AudioEffectCapture
+var _rec_rate := 44100
+
 func _ready() -> void:
 	critter_tex = load("res://assets/critter.svg")
 	ear_tex = load("res://assets/ear.svg")
@@ -52,7 +58,24 @@ func _ready() -> void:
 	api = Api.new()
 	api.name = "Api"
 	add_child(api)
+	_setup_audio()
 	_bootstrap() # 在线引导（best-effort，离线则保留占位 NPC）
+
+func _setup_audio() -> void:
+	# 录音总线 + 采集效果（静音，不外放麦克风）
+	var idx := AudioServer.bus_count
+	AudioServer.add_bus(idx)
+	AudioServer.set_bus_name(idx, "Record")
+	AudioServer.set_bus_mute(idx, true)
+	_capture = AudioEffectCapture.new()
+	AudioServer.add_bus_effect(idx, _capture)
+	_mic_player = AudioStreamPlayer.new()
+	_mic_player.stream = AudioStreamMicrophone.new()
+	_mic_player.bus = "Record"
+	add_child(_mic_player)
+	_rec_rate = int(AudioServer.get_mix_rate())
+	_tts_player = AudioStreamPlayer.new()
+	add_child(_tts_player)
 
 func _setup_environment() -> void:
 	var light := DirectionalLight3D.new()
@@ -362,11 +385,14 @@ func _request_create(intent: String) -> void:
 		backend.send_create_character(world_id, intent)
 
 func _on_listen() -> void:
-	# 点一下开始聆听：显示耳朵（_update_ear 已处理），开始录音。
+	# 点一下开始聆听：显示耳朵（_update_ear 已处理），开始采集麦克风。
 	_recording = true
 	send_btn.disabled = false
 	banner.text = "我在听… 说完点发送"
-	# TODO(device): AudioStreamMicrophone 采集；headless/无麦时由 _on_send 发占位音频。
+	if _capture != null:
+		_capture.clear_buffer()
+	if _mic_player != null and not _mic_player.playing:
+		_mic_player.play()
 
 func _on_send() -> void:
 	if selected == null:
@@ -375,9 +401,34 @@ func _on_send() -> void:
 	send_btn.disabled = true
 	thinking_label.visible = true
 	banner.visible = false
-	# TODO(device): 用真实录音字节；此处发占位音频，闭环靠后端 mock/真实驱动。
-	var stub_audio := Marshalls.raw_to_base64(PackedByteArray([0x52, 0x49, 0x46, 0x46]))
-	backend.send_voice(world_id, _selected_id(), stub_audio)
+	var pcm := _capture_pcm16k()
+	if _mic_player != null:
+		_mic_player.stop()
+	# 无麦/空采集时退化为占位字节，闭环仍可由后端驱动
+	var raw := pcm if pcm.size() > 0 else PackedByteArray([0x52, 0x49, 0x46, 0x46])
+	backend.send_voice(world_id, _selected_id(), Marshalls.raw_to_base64(raw), "audio/L16;rate=16000")
+
+## 读采集缓冲 → 单声道 + 线性重采样到 16k 16bit PCM 字节。
+func _capture_pcm16k() -> PackedByteArray:
+	var out := PackedByteArray()
+	if _capture == null:
+		return out
+	var avail := _capture.get_frames_available()
+	if avail <= 0:
+		return out
+	var frames := _capture.get_buffer(avail)
+	var ratio := 16000.0 / float(_rec_rate)
+	var dst_n := int(frames.size() * ratio)
+	out.resize(dst_n * 2)
+	for i in range(dst_n):
+		var src_i := int(i / ratio)
+		if src_i >= frames.size():
+			break
+		var s: float = (frames[src_i].x + frames[src_i].y) * 0.5
+		var v := int(clampf(s, -1.0, 1.0) * 32767.0)
+		out[i * 2] = v & 0xFF
+		out[i * 2 + 1] = (v >> 8) & 0xFF
+	return out
 
 func _on_character_response(data: Dictionary) -> void:
 	thinking_label.visible = false
@@ -387,7 +438,22 @@ func _on_character_response(data: Dictionary) -> void:
 	var script: Variant = data.get("behaviorScript", null)
 	if typeof(script) == TYPE_DICTIONARY and selected != null:
 		_run_behavior(selected, script)
-	# TODO(device): 下载 /assets/ttsAsset 并用 AudioStreamPlayer 播放 TTS。
+	var asset := String(data.get("ttsAsset", ""))
+	if not asset.is_empty():
+		_play_tts(asset)
+
+## 下载 TTS（16k L16 PCM）→ AudioStreamWAV 播放。
+func _play_tts(asset: String) -> void:
+	var bytes := await api.fetch_bytes(asset)
+	if bytes.is_empty():
+		return
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = 16000
+	wav.stereo = false
+	wav.data = bytes
+	_tts_player.stream = wav
+	_tts_player.play()
 
 func _show_emotion(emotion: String) -> void:
 	var glyphs := { "happy": "☺", "think": "?", "wave": "!", "sad": "…" }
