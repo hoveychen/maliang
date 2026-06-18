@@ -52,23 +52,3 @@ test('文字审核拦截：抛 ModerationError(text) 且不落地', async () => 
   );
   assert.equal(store.listCharacters('w1').length, 0, '被拦截的角色不应落地');
 });
-
-test('图片审核拦截：抛 ModerationError(image)', async () => {
-  const store = new WorldStore();
-  store.createWorld('w1');
-  const base = createMockAdapters();
-  const adapters = {
-    ...base,
-    moderation: {
-      ...base.moderation,
-      async moderateImage() {
-        return { allowed: false, reason: '图片不适宜' };
-      },
-    },
-  };
-
-  await assert.rejects(
-    () => createCharacter({ worldId: 'w1', intentText: '小猫', byFairy: true }, adapters, store),
-    (e) => e instanceof ModerationError && e.stage === 'image',
-  );
-});

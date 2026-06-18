@@ -38,6 +38,6 @@ export function createAdapters(config: Config): ServiceAdapters {
     cutout: new ChromaKeyCutoutAdapter(),
     asr,
     tts,
-    moderation: new OpenRouterModerationAdapter(client, config.moderationTextModel, config.moderationImageModel),
+    moderation: new OpenRouterModerationAdapter(client, config.moderationTextModel),
   };
 }

@@ -37,10 +37,9 @@ export interface TTSAdapter {
   synthesize(text: string, voiceId: string): Promise<AudioBlob>;
 }
 
-/** 内容审核：文字 + 图片，面向幼儿强制。 */
+/** 内容审核：文字（图片由生图模型自带安全门把关，不单独审核）。 */
 export interface ModerationAdapter {
   moderateText(text: string): Promise<ModerationResult>;
-  moderateImage(input: ImageBlob): Promise<ModerationResult>;
 }
 
 /** 一组可插拔的第三方适配器；mock 与真实实现共用此契约。 */

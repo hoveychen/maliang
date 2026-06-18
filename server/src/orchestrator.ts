@@ -3,13 +3,13 @@ import type { ServiceAdapters } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, CharacterSpec, CreateCharacterInput, GenStage } from './types.ts';
 
-/** 内容审核拦截。stage 指明在文字还是图片环节被拦。 */
+/** 内容审核拦截（文字环节）。 */
 export class ModerationError extends Error {
-  readonly stage: 'text' | 'image';
-  constructor(stage: 'text' | 'image', reason?: string) {
-    super(`moderation blocked at ${stage}: ${reason ?? 'unspecified'}`);
+  readonly stage: 'text';
+  constructor(reason?: string) {
+    super(`moderation blocked at text: ${reason ?? 'unspecified'}`);
     this.name = 'ModerationError';
-    this.stage = stage;
+    this.stage = 'text';
   }
 }
 
@@ -58,7 +58,7 @@ export async function createCharacter(
   const textCheck = await adapters.moderation.moderateText(
     `${spec.name}。${spec.personality}。${spec.visualDescription}`,
   );
-  if (!textCheck.allowed) throw new ModerationError('text', textCheck.reason);
+  if (!textCheck.allowed) throw new ModerationError(textCheck.reason);
 
   onProgress('image');
   const raw = await adapters.image.generateSprite(spec.visualDescription);
@@ -66,10 +66,7 @@ export async function createCharacter(
   onProgress('cutout');
   const cut = await adapters.cutout.removeBackground(raw);
 
-  onProgress('moderate_image');
-  const imageCheck = await adapters.moderation.moderateImage(cut);
-  if (!imageCheck.allowed) throw new ModerationError('image', imageCheck.reason);
-
+  // 图片不再单独审核：生图模型自带安全门（见 docs）。文字审核仍保留。
   onProgress('persist');
   const assetHash = store.putAsset(cut);
   const character = buildCharacter(spec, input, assetHash);
