@@ -7,6 +7,7 @@ import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, ModerationError } from './orchestrator.ts';
 import { handleVoice } from './voice.ts';
+import { RateLimiter } from './ratelimit.ts';
 import type { Character } from './types.ts';
 
 export interface ServerDeps {
@@ -67,10 +68,17 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return reply.header('content-type', asset.mime).send(Buffer.from(asset.bytes));
   });
 
+  // 昂贵操作限流：每连接 N/分钟 + 全局并发上限（防刷付费 API）
+  const limiter = new RateLimiter(
+    Number(process.env.RATE_PER_MIN ?? 8),
+    Number(process.env.RATE_GLOBAL_MAX ?? 4),
+  );
+
   // WebSocket：造角色请求 → 进度推送 → 完成/失败
   app.get('/ws', { websocket: true }, (socket) => {
+    const connKey = randomUUID(); // 每连接一个限流 key
     socket.on('message', (raw: Buffer) => {
-      void handleWsMessage(socket, raw.toString(), adapters, store);
+      void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey);
     });
   });
 
@@ -82,6 +90,8 @@ async function handleWsMessage(
   raw: string,
   adapters: ServiceAdapters,
   store: WorldStore,
+  limiter: RateLimiter,
+  connKey: string,
 ): Promise<void> {
   let msg: {
     type?: string;
@@ -101,6 +111,11 @@ async function handleWsMessage(
 
   if (msg.type === 'create_character_request') {
     const requestId = randomUUID();
+    const gate = limiter.tryAcquire(connKey, Date.now());
+    if (!gate.ok) {
+      socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason: gate.reason }));
+      return;
+    }
     const input = {
       worldId: msg.worldId ?? '',
       intentText: msg.intentText ?? '',
@@ -114,11 +129,18 @@ async function handleWsMessage(
     } catch (err) {
       const reason = err instanceof ModerationError ? err.message : String(err);
       socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
+    } finally {
+      gate.release();
     }
     return;
   }
 
   if (msg.type === 'voice_input') {
+    const gate = limiter.tryAcquire(connKey, Date.now());
+    if (!gate.ok) {
+      socket.send(JSON.stringify({ type: 'voice_failed', reason: gate.reason }));
+      return;
+    }
     try {
       const audioBytes = Uint8Array.from(Buffer.from(msg.audio ?? '', 'base64'));
       const response = await handleVoice(
@@ -133,6 +155,8 @@ async function handleWsMessage(
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
+    } finally {
+      gate.release();
     }
     return;
   }
