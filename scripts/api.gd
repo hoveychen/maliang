@@ -59,18 +59,30 @@ func fetch_texture(asset_hash: String) -> Texture2D:
 		return null
 	return ImageTexture.create_from_image(img)
 
-## 拉取资源 hash → 原始字节（如 TTS 音频）。失败返回空。
-func fetch_bytes(asset_hash: String) -> PackedByteArray:
+## 拉取音频资源 hash → { "bytes": PackedByteArray, "rate": int }。
+## 采样率从 content-type 解析（audio/L16;rate=24000 —— local Kokoro 24k / 讯飞 16k），缺失回落 16k。
+func fetch_audio(asset_hash: String) -> Dictionary:
+	var empty := { "bytes": PackedByteArray(), "rate": 16000 }
 	if asset_hash.is_empty():
-		return PackedByteArray()
+		return empty
 	var http := HTTPRequest.new()
 	add_child(http)
 	var err := http.request(base + "/assets/" + asset_hash)
 	if err != OK:
 		http.queue_free()
-		return PackedByteArray()
+		return empty
 	var res: Array = await http.request_completed
 	http.queue_free()
 	if int(res[1]) != 200:
-		return PackedByteArray()
-	return res[3] as PackedByteArray
+		return empty
+	var rate := 16000
+	for h in res[2] as PackedStringArray:
+		var line := String(h).to_lower()
+		if line.begins_with("content-type:"):
+			var idx := line.find("rate=")
+			if idx >= 0:
+				var parsed := int(line.substr(idx + 5))
+				if parsed > 0:
+					rate = parsed
+			break
+	return { "bytes": res[3] as PackedByteArray, "rate": rate }
