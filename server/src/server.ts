@@ -141,6 +141,7 @@ export async function handleWsMessage(
     characterId?: string;
     audio?: string; // base64
     format?: string;
+    transcript?: string; // voice_transcript：端侧 ASR 已识别的文本
   };
   try {
     msg = JSON.parse(raw);
@@ -194,6 +195,43 @@ export async function handleWsMessage(
       );
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
       // 长期记忆后台累积：在回复发出后再做，不阻塞对话；失败/超时只影响这次记忆。
+      void accumulateMemory(
+        msg.worldId ?? '',
+        msg.characterId ?? '',
+        response.transcript,
+        response.replyText,
+        adapters,
+        store,
+      ).catch(() => {});
+    } catch (err) {
+      socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
+    } finally {
+      gate.release();
+    }
+    return;
+  }
+
+  // ── 端侧 ASR：客户端（Android 插件）本地识别完成，直送转写文本，跳过服务端 ASR ──
+  if (msg.type === 'voice_transcript') {
+    const gate = limiter.tryAcquire(connKey, Date.now());
+    if (!gate.ok) {
+      socket.send(JSON.stringify({ type: 'voice_failed', reason: gate.reason }));
+      return;
+    }
+    try {
+      const transcript = (msg.transcript ?? '').trim();
+      if (!transcript) {
+        socket.send(JSON.stringify({ type: 'voice_failed', reason: '转写文本为空' }));
+        return;
+      }
+      const response = await respondToTranscript(
+        msg.worldId ?? '',
+        msg.characterId ?? '',
+        transcript,
+        adapters,
+        store,
+      );
+      socket.send(JSON.stringify({ type: 'character_response', ...response }));
       void accumulateMemory(
         msg.worldId ?? '',
         msg.characterId ?? '',

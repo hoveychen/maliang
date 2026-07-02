@@ -29,6 +29,10 @@ func send_voice_chunk(audio_b64: String) -> void:
 func send_voice_end() -> void:
 	_send({ "type": "voice_end" })
 
+## 端侧 ASR：平板本地已识别，只上传文本（跳过服务端 ASR）。
+func send_voice_transcript(world_id: String, character_id: String, transcript: String) -> void:
+	_send({ "type": "voice_transcript", "worldId": world_id, "characterId": character_id, "transcript": transcript })
+
 func send_create_character(world_id: String, intent_text: String) -> void:
 	_send({ "type": "create_character_request", "worldId": world_id, "intentText": intent_text, "byFairy": true })
 

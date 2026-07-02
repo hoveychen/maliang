@@ -62,10 +62,13 @@ var _rec_rate := 44100
 var _pending_pcm := PackedByteArray()
 var _chunk_accum := 0.0   ## 距上次发分片的累计秒数
 var _streamed_any := false
+var _asr_local: Object = null # 端侧 ASR 插件（Android MaliangAsr），null = 服务端识别
+var _local_asr_session := false # 本次录音走端侧（录音开始时定格，中途不切换）
 
 func _ready() -> void:
 	critter_tex = load("res://assets/critter.svg")
 	ear_tex = load("res://assets/ear.svg")
+	_setup_local_asr()
 	_setup_environment()
 	chunk_manager = ChunkManager.new()
 	chunk_manager.name = "ChunkManager"
@@ -531,6 +534,33 @@ func _request_create(intent: String) -> void:
 		thinking_label.visible = true
 		backend.send_create_character(world_id, intent)
 
+## 端侧 ASR（Android 插件 MaliangAsr）：有则异步加载模型，识别结果直送 voice_transcript。
+## 桌面/编辑器没有该单例 → _asr_local 保持 null，一切走服务端识别（原路径）。
+func _setup_local_asr() -> void:
+	if not Engine.has_singleton("MaliangAsr"):
+		return
+	_asr_local = Engine.get_singleton("MaliangAsr")
+	_asr_local.connect("final_result", _on_local_asr_final)
+	_asr_local.connect("asr_error", _on_local_asr_error)
+	_asr_local.initialize()
+
+func _on_local_asr_final(text: String) -> void:
+	_local_asr_session = false
+	var t := text.strip_edges()
+	if t.is_empty():
+		# 端侧就知道没听清，不必打扰服务端
+		_think_timer.stop()
+		thinking_label.visible = false
+		heard_label.text = "👂 没听清，再说一次试试"
+		heard_label.visible = true
+		return
+	backend.send_voice_transcript(world_id, _selected_id(), t)
+
+func _on_local_asr_error(msg: String) -> void:
+	push_warning("端侧 ASR 出错，本次运行回落服务端识别: %s" % msg)
+	_local_asr_session = false
+	_asr_local = null
+
 func _on_listen() -> void:
 	# 点一下开始聆听：显示耳朵（_update_ear 已处理），开始采集麦克风并开一个边录边传会话。
 	_recording = true
@@ -543,7 +573,12 @@ func _on_listen() -> void:
 		_capture.clear_buffer()
 	if _mic_player != null and not _mic_player.playing:
 		_mic_player.play()
-	backend.send_voice_start(world_id, _selected_id())
+	# 路由定格：端侧模型就绪 → 本地识别（分片不上传，只送最终文本）；否则服务端流式。
+	_local_asr_session = _asr_local != null and _asr_local.isReady()
+	if _local_asr_session:
+		_asr_local.startSession()
+	else:
+		backend.send_voice_start(world_id, _selected_id())
 
 func _on_send() -> void:
 	if selected == null:
@@ -552,15 +587,18 @@ func _on_send() -> void:
 	send_btn.disabled = true
 	thinking_label.visible = true
 	banner.visible = false
-	# 收尾：把残留缓冲 + 最后一截采集都发出去，再发 voice_end 触发识别/回复。
+	# 收尾：把残留缓冲 + 最后一截采集都发出去，再触发识别/回复。
 	_pending_pcm.append_array(_capture_pcm16k())
 	_flush_pending_chunk()
-	if not _streamed_any:
-		# 无麦/空采集时塞个占位分片，闭环仍可由后端驱动（与旧行为一致）
-		backend.send_voice_chunk(Marshalls.raw_to_base64(PackedByteArray([0x52, 0x49, 0x46, 0x46])))
 	if _mic_player != null:
 		_mic_player.stop()
-	backend.send_voice_end()
+	if _local_asr_session:
+		_asr_local.stopSession() # final_result 信号回来后走 voice_transcript
+	else:
+		if not _streamed_any:
+			# 无麦/空采集时塞个占位分片，闭环仍可由后端驱动（与旧行为一致）
+			backend.send_voice_chunk(Marshalls.raw_to_base64(PackedByteArray([0x52, 0x49, 0x46, 0x46])))
+		backend.send_voice_end()
 	_think_timer.start(THINK_TIMEOUT)  # 兜底：响应没回来也会自动解卡
 
 ## 录音中周期性把采集缓冲攒成分片发出（上传与说话重叠，松手时音频已基本传完）。
@@ -573,7 +611,10 @@ func _stream_recording(delta: float) -> void:
 
 func _flush_pending_chunk() -> void:
 	if _pending_pcm.size() > 0:
-		backend.send_voice_chunk(Marshalls.raw_to_base64(_pending_pcm))
+		if _local_asr_session:
+			_asr_local.feedPcm(_pending_pcm) # 端侧：原始 PCM 直喂插件，不上传
+		else:
+			backend.send_voice_chunk(Marshalls.raw_to_base64(_pending_pcm))
 		_pending_pcm = PackedByteArray()
 		_streamed_any = true
 

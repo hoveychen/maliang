@@ -13,5 +13,12 @@ TASKS.md
 # 本地语音模型（server/scripts/fetch-voice-models.sh 拉取，~1GB 不入库）
 server/models/
 
+# 端侧 ASR 插件产物（scripts/build-asr-plugin.sh 生成/下载）
+addons/maliang_asr/bin/
+asr_plugin/libs/
+asr_plugin/build/
+asr_plugin/.gradle/
+asr_plugin/local.properties
+
 # OS
 .DS_Store
