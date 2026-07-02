@@ -33,10 +33,17 @@ func _init() -> void:
 	fails += _check("plaza is path", TerrainMap.tile_type(Vector2i(37, 37)), TerrainMap.T_PATH)
 	fails += _check("west road is path", TerrainMap.tile_type(Vector2i(12, 30)), TerrainMap.T_PATH)
 	fails += _check("pond is water", TerrainMap.tile_type(Vector2i(24, 24)), TerrainMap.T_WATER)
-	fails += _check("knoll is h2", TerrainMap.tile_height(Vector2i(37, 7)), 2)
-	fails += _check("plateau is h1", TerrainMap.tile_height(Vector2i(33, 8)), 1)
+	fails += _check("mountain peak h8", TerrainMap.tile_height(Vector2i(37, 6)), 8)
+	fails += _check("mountain mid h5", TerrainMap.tile_height(Vector2i(33, 8)), 5)
 	fails += _check("far corner grass", TerrainMap.tile_type(Vector2i(2, 70)), TerrainMap.T_GRASS)
 	fails += _check("far corner flat", TerrainMap.tile_height(Vector2i(2, 70)), 0)
+
+	# 全图最高点 = 演示山 8 级
+	var hmax := 0
+	for z in range(n):
+		for x in range(n):
+			hmax = maxi(hmax, TerrainMap.tile_height(Vector2i(x, z)))
+	fails += _check("max height is 8", hmax, 8)
 
 	# 环面 wrap：越界索引等价
 	fails += _check("wrap type", TerrainMap.tile_type(Vector2i(37 + n, 37 - n)), TerrainMap.tile_type(Vector2i(37, 37)))
@@ -47,16 +54,16 @@ func _init() -> void:
 	fails += _check("center roundtrip x", float(WorldGrid.to_tile(c).x), 10.0)
 	fails += _check("center roundtrip z", float(WorldGrid.to_tile(c).y), 20.0)
 
-	# 高度台阶不变量：相邻 tile 高度差 ≤1（保证 P6 侧壁只需一级悬崖拼块）
-	var bad_step := 0
-	for z in range(n):
-		for x in range(n):
-			var h0 := TerrainMap.tile_height(Vector2i(x, z))
-			if absi(h0 - TerrainMap.tile_height(Vector2i(x + 1, z))) > 1:
-				bad_step += 1
-			if absi(h0 - TerrainMap.tile_height(Vector2i(x, z + 1))) > 1:
-				bad_step += 1
-	fails += _check("height steps <= 1", bad_step, 0)
+	# 演示山东西向缓坡可逐级爬：沿 z=6 行从西侧山脚到峰顶，高度单调不减且首尾贯通
+	# （南北向允许多级陡崖——能否攀爬是移动规则的事，不是地形不变量）
+	var prev := 0
+	var monotonic := true
+	for x in range(26, 38):
+		var hx := TerrainMap.tile_height(Vector2i(x, 6))
+		if hx < prev:
+			monotonic = false
+		prev = hx
+	fails += _check("west ridge climbs to peak", 1 if (monotonic and prev == 8) else 0, 1)
 
 	if fails == 0:
 		print("terrain_map tests PASS")

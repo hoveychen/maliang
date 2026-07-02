@@ -7,13 +7,13 @@ extends RefCounted
 ## 默认地形布局（手绘式确定性生成，坐标单位 = tile 索引 0..74）：
 ## - 村庄路网：三条纵向双宽路（x=12/37/61 列）+ 一条横向双宽路（z=37 行）+ 中央广场
 ## - 池塘：村庄西南 (24.5, 24.5) 椭圆水面（岸边全部平地）
-## - 北部高地：(37.5, 7.5) 一级台地，内嵌 (37.5, 6.5) 二级小丘（草地，先纯视觉）
+## - 北部演示山：(37.5, 6.5) 八级同心台地（织梦岛式；东西向缓坡可逐级爬，南北向陡崖多级跳变）
 
 const T_GRASS := 0
 const T_PATH := 1
 const T_WATER := 2
-const MAX_HEIGHT := 2
-const STEP_HEIGHT := 1.0  ## 每级台阶的世界高度（米）；渲染层用，逻辑/寻路暂仍走平地
+const MAX_HEIGHT := 255   ## 数据上限（存储为 byte）；默认地形演示山只到 8 级
+const STEP_HEIGHT := 2.0  ## 每级台阶的世界高度（米）= 1 格（tile 边长）；相邻 tile 跳变可超 1 级（陡崖）
 
 static var _types := PackedByteArray()
 static var _heights := PackedByteArray()
@@ -50,9 +50,9 @@ static func _ensure_built() -> void:
 	_paint()
 
 static func _paint() -> void:
-	# 高地先画（路/水后画时可覆盖判断）：北部一级台地 + 二级小丘
-	_paint_ellipse_height(37.5, 7.5, 9.5, 4.8, 1)
-	_paint_ellipse_height(37.5, 6.5, 4.5, 2.4, 2)
+	# 北部演示山：8 级同心椭圆台地，逐级覆盖抬高（每级 x 缩 1.3、z 缩 0.75 tile）
+	for lvl in range(1, 9):
+		_paint_ellipse_height(37.5, 6.5, 12.0 - 1.3 * float(lvl), 6.8 - 0.75 * float(lvl), lvl)
 
 	# 村庄路网：z 范围避开北部高地（z>=14）
 	_paint_rect_type(12, 14, 13, 61, T_PATH)   # 西纵路
