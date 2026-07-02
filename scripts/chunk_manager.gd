@@ -111,33 +111,34 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	for c in deco.get_children():
 		c.queue_free()
 
+	# L1 摆放网格化：装饰全部吸附 tile 中心，占地检查避让路/水（used 记录已占 tile）。
+	var used := {}
 	var base := hash(wrapped)
 	if in_village:
 		# 村庄区块：约一半放房子(其余点缀树)，避免小世界里全是屋顶。
-		# 中心区块(1,1)是小神仙出生地 → 村口水井 + 空地，不盖房压住角色。
+		# 中心区块(1,1)是小神仙出生地 → 水井坐镇广场（地标特批压路），空地不盖房。
 		if wrapped == Vector2i(1, 1):
-			_spawn(deco, WELL_SCENE, Vector3(CHUNK_WORLD * 0.16, 0.0, -CHUNK_WORLD * 0.12), 4.5, 0.0)
-			_add_tree(deco, Vector3(-CHUNK_WORLD * 0.3, 0.0, -CHUNK_WORLD * 0.26), base + 5)
+			_spawn_on_tile(deco, used, wrapped, WELL_SCENE, Vector2i(12, 12), 4.5, 0.0, 1, 0, true)
+			_tree_on_tile(deco, used, wrapped, Vector2i(5, 6), base + 5)
 		elif posmod(wrapped.x + wrapped.y, 2) == 0:
-			_add_house(deco, Vector3(0.0, 0.0, 0.0), base)
-			_add_tree(deco, Vector3(CHUNK_WORLD * 0.34, 0.0, CHUNK_WORLD * 0.30), base + 7)
+			_house_on_tile(deco, used, wrapped, Vector2i(12, 12), base)
+			_tree_on_tile(deco, used, wrapped, Vector2i(21, 20), base + 7)
 		else:
-			_add_tree(deco, Vector3(-CHUNK_WORLD * 0.22, 0.0, CHUNK_WORLD * 0.24), base)
-			_add_tree(deco, Vector3(CHUNK_WORLD * 0.28, 0.0, -CHUNK_WORLD * 0.2), base + 3)
+			_tree_on_tile(deco, used, wrapped, Vector2i(7, 18), base)
+			_tree_on_tile(deco, used, wrapped, Vector2i(19, 7), base + 3)
 			if wrapped == Vector2i(0, 1):  # 一座风车当村庄地标
-				_spawn(deco, WINDMILL_SCENE, Vector3(CHUNK_WORLD * 0.05, 0.0, -CHUNK_WORLD * 0.34), HOUSE_SCALE, 180.0)
-		_scatter(deco, wrapped, base, 4)
+				_spawn_on_tile(deco, used, wrapped, WINDMILL_SCENE, Vector2i(13, 4), HOUSE_SCALE, 180.0, 1, 3)
+		_scatter(deco, used, wrapped, base, 4)
 	else:
-		# 旷野区块：散布 2~3 棵树
+		# 旷野区块：散布 2~3 棵树（当前 3×3 世界全是村庄，此分支为世界扩容预留）
 		var count := 2 + posmod(base, 2)
 		for k in range(count):
 			var hk := hash(Vector3i(wrapped.x, wrapped.y, k))
 			if posmod(hk, 4) == 0:
 				continue  # 少量空位，避免太规整
-			var rx := (float(posmod(hk, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.85
-			var rz := (float(posmod(hk / 1000, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.85
-			_add_tree(deco, Vector3(rx, 0.0, rz), hk)
-		_scatter(deco, wrapped, base + 11, 6)
+			var ti := Vector2i(1 + posmod(hk, CHUNK_TILES - 2), 1 + posmod(hk / 1000, CHUNK_TILES - 2))
+			_tree_on_tile(deco, used, wrapped, ti, hk)
+		_scatter(deco, used, wrapped, base + 11, 6)
 
 ## 构建（或取缓存）一个 wrapped 区块的地面 ArrayMesh：
 ## 25×25 tile，每 tile 按 Autotile 拆 4 个半 tile 角 quad，UV 指向 atlas 对应变体 cell。
@@ -207,15 +208,18 @@ func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, ya
 		mi.extra_cull_margin = CULL_MARGIN
 	return inst
 
-## 确定性散布小装饰（灌木/石头/草丛），避开区块中心（房子/水井占位）。
-func _scatter(parent: Node3D, wrapped: Vector2i, seed_h: int, count: int) -> void:
+## 确定性散布小装饰（灌木/石头/草丛）：hash 出候选 tile，
+## 非空闲草地就跳过（填充物不强求），并让开区块中心（房子/水井占位）。
+func _scatter(parent: Node3D, used: Dictionary, wrapped: Vector2i, seed_h: int, count: int) -> void:
 	for k in range(count):
 		var hk := hash(Vector3i(wrapped.x + 97, wrapped.y, seed_h + k))
-		var rx := (float(posmod(hk, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.9
-		var rz := (float(posmod(hk / 1000, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.9
-		if Vector2(rx, rz).length() < CHUNK_WORLD * 0.18:
+		var ti := Vector2i(posmod(hk, CHUNK_TILES), posmod(hk / 1000, CHUNK_TILES))
+		var pos := _tile_local(ti)
+		if Vector2(pos.x, pos.z).length() < CHUNK_WORLD * 0.14:
 			continue
-		var pos := Vector3(rx, 0.0, rz)
+		if not _footprint_free(used, wrapped, ti, 0, false):
+			continue
+		used[ti] = true
 		var kind := posmod(hk / 7, 5)
 		if kind == 0:
 			_spawn(parent, ROCK_SCENES[posmod(hk, ROCK_SCENES.size())], pos, 1.6 + float(posmod(hk, 3)) * 0.4, float(posmod(hk, 360)))
@@ -224,11 +228,59 @@ func _scatter(parent: Node3D, wrapped: Vector2i, seed_h: int, count: int) -> voi
 		else:
 			_spawn(parent, TUFT_SCENES[posmod(hk, TUFT_SCENES.size())], pos, 1.8, float(posmod(hk, 360)))
 
-## 村庄民居：KayKit 各色小屋（微缩模型放大到 ~6.5m）。
-func _add_house(parent: Node3D, pos: Vector3, h: int) -> void:
-	var yaw := float(posmod(h, 4)) * 90.0
-	_spawn(parent, HOUSE_SCENES[posmod(h, HOUSE_SCENES.size())], pos, HOUSE_SCALE, yaw)
+## L1 摆放核心：把场景吸附到 tile 中心。anchor 是区块内 tile 索引(0..24)²，
+## 占地或压路/水时沿螺旋环向外找至多 search 圈；reserve 是占地半径（0→1×1，1→3×3）。
+## allow_path 供地标（水井）压路。找不到空位就放弃（确定性，不摆歪）。
+func _spawn_on_tile(parent: Node3D, used: Dictionary, wrapped: Vector2i, scene: PackedScene, anchor: Vector2i, scale_f: float, yaw_deg: float, reserve := 0, search := 0, allow_path := false) -> void:
+	for r in range(search + 1):
+		for ti in _ring(anchor, r):
+			if not _footprint_free(used, wrapped, ti, reserve, allow_path):
+				continue
+			for dz in range(-reserve, reserve + 1):
+				for dx in range(-reserve, reserve + 1):
+					used[ti + Vector2i(dx, dz)] = true
+			_spawn(parent, scene, _tile_local(ti), scale_f, yaw_deg)
+			return
 
-func _add_tree(parent: Node3D, pos: Vector3, h: int) -> void:
+## 半径 r 的方形环上的 tile（r=0 只有中心），确定性顺序。
+func _ring(c: Vector2i, r: int) -> Array:
+	if r == 0:
+		return [c]
+	var out: Array = []
+	for d in range(-r, r + 1):
+		out.append(c + Vector2i(d, -r))
+		out.append(c + Vector2i(d, r))
+	for d in range(-r + 1, r):
+		out.append(c + Vector2i(-r, d))
+		out.append(c + Vector2i(r, d))
+	return out
+
+## 以 ti 为中心、半径 reserve 的占地是否全为空闲草地（水永远不可占）。
+## 脚印允许越过区块边界——TerrainMap 是全局环面数据，越界索引照常判定。
+func _footprint_free(used: Dictionary, wrapped: Vector2i, ti: Vector2i, reserve: int, allow_path: bool) -> bool:
+	for dz in range(-reserve, reserve + 1):
+		for dx in range(-reserve, reserve + 1):
+			var lt := ti + Vector2i(dx, dz)
+			if used.has(lt):
+				return false
+			var ty := TerrainMap.tile_type(wrapped * CHUNK_TILES + lt)
+			if ty == TerrainMap.T_WATER or (ty == TerrainMap.T_PATH and not allow_path):
+				return false
+	return true
+
+## 区块内 tile 索引 → 区块局部坐标（tile 中心）。
+func _tile_local(ti: Vector2i) -> Vector3:
+	var half := CHUNK_WORLD * 0.5
+	return Vector3(
+		-half + (float(ti.x) + 0.5) * WorldGrid.TILE_SIZE,
+		0.0,
+		-half + (float(ti.y) + 0.5) * WorldGrid.TILE_SIZE)
+
+## 村庄民居：KayKit 各色小屋（微缩模型放大到 ~6.5m，占地 3×3 tile）。
+func _house_on_tile(parent: Node3D, used: Dictionary, wrapped: Vector2i, anchor: Vector2i, h: int) -> void:
+	var yaw := float(posmod(h, 4)) * 90.0
+	_spawn_on_tile(parent, used, wrapped, HOUSE_SCENES[posmod(h, HOUSE_SCENES.size())], anchor, HOUSE_SCALE, yaw, 1, 4)
+
+func _tree_on_tile(parent: Node3D, used: Dictionary, wrapped: Vector2i, anchor: Vector2i, h: int) -> void:
 	var scale_f := 1.1 + float(h % 5) * 0.15
-	_spawn(parent, TREE_SCENES[posmod(h, TREE_SCENES.size())], pos, scale_f, float(posmod(h, 360)))
+	_spawn_on_tile(parent, used, wrapped, TREE_SCENES[posmod(h, TREE_SCENES.size())], anchor, scale_f, float(posmod(h, 360)), 0, 2)
