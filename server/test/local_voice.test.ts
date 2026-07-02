@@ -6,7 +6,7 @@ import {
   pcm16ToFloat,
   hasLocalVoiceModels,
 } from '../src/adapters/local.ts';
-import { resolveVoiceProvider } from '../src/adapters/factory.ts';
+import { resolveAsrProvider, resolveTtsProvider } from '../src/adapters/factory.ts';
 import { loadConfig, type Config } from '../src/config.ts';
 
 test('resolveSid：音色名 / 数字 sid / 未知回落 undefined', () => {
@@ -54,24 +54,29 @@ test('LocalTTS：英文+全角括号混合文本能在限时内合成（lang 配
 });
 
 function baseConfig(over: Partial<Config>): Config {
-  return { ...loadConfig(), xfyunAppId: undefined, xfyunApiKey: undefined, xfyunApiSecret: undefined, ...over };
+  return {
+    ...loadConfig(),
+    xfyunAppId: undefined, xfyunApiKey: undefined, xfyunApiSecret: undefined,
+    minimaxApiKey: undefined,
+    voiceAsrProvider: 'auto', voiceTtsProvider: 'auto',
+    ...over,
+  };
 }
 
-test('resolveVoiceProvider：显式指定优先于 auto 探测', () => {
-  assert.equal(resolveVoiceProvider(baseConfig({ voiceProvider: 'mock' })), 'mock');
-  assert.equal(resolveVoiceProvider(baseConfig({ voiceProvider: 'xfyun' })), 'xfyun');
-  assert.equal(resolveVoiceProvider(baseConfig({ voiceProvider: 'local' })), 'local');
+test('resolveAsrProvider：显式指定优先于 auto 探测', () => {
+  assert.equal(resolveAsrProvider(baseConfig({ voiceAsrProvider: 'mock' })), 'mock');
+  assert.equal(resolveAsrProvider(baseConfig({ voiceAsrProvider: 'xfyun' })), 'xfyun');
+  assert.equal(resolveAsrProvider(baseConfig({ voiceAsrProvider: 'local' })), 'local');
 });
 
-test('resolveVoiceProvider：auto 无模型无讯飞 → mock；有讯飞 → xfyun；有模型 → local', () => {
+test('resolveAsrProvider：auto 无模型无讯飞 → mock；有讯飞 → xfyun；有模型 → local', () => {
   assert.equal(
-    resolveVoiceProvider(baseConfig({ voiceProvider: 'auto', voiceModelsDir: '/nonexistent-path-xyz' })),
+    resolveAsrProvider(baseConfig({ voiceModelsDir: '/nonexistent-path-xyz' })),
     'mock',
   );
   assert.equal(
-    resolveVoiceProvider(
+    resolveAsrProvider(
       baseConfig({
-        voiceProvider: 'auto',
         voiceModelsDir: '/nonexistent-path-xyz',
         xfyunAppId: 'a', xfyunApiKey: 'b', xfyunApiSecret: 'c',
       }),
@@ -81,13 +86,28 @@ test('resolveVoiceProvider：auto 无模型无讯飞 → mock；有讯飞 → xf
   // 本地模型已就绪时（开发机跑过 fetch 脚本），auto 应选 local——讯飞凭证在场也优先本地
   if (hasLocalVoiceModels('models')) {
     assert.equal(
-      resolveVoiceProvider(
+      resolveAsrProvider(
         baseConfig({
-          voiceProvider: 'auto', voiceModelsDir: 'models',
+          voiceModelsDir: 'models',
           xfyunAppId: 'a', xfyunApiKey: 'b', xfyunApiSecret: 'c',
         }),
       ),
       'local',
     );
   }
+});
+
+test('resolveTtsProvider：有 MiniMax key 时 auto 优先 minimax；显式指定不受影响', () => {
+  assert.equal(
+    resolveTtsProvider(baseConfig({ minimaxApiKey: 'k', voiceModelsDir: '/nonexistent-path-xyz' })),
+    'minimax',
+  );
+  assert.equal(
+    resolveTtsProvider(baseConfig({ voiceModelsDir: '/nonexistent-path-xyz' })),
+    'mock',
+  );
+  assert.equal(
+    resolveTtsProvider(baseConfig({ minimaxApiKey: 'k', voiceTtsProvider: 'local' })),
+    'local', // 显式 local 覆盖 auto 的 minimax 优先
+  );
 });
