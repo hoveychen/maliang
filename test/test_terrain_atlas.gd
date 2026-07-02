@@ -42,14 +42,16 @@ func _init() -> void:
 	fails += _check("cliff lip dirt", 1 if (lip.r > lip.b and lip.r > 0.5) else 0, 1)
 	var top := _probe(img, TerrainAtlas.CLIFF_RIM, Autotile.C_NW, Autotile.V_EDGE_H, 16.0, 24.0)
 	fails += _check("cliff top grass", 1 if (top.g > top.r) else 0, 1)
-	var wallr := TerrainAtlas.wall_rect()
-	var wallc := img.get_pixel(int(wallr.position.x * TerrainAtlas.W + 16.0), int(wallr.position.y * TerrainAtlas.H + 16.0))
+	var wallc := _probe(img, TerrainAtlas.CLIFF_WALL, Autotile.C_NW, Autotile.V_FULL, 16.0, 16.0)
 	fails += _check("wall dirt", 1 if (wallc.r > wallc.b and wallc.r > 0.4) else 0, 1)
+	# 墙格无邻墙侧（EDGE_V 外缘）是凹缝暗边，比主体明显更暗
+	var crev := _probe(img, TerrainAtlas.CLIFF_WALL, Autotile.C_NW, Autotile.V_EDGE_V, 1.0, 16.0)
+	fails += _check("wall crevice dark", 1 if crev.r < wallc.r * 0.85 else 0, 1)
 
 	# uv_rect 都在 [0,1] 且互不重叠（抽查全组合的中心点唯一性）
 	var centers := {}
 	var overlap := 0
-	for ty in [TerrainMap.T_PATH, TerrainMap.T_WATER, TerrainAtlas.CLIFF_RIM]:
+	for ty in [TerrainMap.T_PATH, TerrainMap.T_WATER, TerrainAtlas.CLIFF_RIM, TerrainAtlas.CLIFF_WALL]:
 		for c in range(4):
 			for v in range(Autotile.VARIANT_COUNT):
 				var r := TerrainAtlas.uv_rect(ty, c, v, 0)

@@ -209,39 +209,62 @@ func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Packe
 	uvs.append(Vector2(r.position.x, r.end.y))
 	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
 
-## tile 四边中「邻居更低」的边发竖直崖壁，一级台阶一个 quad（贴一格崖壁 cell）。
+## tile 四边中「邻居更低」的边发竖直崖壁。每级 = 一个 2m×2m 墙格，
+## 墙格对同一墙面的 8 邻墙格（沿墙走向左右 × 层级上下 × 对角）做 corner autotile：
+## 有邻墙 = 相连，无邻墙侧出凹缝暗边 + 亮棱线。墙格再切 4 个 1m 角 quad 按变体取 UV。
 ## tile 局部范围 [x0, x0+2]×[z0, z0+2]，本 tile 高 h 级。
 func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, idx: PackedInt32Array, t: Vector2i, h: int, x0: float, z0: float) -> void:
 	var ts := WorldGrid.TILE_SIZE
 	var x1 := x0 + ts
 	var z1 := z0 + ts
-	# 每边：邻居偏移 / 墙面法线 / 从法线侧看去顺时针的上边两端点（a→b）
+	# 每边：邻居偏移 n / 墙面法线 / 上边两端点 a→b（从法线侧看去 a 在屏幕左）/
+	# 沿墙走向的 tile 切向 tang（= a→b 方向，保证掩码的"右"= 画面右）
 	var sides := [
-		{ "n": Vector2i(0, 1), "normal": Vector3.BACK, "a": Vector3(x0, 0, z1), "b": Vector3(x1, 0, z1) },      # 南墙 +Z
-		{ "n": Vector2i(0, -1), "normal": Vector3.FORWARD, "a": Vector3(x1, 0, z0), "b": Vector3(x0, 0, z0) },  # 北墙 -Z
-		{ "n": Vector2i(1, 0), "normal": Vector3.RIGHT, "a": Vector3(x1, 0, z1), "b": Vector3(x1, 0, z0) },     # 东墙 +X
-		{ "n": Vector2i(-1, 0), "normal": Vector3.LEFT, "a": Vector3(x0, 0, z0), "b": Vector3(x0, 0, z1) },     # 西墙 -X
+		{ "n": Vector2i(0, 1), "normal": Vector3.BACK, "a": Vector3(x0, 0, z1), "b": Vector3(x1, 0, z1), "tang": Vector2i(1, 0) },
+		{ "n": Vector2i(0, -1), "normal": Vector3.FORWARD, "a": Vector3(x1, 0, z0), "b": Vector3(x0, 0, z0), "tang": Vector2i(-1, 0) },
+		{ "n": Vector2i(1, 0), "normal": Vector3.RIGHT, "a": Vector3(x1, 0, z1), "b": Vector3(x1, 0, z0), "tang": Vector2i(0, -1) },
+		{ "n": Vector2i(-1, 0), "normal": Vector3.LEFT, "a": Vector3(x0, 0, z0), "b": Vector3(x0, 0, z1), "tang": Vector2i(0, 1) },
 	]
-	var wr := TerrainAtlas.wall_rect()
 	for s in sides:
-		var nh := TerrainMap.tile_height(t + s["n"])
+		var n_off: Vector2i = s["n"]
+		var tang: Vector2i = s["tang"]
+		var nh := TerrainMap.tile_height(t + n_off)
 		for lvl in range(nh, h):
+			# (q.x, q.y) = (沿墙偏移, 视觉上下偏移)；atlas 的 N(-1) = 上一级
+			var pred := func(q: Vector2i) -> bool:
+				return _wall_exists(t + tang * q.x, n_off, lvl - q.y)
+			var corners := Autotile.corners_from_mask(Autotile.mask_of(Vector2i.ZERO, pred))
 			var y_top := float(lvl + 1) * TerrainMap.STEP_HEIGHT
+			var y_mid := (float(lvl) + 0.5) * TerrainMap.STEP_HEIGHT
 			var y_bot := float(lvl) * TerrainMap.STEP_HEIGHT
 			var a: Vector3 = s["a"]
 			var b_: Vector3 = s["b"]
-			var base := verts.size()
-			verts.append(Vector3(a.x, y_top, a.z))
-			verts.append(Vector3(b_.x, y_top, b_.z))
-			verts.append(Vector3(b_.x, y_bot, b_.z))
-			verts.append(Vector3(a.x, y_bot, a.z))
-			for k in range(4):
-				norms.append(s["normal"])
-			uvs.append(wr.position)
-			uvs.append(Vector2(wr.end.x, wr.position.y))
-			uvs.append(wr.end)
-			uvs.append(Vector2(wr.position.x, wr.end.y))
-			idx.append_array(PackedInt32Array([base, base + 1, base + 2, base, base + 2, base + 3]))
+			var mid := (a + b_) * 0.5
+			for c in range(4):
+				var right := c == Autotile.C_NE or c == Autotile.C_SE
+				var lower := c == Autotile.C_SW or c == Autotile.C_SE
+				var h0 := mid if right else a
+				var h1 := b_ if right else mid
+				var yt := y_mid if lower else y_top
+				var yb := y_bot if lower else y_mid
+				var r := TerrainAtlas.uv_rect(TerrainAtlas.CLIFF_WALL, c, corners[c], 0)
+				var base := verts.size()
+				verts.append(Vector3(h0.x, yt, h0.z))
+				verts.append(Vector3(h1.x, yt, h1.z))
+				verts.append(Vector3(h1.x, yb, h1.z))
+				verts.append(Vector3(h0.x, yb, h0.z))
+				for k in range(4):
+					norms.append(s["normal"])
+				uvs.append(r.position)
+				uvs.append(Vector2(r.end.x, r.position.y))
+				uvs.append(r.end)
+				uvs.append(Vector2(r.position.x, r.end.y))
+				idx.append_array(PackedInt32Array([base, base + 1, base + 2, base, base + 2, base + 3]))
+
+## 墙格存在性：tile 在 lvl 层朝 n_off 方向有裸露墙面
+## （本 tile 高过该层，且该方向邻居的地面在该层或以下）。
+func _wall_exists(tile: Vector2i, n_off: Vector2i, lvl: int) -> bool:
+	return TerrainMap.tile_height(tile) > lvl and lvl >= TerrainMap.tile_height(tile + n_off)
 
 ## 实例化 KayKit 场景：包裹 bend 材质 + 大裁剪边距（弯曲位移会超出原始 AABB）。
 func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, yaw_deg: float) -> Node3D:
