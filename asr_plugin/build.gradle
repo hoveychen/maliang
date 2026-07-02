@@ -1,0 +1,26 @@
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'cc.insnap.maliang.asr'
+    compileSdk 36
+    defaultConfig {
+        minSdk 24
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    // 只做编译期符号：godot-lib 由宿主 APK 提供，sherpa AAR 由 export 插件一并注入 APK。
+    // （AGP 不允许 library 模块直接依赖本地 .aar，因此用抽出的 classes.jar。）
+    compileOnly files('libs/godot-lib-classes.jar')
+    compileOnly files('libs/sherpa-onnx-classes.jar')
+}

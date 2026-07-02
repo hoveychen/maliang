@@ -1,0 +1,19 @@
+// maliang 端侧 ASR 插件（Godot Android plugin v2）。版本与 android/build 模板对齐。
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+    plugins {
+        id 'com.android.library' version '8.6.1'
+        id 'org.jetbrains.kotlin.android' version '2.1.21'
+    }
+}
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = 'maliang-asr-plugin'

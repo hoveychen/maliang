@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Godot Android plugin v2 注册：Godot 启动时按此 meta-data 实例化插件 -->
+        <meta-data
+            android:name="org.godotengine.plugin.v2.MaliangAsr"
+            android:value="cc.insnap.maliang.asr.MaliangAsrPlugin" />
+    </application>
+</manifest>
