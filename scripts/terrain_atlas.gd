@@ -20,8 +20,8 @@ const H := ROWS * PITCH   ## 360
 
 ## 过渡几何（px，cell 内容坐标系）：草边距 / 凸圆角半径 / 凹角半径 / 描边宽
 const MARGIN := 3.0
-const R_OUT := 10.0
-const R_IN := 6.0
+const R_OUT := 24.0     ## 凸圆角近乎整个半 tile —— 动森式大圆角，斜向边界不出阶梯感
+const R_IN := MARGIN    ## 凹角草圆必须 = MARGIN 才与相邻 cell 的直边草条连续（更大会出豁口）
 const RIM := 3.0
 
 ## 调色板（烘焙色；动森感：亮草绿 + 沙土路 + 湖蓝）

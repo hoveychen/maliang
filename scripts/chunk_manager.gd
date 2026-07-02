@@ -44,13 +44,15 @@ const HOUSE_SCENES: Array[PackedScene] = [
 ]
 const WELL_SCENE: PackedScene = preload("res://assets/kaykit/hexagon/building_well_blue.gltf")
 const WINDMILL_SCENE: PackedScene = preload("res://assets/kaykit/hexagon/building_windmill_red.gltf")
-const GRASS_TEX: Texture2D = preload("res://assets/textures/grass_tile.png")
-## 50m 区块平铺 12 次 → 纹理一格 ~4.2m、三角 ~0.5m（动森草纹尺度）；整数次平铺保证区块间无缝
-const GRASS_UV_SCALE := Vector2(12.0, 12.0)
 const HOUSE_SCALE := 7.0  ## 微缩民居(0.93m 高) → ~6.5m
 
 ## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
+## wrapped 区块索引 → 逐 tile autotile 地面 ArrayMesh。全世界只有 3×3 个
+## wrapped 区块，mesh 各建一次后永久缓存（首帧 9 次，之后零开销）。
+var _chunk_meshes: Dictionary = {}
+## 所有地面共享一个 atlas 材质（颜色全烘在 TerrainAtlas 里，albedo 置白）。
+var _ground_mat: ShaderMaterial = null
 
 func _ready() -> void:
 	for i in range(-R, R + 1):
@@ -58,15 +60,12 @@ func _ready() -> void:
 			_slots.append(_make_slot())
 
 func _make_slot() -> Dictionary:
+	if _ground_mat == null:
+		_ground_mat = BendMat.make_textured(TerrainAtlas.texture(), Color.WHITE, 0.95)
 	var root := Node3D.new()
 	add_child(root)
 	var tile := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(CHUNK_WORLD, CHUNK_WORLD)
-	plane.subdivide_width = 12
-	plane.subdivide_depth = 12
-	tile.mesh = plane
-	tile.material_override = BendMat.make_textured(GRASS_TEX, Color.WHITE, 0.95, GRASS_UV_SCALE)
+	tile.material_override = _ground_mat
 	tile.extra_cull_margin = CULL_MARGIN
 	root.add_child(tile)
 	var deco := Node3D.new()
@@ -100,19 +99,13 @@ func update(player_logical: Vector2) -> void:
 				_skin(slot, wrapped)
 			idx += 1
 
-## 按 wrapped 索引刷新区块外观（棋盘色 + 确定性装饰）。
+## 按 wrapped 索引刷新区块外观（autotile 地面 + 确定性装饰）。
+## 地面棋盘/路/水全部由 TerrainMap+TerrainAtlas 决定，不再逐区块调色。
 func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	var tile: MeshInstance3D = slot["tile"]
-	var mat: ShaderMaterial = tile.material_override
-	var checker := posmod(wrapped.x + wrapped.y, 2) == 0
+	tile.mesh = _chunk_mesh(wrapped)
 	# 世界中心(chunk 1 = 3×3 网格中央，小神仙出生处)一片 3×3 区块为草原村庄。
 	var in_village := absi(wrapped.x - 1) <= 1 and absi(wrapped.y - 1) <= 1
-	var col: Color
-	if in_village:
-		col = Color(0.55, 0.78, 0.48) if checker else Color(0.5, 0.72, 0.43)
-	else:
-		col = Color(0.47, 0.73, 0.41) if checker else Color(0.41, 0.65, 0.35)
-	mat.set_shader_parameter("albedo", col)
 
 	var deco: Node3D = slot["deco"]
 	for c in deco.get_children():
@@ -145,6 +138,62 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 			var rz := (float(posmod(hk / 1000, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.85
 			_add_tree(deco, Vector3(rx, 0.0, rz), hk)
 		_scatter(deco, wrapped, base + 11, 6)
+
+## 构建（或取缓存）一个 wrapped 区块的地面 ArrayMesh：
+## 25×25 tile，每 tile 按 Autotile 拆 4 个半 tile 角 quad，UV 指向 atlas 对应变体 cell。
+## 顶点在区块局部坐标（区块中心为原点，与旧 PlaneMesh 一致）；quad 1m 见方，
+## 比旧 subdivide 12 更密，world_bend 顶点位移更平滑。
+func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
+	if _chunk_meshes.has(wrapped):
+		return _chunk_meshes[wrapped]
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var idx := PackedInt32Array()
+	var base_tile := wrapped * CHUNK_TILES
+	var half := CHUNK_WORLD * 0.5
+	var half_tile := WorldGrid.TILE_SIZE * 0.5
+	for j in range(CHUNK_TILES):
+		for i in range(CHUNK_TILES):
+			var t := base_tile + Vector2i(i, j)
+			var ttype := TerrainMap.tile_type(t)
+			var parity := posmod(t.x + t.y, 2)
+			var corners := PackedInt32Array([0, 0, 0, 0])  # 草地不看变体
+			if ttype != TerrainMap.T_GRASS:
+				var same := func(q: Vector2i) -> bool: return TerrainMap.tile_type(q) == ttype
+				corners = Autotile.corners_from_mask(Autotile.mask_of(t, same))
+			var x0 := -half + float(i) * WorldGrid.TILE_SIZE
+			var z0 := -half + float(j) * WorldGrid.TILE_SIZE
+			for c in range(4):
+				var cx := x0 + (half_tile if (c == Autotile.C_NE or c == Autotile.C_SE) else 0.0)
+				var cz := z0 + (half_tile if (c == Autotile.C_SW or c == Autotile.C_SE) else 0.0)
+				var r := TerrainAtlas.uv_rect(ttype, c, corners[c], parity)
+				_emit_quad(verts, norms, uvs, idx, cx, cz, half_tile, r)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_chunk_meshes[wrapped] = mesh
+	return mesh
+
+## 水平角 quad：NW/NE/SE/SW 顶点序，从上往下看顺时针（Godot 正面绕序）。
+func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, idx: PackedInt32Array, cx: float, cz: float, size: float, r: Rect2) -> void:
+	var b := verts.size()
+	verts.append(Vector3(cx, 0.0, cz))
+	verts.append(Vector3(cx + size, 0.0, cz))
+	verts.append(Vector3(cx + size, 0.0, cz + size))
+	verts.append(Vector3(cx, 0.0, cz + size))
+	for k in range(4):
+		norms.append(Vector3.UP)
+	uvs.append(r.position)
+	uvs.append(Vector2(r.end.x, r.position.y))
+	uvs.append(r.end)
+	uvs.append(Vector2(r.position.x, r.end.y))
+	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
 
 ## 实例化 KayKit 场景：包裹 bend 材质 + 大裁剪边距（弯曲位移会超出原始 AABB）。
 func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, yaw_deg: float) -> Node3D:
