@@ -53,3 +53,22 @@ test('voice_chunk/voice_end 在无活动会话时不崩；voice_end 回 voice_fa
   assert.ok(sent.some((m) => m.type === 'voice_failed'), 'voice_end 无会话应回 voice_failed');
   assert.ok(!sent.some((m) => m.type === 'character_response'), '不应产出回复');
 });
+
+test('voice_transcript：端侧转写直送 → character_response（跳过服务端 ASR）', async () => {
+  const { sent, socket, rest } = setup();
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_transcript', worldId: 'w1', characterId: 'c1', transcript: '去公园' }), ...rest);
+  const resp = sent.find((m) => m.type === 'character_response');
+  assert.ok(resp, '应收到 character_response');
+  assert.equal(resp.transcript, '去公园'); // 原样使用端侧转写，不再过 ASR
+  assert.ok(resp.ttsAsset, '应带 TTS 资源');
+});
+
+test('voice_transcript：空文本 / 角色不存在 → voice_failed', async () => {
+  const { sent, socket, rest } = setup();
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_transcript', worldId: 'w1', characterId: 'c1', transcript: '  ' }), ...rest);
+  assert.ok(sent.some((m) => m.type === 'voice_failed'), '空转写应回 voice_failed');
+  sent.length = 0;
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_transcript', worldId: 'w1', characterId: '不存在', transcript: '你好' }), ...rest);
+  assert.ok(sent.some((m) => m.type === 'voice_failed'), '角色不存在应回 voice_failed');
+  assert.ok(!sent.some((m) => m.type === 'character_response'));
+});
