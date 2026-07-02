@@ -75,6 +75,7 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
 严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
+- replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
 - 绝不包含暴力、恐怖、成人内容。`;
     // 把近 N 轮历史按角色映射成对话消息，让回应有上下文
     const historyMsgs = (ctx.recentHistory ?? []).map((t) => ({
