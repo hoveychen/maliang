@@ -4,6 +4,8 @@ extends Node
 
 signal connected
 signal character_response(data: Dictionary)
+signal tts_chunk(pcm: PackedByteArray)
+signal tts_end
 signal gen_progress(stage: String)
 signal gen_complete(character: Dictionary)
 signal failed(reason: String)
@@ -59,6 +61,10 @@ func _dispatch(data: Dictionary) -> void:
 	match String(data.get("type", "")):
 		"character_response":
 			character_response.emit(data)
+		"tts_chunk":
+			tts_chunk.emit(Marshalls.base64_to_raw(String(data.get("audio", ""))))
+		"tts_end":
+			tts_end.emit()
 		"gen_progress":
 			gen_progress.emit(String(data.get("stage", "")))
 		"gen_complete":
