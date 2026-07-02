@@ -95,7 +95,12 @@ func _step_move(delta: float) -> void:
 	var step_vec := d.normalized() * SPEED * delta
 	if step_vec.length() > d.length():
 		step_vec = d
-	_target["logical"] = WorldGrid.wrap_pos(cur + step_vec)
+	# 统一走 Mover：地形台阶规则 + 物件占地阻挡（整步不行退化单轴滑动）
+	var moved := Mover.attempt(cur, step_vec, int(_target.get("span", 2)))
+	if moved == cur:
+		_advance() # 被崖壁/水/物件挡死：放弃当前指令，避免原地磨墙
+		return
+	_target["logical"] = moved
 
 func _step_wait(delta: float) -> void:
 	_wait_t -= delta

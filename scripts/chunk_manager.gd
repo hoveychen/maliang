@@ -44,13 +44,17 @@ const HOUSE_SCENES: Array[PackedScene] = [
 ]
 const WELL_SCENE: PackedScene = preload("res://assets/kaykit/hexagon/building_well_blue.gltf")
 const WINDMILL_SCENE: PackedScene = preload("res://assets/kaykit/hexagon/building_windmill_red.gltf")
-const GRASS_TEX: Texture2D = preload("res://assets/textures/grass_tile.png")
-## 50m 区块平铺 12 次 → 纹理一格 ~4.2m、三角 ~0.5m（动森草纹尺度）；整数次平铺保证区块间无缝
-const GRASS_UV_SCALE := Vector2(12.0, 12.0)
 const HOUSE_SCALE := 7.0  ## 微缩民居(0.93m 高) → ~6.5m
 
 ## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
+## wrapped 区块索引 → 逐 tile autotile 地面 ArrayMesh。全世界只有 3×3 个
+## wrapped 区块，mesh 各建一次后永久缓存（首帧 9 次，之后零开销）。
+var _chunk_meshes: Dictionary = {}
+## 所有地面共享一个 atlas 材质（颜色全烘在 TerrainAtlas 里，albedo 置白）。
+var _ground_mat: ShaderMaterial = null
+## wrapped 区块 → 已向 OccupancyMap 登记的占地 [[origin_tile, w, h], ...]，重刷时释放。
+var _claims: Dictionary = {}
 
 func _ready() -> void:
 	for i in range(-R, R + 1):
@@ -58,15 +62,12 @@ func _ready() -> void:
 			_slots.append(_make_slot())
 
 func _make_slot() -> Dictionary:
+	if _ground_mat == null:
+		_ground_mat = BendMat.make_textured(TerrainAtlas.texture(), Color.WHITE, 0.95)
 	var root := Node3D.new()
 	add_child(root)
 	var tile := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(CHUNK_WORLD, CHUNK_WORLD)
-	plane.subdivide_width = 12
-	plane.subdivide_depth = 12
-	tile.mesh = plane
-	tile.material_override = BendMat.make_textured(GRASS_TEX, Color.WHITE, 0.95, GRASS_UV_SCALE)
+	tile.material_override = _ground_mat
 	tile.extra_cull_margin = CULL_MARGIN
 	root.add_child(tile)
 	var deco := Node3D.new()
@@ -100,51 +101,175 @@ func update(player_logical: Vector2) -> void:
 				_skin(slot, wrapped)
 			idx += 1
 
-## 按 wrapped 索引刷新区块外观（棋盘色 + 确定性装饰）。
+## 按 wrapped 索引刷新区块外观（autotile 地面 + 确定性装饰）。
+## 地面棋盘/路/水全部由 TerrainMap+TerrainAtlas 决定，不再逐区块调色。
 func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	var tile: MeshInstance3D = slot["tile"]
-	var mat: ShaderMaterial = tile.material_override
-	var checker := posmod(wrapped.x + wrapped.y, 2) == 0
+	tile.mesh = _chunk_mesh(wrapped)
 	# 世界中心(chunk 1 = 3×3 网格中央，小神仙出生处)一片 3×3 区块为草原村庄。
 	var in_village := absi(wrapped.x - 1) <= 1 and absi(wrapped.y - 1) <= 1
-	var col: Color
-	if in_village:
-		col = Color(0.55, 0.78, 0.48) if checker else Color(0.5, 0.72, 0.43)
-	else:
-		col = Color(0.47, 0.73, 0.41) if checker else Color(0.41, 0.65, 0.35)
-	mat.set_shader_parameter("albedo", col)
 
 	var deco: Node3D = slot["deco"]
 	for c in deco.get_children():
 		c.queue_free()
 
+	# L1 摆放网格化：装饰全部吸附 tile 中心，占地经 OccupancyMap 全局登记
+	# （类型/高度检查 + 占用互斥）。重刷先释放本区块旧占地。
+	for cl in _claims.get(wrapped, []):
+		OccupancyMap.free_rect(OccupancyMap.tile_to_cell(cl[0]), cl[1] * 2, cl[2] * 2)
+	_claims[wrapped] = []
 	var base := hash(wrapped)
 	if in_village:
 		# 村庄区块：约一半放房子(其余点缀树)，避免小世界里全是屋顶。
-		# 中心区块(1,1)是小神仙出生地 → 村口水井 + 空地，不盖房压住角色。
+		# 中心区块(1,1)是小神仙出生地 → 水井坐镇广场（地标特批压路），空地不盖房。
 		if wrapped == Vector2i(1, 1):
-			_spawn(deco, WELL_SCENE, Vector3(CHUNK_WORLD * 0.16, 0.0, -CHUNK_WORLD * 0.12), 4.5, 0.0)
-			_add_tree(deco, Vector3(-CHUNK_WORLD * 0.3, 0.0, -CHUNK_WORLD * 0.26), base + 5)
+			_spawn_on_tile(deco, wrapped, WELL_SCENE, Vector2i(12, 12), 4.5, 0.0, 1, 0, true)
+			_tree_on_tile(deco, wrapped, Vector2i(5, 6), base + 5)
 		elif posmod(wrapped.x + wrapped.y, 2) == 0:
-			_add_house(deco, Vector3(0.0, 0.0, 0.0), base)
-			_add_tree(deco, Vector3(CHUNK_WORLD * 0.34, 0.0, CHUNK_WORLD * 0.30), base + 7)
+			_house_on_tile(deco, wrapped, Vector2i(12, 12), base)
+			_tree_on_tile(deco, wrapped, Vector2i(21, 20), base + 7)
 		else:
-			_add_tree(deco, Vector3(-CHUNK_WORLD * 0.22, 0.0, CHUNK_WORLD * 0.24), base)
-			_add_tree(deco, Vector3(CHUNK_WORLD * 0.28, 0.0, -CHUNK_WORLD * 0.2), base + 3)
+			_tree_on_tile(deco, wrapped, Vector2i(7, 18), base)
+			_tree_on_tile(deco, wrapped, Vector2i(19, 7), base + 3)
 			if wrapped == Vector2i(0, 1):  # 一座风车当村庄地标
-				_spawn(deco, WINDMILL_SCENE, Vector3(CHUNK_WORLD * 0.05, 0.0, -CHUNK_WORLD * 0.34), HOUSE_SCALE, 180.0)
+				_spawn_on_tile(deco, wrapped, WINDMILL_SCENE, Vector2i(13, 4), HOUSE_SCALE, 180.0, 1, 3)
 		_scatter(deco, wrapped, base, 4)
 	else:
-		# 旷野区块：散布 2~3 棵树
+		# 旷野区块：散布 2~3 棵树（当前 3×3 世界全是村庄，此分支为世界扩容预留）
 		var count := 2 + posmod(base, 2)
 		for k in range(count):
 			var hk := hash(Vector3i(wrapped.x, wrapped.y, k))
 			if posmod(hk, 4) == 0:
 				continue  # 少量空位，避免太规整
-			var rx := (float(posmod(hk, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.85
-			var rz := (float(posmod(hk / 1000, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.85
-			_add_tree(deco, Vector3(rx, 0.0, rz), hk)
+			var ti := Vector2i(1 + posmod(hk, CHUNK_TILES - 2), 1 + posmod(hk / 1000, CHUNK_TILES - 2))
+			_tree_on_tile(deco, wrapped, ti, hk)
 		_scatter(deco, wrapped, base + 11, 6)
+
+## 构建（或取缓存）一个 wrapped 区块的地面 ArrayMesh：
+## 25×25 tile，每 tile 按 Autotile 拆 4 个半 tile 角 quad，UV 指向 atlas 对应变体 cell。
+## 顶点在区块局部坐标（区块中心为原点，与旧 PlaneMesh 一致）；quad 1m 见方，
+## 比旧 subdivide 12 更密，world_bend 顶点位移更平滑。
+func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
+	if _chunk_meshes.has(wrapped):
+		return _chunk_meshes[wrapped]
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var idx := PackedInt32Array()
+	var base_tile := wrapped * CHUNK_TILES
+	var half := CHUNK_WORLD * 0.5
+	var half_tile := WorldGrid.TILE_SIZE * 0.5
+	for j in range(CHUNK_TILES):
+		for i in range(CHUNK_TILES):
+			var t := base_tile + Vector2i(i, j)
+			var ttype := TerrainMap.tile_type(t)
+			var h := TerrainMap.tile_height(t)
+			var y := float(h) * TerrainMap.STEP_HEIGHT
+			var parity := posmod(t.x + t.y, 2)
+			# 角变体与取图类型：路/水走同类过渡；草地在有更低邻居时换悬崖边草皮
+			var uv_type := ttype
+			var corners := PackedInt32Array([0, 0, 0, 0])  # 平草地不看变体
+			if ttype != TerrainMap.T_GRASS:
+				var same := func(q: Vector2i) -> bool: return TerrainMap.tile_type(q) == ttype
+				corners = Autotile.corners_from_mask(Autotile.mask_of(t, same))
+			elif h > 0:
+				var not_lower := func(q: Vector2i) -> bool: return TerrainMap.tile_height(q) >= h
+				var mask := Autotile.mask_of(t, not_lower)
+				if mask != 255:
+					uv_type = TerrainAtlas.CLIFF_RIM
+					corners = Autotile.corners_from_mask(mask)
+			var x0 := -half + float(i) * WorldGrid.TILE_SIZE
+			var z0 := -half + float(j) * WorldGrid.TILE_SIZE
+			for c in range(4):
+				var cx := x0 + (half_tile if (c == Autotile.C_NE or c == Autotile.C_SE) else 0.0)
+				var cz := z0 + (half_tile if (c == Autotile.C_SW or c == Autotile.C_SE) else 0.0)
+				var r := TerrainAtlas.uv_rect(uv_type, c, corners[c], parity)
+				_emit_quad(verts, norms, uvs, idx, cx, cz, y, half_tile, r)
+			# L3 侧壁：邻居更低的边，从邻居高度到本 tile 高度逐级发墙 quad
+			if h > 0:
+				_emit_walls(verts, norms, uvs, idx, t, h, x0, z0)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_chunk_meshes[wrapped] = mesh
+	return mesh
+
+## 水平角 quad：NW/NE/SE/SW 顶点序，从上往下看顺时针（Godot 正面绕序）。
+func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, idx: PackedInt32Array, cx: float, cz: float, y: float, size: float, r: Rect2) -> void:
+	var b := verts.size()
+	verts.append(Vector3(cx, y, cz))
+	verts.append(Vector3(cx + size, y, cz))
+	verts.append(Vector3(cx + size, y, cz + size))
+	verts.append(Vector3(cx, y, cz + size))
+	for k in range(4):
+		norms.append(Vector3.UP)
+	uvs.append(r.position)
+	uvs.append(Vector2(r.end.x, r.position.y))
+	uvs.append(r.end)
+	uvs.append(Vector2(r.position.x, r.end.y))
+	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
+
+## tile 四边中「邻居更低」的边发竖直崖壁。每级 = 一个 2m×2m 墙格，
+## 墙格对同一墙面的 8 邻墙格（沿墙走向左右 × 层级上下 × 对角）做 corner autotile：
+## 有邻墙 = 相连，无邻墙侧出凹缝暗边 + 亮棱线。墙格再切 4 个 1m 角 quad 按变体取 UV。
+## tile 局部范围 [x0, x0+2]×[z0, z0+2]，本 tile 高 h 级。
+func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, idx: PackedInt32Array, t: Vector2i, h: int, x0: float, z0: float) -> void:
+	var ts := WorldGrid.TILE_SIZE
+	var x1 := x0 + ts
+	var z1 := z0 + ts
+	# 每边：邻居偏移 n / 墙面法线 / 上边两端点 a→b（从法线侧看去 a 在屏幕左）/
+	# 沿墙走向的 tile 切向 tang（= a→b 方向，保证掩码的"右"= 画面右）
+	var sides := [
+		{ "n": Vector2i(0, 1), "normal": Vector3.BACK, "a": Vector3(x0, 0, z1), "b": Vector3(x1, 0, z1), "tang": Vector2i(1, 0) },
+		{ "n": Vector2i(0, -1), "normal": Vector3.FORWARD, "a": Vector3(x1, 0, z0), "b": Vector3(x0, 0, z0), "tang": Vector2i(-1, 0) },
+		{ "n": Vector2i(1, 0), "normal": Vector3.RIGHT, "a": Vector3(x1, 0, z1), "b": Vector3(x1, 0, z0), "tang": Vector2i(0, -1) },
+		{ "n": Vector2i(-1, 0), "normal": Vector3.LEFT, "a": Vector3(x0, 0, z0), "b": Vector3(x0, 0, z1), "tang": Vector2i(0, 1) },
+	]
+	for s in sides:
+		var n_off: Vector2i = s["n"]
+		var tang: Vector2i = s["tang"]
+		var nh := TerrainMap.tile_height(t + n_off)
+		for lvl in range(nh, h):
+			# (q.x, q.y) = (沿墙偏移, 视觉上下偏移)；atlas 的 N(-1) = 上一级
+			var pred := func(q: Vector2i) -> bool:
+				return _wall_exists(t + tang * q.x, n_off, lvl - q.y)
+			var corners := Autotile.corners_from_mask(Autotile.mask_of(Vector2i.ZERO, pred))
+			var y_top := float(lvl + 1) * TerrainMap.STEP_HEIGHT
+			var y_mid := (float(lvl) + 0.5) * TerrainMap.STEP_HEIGHT
+			var y_bot := float(lvl) * TerrainMap.STEP_HEIGHT
+			var a: Vector3 = s["a"]
+			var b_: Vector3 = s["b"]
+			var mid := (a + b_) * 0.5
+			for c in range(4):
+				var right := c == Autotile.C_NE or c == Autotile.C_SE
+				var lower := c == Autotile.C_SW or c == Autotile.C_SE
+				var h0 := mid if right else a
+				var h1 := b_ if right else mid
+				var yt := y_mid if lower else y_top
+				var yb := y_bot if lower else y_mid
+				var r := TerrainAtlas.uv_rect(TerrainAtlas.CLIFF_WALL, c, corners[c], 0)
+				var base := verts.size()
+				verts.append(Vector3(h0.x, yt, h0.z))
+				verts.append(Vector3(h1.x, yt, h1.z))
+				verts.append(Vector3(h1.x, yb, h1.z))
+				verts.append(Vector3(h0.x, yb, h0.z))
+				for k in range(4):
+					norms.append(s["normal"])
+				uvs.append(r.position)
+				uvs.append(Vector2(r.end.x, r.position.y))
+				uvs.append(r.end)
+				uvs.append(Vector2(r.position.x, r.end.y))
+				idx.append_array(PackedInt32Array([base, base + 1, base + 2, base, base + 2, base + 3]))
+
+## 墙格存在性：tile 在 lvl 层朝 n_off 方向有裸露墙面
+## （本 tile 高过该层，且该方向邻居的地面在该层或以下）。
+func _wall_exists(tile: Vector2i, n_off: Vector2i, lvl: int) -> bool:
+	return TerrainMap.tile_height(tile) > lvl and lvl >= TerrainMap.tile_height(tile + n_off)
 
 ## 实例化 KayKit 场景：包裹 bend 材质 + 大裁剪边距（弯曲位移会超出原始 AABB）。
 func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, yaw_deg: float) -> Node3D:
@@ -158,15 +283,18 @@ func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, ya
 		mi.extra_cull_margin = CULL_MARGIN
 	return inst
 
-## 确定性散布小装饰（灌木/石头/草丛），避开区块中心（房子/水井占位）。
+## 确定性散布小装饰（灌木/石头/草丛）：hash 出候选 tile，
+## 非空闲草地就跳过（填充物不强求），并让开区块中心（房子/水井占位）。
 func _scatter(parent: Node3D, wrapped: Vector2i, seed_h: int, count: int) -> void:
 	for k in range(count):
 		var hk := hash(Vector3i(wrapped.x + 97, wrapped.y, seed_h + k))
-		var rx := (float(posmod(hk, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.9
-		var rz := (float(posmod(hk / 1000, 1000)) / 1000.0 - 0.5) * CHUNK_WORLD * 0.9
-		if Vector2(rx, rz).length() < CHUNK_WORLD * 0.18:
+		var ti := Vector2i(posmod(hk, CHUNK_TILES), posmod(hk / 1000, CHUNK_TILES))
+		var pos := _tile_local(ti, wrapped)
+		if Vector2(pos.x, pos.z).length() < CHUNK_WORLD * 0.14:
 			continue
-		var pos := Vector3(rx, 0.0, rz)
+		if not OccupancyMap.prop_area_ok(wrapped * CHUNK_TILES + ti, 1, 1):
+			continue
+		_claim(wrapped, wrapped * CHUNK_TILES + ti, 1, 1)
 		var kind := posmod(hk / 7, 5)
 		if kind == 0:
 			_spawn(parent, ROCK_SCENES[posmod(hk, ROCK_SCENES.size())], pos, 1.6 + float(posmod(hk, 3)) * 0.4, float(posmod(hk, 360)))
@@ -175,11 +303,53 @@ func _scatter(parent: Node3D, wrapped: Vector2i, seed_h: int, count: int) -> voi
 		else:
 			_spawn(parent, TUFT_SCENES[posmod(hk, TUFT_SCENES.size())], pos, 1.8, float(posmod(hk, 360)))
 
-## 村庄民居：KayKit 各色小屋（微缩模型放大到 ~6.5m）。
-func _add_house(parent: Node3D, pos: Vector3, h: int) -> void:
-	var yaw := float(posmod(h, 4)) * 90.0
-	_spawn(parent, HOUSE_SCENES[posmod(h, HOUSE_SCENES.size())], pos, HOUSE_SCALE, yaw)
+## L1 摆放核心：把场景吸附到 tile 中心。anchor 是区块内 tile 索引(0..24)²，
+## 占地或压路/水时沿螺旋环向外找至多 search 圈；reserve 是占地半径（0→1×1，1→3×3）。
+## allow_path 供地标（水井）压路。找不到空位就放弃（确定性，不摆歪）。
+## 占地经 OccupancyMap.prop_area_ok 判定（类型+高度一致+占用）并全局登记。
+func _spawn_on_tile(parent: Node3D, wrapped: Vector2i, scene: PackedScene, anchor: Vector2i, scale_f: float, yaw_deg: float, reserve := 0, search := 0, allow_path := false) -> void:
+	var span := reserve * 2 + 1
+	for r in range(search + 1):
+		for ti in _ring(anchor, r):
+			var origin: Vector2i = wrapped * CHUNK_TILES + ti - Vector2i(reserve, reserve)
+			if not OccupancyMap.prop_area_ok(origin, span, span, allow_path):
+				continue
+			_claim(wrapped, origin, span, span)
+			_spawn(parent, scene, _tile_local(ti, wrapped), scale_f, yaw_deg)
+			return
 
-func _add_tree(parent: Node3D, pos: Vector3, h: int) -> void:
+## 向 OccupancyMap 登记 w×h tile 占地，并记入 _claims 供区块重刷时释放。
+func _claim(wrapped: Vector2i, origin_tile: Vector2i, w: int, h: int) -> void:
+	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(origin_tile), w * 2, h * 2)
+	_claims[wrapped].append([origin_tile, w, h])
+
+## 半径 r 的方形环上的 tile（r=0 只有中心），确定性顺序。
+func _ring(c: Vector2i, r: int) -> Array:
+	if r == 0:
+		return [c]
+	var out: Array = []
+	for d in range(-r, r + 1):
+		out.append(c + Vector2i(d, -r))
+		out.append(c + Vector2i(d, r))
+	for d in range(-r + 1, r):
+		out.append(c + Vector2i(-r, d))
+		out.append(c + Vector2i(r, d))
+	return out
+
+## 区块内 tile 索引 → 区块局部坐标（tile 中心，y 抬到 tile 台阶高度）。
+func _tile_local(ti: Vector2i, wrapped: Vector2i) -> Vector3:
+	var half := CHUNK_WORLD * 0.5
+	var y := float(TerrainMap.tile_height(wrapped * CHUNK_TILES + ti)) * TerrainMap.STEP_HEIGHT
+	return Vector3(
+		-half + (float(ti.x) + 0.5) * WorldGrid.TILE_SIZE,
+		y,
+		-half + (float(ti.y) + 0.5) * WorldGrid.TILE_SIZE)
+
+## 村庄民居：KayKit 各色小屋（微缩模型放大到 ~6.5m，占地 3×3 tile）。
+func _house_on_tile(parent: Node3D, wrapped: Vector2i, anchor: Vector2i, h: int) -> void:
+	var yaw := float(posmod(h, 4)) * 90.0
+	_spawn_on_tile(parent, wrapped, HOUSE_SCENES[posmod(h, HOUSE_SCENES.size())], anchor, HOUSE_SCALE, yaw, 1, 4)
+
+func _tree_on_tile(parent: Node3D, wrapped: Vector2i, anchor: Vector2i, h: int) -> void:
 	var scale_f := 1.1 + float(h % 5) * 0.15
-	_spawn(parent, TREE_SCENES[posmod(h, TREE_SCENES.size())], pos, scale_f, float(posmod(h, 360)))
+	_spawn_on_tile(parent, wrapped, TREE_SCENES[posmod(h, TREE_SCENES.size())], anchor, scale_f, float(posmod(h, 360)), 0, 2)
