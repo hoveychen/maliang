@@ -68,7 +68,7 @@ var _tts_stream_pcm := PackedByteArray()
 var _tts_gen_playback: AudioStreamGeneratorPlayback = null
 
 func _ready() -> void:
-	critter_tex = load("res://assets/critter.svg")
+	critter_tex = load("res://assets/critter.png")
 	ear_tex = load("res://assets/ear.svg")
 	_setup_local_asr()
 	_setup_environment()

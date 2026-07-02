@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b32of11usxpx1"
-path="res://.godot/imported/critter.svg-1edbaf586296f36a5d7115ed6f501b30.ctex"
+uid="uid://xjaaqvsit66x"
+path="res://.godot/imported/critter.png-4044f7ab83e2a200b1742ecaef5f3f7c.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/critter.svg"
-dest_files=["res://.godot/imported/critter.svg-1edbaf586296f36a5d7115ed6f501b30.ctex"]
+source_file="res://assets/critter.png"
+dest_files=["res://.godot/imported/critter.png-4044f7ab83e2a200b1742ecaef5f3f7c.ctex"]
 
 [params]
 
@@ -38,6 +38,3 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=1.0
-editor/scale_with_editor_scale=false
-editor/convert_colors_with_editor_theme=false
