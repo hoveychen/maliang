@@ -37,10 +37,19 @@ func _init() -> void:
 	var foam := _probe(img, TerrainMap.T_WATER, Autotile.C_NW, Autotile.V_EDGE_H, 16.0, TerrainAtlas.MARGIN + 1.5)
 	fails += _check("water foam white", 1 if (foam.r > 0.85 and foam.b > 0.9) else 0, 1)
 
+	# 悬崖边草皮：外缘是土唇，内里是草；崖壁 cell 是土色
+	var lip := _probe(img, TerrainAtlas.CLIFF_RIM, Autotile.C_NW, Autotile.V_EDGE_H, 16.0, 1.0)
+	fails += _check("cliff lip dirt", 1 if (lip.r > lip.b and lip.r > 0.5) else 0, 1)
+	var top := _probe(img, TerrainAtlas.CLIFF_RIM, Autotile.C_NW, Autotile.V_EDGE_H, 16.0, 24.0)
+	fails += _check("cliff top grass", 1 if (top.g > top.r) else 0, 1)
+	var wallr := TerrainAtlas.wall_rect()
+	var wallc := img.get_pixel(int(wallr.position.x * TerrainAtlas.W + 16.0), int(wallr.position.y * TerrainAtlas.H + 16.0))
+	fails += _check("wall dirt", 1 if (wallc.r > wallc.b and wallc.r > 0.4) else 0, 1)
+
 	# uv_rect 都在 [0,1] 且互不重叠（抽查全组合的中心点唯一性）
 	var centers := {}
 	var overlap := 0
-	for ty in [TerrainMap.T_PATH, TerrainMap.T_WATER]:
+	for ty in [TerrainMap.T_PATH, TerrainMap.T_WATER, TerrainAtlas.CLIFF_RIM]:
 		for c in range(4):
 			for v in range(Autotile.VARIANT_COUNT):
 				var r := TerrainAtlas.uv_rect(ty, c, v, 0)

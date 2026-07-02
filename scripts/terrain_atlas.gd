@@ -8,21 +8,27 @@ extends RefCounted
 ##   row 0        草地（col 0/1 = 棋盘 parity 两种色深，与变体无关）
 ##   row 1..4     路  （行 = Autotile 角 NW/NE/SW/SE，列 = 变体）
 ##   row 5..8     水  （同上）
+##   row 9..12    悬崖边草皮（同上；「邻居更低」侧出深色草缘 + 土色崖唇）
+##   row 13       崖壁（col 0 一格，竖直墙 quad 用）
 ## 过渡 cell 统一按 NW 角绘制再镜像；grass 背景用中间色深（棋盘对比极低，接缝不可见）。
 
 const CELL := 32          ## cell 内容像素（半 tile = 1m → 32px/m）
 const GUTTER := 4
 const PITCH := CELL + GUTTER * 2
 const COLS := 5           ## Autotile.VARIANT_COUNT
-const ROWS := 9
+const ROWS := 14
 const W := COLS * PITCH   ## 200
-const H := ROWS * PITCH   ## 360
+const H := ROWS * PITCH   ## 560
+
+## uv_rect 的悬崖边"类型"码（排在 TerrainMap 三个真实类型之后）。
+const CLIFF_RIM := 3
 
 ## 过渡几何（px，cell 内容坐标系）：草边距 / 凸圆角半径 / 凹角半径 / 描边宽
 const MARGIN := 3.0
 const R_OUT := 24.0     ## 凸圆角近乎整个半 tile —— 动森式大圆角，斜向边界不出阶梯感
 const R_IN := MARGIN    ## 凹角草圆必须 = MARGIN 才与相邻 cell 的直边草条连续（更大会出豁口）
 const RIM := 3.0
+const R_OUT_CLIFF := 10.0  ## 悬崖凸角用小圆角：大圆角会在崖角剥出一大片土唇
 
 ## 调色板（烘焙色；动森感：亮草绿 + 沙土路 + 湖蓝）
 const GRASS_A := Color(0.545, 0.78, 0.47)
@@ -32,6 +38,10 @@ const PATH_BODY := Color(0.87, 0.77, 0.55)
 const PATH_RIM := Color(0.95, 0.885, 0.68)
 const WATER_BODY := Color(0.36, 0.63, 0.86)
 const WATER_RIM := Color(0.92, 0.975, 1.0)
+const CLIFF_LIP := Color(0.66, 0.55, 0.38)   ## 崖顶土唇
+const CLIFF_RIM_GRASS := Color(0.44, 0.63, 0.37)  ## 崖缘深色草
+const WALL_BODY := Color(0.60, 0.49, 0.35)   ## 崖壁
+const WALL_BAND := Color(0.52, 0.42, 0.29)   ## 崖壁横向地层带
 
 static var _tex: ImageTexture = null
 
@@ -43,6 +53,7 @@ static func texture() -> ImageTexture:
 	return _tex
 
 ## (类型, 角, 变体, 棋盘 parity) → atlas UV 矩形（cell 内容区，不含 gutter）。
+## type 除 TerrainMap 三类外还接受 CLIFF_RIM（悬崖边草皮）。
 static func uv_rect(type: int, corner: int, variant: int, parity: int) -> Rect2:
 	var col: int
 	var row: int
@@ -52,12 +63,23 @@ static func uv_rect(type: int, corner: int, variant: int, parity: int) -> Rect2:
 	elif type == TerrainMap.T_PATH:
 		col = variant
 		row = 1 + corner
-	else:
+	elif type == TerrainMap.T_WATER:
 		col = variant
 		row = 5 + corner
+	else:
+		col = variant
+		row = 9 + corner
 	return Rect2(
 		float(col * PITCH + GUTTER) / float(W),
 		float(row * PITCH + GUTTER) / float(H),
+		float(CELL) / float(W),
+		float(CELL) / float(H))
+
+## 崖壁 cell 的 UV 矩形（竖直墙 quad 用，一格铺一级台阶）。
+static func wall_rect() -> Rect2:
+	return Rect2(
+		float(GUTTER) / float(W),
+		float(13 * PITCH + GUTTER) / float(H),
 		float(CELL) / float(W),
 		float(CELL) / float(H))
 
@@ -70,6 +92,8 @@ static func build_image() -> Image:
 		for variant in range(Autotile.VARIANT_COUNT):
 			_fill_cell(img, variant, 1 + corner, _transition_fn(corner, variant, false))
 			_fill_cell(img, variant, 5 + corner, _transition_fn(corner, variant, true))
+			_fill_cell(img, variant, 9 + corner, _cliff_fn(corner, variant))
+	_fill_cell(img, 0, 13, func(x: float, y: float) -> Color: return _wall_px(x, y))
 	return img
 
 ## 逐像素填 cell；gutter 用 clamp 到内容区采样 = 边缘外扩。
@@ -95,8 +119,21 @@ static func _transition_fn(corner: int, variant: int, water: bool) -> Callable:
 			return WATER_RIM if water else PATH_RIM
 		return _water_px(x, y) if water else _path_px(x, y)
 
-## NW 规范角坐标下，到域边界的有符号距离（正 = 在路/水内）。
-static func _signed_dist(cx: float, cy: float, variant: int) -> float:
+## 悬崖边草皮 cell：域内 = 高地草面，域外（朝更低邻居一侧）= 崖唇土色，
+## 边界带 = 深色草缘。几何与路/水过渡同构，凸角用小半径。
+static func _cliff_fn(corner: int, variant: int) -> Callable:
+	return func(x: float, y: float) -> Color:
+		var cx := x if (corner == Autotile.C_NW or corner == Autotile.C_SW) else CELL - x
+		var cy := y if (corner == Autotile.C_NW or corner == Autotile.C_NE) else CELL - y
+		var d := _signed_dist(cx, cy, variant, R_OUT_CLIFF)
+		if d < 0.0:
+			return CLIFF_LIP
+		if d < RIM:
+			return CLIFF_RIM_GRASS
+		return _grass_px(x, y, GRASS_MID)
+
+## NW 规范角坐标下，到域边界的有符号距离（正 = 在路/水/高地内）。
+static func _signed_dist(cx: float, cy: float, variant: int, r_out := R_OUT) -> float:
 	match variant:
 		Autotile.V_FULL:
 			return 1e9
@@ -105,9 +142,9 @@ static func _signed_dist(cx: float, cy: float, variant: int) -> float:
 		Autotile.V_EDGE_V:
 			return cx - MARGIN
 		Autotile.V_OUTER:
-			var c := MARGIN + R_OUT # 凸圆角：圆心 (c,c)，两直边 + 四分之一圆
+			var c := MARGIN + r_out # 凸圆角：圆心 (c,c)，两直边 + 四分之一圆
 			if cx < c and cy < c:
-				return R_OUT - Vector2(cx - c, cy - c).length()
+				return r_out - Vector2(cx - c, cy - c).length()
 			return minf(cx - MARGIN, cy - MARGIN)
 		_:
 			return Vector2(cx, cy).length() - R_IN  # V_INNER：外角点一小片草圆
@@ -138,6 +175,16 @@ static func _water_px(x: float, y: float) -> Color:
 	var c := WATER_BODY * 1.08 if wave else WATER_BODY
 	if _hash2(int(x), int(y)) % 37 == 0:
 		c = WATER_BODY * 1.18
+	return c
+
+static func _wall_px(x: float, y: float) -> Color:
+	# 崖壁：土色 + 横向地层带（顶部一条亮檐，接崖唇）
+	if y < 3.0:
+		return CLIFF_LIP
+	var band := fmod(y + sin(x * 0.5) * 1.2, 11.0) < 2.5
+	var c := WALL_BAND if band else WALL_BODY
+	if _hash2(int(x), int(y)) % 19 == 0:
+		c = WALL_BODY * 1.08
 	return c
 
 static func _hash2(x: int, y: int) -> int:

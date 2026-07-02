@@ -13,6 +13,7 @@ const T_GRASS := 0
 const T_PATH := 1
 const T_WATER := 2
 const MAX_HEIGHT := 2
+const STEP_HEIGHT := 1.0  ## 每级台阶的世界高度（米）；渲染层用，逻辑/寻路暂仍走平地
 
 static var _types := PackedByteArray()
 static var _heights := PackedByteArray()

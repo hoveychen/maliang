@@ -158,18 +158,31 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 		for i in range(CHUNK_TILES):
 			var t := base_tile + Vector2i(i, j)
 			var ttype := TerrainMap.tile_type(t)
+			var h := TerrainMap.tile_height(t)
+			var y := float(h) * TerrainMap.STEP_HEIGHT
 			var parity := posmod(t.x + t.y, 2)
-			var corners := PackedInt32Array([0, 0, 0, 0])  # 草地不看变体
+			# 角变体与取图类型：路/水走同类过渡；草地在有更低邻居时换悬崖边草皮
+			var uv_type := ttype
+			var corners := PackedInt32Array([0, 0, 0, 0])  # 平草地不看变体
 			if ttype != TerrainMap.T_GRASS:
 				var same := func(q: Vector2i) -> bool: return TerrainMap.tile_type(q) == ttype
 				corners = Autotile.corners_from_mask(Autotile.mask_of(t, same))
+			elif h > 0:
+				var not_lower := func(q: Vector2i) -> bool: return TerrainMap.tile_height(q) >= h
+				var mask := Autotile.mask_of(t, not_lower)
+				if mask != 255:
+					uv_type = TerrainAtlas.CLIFF_RIM
+					corners = Autotile.corners_from_mask(mask)
 			var x0 := -half + float(i) * WorldGrid.TILE_SIZE
 			var z0 := -half + float(j) * WorldGrid.TILE_SIZE
 			for c in range(4):
 				var cx := x0 + (half_tile if (c == Autotile.C_NE or c == Autotile.C_SE) else 0.0)
 				var cz := z0 + (half_tile if (c == Autotile.C_SW or c == Autotile.C_SE) else 0.0)
-				var r := TerrainAtlas.uv_rect(ttype, c, corners[c], parity)
-				_emit_quad(verts, norms, uvs, idx, cx, cz, half_tile, r)
+				var r := TerrainAtlas.uv_rect(uv_type, c, corners[c], parity)
+				_emit_quad(verts, norms, uvs, idx, cx, cz, y, half_tile, r)
+			# L3 侧壁：邻居更低的边，从邻居高度到本 tile 高度逐级发墙 quad
+			if h > 0:
+				_emit_walls(verts, norms, uvs, idx, t, h, x0, z0)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
@@ -182,12 +195,12 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 	return mesh
 
 ## 水平角 quad：NW/NE/SE/SW 顶点序，从上往下看顺时针（Godot 正面绕序）。
-func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, idx: PackedInt32Array, cx: float, cz: float, size: float, r: Rect2) -> void:
+func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, idx: PackedInt32Array, cx: float, cz: float, y: float, size: float, r: Rect2) -> void:
 	var b := verts.size()
-	verts.append(Vector3(cx, 0.0, cz))
-	verts.append(Vector3(cx + size, 0.0, cz))
-	verts.append(Vector3(cx + size, 0.0, cz + size))
-	verts.append(Vector3(cx, 0.0, cz + size))
+	verts.append(Vector3(cx, y, cz))
+	verts.append(Vector3(cx + size, y, cz))
+	verts.append(Vector3(cx + size, y, cz + size))
+	verts.append(Vector3(cx, y, cz + size))
 	for k in range(4):
 		norms.append(Vector3.UP)
 	uvs.append(r.position)
@@ -195,6 +208,40 @@ func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Packe
 	uvs.append(r.end)
 	uvs.append(Vector2(r.position.x, r.end.y))
 	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
+
+## tile 四边中「邻居更低」的边发竖直崖壁，一级台阶一个 quad（贴一格崖壁 cell）。
+## tile 局部范围 [x0, x0+2]×[z0, z0+2]，本 tile 高 h 级。
+func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, idx: PackedInt32Array, t: Vector2i, h: int, x0: float, z0: float) -> void:
+	var ts := WorldGrid.TILE_SIZE
+	var x1 := x0 + ts
+	var z1 := z0 + ts
+	# 每边：邻居偏移 / 墙面法线 / 从法线侧看去顺时针的上边两端点（a→b）
+	var sides := [
+		{ "n": Vector2i(0, 1), "normal": Vector3.BACK, "a": Vector3(x0, 0, z1), "b": Vector3(x1, 0, z1) },      # 南墙 +Z
+		{ "n": Vector2i(0, -1), "normal": Vector3.FORWARD, "a": Vector3(x1, 0, z0), "b": Vector3(x0, 0, z0) },  # 北墙 -Z
+		{ "n": Vector2i(1, 0), "normal": Vector3.RIGHT, "a": Vector3(x1, 0, z1), "b": Vector3(x1, 0, z0) },     # 东墙 +X
+		{ "n": Vector2i(-1, 0), "normal": Vector3.LEFT, "a": Vector3(x0, 0, z0), "b": Vector3(x0, 0, z1) },     # 西墙 -X
+	]
+	var wr := TerrainAtlas.wall_rect()
+	for s in sides:
+		var nh := TerrainMap.tile_height(t + s["n"])
+		for lvl in range(nh, h):
+			var y_top := float(lvl + 1) * TerrainMap.STEP_HEIGHT
+			var y_bot := float(lvl) * TerrainMap.STEP_HEIGHT
+			var a: Vector3 = s["a"]
+			var b_: Vector3 = s["b"]
+			var base := verts.size()
+			verts.append(Vector3(a.x, y_top, a.z))
+			verts.append(Vector3(b_.x, y_top, b_.z))
+			verts.append(Vector3(b_.x, y_bot, b_.z))
+			verts.append(Vector3(a.x, y_bot, a.z))
+			for k in range(4):
+				norms.append(s["normal"])
+			uvs.append(wr.position)
+			uvs.append(Vector2(wr.end.x, wr.position.y))
+			uvs.append(wr.end)
+			uvs.append(Vector2(wr.position.x, wr.end.y))
+			idx.append_array(PackedInt32Array([base, base + 1, base + 2, base, base + 2, base + 3]))
 
 ## 实例化 KayKit 场景：包裹 bend 材质 + 大裁剪边距（弯曲位移会超出原始 AABB）。
 func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, yaw_deg: float) -> Node3D:
@@ -214,7 +261,7 @@ func _scatter(parent: Node3D, used: Dictionary, wrapped: Vector2i, seed_h: int, 
 	for k in range(count):
 		var hk := hash(Vector3i(wrapped.x + 97, wrapped.y, seed_h + k))
 		var ti := Vector2i(posmod(hk, CHUNK_TILES), posmod(hk / 1000, CHUNK_TILES))
-		var pos := _tile_local(ti)
+		var pos := _tile_local(ti, wrapped)
 		if Vector2(pos.x, pos.z).length() < CHUNK_WORLD * 0.14:
 			continue
 		if not _footprint_free(used, wrapped, ti, 0, false):
@@ -239,7 +286,7 @@ func _spawn_on_tile(parent: Node3D, used: Dictionary, wrapped: Vector2i, scene: 
 			for dz in range(-reserve, reserve + 1):
 				for dx in range(-reserve, reserve + 1):
 					used[ti + Vector2i(dx, dz)] = true
-			_spawn(parent, scene, _tile_local(ti), scale_f, yaw_deg)
+			_spawn(parent, scene, _tile_local(ti, wrapped), scale_f, yaw_deg)
 			return
 
 ## 半径 r 的方形环上的 tile（r=0 只有中心），确定性顺序。
@@ -268,12 +315,13 @@ func _footprint_free(used: Dictionary, wrapped: Vector2i, ti: Vector2i, reserve:
 				return false
 	return true
 
-## 区块内 tile 索引 → 区块局部坐标（tile 中心）。
-func _tile_local(ti: Vector2i) -> Vector3:
+## 区块内 tile 索引 → 区块局部坐标（tile 中心，y 抬到 tile 台阶高度）。
+func _tile_local(ti: Vector2i, wrapped: Vector2i) -> Vector3:
 	var half := CHUNK_WORLD * 0.5
+	var y := float(TerrainMap.tile_height(wrapped * CHUNK_TILES + ti)) * TerrainMap.STEP_HEIGHT
 	return Vector3(
 		-half + (float(ti.x) + 0.5) * WorldGrid.TILE_SIZE,
-		0.0,
+		y,
 		-half + (float(ti.y) + 0.5) * WorldGrid.TILE_SIZE)
 
 ## 村庄民居：KayKit 各色小屋（微缩模型放大到 ~6.5m，占地 3×3 tile）。
