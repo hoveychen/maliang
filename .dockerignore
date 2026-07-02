@@ -1,6 +1,8 @@
 **/node_modules
 **/.env
 **/data
+# 语音模型运行时拉取（fetch-voice-models.sh → /workspace/models），不进构建上下文
+server/models
 .godot/
 .worktrees/
 build/

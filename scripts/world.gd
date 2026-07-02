@@ -619,14 +619,15 @@ func _on_character_response(data: Dictionary) -> void:
 	if not asset.is_empty():
 		_play_tts(asset)
 
-## 下载 TTS（16k L16 PCM）→ AudioStreamWAV 播放。
+## 下载 TTS（L16 PCM，采样率随 provider：local Kokoro 24k / 讯飞 16k）→ AudioStreamWAV 播放。
 func _play_tts(asset: String) -> void:
-	var bytes := await api.fetch_bytes(asset)
+	var audio := await api.fetch_audio(asset)
+	var bytes := audio["bytes"] as PackedByteArray
 	if bytes.is_empty():
 		return
 	var wav := AudioStreamWAV.new()
 	wav.format = AudioStreamWAV.FORMAT_16_BITS
-	wav.mix_rate = 16000
+	wav.mix_rate = int(audio["rate"])
 	wav.stereo = false
 	wav.data = bytes
 	_tts_player.stream = wav

@@ -10,5 +10,8 @@ export.cfg
 .worktrees/
 TASKS.md
 
+# 本地语音模型（server/scripts/fetch-voice-models.sh 拉取，~1GB 不入库）
+server/models/
+
 # OS
 .DS_Store
