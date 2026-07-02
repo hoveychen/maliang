@@ -8,7 +8,7 @@ import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
 import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
 import { RateLimiter } from './ratelimit.ts';
-import type { Character } from './types.ts';
+import type { Character, VoiceResponse } from './types.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -224,14 +224,21 @@ export async function handleWsMessage(
         socket.send(JSON.stringify({ type: 'voice_failed', reason: '转写文本为空' }));
         return;
       }
+    // 流式 TTS 钩子：character_response 先行（文字/行为脚本提前到达），音频分片随合成推送。
+    const ttsHooks = {
+      onResponse: (r: VoiceResponse) => socket.send(JSON.stringify({ type: 'character_response', ...r })),
+      onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
+      onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
+    };
       const response = await respondToTranscript(
         msg.worldId ?? '',
         msg.characterId ?? '',
         transcript,
         adapters,
         store,
+        ttsHooks,
       );
-      socket.send(JSON.stringify({ type: 'character_response', ...response }));
+      if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       void accumulateMemory(
         msg.worldId ?? '',
         msg.characterId ?? '',
@@ -279,8 +286,13 @@ export async function handleWsMessage(
     session.asr = null;
     try {
       const transcript = await asr.finish(); // 识别尾巴：流式期间已基本识完
-      const response = await respondToTranscript(worldId, characterId, transcript, adapters, store);
-      socket.send(JSON.stringify({ type: 'character_response', ...response }));
+      const ttsHooks = {
+        onResponse: (r: VoiceResponse) => socket.send(JSON.stringify({ type: 'character_response', ...r })),
+        onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
+        onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
+      };
+      const response = await respondToTranscript(worldId, characterId, transcript, adapters, store, ttsHooks);
+      if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       void accumulateMemory(worldId, characterId, response.transcript, response.replyText, adapters, store).catch(() => {});
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));

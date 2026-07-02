@@ -64,6 +64,9 @@ var _chunk_accum := 0.0   ## 距上次发分片的累计秒数
 var _streamed_any := false
 var _asr_local: Object = null # 端侧 ASR 插件（Android MaliangAsr），null = 服务端识别
 var _local_asr_session := false # 本次录音走端侧（录音开始时定格，中途不切换）
+# 流式 TTS：tts_chunk 分片先积压再按 generator 空位排空（_drain_tts_stream）
+var _tts_stream_pcm := PackedByteArray()
+var _tts_gen_playback: AudioStreamGeneratorPlayback = null
 
 func _ready() -> void:
 	critter_tex = load("res://assets/critter.svg")
@@ -264,6 +267,7 @@ func _physics_process(delta: float) -> void:
 		focus_logical = WorldGrid.wrap_pos(focus_logical + input * PAN_SPEED * delta)
 
 func _process(delta: float) -> void:
+	_drain_tts_stream()
 	_step_executors(delta)
 	if _recording:
 		_stream_recording(delta)
@@ -421,6 +425,8 @@ func _setup_backend() -> void:
 	backend.name = "Backend"
 	add_child(backend)
 	backend.character_response.connect(_on_character_response)
+	backend.tts_chunk.connect(_on_tts_chunk)
+	backend.tts_end.connect(func() -> void: pass) # 残余积压由 _drain_tts_stream 排空，无需专门收尾
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.failed.connect(_on_failed)
@@ -656,12 +662,59 @@ func _on_character_response(data: Dictionary) -> void:
 	var script: Variant = data.get("behaviorScript", null)
 	if typeof(script) == TYPE_DICTIONARY and selected != null:
 		_run_behavior(selected, script)
-	var asset := String(data.get("ttsAsset", ""))
-	if not asset.is_empty():
-		_play_tts(asset)
+	if bool(data.get("ttsStreaming", false)):
+		_start_tts_stream(_parse_rate(String(data.get("ttsMime", "")), 24000))
+	else:
+		var asset := String(data.get("ttsAsset", ""))
+		if not asset.is_empty():
+			_play_tts(asset)
+
+## 流式 TTS：character_response 先到，PCM 分片随 tts_chunk 推来，边收边播（首包即出声）。
+func _start_tts_stream(rate: int) -> void:
+	_tts_stream_pcm = PackedByteArray()
+	var gen := AudioStreamGenerator.new()
+	gen.mix_rate = float(rate)
+	gen.buffer_length = 2.0
+	_tts_player.stop()
+	_tts_player.stream = gen
+	_tts_player.play()
+	_tts_gen_playback = _tts_player.get_stream_playback()
+
+func _on_tts_chunk(pcm: PackedByteArray) -> void:
+	if _tts_gen_playback != null:
+		_tts_stream_pcm.append_array(pcm)
+		_drain_tts_stream()
+
+## 把积压 PCM16 按 generator 剩余空位转成帧推入（每帧 Vector2 双声道同值）。
+func _drain_tts_stream() -> void:
+	if _tts_gen_playback == null or _tts_stream_pcm.size() < 2:
+		return
+	var n: int = mini(_tts_gen_playback.get_frames_available(), _tts_stream_pcm.size() / 2)
+	if n <= 0:
+		return
+	var buf := PackedVector2Array()
+	buf.resize(n)
+	for i in range(n):
+		var v: int = (_tts_stream_pcm[i * 2 + 1] << 8) | _tts_stream_pcm[i * 2]
+		if v >= 32768:
+			v -= 65536
+		var sample := float(v) / 32768.0
+		buf[i] = Vector2(sample, sample)
+	_tts_gen_playback.push_buffer(buf)
+	_tts_stream_pcm = _tts_stream_pcm.slice(n * 2)
+
+## 从 audio/L16;rate=N 解析采样率。
+func _parse_rate(mime: String, fallback: int) -> int:
+	var idx := mime.find("rate=")
+	if idx >= 0:
+		var parsed := int(mime.substr(idx + 5))
+		if parsed > 0:
+			return parsed
+	return fallback
 
 ## 下载 TTS（L16 PCM，采样率随 provider：local Kokoro 24k / 讯飞 16k）→ AudioStreamWAV 播放。
 func _play_tts(asset: String) -> void:
+	_tts_gen_playback = null # 切回整段路径时停掉流式排空
 	var audio := await api.fetch_audio(asset)
 	var bytes := audio["bytes"] as PackedByteArray
 	if bytes.is_empty():

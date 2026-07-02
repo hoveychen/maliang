@@ -1,6 +1,6 @@
 import type { ServiceAdapters, AudioBlob } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
-import type { VoiceResponse } from './types.ts';
+import type { Character, VoiceResponse } from './types.ts';
 
 export interface VoiceInput {
   worldId: string;
@@ -33,8 +33,22 @@ export async function handleVoice(
 }
 
 /**
+ * 流式 TTS 下发钩子（由 WS 处理器实现）：
+ * - onResponse：意图/文本就绪即发 character_response（不等音频合成完，文字/情绪/行为脚本提前到达）
+ * - onChunk：PCM 分片随合成推 tts_chunk
+ * - onEnd：完整音频已存资产，发 tts_end（客户端可忽略，历史回放用）
+ */
+export interface TTSStreamHooks {
+  onResponse(r: VoiceResponse): void;
+  onChunk(pcm: Uint8Array): void;
+  onEnd(assetHash: string): void;
+}
+
+/**
  * ASR 之后的回复编排：意图路由 → TTS → 更新对话历史 → VoiceResponse。
  * 抽出来供「边说边识别」路径复用（转写已由流式会话拿到，无需再 transcribe）。
+ * 传入 hooks 且 TTS 支持流式时走流式下发（response 已经 hooks.onResponse 先行送出，
+ * 返回值 ttsStreaming=true 告知调用方不要再发一遍）；否则维持原整段 ttsAsset 路径。
  */
 export async function respondToTranscript(
   worldId: string,
@@ -42,6 +56,7 @@ export async function respondToTranscript(
   transcript: string,
   adapters: ServiceAdapters,
   store: WorldStore,
+  hooks?: TTSStreamHooks,
 ): Promise<VoiceResponse> {
   const character = store.getCharacter(worldId, characterId);
   if (!character) throw new CharacterNotFoundError(worldId, characterId);
@@ -58,30 +73,57 @@ export async function respondToTranscript(
   // 回复由 routeIntent 的儿童安全 system prompt 约束生成；造角色路径的 child 自由文本仍走审核。
   const replyText = intent.replyText;
 
-  const tts = await adapters.tts.synthesize(replyText, character.voiceId);
-  const ttsAsset = store.putAsset(tts);
-
-  // 更新对话历史（持久化在 store 里的 character 对象上）。
-  character.chatHistory.push({ role: 'child', text: transcript, ts: 0 });
-  character.chatHistory.push({ role: 'npc', text: replyText, ts: 0 });
-
-  // 注意：长期记忆抽取（extractMemory，含一次 LLM 调用）已移出本函数的回复关键路径，
-  // 改由 WS 处理器在回复发出后后台调用 accumulateMemory —— 否则记忆调用变慢/卡住会
-  // 拖住整条回复，让客户端一直停在「思考中」。
-
   const response: VoiceResponse = {
     characterId: character.id,
     transcript,
     replyText,
-    ttsAsset,
+    ttsAsset: '',
     emotion: intent.emotion,
   };
   if (intent.kind === 'command' && intent.behaviorScript) {
     response.behaviorScript = intent.behaviorScript;
     character.behaviorScript = intent.behaviorScript; // 指令即时生效
   }
-  store.saveCharacter(character); // 持久化 chatHistory/behaviorScript 变更
+
+  const streamFn = adapters.tts.synthesizeStream?.bind(adapters.tts);
+  if (hooks && streamFn) {
+    // 流式：onStart（拿到 mime）即发 character_response，音频分片随合成推送。
+    // onStart 之前抛错（如建连失败）会落到 catch 整体回落非流式——response 尚未发出，安全。
+    let responded = false;
+    try {
+      const full = await streamFn(replyText, character.voiceId, {
+        onStart: (mime) => {
+          response.ttsStreaming = true;
+          response.ttsMime = mime;
+          responded = true;
+          hooks.onResponse(response);
+        },
+        onChunk: hooks.onChunk,
+      });
+      hooks.onEnd(store.putAsset(full));
+      finishTurn(store, character, transcript, replyText);
+      return response;
+    } catch (err) {
+      if (responded) throw err; // 已出声，只能向上失败（客户端有 voice_failed/超时兜底）
+      console.warn(`流式 TTS 未出声即失败，回落整段路径：${String(err)}`);
+      response.ttsStreaming = undefined;
+      response.ttsMime = undefined;
+    }
+  }
+
+  const tts = await adapters.tts.synthesize(replyText, character.voiceId);
+  response.ttsAsset = store.putAsset(tts);
+  finishTurn(store, character, transcript, replyText);
   return response;
+}
+
+/** 回合收尾：更新对话历史并持久化（chatHistory/behaviorScript 变更）。 */
+function finishTurn(store: WorldStore, character: Character, transcript: string, replyText: string): void {
+  character.chatHistory.push({ role: 'child', text: transcript, ts: 0 });
+  character.chatHistory.push({ role: 'npc', text: replyText, ts: 0 });
+  // 注意：长期记忆抽取（extractMemory，含一次 LLM 调用）已移出回复关键路径，
+  // 由 WS 处理器在回复发出后后台调用 accumulateMemory。
+  store.saveCharacter(character);
 }
 
 /**
