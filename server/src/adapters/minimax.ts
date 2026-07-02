@@ -14,6 +14,8 @@ export interface MinimaxTTSOptions {
   model?: string;
   /** 角色 voiceId 不认识时的默认音色。 */
   defaultVoice?: string;
+  /** 语速倍率（0.5-2）。lovely_girl 等童声音色原生 ~3.4 字/s 偏慢，Boss 试听选定 1.35。 */
+  speed?: number;
   /** 注入点：测试用假 fetch。 */
   fetchFn?: typeof fetch;
 }
@@ -26,12 +28,14 @@ export class MinimaxTTSAdapter implements TTSAdapter {
   readonly #apiKey: string;
   readonly #model: string;
   readonly #defaultVoice: string;
+  readonly #speed: number;
   readonly #fetch: typeof fetch;
 
   constructor(opts: MinimaxTTSOptions) {
     this.#apiKey = opts.apiKey;
     this.#model = opts.model ?? 'speech-2.6-turbo';
     this.#defaultVoice = opts.defaultVoice ?? 'lovely_girl';
+    this.#speed = opts.speed ?? 1.35;
     this.#fetch = opts.fetchFn ?? fetch;
   }
 
@@ -42,7 +46,7 @@ export class MinimaxTTSAdapter implements TTSAdapter {
       body: JSON.stringify({
         model: this.#model,
         text,
-        voice_setting: { voice_id: resolveMinimaxVoice(voiceId, this.#defaultVoice), speed: 1.0 },
+        voice_setting: { voice_id: resolveMinimaxVoice(voiceId, this.#defaultVoice), speed: this.#speed },
         audio_setting: { sample_rate: 24000, format: 'pcm', channel: 1 },
       }),
       signal: AbortSignal.timeout(15000),

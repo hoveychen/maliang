@@ -23,6 +23,8 @@ export interface Config {
   voiceModelsDir: string;
   /** TTS 默认音色（按 provider 解释：Kokoro 音色名/sid 或 MiniMax voice_id）；未设则各 provider 自带默认。 */
   voiceTtsVoice: string | undefined;
+  /** TTS 语速倍率（目前仅作用于 minimax）；未设则 adapter 默认 1.35（Boss 试听选定）。 */
+  voiceTtsSpeed: number | undefined;
 }
 
 export function loadConfig(): Config {
@@ -45,7 +47,16 @@ export function loadConfig(): Config {
     voiceTtsProvider: parseTtsProvider(process.env.VOICE_TTS_PROVIDER, base),
     voiceModelsDir: process.env.VOICE_MODELS_DIR ?? 'models',
     voiceTtsVoice: process.env.VOICE_TTS_VOICE,
+    voiceTtsSpeed: parseSpeed(process.env.VOICE_TTS_SPEED),
   };
+}
+
+function parseSpeed(v: string | undefined): number | undefined {
+  if (!v) return undefined;
+  const n = Number(v);
+  if (Number.isFinite(n) && n >= 0.5 && n <= 2) return n;
+  console.warn(`VOICE_TTS_SPEED=${v} 越界（0.5-2），忽略`);
+  return undefined;
 }
 
 function parseVoiceProvider(v: string | undefined, name: string, fallback: VoiceProvider = 'auto'): VoiceProvider {
