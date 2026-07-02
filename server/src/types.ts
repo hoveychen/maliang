@@ -93,7 +93,11 @@ export interface VoiceResponse {
   characterId: string;
   transcript: string;
   replyText: string;
-  ttsAsset: string; // 资源 hash（/assets/:hash）
+  /** 非流式：资源 hash（/assets/:hash）。流式时为空串，完整音频 hash 由 tts_end 携带。 */
+  ttsAsset: string;
   behaviorScript?: BehaviorScript;
   emotion: string;
+  /** 流式 TTS：character_response 先行，音频随 tts_chunk 推送（PCM16，mime 见 ttsMime）。 */
+  ttsStreaming?: boolean;
+  ttsMime?: string; // 如 audio/L16;rate=24000，客户端据此设采样率
 }

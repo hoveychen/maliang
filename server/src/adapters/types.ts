@@ -48,9 +48,20 @@ export interface ASRAdapter {
   openStream(): ASRStream;
 }
 
-/** 语音合成：文字 + 音色 → 音频。真实实现接讯飞。 */
+/** 流式合成回调：onStart 在首个分片前带 mime（客户端要先知道采样率），onChunk 按序推 PCM16 分片。 */
+export interface TTSStreamCallbacks {
+  onStart(mime: string): void;
+  onChunk(pcm: Uint8Array): void;
+}
+
+/** 语音合成：文字 + 音色 → 音频。 */
 export interface TTSAdapter {
   synthesize(text: string, voiceId: string): Promise<AudioBlob>;
+  /**
+   * 可选流式合成：分片随合成推给 cb，resolve 返回完整音频（与分片拼接一致，供存资产回放）。
+   * 首个分片前失败应 throw 且不得调用过 cb.onChunk——调用方以此安全回落非流式路径。
+   */
+  synthesizeStream?(text: string, voiceId: string, cb: TTSStreamCallbacks): Promise<AudioBlob>;
 }
 
 /** 内容审核：文字（图片由生图模型自带安全门把关，不单独审核）。 */
