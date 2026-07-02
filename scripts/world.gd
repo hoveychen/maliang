@@ -107,7 +107,12 @@ func _setup_environment() -> void:
 	light.name = "Sun"
 	light.rotation_degrees = Vector3(-55.0, -40.0, 0.0)
 	light.light_energy = 1.15
-	light.shadow_enabled = false  # 弯曲后阴影投影会错位
+	# 弯曲已改为世界空间位移（world_bend.gdshader）：相机/shadow pass 几何一致，可开阴影。
+	# 单 split 正交 + 短距离：Android 平板便宜；雾在 ~95 淡出，阴影只需覆盖近处。
+	light.shadow_enabled = true
+	light.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	light.directional_shadow_max_distance = 90.0
+	light.shadow_blur = 1.5
 	add_child(light)
 
 	var we := WorldEnvironment.new()
