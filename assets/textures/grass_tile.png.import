@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b32of11usxpx1"
-path="res://.godot/imported/critter.svg-1edbaf586296f36a5d7115ed6f501b30.ctex"
+uid="uid://nhc5ky0mwkbt"
+path="res://.godot/imported/grass_tile.png-94c3bcba09101bc7b65276fb7f07f179.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/critter.svg"
-dest_files=["res://.godot/imported/critter.svg-1edbaf586296f36a5d7115ed6f501b30.ctex"]
+source_file="res://assets/textures/grass_tile.png"
+dest_files=["res://.godot/imported/grass_tile.png-94c3bcba09101bc7b65276fb7f07f179.ctex"]
 
 [params]
 
@@ -38,6 +38,3 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=1.0
-editor/scale_with_editor_scale=false
-editor/convert_colors_with_editor_theme=false

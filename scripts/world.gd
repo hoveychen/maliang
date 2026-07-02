@@ -33,7 +33,6 @@ var ear_tex: Texture2D
 var npcs: Array = []              ## [{ node:PaperCharacter, logical:Vector2 }]
 var selected: PaperCharacter = null
 var ear_icon: Sprite3D
-var _cam_up := Vector3.UP         ## 相机上方向（弯曲补偿用，随相机更新）
 var _dragging := false
 var _press_pos := Vector2.ZERO
 
@@ -69,7 +68,7 @@ var _tts_stream_pcm := PackedByteArray()
 var _tts_gen_playback: AudioStreamGeneratorPlayback = null
 
 func _ready() -> void:
-	critter_tex = load("res://assets/critter.svg")
+	critter_tex = load("res://assets/critter.png")
 	ear_tex = load("res://assets/ear.svg")
 	_setup_local_asr()
 	_setup_environment()
@@ -108,7 +107,12 @@ func _setup_environment() -> void:
 	light.name = "Sun"
 	light.rotation_degrees = Vector3(-55.0, -40.0, 0.0)
 	light.light_energy = 1.15
-	light.shadow_enabled = false  # 弯曲后阴影投影会错位
+	# 弯曲已改为世界空间位移（world_bend.gdshader）：相机/shadow pass 几何一致，可开阴影。
+	# 单 split 正交 + 短距离：Android 平板便宜；雾在 ~95 淡出，阴影只需覆盖近处。
+	light.shadow_enabled = true
+	light.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	light.directional_shadow_max_distance = 90.0
+	light.shadow_blur = 1.5
 	add_child(light)
 
 	var we := WorldEnvironment.new()
@@ -143,7 +147,6 @@ func _update_camera() -> void:
 	var pitch := deg_to_rad(_cur_pitch)
 	camera.global_position = Vector3(0.0, sin(pitch) * _cur_dist, cos(pitch) * _cur_dist)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
-	_cam_up = camera.global_transform.basis.y
 
 func _setup_npcs() -> void:
 	var defs := [
@@ -301,11 +304,11 @@ func _reposition_npcs() -> void:
 		_place_on_bent_ground(node, Vector3(d.x, 0.0, d.y))
 		node.rotation = Vector3(-lean, 0.0, 0.0)
 
-## 把节点放到「弯曲后」的地表位置：先算视图空间弯曲下沉量，再沿相机上方向补偿。
+## 把节点放到「弯曲后」的地表位置。与 world_bend.gdshader 同一公式：
+## 世界空间、以原点（玩家）为中心的水平距离平方下沉（shadow pass 一致，见着色器注释）。
 func _place_on_bent_ground(node: Node3D, base_world: Vector3) -> void:
-	var vp := camera.global_transform.affine_inverse() * base_world
-	var drop := BendMat.CURVATURE * (vp.x * vp.x + vp.z * vp.z)
-	node.global_position = base_world - _cam_up * drop
+	var drop := BendMat.CURVATURE * (base_world.x * base_world.x + base_world.z * base_world.z)
+	node.global_position = base_world - Vector3(0.0, drop, 0.0)
 
 func _update_ear() -> void:
 	if selected != null and is_instance_valid(selected):

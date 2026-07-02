@@ -13,11 +13,10 @@ const DESIGNER_SYSTEM = `你是幼儿园游戏「maliang」的角色设计师。
 {"name": "中文名字", "personality": "1-2句中文个性描述", "visualDescription": "ENGLISH image prompt"}
 规则：
 - name、personality 用中文，温暖童趣。
-- visualDescription 用英文，描述外观，必须是 Paper-Mario 风格的可爱卡通、色彩明亮、full body、centered、on a pure solid chroma-green #00FF00 background、no shadows。
+- visualDescription 用英文，只描述角色主体外观（种类、配色、服饰、表情等），不要写画风/构图/背景——服务端会统一追加动森（Animal Crossing）画风与绿幕背景。
 - 绝不包含暴力、恐怖、武器、成人内容。`;
 
-const FALLBACK_VISUAL =
-  'a cute Paper-Mario style cartoon animal, bright colors, full body, centered, on a pure solid chroma-green #00FF00 background, no shadows';
+const FALLBACK_VISUAL = 'a cute small round animal friend with a happy smiling face';
 
 function stripFences(s: string): string {
   return s.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/i, '').trim();
