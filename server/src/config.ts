@@ -1,5 +1,7 @@
 // 运行时配置。密钥从环境读取（node --env-file=.env），绝不写入源码。
 
+export type VoiceProvider = 'auto' | 'local' | 'xfyun' | 'mock';
+
 export interface Config {
   openrouterApiKey: string | undefined;
   llmModel: string;
@@ -8,6 +10,12 @@ export interface Config {
   xfyunAppId: string | undefined;
   xfyunApiKey: string | undefined;
   xfyunApiSecret: string | undefined;
+  /** ASR/TTS 路由：auto=有本地模型用 local，否则有讯飞 key 用 xfyun，否则 mock。 */
+  voiceProvider: VoiceProvider;
+  /** 本地语音模型目录（scripts/fetch-voice-models.sh 拉取）。 */
+  voiceModelsDir: string;
+  /** local TTS 默认音色（Kokoro 音色名或 sid），角色 voiceId 不认识时回落。 */
+  voiceTtsVoice: string;
 }
 
 export function loadConfig(): Config {
@@ -21,7 +29,17 @@ export function loadConfig(): Config {
     xfyunAppId: process.env.XFYUN_APP_ID,
     xfyunApiKey: process.env.XFYUN_API_KEY,
     xfyunApiSecret: process.env.XFYUN_API_SECRET,
+    voiceProvider: parseVoiceProvider(process.env.VOICE_PROVIDER),
+    voiceModelsDir: process.env.VOICE_MODELS_DIR ?? 'models',
+    // zf_001：Kokoro v1.1-zh 温暖中文女声（talk-cli 默认同款）
+    voiceTtsVoice: process.env.VOICE_TTS_VOICE ?? 'zf_001',
   };
+}
+
+function parseVoiceProvider(v: string | undefined): VoiceProvider {
+  if (v === 'local' || v === 'xfyun' || v === 'mock' || v === 'auto') return v;
+  if (v) console.warn(`未知 VOICE_PROVIDER=${v}，回落 auto`);
+  return 'auto';
 }
 
 /** 有 key 才能用真实适配器；否则回落 mock。 */

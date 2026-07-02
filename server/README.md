@@ -26,3 +26,24 @@ pnpm test         # node --test，端到端验证造角色闭环
 ## 接真实第三方（M1→真实 / M2）
 
 实现 `ServiceAdapters` 各接口（如 `ClaudeLLMAdapter`、`OpenRouterImageAdapter`、`ChromaKeyCutoutAdapter`、`讯飞`），在 `buildServer({ adapters })` 注入即可。密钥走 `.env` / muvee secrets，**绝不提交进仓库**。
+
+## 语音（ASR/TTS）
+
+默认走**本地推理**（sherpa-onnx，进程内，无外部服务/密钥）：
+
+- TTS：Kokoro v1.1-zh（103 个中文音色，24kHz，默认 `zf_001` 温暖女声）
+- ASR：流式 Zipformer 中文（int8，真流式，`openStream` 边说边识别，finish 尾巴 ~10ms）
+
+首次运行先拉模型（~1GB，gitignore 不入库）：
+
+```bash
+scripts/fetch-voice-models.sh          # 落到 server/models/
+```
+
+环境变量：
+
+- `VOICE_PROVIDER` — `auto`（默认：有本地模型用 local → 有讯飞 key 用 xfyun → mock）/ `local` / `xfyun` / `mock`。讯飞回切：`VOICE_PROVIDER=xfyun`。
+- `VOICE_MODELS_DIR` — 模型目录，默认 `models`（相对 server 运行目录）。
+- `VOICE_TTS_VOICE` — 默认音色（Kokoro 音色名如 `zf_001`/`zm_009`，或 sid 数字）。角色 voiceId 也可直接填这些值按角色定音色。
+
+冒烟/延迟实测：`node tools/voice_smoke.mjs`（合成样音存 `/tmp/maliang_tts_smoke.wav`）。
