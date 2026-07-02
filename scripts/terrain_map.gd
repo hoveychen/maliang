@@ -30,6 +30,18 @@ static func tile_height(t: Vector2i) -> int:
 	_ensure_built()
 	return _heights[_idx(t)]
 
+## 移动规则（纯函数，供 can_step 与测试）：目标是水不可进；
+## 一次最多升 1 级；下落超过 4 级视为空气墙。
+static func step_allowed(from_h: int, to_h: int, to_type: int) -> bool:
+	if to_type == T_WATER:
+		return false
+	var rise := to_h - from_h
+	return rise <= 1 and rise >= -4
+
+## 移动规则的 tile 版：from_t → to_t 是否允许（角色一步跨 tile 时调用）。
+static func can_step(from_t: Vector2i, to_t: Vector2i) -> bool:
+	return step_allowed(tile_height(from_t), tile_height(to_t), tile_type(to_t))
+
 ## tile 中心的逻辑世界坐标（米），供摆放吸附用。
 static func tile_center(t: Vector2i) -> Vector2:
 	var x := posmod(t.x, WorldGrid.GRID_TILES)

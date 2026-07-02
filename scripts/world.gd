@@ -285,7 +285,7 @@ func _process(delta: float) -> void:
 		focus_logical = WorldGrid.wrap_pos(focus_logical + fd * t)
 	_update_camera()
 	chunk_manager.update(focus_logical)
-	_reposition_npcs()
+	_reposition_npcs(delta)
 	_update_ear()
 	_update_emotion_bubble()
 	_update_hud()
@@ -295,13 +295,17 @@ func _step_executors(delta: float) -> void:
 		ex.step(delta)
 	_executors = _executors.filter(func(e: BehaviorExecutor) -> bool: return not e.is_done())
 
-func _reposition_npcs() -> void:
+func _reposition_npcs(delta: float) -> void:
 	# 固定小倾角：随当前相机角度调（站立感 + 面向相机的折中），绕脚底前倾
 	var lean := deg_to_rad((90.0 - _cur_pitch) * SPRITE_LEAN_FACTOR)
 	for n in npcs:
 		var d: Vector2 = WorldGrid.shortest_delta(focus_logical, n["logical"])
 		var node: Node3D = n["node"]
-		_place_on_bent_ground(node, Vector3(d.x, 0.0, d.y))
+		# 高度跟随：站上所在 tile 的台阶高度（短 lerp 平滑跨台阶的 2m 跳变）
+		var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(n["logical"]))) * TerrainMap.STEP_HEIGHT
+		var ry := lerpf(float(n.get("ry", ty)), ty, minf(1.0, 12.0 * delta))
+		n["ry"] = ry
+		_place_on_bent_ground(node, Vector3(d.x, ry, d.y))
 		node.rotation = Vector3(-lean, 0.0, 0.0)
 
 ## 把节点放到「弯曲后」的地表位置。与 world_bend.gdshader 同一公式：
