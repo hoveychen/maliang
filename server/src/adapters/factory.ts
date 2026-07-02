@@ -74,6 +74,7 @@ export function createAdapters(config: Config): ServiceAdapters {
       apiKey: config.minimaxApiKey as string,
       model: config.minimaxTtsModel,
       defaultVoice: config.voiceTtsVoice ?? 'lovely_girl',
+      speed: config.voiceTtsSpeed,
     });
     if (hasLocalVoiceModels(config.voiceModelsDir)) {
       tts = new FallbackTTSAdapter(minimax, new LocalTTSAdapter({ modelsDir: config.voiceModelsDir }));

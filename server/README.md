@@ -47,6 +47,7 @@ TTS 另可走 **MiniMax 云端**（`speech-2.6-turbo`，实测整句 1.0-1.9s、
 - `VOICE_ASR_PROVIDER` / `VOICE_TTS_PROVIDER` — 分别路由（未设则用 `VOICE_PROVIDER`，再未设为 `auto`）。取值 `auto`/`local`/`xfyun`/`mock`，TTS 另有 `minimax`。auto 落点：ASR = local→xfyun→mock；TTS = minimax→local→xfyun→mock。
 - `MINIMAX_API_KEY` / `MINIMAX_TTS_MODEL` — MiniMax 语音（默认 `speech-2.6-turbo`，音质冲高换 `speech-2.6-hd` 约 1.75 倍价）。
 - `VOICE_MODELS_DIR` — 本地模型目录，默认 `models`（相对 server 运行目录）。
+- `VOICE_TTS_SPEED` — TTS 语速倍率 0.5-2（目前仅 minimax），默认 1.35（lovely_girl 童声原生 ~3.4 字/s 偏慢，提速后 ~4.6 字/s）。
 - `VOICE_TTS_VOICE` — 默认音色，按 provider 解释：Kokoro 音色名（`zf_001`/`zm_009`/sid 数字，未设默认 `zf_001`）或 MiniMax voice_id（`lovely_girl` 萌萌女童/`cute_boy`/`female-tianmei`，未设默认 `lovely_girl`）。角色 voiceId 命中这些值时按角色定音色。
 
 冒烟/延迟实测：`node tools/voice_smoke.mjs`（合成样音存 `/tmp/maliang_tts_smoke.wav`）。
