@@ -100,8 +100,9 @@ export class LocalTTSAdapter implements TTSAdapter {
           voices: path.join(dir, 'voices.bin'),
           tokens: path.join(dir, 'tokens.txt'),
           dataDir: path.join(dir, 'espeak-ng-data'),
-          lexicon: `${path.join(dir, 'lexicon-zh.txt')},${path.join(dir, 'lexicon-us-en.txt')}`,
-          lang: 'zh',
+          // 顺序与官方示例一致（us-en 在前）。禁设 lang:'zh'——隔离实验证实它让 espeak-ng
+          // 对英文/符号抛 "Failed to set eSpeak-ng voice"，异步路径下回调被吞、synthesize 永久挂起。
+          lexicon: `${path.join(dir, 'lexicon-us-en.txt')},${path.join(dir, 'lexicon-zh.txt')}`,
         },
         // 实测（M 系 Mac，fp32 模型）：threads 2→4 长句 RTF 0.69→0.45；int8 版反而更慢（0.76+）故用 fp32
         numThreads: opts.numThreads ?? 4,
@@ -121,12 +122,19 @@ export class LocalTTSAdapter implements TTSAdapter {
   synthesize(text: string, voiceId: string): Promise<AudioBlob> {
     const sid = resolveSid(voiceId) ?? this.#defaultSid;
     const run = this.#queue.then(async () => {
-      // generateAsync 在 addon 工作线程上推理，不阻塞事件循环
-      const audio = await this.#tts.generateAsync({
-        text,
-        enableExternalBuffer: true,
-        generationConfig: new this.#GenerationConfig({ sid, speed: 1.0 }),
-      });
+      // generateAsync 在 addon 工作线程上推理，不阻塞事件循环。
+      // 兜底超时：native 层若吞掉回调（如 G2P 异常），不能让语音会话和串行队列永久挂死。
+      const audio = await Promise.race([
+        this.#tts.generateAsync({
+          text,
+          enableExternalBuffer: true,
+          generationConfig: new this.#GenerationConfig({ sid, speed: 1.0 }),
+        }),
+        new Promise<never>((_, rej) => {
+          const t = setTimeout(() => rej(new Error('local tts timeout (30s)')), 30000);
+          t.unref?.();
+        }),
+      ]);
       return {
         bytes: floatToPcm16(audio.samples),
         mime: `audio/L16;rate=${audio.sampleRate}`,

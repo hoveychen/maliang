@@ -39,6 +39,20 @@ test('hasLocalVoiceModels：目录缺失 → false', () => {
   assert.equal(hasLocalVoiceModels('/nonexistent-path-xyz'), false);
 });
 
+// 回归：kokoro 配置带 lang:'zh' 时，英文/括号等非纯中文文本会让 espeak-ng 抛
+// "Failed to set eSpeak-ng voice"——异步路径下回调被吞，synthesize 永远不 resolve。
+// 需要真模型（fetch-voice-models.sh），CI 无模型时跳过。
+test('LocalTTS：英文+全角括号混合文本能在限时内合成（lang 配置回归）', { skip: !hasLocalVoiceModels('models'), timeout: 60000 }, async () => {
+  const { LocalTTSAdapter } = await import('../src/adapters/local.ts');
+  const tts = new LocalTTSAdapter({ modelsDir: 'models' });
+  const blob = await Promise.race([
+    tts.synthesize('（mock 回应）你说的是「hello」对吗？', 'cn-child-default'),
+    new Promise<never>((_, rej) => setTimeout(() => rej(new Error('synthesize 卡死（>20s 未返回）')), 20000)),
+  ]);
+  assert.ok(blob.bytes.byteLength > 1000, 'PCM 应非空');
+  assert.match(blob.mime, /^audio\/L16;rate=\d+$/);
+});
+
 function baseConfig(over: Partial<Config>): Config {
   return { ...loadConfig(), xfyunAppId: undefined, xfyunApiKey: undefined, xfyunApiSecret: undefined, ...over };
 }
