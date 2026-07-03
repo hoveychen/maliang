@@ -17,6 +17,7 @@ const PICK_RADIUS_PX := 80.0
 const THINK_TIMEOUT := 40.0       ## 「思考中」最长等待秒数；超时(响应丢失/网络/TLS)自动清除，杜绝永久卡死
 const PLAYER_ID := "player"
 const PLAYER_SPAN := 2            ## 玩家占地（半格数），与 NPC 一致
+const APPROACH_ARRIVE := 2.6      ## 跑向 NPC 的到达半径：对象自身占格，走到旁边即算到（同送信）
 
 var focus_logical := Vector2.ZERO   ## 相机在环面上聚焦的逻辑坐标（跟随玩家/交互对象）
 var focus_override := Vector2.INF   ## 测试脚本抢镜头用：非 INF 时聚焦固定到这里
@@ -54,6 +55,9 @@ var _think_timer: Timer            ## 「思考中」兜底超时（响应没回
 var emotion_bubble: Label3D
 var _recording := false
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
+var _player_executor: BehaviorExecutor = null ## 玩家当前移动指令（新点击即替换）
+var _approach: Dictionary = {}    ## 正在跑向的目标 NPC 字典（到旁边后进近身视图）
+var _stopped: Dictionary = {}     ## 被叫停等玩家的 NPC 字典（退出交互恢复闲逛）
 var world_id := ""
 
 # M2-real 在线
@@ -303,6 +307,7 @@ func _physics_process(delta: float) -> void:
 	# 方向键直接驱动玩家（桌面调试；与点击移动同一 Mover 规则）
 	var input := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	if input != Vector2.ZERO and not player.is_empty():
+		_cancel_player_move() # 手动操控优先，替换点击移动指令
 		var moved := Mover.attempt(player["logical"], input * PLAYER_SPEED * delta, PLAYER_SPAN, PLAYER_ID)
 		if moved != player["logical"]:
 			player["logical"] = moved
@@ -311,6 +316,7 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	_drain_tts_stream()
 	_step_executors(delta)
+	_check_approach()
 	if _recording:
 		_stream_recording(delta)
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
@@ -420,9 +426,32 @@ func _unhandled_input(event: InputEvent) -> void:
 func _tap_pick(screen_pos: Vector2) -> void:
 	var hit := _pick_npc(screen_pos)
 	if hit != null:
-		_enter_interaction(hit)
-	else:
+		_approach_npc(hit)
+		return
+	# 点空地：退出交互（恢复被叫停的 NPC），玩家走过去
+	if selected != null:
 		_exit_interaction()
+	_clear_approach()
+	var ground := _pick_ground(screen_pos)
+	if ground != Vector2.INF and not player.is_empty():
+		_show_tap_marker(ground)
+		_move_player_to(ground)
+
+## 玩家移动指令：新点击替换旧指令（寻路 waypoint 队列 + Mover 规则由执行器统一处理）。
+func _move_player_to(target: Vector2, arrive := 0.0) -> void:
+	_cancel_player_move()
+	var ex := BehaviorExecutor.new()
+	ex.setup(player, {
+		"commands": [{ "type": "move_to", "params": { "target": [target.x, target.y], "arrive": arrive } }],
+		"loop": false,
+	})
+	_player_executor = ex
+	_executors.append(ex)
+
+func _cancel_player_move() -> void:
+	if _player_executor != null:
+		_player_executor.cancel()
+		_player_executor = null
 
 ## 屏幕点 → 弯曲地表交点的逻辑坐标；无交点返回 Vector2.INF。
 ## 地表 y = tile 台阶高度 - 弯曲下沉（与 _place_on_bent_ground 同公式）；
@@ -503,6 +532,57 @@ func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
 			best = node
 	return best
 
+## 点 NPC：对象停下等待，玩家跑到旁边后再进近身视图（饥荒式）。
+func _approach_npc(npc: PaperCharacter) -> void:
+	if npc == selected:
+		return # 已在与它交互
+	var d := _find_npc_dict(npc)
+	if d.is_empty():
+		return
+	if selected != null:
+		_exit_interaction()
+	_clear_approach()
+	_halt_npc(d)
+	_approach = d
+	_move_player_to(d["logical"], APPROACH_ARRIVE)
+
+## 叫停一个 NPC 的所有行为（闲逛/服务端指令），退出交互时恢复闲逛。
+func _halt_npc(d: Dictionary) -> void:
+	for ex in _executors:
+		if (ex as BehaviorExecutor).drives(d):
+			(ex as BehaviorExecutor).cancel()
+	_stopped = d
+
+func _resume_stopped_npc() -> void:
+	if not _stopped.is_empty() and not _stopped.get("is_fairy", false) \
+			and is_instance_valid(_stopped.get("node")):
+		_start_ambient_wander(_stopped)
+	_stopped = {}
+
+## 放弃当前「跑向 NPC」目标（点了别处/换目标），恢复被叫停的对象。
+func _clear_approach() -> void:
+	if _approach.is_empty():
+		return
+	_approach = {}
+	if selected == null:
+		_resume_stopped_npc()
+
+## 每帧检查：玩家跑到目标 NPC 旁了就进近身视图；走不到（路被围死）则恢复对象。
+func _check_approach() -> void:
+	if _approach.is_empty() or _player_executor == null or not _player_executor.is_done():
+		return
+	var d := _approach
+	_approach = {}
+	_player_executor = null
+	if not is_instance_valid(d.get("node")):
+		_resume_stopped_npc()
+		return
+	var dist: float = WorldGrid.shortest_delta(player["logical"], d["logical"]).length()
+	if dist <= APPROACH_ARRIVE + 0.6:
+		_enter_interaction(d["node"])
+	else:
+		_resume_stopped_npc()
+
 func _enter_interaction(npc: PaperCharacter) -> void:
 	selected = npc
 	# lock：相机平滑切到更低角(3/4)+拉近，聚焦跟随该角色
@@ -518,7 +598,8 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 
 func _exit_interaction() -> void:
 	selected = null
-	# 切回 god 自由视角（平滑过渡）
+	_resume_stopped_npc() # 被叫停等玩家的对象恢复闲逛
+	# 切回跟随玩家视角（平滑过渡）
 	_locked = null
 	_target_pitch = GOD_PITCH_DEG
 	_target_dist = GOD_DIST
