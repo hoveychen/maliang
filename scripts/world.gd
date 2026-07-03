@@ -83,10 +83,8 @@ var online := false
 var _villager_count := 0          ## 村民散开序号（避免堆叠在中心）
 
 # 音频 I/O（真机：麦克风采集 + TTS 播放）
-var _mic_player: AudioStreamPlayer
+var _mic: MicRecorder
 var _tts_player: AudioStreamPlayer
-var _capture: AudioEffectCapture
-var _rec_rate := 44100
 # 边录边传：录音时持续把采集到的 PCM 攒成小块发给后端（上传与说话重叠）
 var _pending_pcm := PackedByteArray()
 var _chunk_accum := 0.0   ## 距上次发分片的累计秒数
@@ -119,18 +117,10 @@ func _ready() -> void:
 	_bootstrap() # 在线引导（best-effort，离线则保留占位 NPC）
 
 func _setup_audio() -> void:
-	# 录音总线 + 采集效果（静音，不外放麦克风）
-	var idx := AudioServer.bus_count
-	AudioServer.add_bus(idx)
-	AudioServer.set_bus_name(idx, "Record")
-	AudioServer.set_bus_mute(idx, true)
-	_capture = AudioEffectCapture.new()
-	AudioServer.add_bus_effect(idx, _capture)
-	_mic_player = AudioStreamPlayer.new()
-	_mic_player.stream = AudioStreamMicrophone.new()
-	_mic_player.bus = "Record"
-	add_child(_mic_player)
-	_rec_rate = int(AudioServer.get_mix_rate())
+	# 麦克风采集抽到 MicRecorder（与 onboarding 共用）；TTS 播放器保留在本场景
+	_mic = MicRecorder.new()
+	_mic.name = "MicRecorder"
+	add_child(_mic)
 	_tts_player = AudioStreamPlayer.new()
 	add_child(_tts_player)
 
@@ -207,14 +197,36 @@ func _start_ambient_wander(npc_dict: Dictionary) -> void:
 	})
 	_executors.append(ex)
 
-## 玩家角色：占位形象（粉色 critter），后续由 onboarding 生成的形象替换。
+## 玩家角色：称呼来自 onboarding 档案；先占位形象（粉色 critter），
+## 在线后由 _apply_player_sprite 换成档案里生成的形象。
 func _setup_player() -> void:
 	var node := PaperCharacter.new()
 	add_child(node)
-	node.setup(critter_tex, Color(1.0, 0.74, 0.80), "我")
+	var prof := PlayerProfile.load_profile()
+	var pname := String(prof.get("nickname", ""))
+	if pname.is_empty():
+		pname = String(prof.get("name", ""))
+	if pname.is_empty():
+		pname = "我"
+	node.setup(critter_tex, Color(1.0, 0.74, 0.80), pname)
 	var spawn := _find_free_spot(focus_logical, PLAYER_SPAN)
 	player = { "node": node, "logical": spawn, "id": PLAYER_ID, "span": PLAYER_SPAN }
 	OccupancyMap.char_register(PLAYER_ID, spawn, PLAYER_SPAN)
+
+## 档案里有生成形象时，从服务端拉取替换占位（离线/失败静默保留占位）。
+func _apply_player_sprite() -> void:
+	var asset := String(PlayerProfile.load_profile().get("sprite_asset", ""))
+	if asset.is_empty() or player.is_empty():
+		return
+	var tex := await api.fetch_texture(asset)
+	if tex == null or player.is_empty():
+		return
+	var node := player["node"] as PaperCharacter
+	node.texture = tex
+	# 生成图按高度归一化到 5 单位（小朋友比 6 单位的村民略矮），脚底对齐
+	node.pixel_size = 5.0 / float(tex.get_height())
+	node.offset = Vector2(0.0, float(tex.get_height()) / 2.0)
+	node.modulate = Color.WHITE
 
 ## 离线模式的小仙子随从（在线时 _bootstrap 会清掉、换成服务端小神仙）。
 ## 悬浮飞行：不登记占用图、不走寻路，由 _update_fairy 驱动跟随玩家。
@@ -821,6 +833,7 @@ func _on_failed(reason: String) -> void:
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 func _bootstrap() -> void:
+	_apply_player_sprite() # 档案形象替换占位（并行拉取，不阻塞世界引导）
 	# 加载固定的 default 世界（含预生成村民），不再每次新建
 	var world: Dictionary = await api.get_world("default")
 	if world.is_empty():
@@ -957,10 +970,7 @@ func _on_listen() -> void:
 	_pending_pcm = PackedByteArray()
 	_chunk_accum = 0.0
 	_streamed_any = false
-	if _capture != null:
-		_capture.clear_buffer()
-	if _mic_player != null and not _mic_player.playing:
-		_mic_player.play()
+	_mic.start()
 	# 路由定格：端侧模型就绪 → 本地识别（分片不上传，只送最终文本）；否则服务端流式。
 	_local_asr_session = _asr_local != null and _asr_local.isReady()
 	if _local_asr_session:
@@ -976,10 +986,9 @@ func _on_send() -> void:
 	thinking_label.visible = true
 	banner.visible = false
 	# 收尾：把残留缓冲 + 最后一截采集都发出去，再触发识别/回复。
-	_pending_pcm.append_array(_capture_pcm16k())
+	_pending_pcm.append_array(_mic.drain_pcm16k())
 	_flush_pending_chunk()
-	if _mic_player != null:
-		_mic_player.stop()
+	_mic.stop()
 	if _local_asr_session:
 		_asr_local.stopSession() # final_result 信号回来后走 voice_transcript
 	else:
@@ -991,7 +1000,7 @@ func _on_send() -> void:
 
 ## 录音中周期性把采集缓冲攒成分片发出（上传与说话重叠，松手时音频已基本传完）。
 func _stream_recording(delta: float) -> void:
-	_pending_pcm.append_array(_capture_pcm16k())
+	_pending_pcm.append_array(_mic.drain_pcm16k())
 	_chunk_accum += delta
 	if _chunk_accum >= 0.15:
 		_flush_pending_chunk()
@@ -1005,28 +1014,6 @@ func _flush_pending_chunk() -> void:
 			backend.send_voice_chunk(Marshalls.raw_to_base64(_pending_pcm))
 		_pending_pcm = PackedByteArray()
 		_streamed_any = true
-
-## 读采集缓冲 → 单声道 + 线性重采样到 16k 16bit PCM 字节。
-func _capture_pcm16k() -> PackedByteArray:
-	var out := PackedByteArray()
-	if _capture == null:
-		return out
-	var avail := _capture.get_frames_available()
-	if avail <= 0:
-		return out
-	var frames := _capture.get_buffer(avail)
-	var ratio := 16000.0 / float(_rec_rate)
-	var dst_n := int(frames.size() * ratio)
-	out.resize(dst_n * 2)
-	for i in range(dst_n):
-		var src_i := int(i / ratio)
-		if src_i >= frames.size():
-			break
-		var s: float = (frames[src_i].x + frames[src_i].y) * 0.5
-		var v := int(clampf(s, -1.0, 1.0) * 32767.0)
-		out[i * 2] = v & 0xFF
-		out[i * 2 + 1] = (v >> 8) & 0xFF
-	return out
 
 func _on_character_response(data: Dictionary) -> void:
 	if _think_timer != null:

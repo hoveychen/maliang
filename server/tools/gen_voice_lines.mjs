@@ -1,13 +1,14 @@
-// 小仙子预制台词 TTS：读 assets/voice/fairy/lines.json，逐条 MiniMax 合成写 WAV。
+// 预制台词 TTS 批量合成：读 <目录>/lines.json，逐条 MiniMax 合成写 WAV。
 // 幂等：已有 wav 跳过；--force 全量重生成。运行期游戏零 TTS 调用（纯播本地文件）。
-// 用法：node --env-file=.env tools/gen_fairy_lines.mjs [--force]
+// 用法：node --env-file=.env tools/gen_voice_lines.mjs [目录=../assets/voice/fairy] [--force]
 import { readFile, writeFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { MinimaxTTSAdapter } from '../src/adapters/minimax.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const voiceDir = join(here, '../../assets/voice/fairy');
+const dirArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
+const voiceDir = dirArg ? resolve(dirArg) : join(here, '../../assets/voice/fairy');
 const force = process.argv.includes('--force');
 
 const apiKey = process.env.MINIMAX_API_KEY;

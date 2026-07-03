@@ -22,6 +22,8 @@ export interface LLMAdapter {
   routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult>;
   /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条简短中文，去重后由 voice 落地）。 */
   extractMemory(ctx: MemoryExtractionContext): Promise<string[]>;
+  /** onboarding 自我介绍：从小朋友的转写里提取名字与称呼（提取不到均返回空串）。 */
+  extractProfile(transcript: string): Promise<{ name: string; nickname: string }>;
   respond(prompt: string): Promise<string>;
 }
 

@@ -90,6 +90,43 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { id: fairy.id, spriteAsset: hash, regenerated: true };
   });
 
+  // onboarding 玩家形象：描述（由问题答案拼装）→ 生图 → 资产 hash。不建角色——
+  // 玩家档案在设备端，资产内容寻址共享。描述过文字审核（防客户端篡改）。
+  app.post<{ Body: { visualDescription?: string } | null }>('/player-sprite', async (req, reply) => {
+    const desc = (req.body?.visualDescription ?? '').trim();
+    if (desc.length === 0) return reply.code(400).send({ error: 'visualDescription required' });
+    const check = await adapters.moderation.moderateText(desc);
+    if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
+    const hash = await generateSprite(adapters, desc, store);
+    return { spriteAsset: hash };
+  });
+
+  // onboarding 自我介绍：转写（客户端直送或送 PCM 走服务端 ASR）→ LLM 提取名字/称呼
+  // → TTS 复述确认音频。提取不到名字返回空串，客户端播预制 retry 重问（多轮）。
+  app.post<{
+    Body: { transcript?: string; pcmBase64?: string; rate?: number } | null;
+  }>('/onboarding/intro', { bodyLimit: 8 * 1024 * 1024 }, async (req) => {
+    let transcript = (req.body?.transcript ?? '').trim();
+    if (transcript.length === 0 && req.body?.pcmBase64) {
+      const bytes = Uint8Array.from(Buffer.from(req.body.pcmBase64, 'base64'));
+      const mime = `audio/L16;rate=${req.body.rate ?? 16000}`;
+      transcript = (await adapters.asr.transcribe({ bytes, mime })).trim();
+    }
+    if (transcript.length === 0) return { transcript: '', name: '', nickname: '' };
+    const prof = await adapters.llm.extractProfile(transcript);
+    if (!prof.name && !prof.nickname) return { transcript, name: '', nickname: '' };
+    const callName = prof.nickname || prof.name;
+    const audio = await adapters.tts.synthesize(`你叫${callName}，对不对呀？`, 'lovely_girl');
+    const hash = store.putAsset(audio);
+    return {
+      transcript,
+      name: prof.name,
+      nickname: prof.nickname,
+      confirmTtsAsset: hash,
+      confirmMime: audio.mime,
+    };
+  });
+
   // 取生成的 sprite 资源
   app.get<{ Params: { hash: string } }>('/assets/:hash', async (req, reply) => {
     const asset = store.getAsset(req.params.hash);

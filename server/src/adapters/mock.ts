@@ -1,9 +1,10 @@
 import type { ServiceAdapters, ImageBlob, AudioBlob } from './types.ts';
 import type { CharacterSpec, IntentContext, IntentResult, MemoryExtractionContext } from '../types.ts';
 
-// 1x1 透明 PNG，作为生图占位。
+// 1x1 透明 PNG，作为生图占位。（须是合法 PNG：Godot 客户端会真解码，CRC 错会拒收；
+// 旧值 IDAT CRC 损坏，Node 侧从未校验所以一直没暴露）
 const PNG_1x1 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4AWMAAQAABQABNtCI3QAAAABJRU5ErkJggg==';
 
 function pngStub(): ImageBlob {
   return { bytes: Uint8Array.from(Buffer.from(PNG_1x1, 'base64')), mime: 'image/png' };
@@ -64,6 +65,12 @@ export function createMockAdapters(): ServiceAdapters {
         const likeM = /我喜欢([^\s，。!！?？]{1,12})/.exec(ctx.transcript);
         if (likeM) facts.push(`小朋友喜欢${likeM[1]}`);
         return facts.filter((f) => !ctx.existingMemory.includes(f));
+      },
+      async extractProfile(transcript: string): Promise<{ name: string; nickname: string }> {
+        // mock：确定性从「我叫X / 我是X」提取；真实接 LLM 自由理解（含称呼、小名）
+        const m = /我(?:叫|是)([^\s，。!！?？]{1,8})/.exec(transcript);
+        const name = m ? m[1] : '';
+        return { name, nickname: name };
       },
       async respond(prompt: string): Promise<string> {
         return `（mock 回应）你说的是「${prompt}」对吗？`;
