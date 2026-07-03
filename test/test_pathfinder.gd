@@ -9,20 +9,20 @@ func _init() -> void:
 	OccupancyMap.clear()
 	var a := TerrainMap.tile_center(Vector2i(2, 68))
 	var b := TerrainMap.tile_center(Vector2i(10, 68))
-	var p := Pathfinder.find_path(a, b, 2, false)
+	var p := Pathfinder.find_path(a, b, 2, "", false)
 	fails += _check("flat found", p.size() > 0, true)
 	fails += _check("flat reaches", _near(p[p.size() - 1], b, 1.0), true)
 	fails += _check("flat mover-executable", _executable(a, p), true)
 
 	# 简化版：同向直线段合并，waypoint 数明显更少且终点一致
-	var ps := Pathfinder.find_path(a, b, 2, true)
+	var ps := Pathfinder.find_path(a, b)
 	fails += _check("simplify shorter", ps.size() < p.size(), true)
 	fails += _check("simplify same end", ps[ps.size() - 1] == p[p.size() - 1], true)
 
 	# 绕池塘：南岸→北岸，无 waypoint 踩水，全程可执行
 	var south := TerrainMap.tile_center(Vector2i(24, 31))
 	var north := TerrainMap.tile_center(Vector2i(24, 17))
-	var pond := Pathfinder.find_path(south, north, 2, false)
+	var pond := Pathfinder.find_path(south, north, 2, "", false)
 	fails += _check("pond found", pond.size() > 0, true)
 	fails += _check("pond no water", _no_water(pond), true)
 	fails += _check("pond mover-executable", _executable(south, pond), true)
@@ -31,7 +31,7 @@ func _init() -> void:
 	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(Vector2i(10, 60)), 2, 14)
 	var w_from := TerrainMap.tile_center(Vector2i(8, 63))
 	var w_to := TerrainMap.tile_center(Vector2i(12, 63))
-	var wall := Pathfinder.find_path(w_from, w_to, 2, false)
+	var wall := Pathfinder.find_path(w_from, w_to, 2, "", false)
 	fails += _check("wall found", wall.size() > 0, true)
 	fails += _check("wall mover-executable", _executable(w_from, wall), true)
 	# 把角色围死在 4 面墙里（2×2 tile 空腔，四周全占用）
@@ -40,14 +40,14 @@ func _init() -> void:
 	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(Vector2i(49, 63)), 8, 2)  # 南墙
 	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(Vector2i(49, 61)), 2, 4)  # 西墙
 	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(Vector2i(52, 61)), 2, 4)  # 东墙
-	var boxed := Pathfinder.find_path(TerrainMap.tile_center(Vector2i(50, 61)), TerrainMap.tile_center(Vector2i(60, 61)), 2, false)
+	var boxed := Pathfinder.find_path(TerrainMap.tile_center(Vector2i(50, 61)), TerrainMap.tile_center(Vector2i(60, 61)), 2, "", false)
 	fails += _check("boxed no path", boxed.size() == 0, true)
 	OccupancyMap.clear()
 
 	# 环面 wrap：x=1 → x=73（跨接缝 6m << 全图 144m），总路长必须走短边
 	var t_from := TerrainMap.tile_center(Vector2i(1, 68))
 	var t_to := TerrainMap.tile_center(Vector2i(73, 68))
-	var torus := Pathfinder.find_path(t_from, t_to, 2, false)
+	var torus := Pathfinder.find_path(t_from, t_to, 2, "", false)
 	fails += _check("torus found", torus.size() > 0, true)
 	fails += _check("torus short side", _path_len(t_from, torus) < 20.0, true)
 	fails += _check("torus mover-executable", _executable(t_from, torus), true)
@@ -63,22 +63,43 @@ func _init() -> void:
 	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(Vector2i(20, 68)), 2, 2)
 	var d_from := TerrainMap.tile_center(Vector2i(16, 68))
 	var d_to := TerrainMap.tile_center(Vector2i(20, 68))
-	var deliver := Pathfinder.find_path(d_from, d_to, 2, false)
+	var deliver := Pathfinder.find_path(d_from, d_to, 2, "", false)
 	fails += _check("blocked goal found", deliver.size() > 0, true)
 	fails += _check("blocked goal near", _near(deliver[deliver.size() - 1], d_to, 3.0), true)
 	fails += _check("blocked goal executable", _executable(d_from, deliver), true)
 	OccupancyMap.clear()
 
+	# 角色层：绕开挡路的他人（排除自己）；送信目标是角色 → 落到其旁边
+	OccupancyMap.clear()
+	var c_from := TerrainMap.tile_center(Vector2i(16, 68))
+	var c_to := TerrainMap.tile_center(Vector2i(20, 68))
+	OccupancyMap.char_register("walker", c_from, 2)
+	OccupancyMap.char_register("blocker", TerrainMap.tile_center(Vector2i(18, 68)), 2)
+	OccupancyMap.char_register("target", c_to, 2)
+	var around := Pathfinder.find_path(c_from, c_to, 2, "walker", false)
+	fails += _check("char detour found", around.size() > 0, true)
+	fails += _check("char detour near target", _near(around[around.size() - 1], c_to, 3.0), true)
+	var okc := true
+	var cur := c_from
+	for wp in around:
+		var moved := Mover.attempt(cur, WorldGrid.shortest_delta(cur, wp), 2, "walker")
+		if not _near(moved, wp, 0.01):
+			okc = false
+			break
+		cur = moved
+	fails += _check("char detour executable", okc, true)
+	OccupancyMap.clear()
+
 	# 上山：西坡缓坡逐级爬到 8 级山顶（南北陡崖不可直上，Mover 可执行性即证明合规）
 	var base := TerrainMap.tile_center(Vector2i(24, 6))
 	var summit := TerrainMap.tile_center(Vector2i(37, 6))
-	var climb := Pathfinder.find_path(base, summit, 2, false)
+	var climb := Pathfinder.find_path(base, summit, 2, "", false)
 	fails += _check("climb found", climb.size() > 0, true)
 	fails += _check("climb reaches summit", TerrainMap.tile_height(WorldGrid.to_tile(climb[climb.size() - 1])) == 8, true)
 	fails += _check("climb mover-executable", _executable(base, climb), true)
 	# 南麓正对山顶出发也必须能到（绕上坡而非撞崖）
 	var s_base := TerrainMap.tile_center(Vector2i(37, 14))
-	var s_climb := Pathfinder.find_path(s_base, summit, 2, false)
+	var s_climb := Pathfinder.find_path(s_base, summit, 2, "", false)
 	fails += _check("south climb found", s_climb.size() > 0, true)
 	fails += _check("south climb executable", _executable(s_base, s_climb), true)
 

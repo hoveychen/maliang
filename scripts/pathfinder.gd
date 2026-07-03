@@ -18,10 +18,11 @@ const DIRS: Array[Vector2i] = [
 ## 从逻辑坐标 from_pos 寻路到 to_pos（米）。返回 waypoint 序列（半格中心的逻辑坐标，
 ## 不含起点格，含终点格）；无路/已在原格返回空数组（调用方回退直线滑动）。
 ## 目标格不可通行时（如目标是角色/物件所在），螺旋搜索最近可通行格替代；
+## exclude_id = 寻路者自己的角色 id（角色层排除自己）；
 ## simplify=false 保留逐格路径（测试用），true 时合并同向直线段。
-static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, simplify := true, max_iter := 8000) -> PackedVector2Array:
+static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id := "", simplify := true, max_iter := 8000) -> PackedVector2Array:
 	var start := OccupancyMap.to_cell(from_pos)
-	var goal := _resolve_goal(to_pos, span)
+	var goal := _resolve_goal(to_pos, span, exclude_id)
 	if goal == Vector2i(-1, -1) or _wrap(start) == goal:
 		return PackedVector2Array()
 
@@ -47,12 +48,12 @@ static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, simplify :=
 		for dir in DIRS:
 			var nxt := _wrap(cur + dir)
 			var nxt_i := _idx(nxt)
-			if closed.has(nxt_i) or not _step_ok(cur, nxt, span):
+			if closed.has(nxt_i) or not _step_ok(cur, nxt, span, exclude_id):
 				continue
 			if dir.x != 0 and dir.y != 0:
 				# 防穿角：对角步要求两正交邻居也可通行
-				if not _step_ok(cur, _wrap(cur + Vector2i(dir.x, 0)), span) \
-						or not _step_ok(cur, _wrap(cur + Vector2i(0, dir.y)), span):
+				if not _step_ok(cur, _wrap(cur + Vector2i(dir.x, 0)), span, exclude_id) \
+						or not _step_ok(cur, _wrap(cur + Vector2i(0, dir.y)), span, exclude_id):
 					continue
 			var cost := DIAGONAL if (dir.x != 0 and dir.y != 0) else STRAIGHT
 			var ng: int = g[cur_i] + cost
@@ -70,18 +71,18 @@ static func cell_center(c: Vector2i) -> Vector2:
 	return Vector2((float(w.x) + 0.5) * OccupancyMap.CELL_SIZE, (float(w.y) + 0.5) * OccupancyMap.CELL_SIZE)
 
 ## 单步通行判定（from 半格 → 相邻 to 半格），规则与 Mover._passable 逐条对应。
-static func step_ok(from_c: Vector2i, to_c: Vector2i, span := 2) -> bool:
-	return _step_ok(_wrap(from_c), _wrap(to_c), span)
+static func step_ok(from_c: Vector2i, to_c: Vector2i, span := 2, exclude_id := "") -> bool:
+	return _step_ok(_wrap(from_c), _wrap(to_c), span, exclude_id)
 
-## 站位判定：角色中心在半格 c 中心时 footprint 是否全空闲（不含地形，地形在 step_ok）。
-static func cell_free(c: Vector2i, span := 2) -> bool:
-	var pos := cell_center(c)
-	var half := float(span) * OccupancyMap.CELL_SIZE * 0.5
-	var origin := OccupancyMap.to_cell(pos - Vector2(half, half))
-	return OccupancyMap.is_free_rect(origin, span, span)
+## 站位判定：角色中心在半格 c 中心时 footprint 是否全空闲（物件层+角色层，
+## exclude_id 排除自己；不含地形，地形在 step_ok）。
+static func cell_free(c: Vector2i, span := 2, exclude_id := "") -> bool:
+	var origin := OccupancyMap.footprint_origin(cell_center(c), span)
+	return OccupancyMap.is_free_rect(origin, span, span) \
+		and OccupancyMap.char_area_free(origin, span, span, exclude_id)
 
-static func _step_ok(from_c: Vector2i, to_c: Vector2i, span: int) -> bool:
-	if not cell_free(to_c, span):
+static func _step_ok(from_c: Vector2i, to_c: Vector2i, span: int, exclude_id: String) -> bool:
+	if not cell_free(to_c, span, exclude_id):
 		return false
 	var ft := WorldGrid.to_tile(cell_center(from_c))
 	var tt := WorldGrid.to_tile(cell_center(to_c))
@@ -89,9 +90,9 @@ static func _step_ok(from_c: Vector2i, to_c: Vector2i, span: int) -> bool:
 
 ## 目标格可通行则原样返回；否则螺旋（chebyshev 环 r=1..8）找离 to_pos 最近的
 ## 可通行格；全无返回 (-1,-1)。
-static func _resolve_goal(to_pos: Vector2, span: int) -> Vector2i:
+static func _resolve_goal(to_pos: Vector2, span: int, exclude_id: String) -> Vector2i:
 	var goal := _wrap(OccupancyMap.to_cell(to_pos))
-	if cell_free(goal, span):
+	if cell_free(goal, span, exclude_id):
 		return goal
 	for r in range(1, 9):
 		var best := Vector2i(-1, -1)
@@ -101,7 +102,7 @@ static func _resolve_goal(to_pos: Vector2, span: int) -> Vector2i:
 				if maxi(absi(dx), absi(dz)) != r:
 					continue
 				var c := _wrap(goal + Vector2i(dx, dz))
-				if not cell_free(c, span):
+				if not cell_free(c, span, exclude_id):
 					continue
 				var d := WorldGrid.shortest_delta(to_pos, cell_center(c)).length_squared()
 				if d < best_d:

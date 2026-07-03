@@ -48,6 +48,36 @@ func _init() -> void:
 	fails += _check("occupied blocked", OccupancyMap.prop_area_ok(Vector2i(2, 68), 2, 2), false)
 	OccupancyMap.clear()
 
+	# 角色层：登记/查询/排除自己
+	OccupancyMap.clear()
+	var pos := TerrainMap.tile_center(Vector2i(5, 68))
+	OccupancyMap.char_register("npc_a", pos, 2)
+	var org := OccupancyMap.footprint_origin(pos, 2)
+	fails += _check("char blocks others", OccupancyMap.char_area_free(org, 2, 2), false)
+	fails += _check("char excludes self", OccupancyMap.char_area_free(org, 2, 2, "npc_a"), true)
+	fails += _check("char no prop pollution", OccupancyMap.is_free_rect(org, 2, 2), true)
+	# 迁移：同 id 再登记，旧脚印释放、新脚印生效
+	var pos2 := TerrainMap.tile_center(Vector2i(8, 68))
+	OccupancyMap.char_register("npc_a", pos2, 2)
+	fails += _check("char moved away", OccupancyMap.char_area_free(org, 2, 2), true)
+	fails += _check("char at new pos", OccupancyMap.char_area_free(OccupancyMap.footprint_origin(pos2, 2), 2, 2), false)
+	# 释放
+	OccupancyMap.char_unregister("npc_a")
+	fails += _check("char unregistered", OccupancyMap.char_area_free(OccupancyMap.footprint_origin(pos2, 2), 2, 2), true)
+	# 重叠登记防误擦：B 覆盖 A 的 cell 后释放 A，B 仍在
+	OccupancyMap.char_register("npc_a", pos, 2)
+	OccupancyMap.char_register("npc_b", pos, 2)
+	OccupancyMap.char_unregister("npc_a")
+	fails += _check("overlap free keeps b", OccupancyMap.char_area_free(org, 2, 2), false)
+	OccupancyMap.char_unregister("npc_b")
+	# prop_area_ok 不许压角色
+	OccupancyMap.char_register("npc_a", TerrainMap.tile_center(Vector2i(5, 68)), 2)
+	fails += _check("prop on char blocked", OccupancyMap.prop_area_ok(Vector2i(5, 68), 2, 2), false)
+	fails += _check("prop off char ok", OccupancyMap.prop_area_ok(Vector2i(8, 68), 2, 2), true)
+	# clear 连角色层一起清
+	OccupancyMap.clear()
+	fails += _check("clear wipes chars", OccupancyMap.char_area_free(org, 2, 2), true)
+
 	if fails == 0:
 		print("occupancy_map tests PASS")
 	else:
