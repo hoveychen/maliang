@@ -58,6 +58,10 @@ var emotion_bubble: Label3D
 var _recording := false
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
 var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
+var fairy_voice: FairyVoice       ## 预制台词播放器（构建期 TTS，运行期零调用）
+var _fairy_bubble: Label3D        ## 小仙子说话时的 ♪ 气泡
+var _fairy_greeted := false       ## 每次启动只问候一次
+var _fairy_chat_t := 3.0          ## 下一次闲聊倒计时（首次 ~3s 内问候）
 var _player_executor: BehaviorExecutor = null ## 玩家当前移动指令（新点击即替换）
 var _approach: Dictionary = {}    ## 正在跑向的目标 NPC 字典（到旁边后进近身视图）
 var _stopped: Dictionary = {}     ## 被叫停等玩家的 NPC 字典（退出交互恢复闲逛）
@@ -212,6 +216,17 @@ func _setup_fairy_offline() -> void:
 	node.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
 	var spawn := WorldGrid.wrap_pos(player["logical"] + Vector2(3.0, 2.0))
 	npcs.append({ "node": node, "logical": spawn, "id": "fairy_local", "is_fairy": true, "hover": FAIRY_HOVER })
+	fairy_voice = FairyVoice.new()
+	fairy_voice.name = "FairyVoice"
+	add_child(fairy_voice)
+	_fairy_bubble = Label3D.new()
+	_fairy_bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_fairy_bubble.pixel_size = 0.02
+	_fairy_bubble.outline_size = 12
+	_fairy_bubble.font_size = 72
+	_fairy_bubble.text = "♪"
+	_fairy_bubble.visible = false
+	add_child(_fairy_bubble)
 
 ## 小仙子随从每帧驱动：悬浮漂移跟在玩家旁（玩家跑动时拖尾追赶，静止时缓慢环绕），
 ## 轻微上下浮动。永远由这里驱动，不吃行为脚本（见 _run_behavior）。
@@ -227,6 +242,52 @@ func _update_fairy(delta: float) -> void:
 	var step := d.normalized() * minf(speed * delta, d.length())
 	fairy["logical"] = WorldGrid.wrap_pos(fairy["logical"] + step)
 	fairy["hover"] = FAIRY_HOVER + sin(_fairy_drift_t * 2.2) * 0.3
+	_fairy_ambient(delta, fairy)
+
+## 氛围台词引擎：先问候，之后每 15~25s 按周围环境挑话题（水/山/村庄），没有就闲聊。
+## 交互/录音/思考/正式 TTS 播放中一律闭嘴，避免叠声。
+func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
+	if fairy_voice == null:
+		return
+	# ♪ 气泡跟随（说话时显示在小仙子头顶）
+	var node: Node3D = fairy["node"]
+	_fairy_bubble.visible = fairy_voice.is_playing()
+	if _fairy_bubble.visible:
+		_fairy_bubble.global_position = node.global_position \
+			+ Vector3(0.0, _char_top(node as PaperCharacter) + 0.9, 0.0)
+	if selected != null or _recording or thinking_label.visible or _tts_player.playing:
+		return
+	_fairy_chat_t -= delta
+	if _fairy_chat_t > 0.0:
+		return
+	_fairy_chat_t = randf_range(15.0, 25.0)
+	if not _fairy_greeted:
+		_fairy_greeted = fairy_voice.try_play("greet")
+		return
+	fairy_voice.try_play(_ambient_trigger())
+
+## 按玩家周围地形挑话题：水/高山/村庄优先（各有冷却），否则闲聊。
+func _ambient_trigger() -> String:
+	var pt := WorldGrid.to_tile(player["logical"])
+	var near_water := false
+	var near_mountain := false
+	for dz in range(-3, 4):
+		for dx in range(-3, 4):
+			var t := Vector2i((pt.x + dx + WorldGrid.GRID_TILES) % WorldGrid.GRID_TILES,
+				(pt.y + dz + WorldGrid.GRID_TILES) % WorldGrid.GRID_TILES)
+			if TerrainMap.tile_type(t) == TerrainMap.T_WATER:
+				near_water = true
+			if TerrainMap.tile_height(t) >= 3:
+				near_mountain = true
+	if near_water and fairy_voice.can_play("near_water"):
+		return "near_water"
+	if near_mountain and fairy_voice.can_play("near_mountain"):
+		return "near_mountain"
+	var center := Vector2(WorldGrid.WORLD_SPAN, WorldGrid.WORLD_SPAN) * 0.5
+	if WorldGrid.shortest_delta(player["logical"], center).length() <= 14.0 \
+			and fairy_voice.can_play("near_village"):
+		return "near_village"
+	return "idle"
 
 ## 在 around 附近按环形扫描找可站立空位（不压物件/角色、不在水里）；找不到原样返回。
 func _find_free_spot(around: Vector2, span: int) -> Vector2:
