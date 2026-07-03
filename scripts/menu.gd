@@ -2,7 +2,6 @@ extends Control
 ## 主菜单：3 岁小朋友友好——不依赖文字，超大按钮 + 小仙子飘动。
 ## ▶ 开始 → 童话书 onboarding（P7 接入前暂进世界）；📖 继续 → 直接进世界（有档案时才显示）。
 
-const PROFILE_PATH := "user://profile.json"
 
 var _fairy: TextureRect
 var _t := 0.0
@@ -66,7 +65,7 @@ func _setup_buttons() -> void:
 	start.pressed.connect(_on_start)
 	add_child(start)
 
-	if FileAccess.file_exists(PROFILE_PATH):
+	if PlayerProfile.exists():
 		var cont := _big_button("📖  继续玩", Color(0.62, 0.85, 0.62))
 		cont.set_anchors_preset(Control.PRESET_CENTER)
 		cont.offset_left = -220.0
