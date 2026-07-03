@@ -105,8 +105,7 @@ func _process(delta: float) -> void:
 		_fairy.offset_bottom = _fairy_base_y + 178.0 + off
 
 func _on_start() -> void:
-	# TODO(P7)：接入童话书 onboarding 后改为 res://onboarding.tscn
-	get_tree().change_scene_to_file("res://main.tscn")
+	get_tree().change_scene_to_file("res://onboarding.tscn")
 
 func _on_continue() -> void:
 	get_tree().change_scene_to_file("res://main.tscn")
