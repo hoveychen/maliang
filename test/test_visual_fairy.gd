@@ -34,6 +34,15 @@ func _tick() -> void:
 		80:
 			_check_near("caught up after walk", 8.0)
 			_check("hover bobbing (min<max)", hover_max - hover_min > 0.2, true)
+		82:
+			# 点玩家自己 → 应进入与小仙子的对话
+			var pnode: Node3D = (scene.get("player") as Dictionary)["node"]
+			var cam: Camera3D = scene.get("camera")
+			scene.call("_tap_pick", cam.unproject_position(pnode.global_position + Vector3(0.0, 1.6, 0.0)))
+		96:
+			var f2: Dictionary = scene.call("_find_fairy")
+			_check("tap player talks to fairy", scene.get("selected") == f2.get("node"), true)
+			_check("talk banner visible", (scene.get("banner") as Label).visible, true)
 			if fails == 0:
 				print("visual_fairy PASS")
 			else:

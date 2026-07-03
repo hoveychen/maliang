@@ -251,6 +251,8 @@ func _update_fairy(delta: float) -> void:
 		target = _fairy_poi["point"]
 		speed_min = 14.0 # 提醒飞行：果断飞过去
 		_step_fairy_poi(delta, fairy, target)
+	elif selected == fairy.get("node"):
+		target = fairy["logical"] # 对话中：停在原地听小朋友说话（仍轻微浮动）
 	else:
 		var drift := Vector2(cos(_fairy_drift_t * 0.6), sin(_fairy_drift_t * 0.45)) * 1.8
 		target = WorldGrid.wrap_pos(player["logical"] + Vector2(2.6, 1.8) + drift)
@@ -584,6 +586,12 @@ func _tap_pick(screen_pos: Vector2) -> void:
 	if hit != null:
 		_approach_npc(hit)
 		return
+	# 点自己 = 跟身边的小仙子说话（她是「我」的引导精灵，语音路由到精灵角色）
+	if _pick_player(screen_pos):
+		var fairy := _find_fairy()
+		if not fairy.is_empty():
+			_approach_npc(fairy["node"])
+		return
 	# 点空地：退出交互（恢复被叫停的 NPC），玩家走过去
 	if selected != null:
 		_exit_interaction()
@@ -671,6 +679,16 @@ func _update_tap_marker(delta: float) -> void:
 	_place_on_bent_ground(_tap_marker, Vector3(d.x, ty + 0.05, d.y))
 	var mat := _tap_marker.material_override as StandardMaterial3D
 	mat.albedo_color.a = 0.85 * clampf(_tap_marker_t / TAP_MARKER_LIFE, 0.0, 1.0)
+
+## 玩家角色的屏幕空间拾取（与 _pick_npc 同一套 unproject 判定）。
+func _pick_player(screen_pos: Vector2) -> bool:
+	if player.is_empty():
+		return false
+	var node: Node3D = player["node"]
+	var wp := node.global_position + Vector3(0.0, 1.6, 0.0)
+	if camera.is_position_behind(wp):
+		return false
+	return screen_pos.distance_to(camera.unproject_position(wp)) < PICK_RADIUS_PX
 
 ## 屏幕空间拾取：精灵未弯曲，其屏幕位置 = unproject(实际渲染坐标)，与点击对比。
 func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
