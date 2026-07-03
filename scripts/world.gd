@@ -18,6 +18,8 @@ const THINK_TIMEOUT := 40.0       ## 「思考中」最长等待秒数；超时(
 const PLAYER_ID := "player"
 const PLAYER_SPAN := 2            ## 玩家占地（半格数），与 NPC 一致
 const APPROACH_ARRIVE := 2.6      ## 跑向 NPC 的到达半径：对象自身占格，走到旁边即算到（同送信）
+const FAIRY_HEIGHT := 1.5         ## 小仙子立绘世界高度（头部大小的随从，时之笛式）
+const FAIRY_HOVER := 2.4          ## 小仙子悬浮基准高度（米，脚底离地）
 
 var focus_logical := Vector2.ZERO   ## 相机在环面上聚焦的逻辑坐标（跟随玩家/交互对象）
 var focus_override := Vector2.INF   ## 测试脚本抢镜头用：非 INF 时聚焦固定到这里
@@ -55,6 +57,7 @@ var _think_timer: Timer            ## 「思考中」兜底超时（响应没回
 var emotion_bubble: Label3D
 var _recording := false
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
+var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
 var _player_executor: BehaviorExecutor = null ## 玩家当前移动指令（新点击即替换）
 var _approach: Dictionary = {}    ## 正在跑向的目标 NPC 字典（到旁边后进近身视图）
 var _stopped: Dictionary = {}     ## 被叫停等玩家的 NPC 字典（退出交互恢复闲逛）
@@ -91,6 +94,7 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_npcs()
 	_setup_player()
+	_setup_fairy_offline()
 	_setup_ear()
 	_setup_hud()
 	_setup_backend()
@@ -197,6 +201,32 @@ func _setup_player() -> void:
 	var spawn := _find_free_spot(focus_logical, PLAYER_SPAN)
 	player = { "node": node, "logical": spawn, "id": PLAYER_ID, "span": PLAYER_SPAN }
 	OccupancyMap.char_register(PLAYER_ID, spawn, PLAYER_SPAN)
+
+## 离线模式的小仙子随从（在线时 _bootstrap 会清掉、换成服务端小神仙）。
+## 悬浮飞行：不登记占用图、不走寻路，由 _update_fairy 驱动跟随玩家。
+func _setup_fairy_offline() -> void:
+	var tex: Texture2D = load("res://assets/fairy.png")
+	var node := PaperCharacter.new()
+	add_child(node)
+	node.setup(tex, Color.WHITE, "小神仙")
+	node.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
+	var spawn := WorldGrid.wrap_pos(player["logical"] + Vector2(3.0, 2.0))
+	npcs.append({ "node": node, "logical": spawn, "id": "fairy_local", "is_fairy": true, "hover": FAIRY_HOVER })
+
+## 小仙子随从每帧驱动：悬浮漂移跟在玩家旁（玩家跑动时拖尾追赶，静止时缓慢环绕），
+## 轻微上下浮动。永远由这里驱动，不吃行为脚本（见 _run_behavior）。
+func _update_fairy(delta: float) -> void:
+	var fairy := _find_fairy()
+	if fairy.is_empty() or player.is_empty():
+		return
+	_fairy_drift_t += delta
+	var drift := Vector2(cos(_fairy_drift_t * 0.6), sin(_fairy_drift_t * 0.45)) * 1.8
+	var target := WorldGrid.wrap_pos(player["logical"] + Vector2(2.6, 1.8) + drift)
+	var d := WorldGrid.shortest_delta(fairy["logical"], target)
+	var speed := clampf(d.length() * 2.0, 1.2, 22.0) # 越远追得越快
+	var step := d.normalized() * minf(speed * delta, d.length())
+	fairy["logical"] = WorldGrid.wrap_pos(fairy["logical"] + step)
+	fairy["hover"] = FAIRY_HOVER + sin(_fairy_drift_t * 2.2) * 0.3
 
 ## 在 around 附近按环形扫描找可站立空位（不压物件/角色、不在水里）；找不到原样返回。
 func _find_free_spot(around: Vector2, span: int) -> Vector2:
@@ -317,6 +347,7 @@ func _process(delta: float) -> void:
 	_drain_tts_stream()
 	_step_executors(delta)
 	_check_approach()
+	_update_fairy(delta)
 	if _recording:
 		_stream_recording(delta)
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
@@ -361,7 +392,7 @@ func _place_char(n: Dictionary, lean: float, delta: float) -> void:
 	var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(n["logical"]))) * TerrainMap.STEP_HEIGHT
 	var ry := lerpf(float(n.get("ry", ty)), ty, minf(1.0, 12.0 * delta))
 	n["ry"] = ry
-	_place_on_bent_ground(node, Vector3(d.x, ry, d.y))
+	_place_on_bent_ground(node, Vector3(d.x, ry + float(n.get("hover", 0.0)), d.y))
 	node.rotation = Vector3(-lean, 0.0, 0.0)
 
 ## 把节点放到「弯曲后」的地表位置。与 world_bend.gdshader 同一公式：
@@ -373,9 +404,15 @@ func _place_on_bent_ground(node: Node3D, base_world: Vector3) -> void:
 func _update_ear() -> void:
 	if selected != null and is_instance_valid(selected):
 		ear_icon.visible = true
-		ear_icon.global_position = selected.global_position + Vector3(0.0, 3.6, 0.0)
+		ear_icon.global_position = selected.global_position + Vector3(0.0, _char_top(selected) + 0.5, 0.0)
 	else:
 		ear_icon.visible = false
+
+## 角色立绘顶端相对节点原点（脚底）的高度——头顶挂饰（耳朵/气泡）按此定位，小仙子等小体型不悬空。
+func _char_top(npc: PaperCharacter) -> float:
+	if npc.texture == null:
+		return 3.2
+	return float(npc.texture.get_height()) * npc.pixel_size
 
 func _update_hud() -> void:
 	var t := WorldGrid.to_tile(player["logical"] if not player.is_empty() else focus_logical)
@@ -694,12 +731,15 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 	if not real:
 		color = Color(0.85, 0.8, 1.0) if c.get("isFairy", false) else Color(0.92, 0.92, 0.92)
 	npc.setup(tex, color, String(c.get("name", "")))
-	if real:
+	var is_fairy := bool(c.get("isFairy", false))
+	if is_fairy:
+		# 小仙子随从：头部大小（时之笛式），无论真图/占位都按 FAIRY_HEIGHT 归一
+		npc.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
+	elif real:
 		# 生成图分辨率高，按高度归一化到约 6 单位，脚底对齐原点
 		var h := float(tex.get_height())
 		npc.pixel_size = 6.0 / h
 		npc.offset = Vector2(0.0, h / 2.0)
-	var is_fairy := bool(c.get("isFairy", false))
 	var logical := at_logical
 	if logical == Vector2.INF:
 		# 小世界：忽略后端旧坐标(原 1000×1000 的 tile 500)，统一放到村庄中心(chunk2 = world 中心)
@@ -715,8 +755,12 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 	var cid := String(c.get("id", ""))
 	if cid.is_empty():
 		cid = String(c.get("name", "")) # 后端无 id 时用名字兜底，保证角色层有主
-	npcs.append({ "node": npc, "logical": logical, "id": cid, "is_fairy": is_fairy })
-	OccupancyMap.char_register(cid, logical, 2)
+	var dict := { "node": npc, "logical": logical, "id": cid, "is_fairy": is_fairy }
+	if is_fairy:
+		dict["hover"] = FAIRY_HOVER # 悬浮随从：不登记占用（飞行不挡路），由 _update_fairy 驱动
+	else:
+		OccupancyMap.char_register(cid, logical, 2)
+	npcs.append(dict)
 	if not is_fairy:
 		_start_ambient_wander(npcs[npcs.size() - 1])
 
@@ -936,7 +980,7 @@ func _show_emotion(emotion: String) -> void:
 
 func _update_emotion_bubble() -> void:
 	if emotion_bubble.visible and selected != null and is_instance_valid(selected):
-		emotion_bubble.global_position = selected.global_position + Vector3(0.0, 4.6, 0.0)
+		emotion_bubble.global_position = selected.global_position + Vector3(0.0, _char_top(selected) + 1.4, 0.0)
 	elif selected == null:
 		emotion_bubble.visible = false
 
@@ -945,6 +989,8 @@ func _run_behavior(npc: PaperCharacter, script: Dictionary) -> void:
 	var dict := _find_npc_dict(npc)
 	if dict.is_empty():
 		return
+	if dict.get("is_fairy", false):
+		return # 小仙子是随从：永远跟着玩家（_update_fairy），不吃移动类行为脚本
 	var ex := BehaviorExecutor.new()
 	ex.setup(dict, script, Callable(self, "_resolve_char_pos"), Callable(self, "_deliver_message"))
 	_executors.append(ex)
