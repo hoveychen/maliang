@@ -39,6 +39,11 @@ var selected: PaperCharacter = null
 var ear_icon: Sprite3D
 var _dragging := false
 var _press_pos := Vector2.ZERO
+# 点击落点标记（黄色圆片，淡出）
+const TAP_MARKER_LIFE := 0.8
+var _tap_marker: MeshInstance3D = null
+var _tap_marker_logical := Vector2.ZERO
+var _tap_marker_t := 0.0
 
 # M2 语音交互
 var backend: Backend
@@ -325,6 +330,7 @@ func _process(delta: float) -> void:
 	_update_camera()
 	chunk_manager.update(focus_logical)
 	_reposition_npcs(delta)
+	_update_tap_marker(delta)
 	_update_ear()
 	_update_emotion_bubble()
 	_update_hud()
@@ -417,6 +423,69 @@ func _tap_pick(screen_pos: Vector2) -> void:
 		_enter_interaction(hit)
 	else:
 		_exit_interaction()
+
+## 屏幕点 → 弯曲地表交点的逻辑坐标；无交点返回 Vector2.INF。
+## 地表 y = tile 台阶高度 - 弯曲下沉（与 _place_on_bent_ground 同公式）；
+## 台阶/曲面无解析解，射线步进找穿越区间再二分细化（0.5m 步进对 2m tile 足够）。
+func _pick_ground(screen_pos: Vector2) -> Vector2:
+	var from := camera.project_ray_origin(screen_pos)
+	var dir := camera.project_ray_normal(screen_pos)
+	var prev_t := 0.0
+	var t := 0.0
+	while t < 220.0:
+		t += 0.5
+		var p := from + dir * t
+		if p.y <= _surface_y(p):
+			var lo := prev_t
+			var hi := t
+			for i in range(10):
+				var mid := (lo + hi) * 0.5
+				if (from + dir * mid).y <= _surface_y(from + dir * mid):
+					hi = mid
+				else:
+					lo = mid
+			var hit := from + dir * hi
+			return WorldGrid.wrap_pos(focus_logical + Vector2(hit.x, hit.z))
+		prev_t = t
+	return Vector2.INF
+
+## 渲染空间点位下方的弯曲地表高度（渲染原点 = focus_logical）。
+func _surface_y(p: Vector3) -> float:
+	var logical := WorldGrid.wrap_pos(focus_logical + Vector2(p.x, p.z))
+	var h := float(TerrainMap.tile_height(WorldGrid.to_tile(logical))) * TerrainMap.STEP_HEIGHT
+	return h - BendMat.CURVATURE * (p.x * p.x + p.z * p.z)
+
+## 点击落点标记：黄色小圆片淡出（每帧随世界滚动重摆）。
+func _show_tap_marker(logical: Vector2) -> void:
+	if _tap_marker == null:
+		_tap_marker = MeshInstance3D.new()
+		var m := CylinderMesh.new()
+		m.top_radius = 0.7
+		m.bottom_radius = 0.7
+		m.height = 0.06
+		_tap_marker.mesh = m
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(1.0, 0.95, 0.4, 0.85)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_tap_marker.material_override = mat
+		add_child(_tap_marker)
+	_tap_marker_logical = logical
+	_tap_marker_t = TAP_MARKER_LIFE
+	_tap_marker.visible = true
+
+func _update_tap_marker(delta: float) -> void:
+	if _tap_marker == null or not _tap_marker.visible:
+		return
+	_tap_marker_t -= delta
+	if _tap_marker_t <= 0.0:
+		_tap_marker.visible = false
+		return
+	var d := WorldGrid.shortest_delta(focus_logical, _tap_marker_logical)
+	var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(_tap_marker_logical))) * TerrainMap.STEP_HEIGHT
+	_place_on_bent_ground(_tap_marker, Vector3(d.x, ty + 0.05, d.y))
+	var mat := _tap_marker.material_override as StandardMaterial3D
+	mat.albedo_color.a = 0.85 * clampf(_tap_marker_t / TAP_MARKER_LIFE, 0.0, 1.0)
 
 ## 屏幕空间拾取：精灵未弯曲，其屏幕位置 = unproject(实际渲染坐标)，与点击对比。
 func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
