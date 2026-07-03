@@ -68,6 +68,40 @@ func _init() -> void:
 	fails += _check("boxed stays inside", WorldGrid.shortest_delta(d3["logical"], boxed).length() <= 4.0, true)
 	OccupancyMap.clear()
 
+	# 玩家指令语义：arrive 覆盖到达半径（走到对象旁停下）+ cancel 中止 + drives 引用判定
+	OccupancyMap.clear()
+	var p_start := TerrainMap.tile_center(Vector2i(30, 68))
+	var p_goal := TerrainMap.tile_center(Vector2i(35, 68))
+	OccupancyMap.char_register("walker", p_start, 2)
+	var d4 := { "logical": p_start, "id": "walker" }
+	var ex4 := BehaviorExecutor.new()
+	ex4.setup(d4, { "commands": [ { "type": "move_to", "params": { "target": [p_goal.x, p_goal.y], "arrive": 2.6 } } ] })
+	fails += _check("drives same dict", ex4.drives(d4), true)
+	fails += _check("drives content-equal dict", ex4.drives({ "logical": p_start, "id": "walker" }), false)
+	for i in range(3000):
+		if ex4.is_done():
+			break
+		ex4.step(dt)
+	fails += _check("arrive done", ex4.is_done(), true)
+	var dist4 := WorldGrid.shortest_delta(d4["logical"], p_goal).length()
+	fails += _check("arrive stops adjacent (1.2..2.6)", dist4 <= 2.6 and dist4 >= 1.2, true)
+
+	# cancel：走一半外部中止，之后 step 不再前进
+	OccupancyMap.clear()
+	OccupancyMap.char_register("walker", p_start, 2)
+	var d5 := { "logical": p_start, "id": "walker" }
+	var ex5 := BehaviorExecutor.new()
+	ex5.setup(d5, { "commands": [ { "type": "move_to", "params": { "target": [p_goal.x, p_goal.y] } } ] })
+	for i in range(30):
+		ex5.step(dt)
+	var mid: Vector2 = d5["logical"]
+	fails += _check("moving before cancel", WorldGrid.shortest_delta(p_start, mid).length() > 0.5, true)
+	ex5.cancel()
+	fails += _check("cancel done", ex5.is_done(), true)
+	ex5.step(dt)
+	fails += _check("no move after cancel", d5["logical"], mid)
+	OccupancyMap.clear()
+
 	if fails == 0:
 		print("behavior_executor tests PASS")
 	else:

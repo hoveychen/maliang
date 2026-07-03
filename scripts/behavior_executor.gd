@@ -17,6 +17,7 @@ var _idx := 0
 var _state := "idle" ## idle | move | wait | done
 var _wait_t := 0.0
 var _move_to := Vector2.ZERO
+var _arrive_override := 0.0 ## 当前指令的到达半径覆盖（0 = 用默认 ARRIVE）
 
 # 寻路状态：waypoint 队列 + 无路直线回退 + 被挡等待/重算
 var _waypoints := PackedVector2Array()
@@ -44,6 +45,14 @@ func setup(target: Dictionary, script: Dictionary, resolver := Callable(), deliv
 func is_done() -> bool:
 	return _state == "done"
 
+## 外部中止：立即完成（玩家新点击替换旧指令、交互叫停 NPC）。
+func cancel() -> void:
+	_state = "done"
+
+## 是否在驱动这个角色字典（按引用同一性，防内容巧合相等）。
+func drives(target: Dictionary) -> bool:
+	return is_same(_target, target)
+
 func step(delta: float) -> void:
 	if _state == "done":
 		return
@@ -56,6 +65,7 @@ func step(delta: float) -> void:
 func _start(cmd: Dictionary) -> void:
 	var type := String(cmd.get("type", ""))
 	var params: Dictionary = cmd.get("params", {})
+	_arrive_override = float(params.get("arrive", 0.0)) ## >0 覆盖 move_to 到达半径（走到对象旁边停）
 	match type:
 		"move_to":
 			_move_to = _resolve_target(params)
@@ -107,7 +117,7 @@ func _plan_path() -> void:
 
 func _step_move(delta: float) -> void:
 	var cur: Vector2 = _target["logical"]
-	var arrive := DELIVER_ARRIVE if _delivering else ARRIVE
+	var arrive := DELIVER_ARRIVE if _delivering else (_arrive_override if _arrive_override > 0.0 else ARRIVE)
 	if WorldGrid.shortest_delta(cur, _move_to).length() <= arrive:
 		if _delivering:
 			_delivering = false
