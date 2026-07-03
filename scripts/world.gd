@@ -62,6 +62,16 @@ var fairy_voice: FairyVoice       ## 预制台词播放器（构建期 TTS，运
 var _fairy_bubble: Label3D        ## 小仙子说话时的 ♪ 气泡
 var _fairy_greeted := false       ## 每次启动只问候一次
 var _fairy_chat_t := 3.0          ## 下一次闲聊倒计时（首次 ~3s 内问候）
+var _fairy_poi: Dictionary = {}   ## 进行中的 POI 提醒 { point, trigger, spoke, hold }
+var _poi_check_t := 6.0           ## POI 扫描倒计时（每 2s 一次，开局先安静一会）
+
+## 默认地形的兴趣点：池塘 (tile 24,24 附近) / 北部演示山。发现半径内且台词未冷却时，
+## 小仙子飞过去提醒（台词冷却 180s 天然防重复唠叨）。
+const POIS := [
+	{ "tile": Vector2i(24, 24), "radius": 20.0, "trigger": "poi_pond" },
+	{ "tile": Vector2i(31, 7), "radius": 22.0, "trigger": "poi_mountain" },
+]
+const POI_FLY_CAP := 9.0          ## 提醒飞行离玩家的最远距离（保持在视野内）
 var _player_executor: BehaviorExecutor = null ## 玩家当前移动指令（新点击即替换）
 var _approach: Dictionary = {}    ## 正在跑向的目标 NPC 字典（到旁边后进近身视图）
 var _stopped: Dictionary = {}     ## 被叫停等玩家的 NPC 字典（退出交互恢复闲逛）
@@ -235,26 +245,66 @@ func _update_fairy(delta: float) -> void:
 	if fairy.is_empty() or player.is_empty():
 		return
 	_fairy_drift_t += delta
-	var drift := Vector2(cos(_fairy_drift_t * 0.6), sin(_fairy_drift_t * 0.45)) * 1.8
-	var target := WorldGrid.wrap_pos(player["logical"] + Vector2(2.6, 1.8) + drift)
+	var target: Vector2
+	var speed_min := 1.2
+	if not _fairy_poi.is_empty():
+		target = _fairy_poi["point"]
+		speed_min = 14.0 # 提醒飞行：果断飞过去
+		_step_fairy_poi(delta, fairy, target)
+	else:
+		var drift := Vector2(cos(_fairy_drift_t * 0.6), sin(_fairy_drift_t * 0.45)) * 1.8
+		target = WorldGrid.wrap_pos(player["logical"] + Vector2(2.6, 1.8) + drift)
 	var d := WorldGrid.shortest_delta(fairy["logical"], target)
-	var speed := clampf(d.length() * 2.0, 1.2, 22.0) # 越远追得越快
+	var speed := clampf(d.length() * 2.0, speed_min, 26.0) # 越远追得越快
 	var step := d.normalized() * minf(speed * delta, d.length())
 	fairy["logical"] = WorldGrid.wrap_pos(fairy["logical"] + step)
 	fairy["hover"] = FAIRY_HOVER + sin(_fairy_drift_t * 2.2) * 0.3
-	_fairy_ambient(delta, fairy)
+	if _fairy_poi.is_empty():
+		_fairy_ambient(delta, fairy)
+	else:
+		_update_fairy_bubble(fairy) # 飞行提醒中也要挂 ♪
+	_check_poi(delta)
+
+## POI 提醒推进：到位后说台词，说完稍作停留再回到玩家身边。
+func _step_fairy_poi(delta: float, fairy: Dictionary, target: Vector2) -> void:
+	if WorldGrid.shortest_delta(fairy["logical"], target).length() > 1.0:
+		return
+	if not _fairy_poi.get("spoke", false):
+		fairy_voice.try_play(_fairy_poi["trigger"])
+		_fairy_poi["spoke"] = true
+		_fairy_poi["hold"] = 2.0
+		return
+	if not fairy_voice.is_playing():
+		_fairy_poi["hold"] = float(_fairy_poi["hold"]) - delta
+		if float(_fairy_poi["hold"]) <= 0.0:
+			_fairy_poi = {}
+
+## 周期扫描 POI：玩家进入发现半径且对应台词未冷却 → 小仙子朝 POI 方向飞（距玩家封顶，
+## 保持在视野内）。交互/录音/思考/TTS 中不打扰。
+func _check_poi(delta: float) -> void:
+	if not _fairy_poi.is_empty() or fairy_voice == null:
+		return
+	_poi_check_t -= delta
+	if _poi_check_t > 0.0:
+		return
+	_poi_check_t = 2.0
+	if selected != null or _recording or thinking_label.visible or _tts_player.playing:
+		return
+	for poi in POIS:
+		var pp := TerrainMap.tile_center(poi["tile"])
+		var dp := WorldGrid.shortest_delta(player["logical"], pp)
+		if dp.length() <= float(poi["radius"]) and fairy_voice.can_play(String(poi["trigger"])):
+			var fly := dp.normalized() * minf(dp.length(), POI_FLY_CAP)
+			_fairy_poi = { "point": WorldGrid.wrap_pos(player["logical"] + fly),
+				"trigger": String(poi["trigger"]), "spoke": false, "hold": 2.0 }
+			return
 
 ## 氛围台词引擎：先问候，之后每 15~25s 按周围环境挑话题（水/山/村庄），没有就闲聊。
 ## 交互/录音/思考/正式 TTS 播放中一律闭嘴，避免叠声。
 func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
 	if fairy_voice == null:
 		return
-	# ♪ 气泡跟随（说话时显示在小仙子头顶）
-	var node: Node3D = fairy["node"]
-	_fairy_bubble.visible = fairy_voice.is_playing()
-	if _fairy_bubble.visible:
-		_fairy_bubble.global_position = node.global_position \
-			+ Vector3(0.0, _char_top(node as PaperCharacter) + 0.9, 0.0)
+	_update_fairy_bubble(fairy)
 	if selected != null or _recording or thinking_label.visible or _tts_player.playing:
 		return
 	_fairy_chat_t -= delta
@@ -265,6 +315,14 @@ func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
 		_fairy_greeted = fairy_voice.try_play("greet")
 		return
 	fairy_voice.try_play(_ambient_trigger())
+
+## ♪ 气泡：小仙子出声时挂在头顶（氛围闲聊与 POI 提醒共用）。
+func _update_fairy_bubble(fairy: Dictionary) -> void:
+	var node: Node3D = fairy["node"]
+	_fairy_bubble.visible = fairy_voice.is_playing()
+	if _fairy_bubble.visible:
+		_fairy_bubble.global_position = node.global_position \
+			+ Vector3(0.0, _char_top(node as PaperCharacter) + 0.9, 0.0)
 
 ## 按玩家周围地形挑话题：水/高山/村庄优先（各有冷却），否则闲聊。
 func _ambient_trigger() -> String:
