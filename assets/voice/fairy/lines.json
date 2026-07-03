@@ -1,0 +1,17 @@
+{
+  "voice": "lovely_girl",
+  "lines": [
+    { "id": "fairy_greet_1", "trigger": "greet", "cooldown": 99999, "text": "你好呀小朋友！我是小仙子，今天想去哪儿玩呀？" },
+    { "id": "fairy_greet_2", "trigger": "greet", "cooldown": 99999, "text": "嘿嘿，我们又见面啦！" },
+    { "id": "fairy_idle_1", "trigger": "idle", "cooldown": 60, "text": "啦啦啦，今天天气真好呀。" },
+    { "id": "fairy_idle_2", "trigger": "idle", "cooldown": 60, "text": "你看天上的云朵，像不像棉花糖呀？" },
+    { "id": "fairy_idle_3", "trigger": "idle", "cooldown": 60, "text": "要不要去找小伙伴一起玩呀？" },
+    { "id": "fairy_idle_4", "trigger": "idle", "cooldown": 60, "text": "嗯哼，我就在你身边陪着你哟。" },
+    { "id": "fairy_water_1", "trigger": "near_water", "cooldown": 90, "text": "前面是小池塘，小心别掉进去咯。" },
+    { "id": "fairy_water_2", "trigger": "near_water", "cooldown": 90, "text": "哇，水里会不会有小鱼呀？" },
+    { "id": "fairy_mountain_1", "trigger": "near_mountain", "cooldown": 90, "text": "好高的山呀！我们爬上去看看吧。" },
+    { "id": "fairy_village_1", "trigger": "near_village", "cooldown": 90, "text": "这里是小村庄，房子好可爱呀。" },
+    { "id": "fairy_poi_pond", "trigger": "poi_pond", "cooldown": 180, "text": "看！那边有个大池塘，我们过去看看吧！" },
+    { "id": "fairy_poi_mountain", "trigger": "poi_mountain", "cooldown": 180, "text": "那边有座大山耶！要不要去爬爬看？" }
+  ]
+}

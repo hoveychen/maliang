@@ -13,3 +13,11 @@ export function buildSpritePrompt(visualDescription: string): string {
   const subject = visualDescription.trim().replace(/[.。，,]+$/, '');
   return `${subject}. ${SPRITE_STYLE_SUFFIX}`;
 }
+
+/**
+ * 小神仙（引导精灵）的形象主体：娜薇式发光小仙子——迷你仙子女孩 + 青蓝光晕 +
+ * 透明虫翅 + 星尘，游戏内按头部大小悬浮渲染。统一画风后缀仍由 buildSpritePrompt 拼接。
+ */
+export const FAIRY_VISUAL_DESC =
+  '一个发光的迷你小仙子女孩，全身包裹着柔和的青蓝色光球光晕，四片透明闪亮的蜻蜓翅膀，' +
+  '圆脸大眼睛温柔微笑，短短的淡蓝色头发，小小的白裙子，身后拖着闪烁的星星光尘';

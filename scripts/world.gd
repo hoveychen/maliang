@@ -18,6 +18,8 @@ const THINK_TIMEOUT := 40.0       ## 「思考中」最长等待秒数；超时(
 const PLAYER_ID := "player"
 const PLAYER_SPAN := 2            ## 玩家占地（半格数），与 NPC 一致
 const APPROACH_ARRIVE := 2.6      ## 跑向 NPC 的到达半径：对象自身占格，走到旁边即算到（同送信）
+const FAIRY_HEIGHT := 1.5         ## 小仙子立绘世界高度（头部大小的随从，时之笛式）
+const FAIRY_HOVER := 2.4          ## 小仙子悬浮基准高度（米，脚底离地）
 
 var focus_logical := Vector2.ZERO   ## 相机在环面上聚焦的逻辑坐标（跟随玩家/交互对象）
 var focus_override := Vector2.INF   ## 测试脚本抢镜头用：非 INF 时聚焦固定到这里
@@ -55,6 +57,21 @@ var _think_timer: Timer            ## 「思考中」兜底超时（响应没回
 var emotion_bubble: Label3D
 var _recording := false
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
+var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
+var fairy_voice: FairyVoice       ## 预制台词播放器（构建期 TTS，运行期零调用）
+var _fairy_bubble: Label3D        ## 小仙子说话时的 ♪ 气泡
+var _fairy_greeted := false       ## 每次启动只问候一次
+var _fairy_chat_t := 3.0          ## 下一次闲聊倒计时（首次 ~3s 内问候）
+var _fairy_poi: Dictionary = {}   ## 进行中的 POI 提醒 { point, trigger, spoke, hold }
+var _poi_check_t := 6.0           ## POI 扫描倒计时（每 2s 一次，开局先安静一会）
+
+## 默认地形的兴趣点：池塘 (tile 24,24 附近) / 北部演示山。发现半径内且台词未冷却时，
+## 小仙子飞过去提醒（台词冷却 180s 天然防重复唠叨）。
+const POIS := [
+	{ "tile": Vector2i(24, 24), "radius": 20.0, "trigger": "poi_pond" },
+	{ "tile": Vector2i(31, 7), "radius": 22.0, "trigger": "poi_mountain" },
+]
+const POI_FLY_CAP := 9.0          ## 提醒飞行离玩家的最远距离（保持在视野内）
 var _player_executor: BehaviorExecutor = null ## 玩家当前移动指令（新点击即替换）
 var _approach: Dictionary = {}    ## 正在跑向的目标 NPC 字典（到旁边后进近身视图）
 var _stopped: Dictionary = {}     ## 被叫停等玩家的 NPC 字典（退出交互恢复闲逛）
@@ -91,6 +108,7 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_npcs()
 	_setup_player()
+	_setup_fairy_offline()
 	_setup_ear()
 	_setup_hud()
 	_setup_backend()
@@ -197,6 +215,139 @@ func _setup_player() -> void:
 	var spawn := _find_free_spot(focus_logical, PLAYER_SPAN)
 	player = { "node": node, "logical": spawn, "id": PLAYER_ID, "span": PLAYER_SPAN }
 	OccupancyMap.char_register(PLAYER_ID, spawn, PLAYER_SPAN)
+
+## 离线模式的小仙子随从（在线时 _bootstrap 会清掉、换成服务端小神仙）。
+## 悬浮飞行：不登记占用图、不走寻路，由 _update_fairy 驱动跟随玩家。
+func _setup_fairy_offline() -> void:
+	var tex: Texture2D = load("res://assets/fairy.png")
+	var node := PaperCharacter.new()
+	add_child(node)
+	node.setup(tex, Color.WHITE, "小神仙")
+	node.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
+	var spawn := WorldGrid.wrap_pos(player["logical"] + Vector2(3.0, 2.0))
+	npcs.append({ "node": node, "logical": spawn, "id": "fairy_local", "is_fairy": true, "hover": FAIRY_HOVER })
+	fairy_voice = FairyVoice.new()
+	fairy_voice.name = "FairyVoice"
+	add_child(fairy_voice)
+	_fairy_bubble = Label3D.new()
+	_fairy_bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_fairy_bubble.pixel_size = 0.02
+	_fairy_bubble.outline_size = 12
+	_fairy_bubble.font_size = 72
+	_fairy_bubble.text = "♪"
+	_fairy_bubble.visible = false
+	add_child(_fairy_bubble)
+
+## 小仙子随从每帧驱动：悬浮漂移跟在玩家旁（玩家跑动时拖尾追赶，静止时缓慢环绕），
+## 轻微上下浮动。永远由这里驱动，不吃行为脚本（见 _run_behavior）。
+func _update_fairy(delta: float) -> void:
+	var fairy := _find_fairy()
+	if fairy.is_empty() or player.is_empty():
+		return
+	_fairy_drift_t += delta
+	var target: Vector2
+	var speed_min := 1.2
+	if not _fairy_poi.is_empty():
+		target = _fairy_poi["point"]
+		speed_min = 14.0 # 提醒飞行：果断飞过去
+		_step_fairy_poi(delta, fairy, target)
+	elif selected == fairy.get("node"):
+		target = fairy["logical"] # 对话中：停在原地听小朋友说话（仍轻微浮动）
+	else:
+		var drift := Vector2(cos(_fairy_drift_t * 0.6), sin(_fairy_drift_t * 0.45)) * 1.8
+		target = WorldGrid.wrap_pos(player["logical"] + Vector2(2.6, 1.8) + drift)
+	var d := WorldGrid.shortest_delta(fairy["logical"], target)
+	var speed := clampf(d.length() * 2.0, speed_min, 26.0) # 越远追得越快
+	var step := d.normalized() * minf(speed * delta, d.length())
+	fairy["logical"] = WorldGrid.wrap_pos(fairy["logical"] + step)
+	fairy["hover"] = FAIRY_HOVER + sin(_fairy_drift_t * 2.2) * 0.3
+	if _fairy_poi.is_empty():
+		_fairy_ambient(delta, fairy)
+	else:
+		_update_fairy_bubble(fairy) # 飞行提醒中也要挂 ♪
+	_check_poi(delta)
+
+## POI 提醒推进：到位后说台词，说完稍作停留再回到玩家身边。
+func _step_fairy_poi(delta: float, fairy: Dictionary, target: Vector2) -> void:
+	if WorldGrid.shortest_delta(fairy["logical"], target).length() > 1.0:
+		return
+	if not _fairy_poi.get("spoke", false):
+		fairy_voice.try_play(_fairy_poi["trigger"])
+		_fairy_poi["spoke"] = true
+		_fairy_poi["hold"] = 2.0
+		return
+	if not fairy_voice.is_playing():
+		_fairy_poi["hold"] = float(_fairy_poi["hold"]) - delta
+		if float(_fairy_poi["hold"]) <= 0.0:
+			_fairy_poi = {}
+
+## 周期扫描 POI：玩家进入发现半径且对应台词未冷却 → 小仙子朝 POI 方向飞（距玩家封顶，
+## 保持在视野内）。交互/录音/思考/TTS 中不打扰。
+func _check_poi(delta: float) -> void:
+	if not _fairy_poi.is_empty() or fairy_voice == null:
+		return
+	_poi_check_t -= delta
+	if _poi_check_t > 0.0:
+		return
+	_poi_check_t = 2.0
+	if selected != null or _recording or thinking_label.visible or _tts_player.playing:
+		return
+	for poi in POIS:
+		var pp := TerrainMap.tile_center(poi["tile"])
+		var dp := WorldGrid.shortest_delta(player["logical"], pp)
+		if dp.length() <= float(poi["radius"]) and fairy_voice.can_play(String(poi["trigger"])):
+			var fly := dp.normalized() * minf(dp.length(), POI_FLY_CAP)
+			_fairy_poi = { "point": WorldGrid.wrap_pos(player["logical"] + fly),
+				"trigger": String(poi["trigger"]), "spoke": false, "hold": 2.0 }
+			return
+
+## 氛围台词引擎：先问候，之后每 15~25s 按周围环境挑话题（水/山/村庄），没有就闲聊。
+## 交互/录音/思考/正式 TTS 播放中一律闭嘴，避免叠声。
+func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
+	if fairy_voice == null:
+		return
+	_update_fairy_bubble(fairy)
+	if selected != null or _recording or thinking_label.visible or _tts_player.playing:
+		return
+	_fairy_chat_t -= delta
+	if _fairy_chat_t > 0.0:
+		return
+	_fairy_chat_t = randf_range(15.0, 25.0)
+	if not _fairy_greeted:
+		_fairy_greeted = fairy_voice.try_play("greet")
+		return
+	fairy_voice.try_play(_ambient_trigger())
+
+## ♪ 气泡：小仙子出声时挂在头顶（氛围闲聊与 POI 提醒共用）。
+func _update_fairy_bubble(fairy: Dictionary) -> void:
+	var node: Node3D = fairy["node"]
+	_fairy_bubble.visible = fairy_voice.is_playing()
+	if _fairy_bubble.visible:
+		_fairy_bubble.global_position = node.global_position \
+			+ Vector3(0.0, _char_top(node as PaperCharacter) + 0.9, 0.0)
+
+## 按玩家周围地形挑话题：水/高山/村庄优先（各有冷却），否则闲聊。
+func _ambient_trigger() -> String:
+	var pt := WorldGrid.to_tile(player["logical"])
+	var near_water := false
+	var near_mountain := false
+	for dz in range(-3, 4):
+		for dx in range(-3, 4):
+			var t := Vector2i((pt.x + dx + WorldGrid.GRID_TILES) % WorldGrid.GRID_TILES,
+				(pt.y + dz + WorldGrid.GRID_TILES) % WorldGrid.GRID_TILES)
+			if TerrainMap.tile_type(t) == TerrainMap.T_WATER:
+				near_water = true
+			if TerrainMap.tile_height(t) >= 3:
+				near_mountain = true
+	if near_water and fairy_voice.can_play("near_water"):
+		return "near_water"
+	if near_mountain and fairy_voice.can_play("near_mountain"):
+		return "near_mountain"
+	var center := Vector2(WorldGrid.WORLD_SPAN, WorldGrid.WORLD_SPAN) * 0.5
+	if WorldGrid.shortest_delta(player["logical"], center).length() <= 14.0 \
+			and fairy_voice.can_play("near_village"):
+		return "near_village"
+	return "idle"
 
 ## 在 around 附近按环形扫描找可站立空位（不压物件/角色、不在水里）；找不到原样返回。
 func _find_free_spot(around: Vector2, span: int) -> Vector2:
@@ -317,6 +468,7 @@ func _process(delta: float) -> void:
 	_drain_tts_stream()
 	_step_executors(delta)
 	_check_approach()
+	_update_fairy(delta)
 	if _recording:
 		_stream_recording(delta)
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
@@ -361,7 +513,7 @@ func _place_char(n: Dictionary, lean: float, delta: float) -> void:
 	var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(n["logical"]))) * TerrainMap.STEP_HEIGHT
 	var ry := lerpf(float(n.get("ry", ty)), ty, minf(1.0, 12.0 * delta))
 	n["ry"] = ry
-	_place_on_bent_ground(node, Vector3(d.x, ry, d.y))
+	_place_on_bent_ground(node, Vector3(d.x, ry + float(n.get("hover", 0.0)), d.y))
 	node.rotation = Vector3(-lean, 0.0, 0.0)
 
 ## 把节点放到「弯曲后」的地表位置。与 world_bend.gdshader 同一公式：
@@ -373,9 +525,15 @@ func _place_on_bent_ground(node: Node3D, base_world: Vector3) -> void:
 func _update_ear() -> void:
 	if selected != null and is_instance_valid(selected):
 		ear_icon.visible = true
-		ear_icon.global_position = selected.global_position + Vector3(0.0, 3.6, 0.0)
+		ear_icon.global_position = selected.global_position + Vector3(0.0, _char_top(selected) + 0.5, 0.0)
 	else:
 		ear_icon.visible = false
+
+## 角色立绘顶端相对节点原点（脚底）的高度——头顶挂饰（耳朵/气泡）按此定位，小仙子等小体型不悬空。
+func _char_top(npc: PaperCharacter) -> float:
+	if npc.texture == null:
+		return 3.2
+	return float(npc.texture.get_height()) * npc.pixel_size
 
 func _update_hud() -> void:
 	var t := WorldGrid.to_tile(player["logical"] if not player.is_empty() else focus_logical)
@@ -427,6 +585,12 @@ func _tap_pick(screen_pos: Vector2) -> void:
 	var hit := _pick_npc(screen_pos)
 	if hit != null:
 		_approach_npc(hit)
+		return
+	# 点自己 = 跟身边的小仙子说话（她是「我」的引导精灵，语音路由到精灵角色）
+	if _pick_player(screen_pos):
+		var fairy := _find_fairy()
+		if not fairy.is_empty():
+			_approach_npc(fairy["node"])
 		return
 	# 点空地：退出交互（恢复被叫停的 NPC），玩家走过去
 	if selected != null:
@@ -515,6 +679,16 @@ func _update_tap_marker(delta: float) -> void:
 	_place_on_bent_ground(_tap_marker, Vector3(d.x, ty + 0.05, d.y))
 	var mat := _tap_marker.material_override as StandardMaterial3D
 	mat.albedo_color.a = 0.85 * clampf(_tap_marker_t / TAP_MARKER_LIFE, 0.0, 1.0)
+
+## 玩家角色的屏幕空间拾取（与 _pick_npc 同一套 unproject 判定）。
+func _pick_player(screen_pos: Vector2) -> bool:
+	if player.is_empty():
+		return false
+	var node: Node3D = player["node"]
+	var wp := node.global_position + Vector3(0.0, 1.6, 0.0)
+	if camera.is_position_behind(wp):
+		return false
+	return screen_pos.distance_to(camera.unproject_position(wp)) < PICK_RADIUS_PX
 
 ## 屏幕空间拾取：精灵未弯曲，其屏幕位置 = unproject(实际渲染坐标)，与点击对比。
 func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
@@ -694,12 +868,15 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 	if not real:
 		color = Color(0.85, 0.8, 1.0) if c.get("isFairy", false) else Color(0.92, 0.92, 0.92)
 	npc.setup(tex, color, String(c.get("name", "")))
-	if real:
+	var is_fairy := bool(c.get("isFairy", false))
+	if is_fairy:
+		# 小仙子随从：头部大小（时之笛式），无论真图/占位都按 FAIRY_HEIGHT 归一
+		npc.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
+	elif real:
 		# 生成图分辨率高，按高度归一化到约 6 单位，脚底对齐原点
 		var h := float(tex.get_height())
 		npc.pixel_size = 6.0 / h
 		npc.offset = Vector2(0.0, h / 2.0)
-	var is_fairy := bool(c.get("isFairy", false))
 	var logical := at_logical
 	if logical == Vector2.INF:
 		# 小世界：忽略后端旧坐标(原 1000×1000 的 tile 500)，统一放到村庄中心(chunk2 = world 中心)
@@ -715,8 +892,12 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 	var cid := String(c.get("id", ""))
 	if cid.is_empty():
 		cid = String(c.get("name", "")) # 后端无 id 时用名字兜底，保证角色层有主
-	npcs.append({ "node": npc, "logical": logical, "id": cid, "is_fairy": is_fairy })
-	OccupancyMap.char_register(cid, logical, 2)
+	var dict := { "node": npc, "logical": logical, "id": cid, "is_fairy": is_fairy }
+	if is_fairy:
+		dict["hover"] = FAIRY_HOVER # 悬浮随从：不登记占用（飞行不挡路），由 _update_fairy 驱动
+	else:
+		OccupancyMap.char_register(cid, logical, 2)
+	npcs.append(dict)
 	if not is_fairy:
 		_start_ambient_wander(npcs[npcs.size() - 1])
 
@@ -936,7 +1117,7 @@ func _show_emotion(emotion: String) -> void:
 
 func _update_emotion_bubble() -> void:
 	if emotion_bubble.visible and selected != null and is_instance_valid(selected):
-		emotion_bubble.global_position = selected.global_position + Vector3(0.0, 4.6, 0.0)
+		emotion_bubble.global_position = selected.global_position + Vector3(0.0, _char_top(selected) + 1.4, 0.0)
 	elif selected == null:
 		emotion_bubble.visible = false
 
@@ -945,6 +1126,8 @@ func _run_behavior(npc: PaperCharacter, script: Dictionary) -> void:
 	var dict := _find_npc_dict(npc)
 	if dict.is_empty():
 		return
+	if dict.get("is_fairy", false):
+		return # 小仙子是随从：永远跟着玩家（_update_fairy），不吃移动类行为脚本
 	var ex := BehaviorExecutor.new()
 	ex.setup(dict, script, Callable(self, "_resolve_char_pos"), Callable(self, "_deliver_message"))
 	_executors.append(ex)
