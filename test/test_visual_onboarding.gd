@@ -39,10 +39,7 @@ func _tick() -> void:
 					if frame % 30 == 0 and int(p_idx_tries()) < 3:
 						ob.call("_submit_intro", "测试", PackedByteArray())
 				"generate":
-					for b in ob.find_children("*", "Button", true, false):
-						if (b as Button).text == "▶":
-							(b as Button).emit_signal("pressed")
-							break
+					pass # 离线:生成失败自动放行,无需驱动
 	# 场景被替换成世界 = 完成
 	if current_scene != null and current_scene.name == "World":
 		done = true

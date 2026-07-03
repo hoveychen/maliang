@@ -60,6 +60,14 @@ var _pending := {}                 ## 待确认 {name, nickname, transcript}
 var _asr_local: Object = null      ## 端侧 ASR（Android MaliangAsr），null=服务端识别
 var _local_session := false
 
+# 形象生成（generate 页）：intro 页起预取，✓采用 / ↻重生成
+var _gen_status: Label = null
+var _gen_img: TextureRect = null
+var _gen_confirm: Control = null
+var _prefetch_state := ""          ## "" | pending | done | failed
+var _prefetch_hash := ""
+var _prefetch_tex: Texture2D = null
+
 func _ready() -> void:
 	_setup_background()
 	_setup_book()
@@ -385,20 +393,95 @@ func _play_pcm(bytes: PackedByteArray, rate: int) -> void:
 	_voice.stream = wav
 	_voice.play()
 
-## P6 接入形象生成确认；框架阶段直接提供跳过点继续。
+## 形象生成确认：答案拼描述 → 生图（intro 页起就预取，生图 ~1min 与说话时间重叠）
+## → 展示 → ✓采用 / ↻再变一次。离线/失败直接放行（占位形象进世界，不卡小朋友）。
 func _build_generate(box: VBoxContainer, _p: Dictionary) -> void:
-	var wand := Label.new()
-	wand.text = "🪄✨"
-	wand.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	wand.add_theme_font_size_override("font_size", 120)
-	box.add_child(wand)
-	var next := Button.new()
-	next.text = "▶"
-	next.add_theme_font_size_override("font_size", 44)
-	next.flat = true
-	next.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	next.pressed.connect(_next_page)
-	box.add_child(next)
+	_gen_status = Label.new()
+	_gen_status.text = "🪄✨"
+	_gen_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gen_status.add_theme_font_size_override("font_size", 110)
+	box.add_child(_gen_status)
+
+	_gen_img = TextureRect.new()
+	_gen_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_gen_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_gen_img.custom_minimum_size = Vector2(300.0, 300.0)
+	_gen_img.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_gen_img.visible = false
+	box.add_child(_gen_img)
+
+	_gen_confirm = HBoxContainer.new()
+	(_gen_confirm as HBoxContainer).alignment = BoxContainer.ALIGNMENT_CENTER
+	(_gen_confirm as HBoxContainer).add_theme_constant_override("separation", 40)
+	_gen_confirm.visible = false
+	for spec in [["✓", Color(0.45, 0.8, 0.45), true], ["↻", Color(0.95, 0.75, 0.4), false]]:
+		var b := Button.new()
+		b.text = String(spec[0])
+		b.custom_minimum_size = Vector2(130.0, 110.0)
+		b.add_theme_font_size_override("font_size", 64)
+		var s := StyleBoxFlat.new()
+		s.bg_color = spec[1]
+		s.set_corner_radius_all(30)
+		b.add_theme_stylebox_override("normal", s)
+		b.add_theme_stylebox_override("hover", s)
+		b.add_theme_stylebox_override("pressed", s)
+		b.pressed.connect(_on_gen_confirm.bind(bool(spec[2])))
+		(_gen_confirm as HBoxContainer).add_child(b)
+	box.add_child(_gen_confirm)
+	_gen_confirm.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_generate_avatar()
+
+## 答案 → 形象描述（风格后缀由服务端生图管线统一拼接）。
+func _avatar_description() -> String:
+	var who := "小男孩" if String(answers.get("gender", "")) == "boy" else "小女孩"
+	return "一个可爱的%s形象，穿着%s的衣服，抱着一只%s玩偶，一看就很喜欢%s" % [
+		who, String(answers.get("color", "彩色")),
+		String(answers.get("likes", "小兔子")), String(answers.get("interest", "玩耍"))]
+
+## 预取：进 intro 页就开始生图（结果落 _prefetch_*，generate 页直接用）。
+func _start_avatar_prefetch() -> void:
+	if _prefetch_state != "":
+		return
+	_prefetch_state = "pending"
+	var res := await api.post_json("/player-sprite", { "visualDescription": _avatar_description() })
+	var hash := String(res.get("spriteAsset", ""))
+	if hash.is_empty():
+		_prefetch_state = "failed"
+		return
+	var tex := await api.fetch_texture(hash)
+	if tex == null:
+		_prefetch_state = "failed"
+		return
+	_prefetch_hash = hash
+	_prefetch_tex = tex
+	_prefetch_state = "done"
+
+func _generate_avatar() -> void:
+	_gen_confirm.visible = false
+	_gen_img.visible = false
+	_gen_status.text = "🪄✨"
+	_start_avatar_prefetch()
+	while _prefetch_state == "pending" or _flipping:
+		await get_tree().process_frame
+	if not is_inside_tree() or _page == null:
+		return # 场景已切走（跳过）
+	if _prefetch_state != "done":
+		_next_page()
+		return
+	_gen_status.text = "✨"
+	_gen_img.texture = _prefetch_tex
+	_gen_img.visible = true
+	_play("ob_confirm")
+	_gen_confirm.visible = true
+
+func _on_gen_confirm(yes: bool) -> void:
+	if yes:
+		answers["sprite_asset"] = _prefetch_hash
+		_next_page()
+		return
+	_play("ob_regen")
+	_prefetch_state = "" # 再变一次：重新生成
+	_generate_avatar()
 
 # ── 旁白与推进 ────────────────────────────────────────────────────────────
 
@@ -406,6 +489,8 @@ func _on_page_shown(p: Dictionary) -> void:
 	var dur := _play(String(p.get("voice", "")))
 	if String(p["kind"]) == "story":
 		_story_auto_t = maxf(dur, 0.5) + 1.2 # 旁白讲完停 1.2s 自动翻页
+	elif String(p["kind"]) == "intro":
+		_start_avatar_prefetch() # 答案已齐：说话确认的同时后台生形象（生图 ~1min 重叠掉）
 
 func _process(delta: float) -> void:
 	if _intro_recording:
@@ -429,11 +514,19 @@ func _play(id: String) -> float:
 	_voice.play()
 	return stream.get_length()
 
+var _finishing := false
+
 func _finish() -> void:
-	# 保存已收集的答案（名字/形象由 P5/P6 补全）
+	if _finishing:
+		return
+	_finishing = true
 	var profile := PlayerProfile.load_profile()
 	for k in answers:
 		profile[k] = answers[k]
 	profile["created_at"] = Time.get_datetime_string_from_system()
 	PlayerProfile.save_profile(profile)
+	# 收尾欢呼后翻进世界
+	var dur := _play("ob_done")
+	if dur > 0.0:
+		await get_tree().create_timer(dur + 0.3).timeout
 	get_tree().change_scene_to_file("res://main.tscn")

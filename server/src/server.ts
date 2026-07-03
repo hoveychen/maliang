@@ -90,6 +90,17 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { id: fairy.id, spriteAsset: hash, regenerated: true };
   });
 
+  // onboarding 玩家形象：描述（由问题答案拼装）→ 生图 → 资产 hash。不建角色——
+  // 玩家档案在设备端，资产内容寻址共享。描述过文字审核（防客户端篡改）。
+  app.post<{ Body: { visualDescription?: string } | null }>('/player-sprite', async (req, reply) => {
+    const desc = (req.body?.visualDescription ?? '').trim();
+    if (desc.length === 0) return reply.code(400).send({ error: 'visualDescription required' });
+    const check = await adapters.moderation.moderateText(desc);
+    if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
+    const hash = await generateSprite(adapters, desc, store);
+    return { spriteAsset: hash };
+  });
+
   // onboarding 自我介绍：转写（客户端直送或送 PCM 走服务端 ASR）→ LLM 提取名字/称呼
   // → TTS 复述确认音频。提取不到名字返回空串，客户端播预制 retry 重问（多轮）。
   app.post<{

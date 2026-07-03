@@ -1,9 +1,10 @@
 import type { ServiceAdapters, ImageBlob, AudioBlob } from './types.ts';
 import type { CharacterSpec, IntentContext, IntentResult, MemoryExtractionContext } from '../types.ts';
 
-// 1x1 透明 PNG，作为生图占位。
+// 1x1 透明 PNG，作为生图占位。（须是合法 PNG：Godot 客户端会真解码，CRC 错会拒收；
+// 旧值 IDAT CRC 损坏，Node 侧从未校验所以一直没暴露）
 const PNG_1x1 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4AWMAAQAABQABNtCI3QAAAABJRU5ErkJggg==';
 
 function pngStub(): ImageBlob {
   return { bytes: Uint8Array.from(Buffer.from(PNG_1x1, 'base64')), mime: 'image/png' };
