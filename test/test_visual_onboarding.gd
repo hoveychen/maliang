@@ -34,7 +34,11 @@ func _tick() -> void:
 							opts.append(b)
 					if opts.size() >= 2:
 						(opts[1] as Button).emit_signal("pressed")
-				"intro", "generate":
+				"intro":
+					# 离线环境:提交必失败→重问,3 次后兜底叫「小朋友」自动放行
+					if frame % 30 == 0 and int(p_idx_tries()) < 3:
+						ob.call("_submit_intro", "测试", PackedByteArray())
+				"generate":
 					for b in ob.find_children("*", "Button", true, false):
 						if (b as Button).text == "▶":
 							(b as Button).emit_signal("pressed")
@@ -47,14 +51,18 @@ func _tick() -> void:
 		_check("profile color saved", prof.get("color", ""), "蓝色")
 		_check("profile likes saved", prof.get("likes", ""), "小猫")
 		_check("profile interest saved", prof.get("interest", ""), "踢球")
+		_check("offline intro fallback nickname", prof.get("nickname", ""), "小朋友")
 		if fails == 0:
 			print("visual_onboarding PASS")
 		else:
 			printerr("visual_onboarding FAILED: %d" % fails)
 		return
-	if frame >= 410:
+	if frame >= 470:
 		done = true
 		printerr("visual_onboarding FAILED: 没有在时限内走完流程 (page_idx=%s)" % str(ob.get("page_idx")))
+
+func p_idx_tries() -> int:
+	return int(ob.get("_intro_tries"))
 
 func _check(name: String, got: Variant, want: Variant) -> void:
 	if got == want:

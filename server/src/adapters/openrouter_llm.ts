@@ -143,6 +143,29 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     return [];
   }
 
+  async extractProfile(transcript: string): Promise<{ name: string; nickname: string }> {
+    const system = `一位 3 岁小朋友在游戏里做自我介绍（语音转写，可能有识别噪音）。
+提取：name=名字（如「朵朵」「王小明」），nickname=希望被叫的称呼（小名/昵称；没说就用名字）。
+提取不到就给空字符串，不要编造。
+严格只输出 JSON 对象：{"name":"朵朵","nickname":"朵朵"}。`;
+    const content = await this.#client.chatText(
+      this.#model,
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: `小朋友说：${transcript}` },
+      ],
+      { jsonObject: true },
+    );
+    try {
+      const raw = JSON.parse(stripFences(content)) as { name?: unknown; nickname?: unknown };
+      const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+      const nickname = typeof raw.nickname === 'string' && raw.nickname.trim() ? raw.nickname.trim() : name;
+      return { name, nickname };
+    } catch {
+      return { name: '', nickname: '' }; // 解析失败当没听清，客户端会重问
+    }
+  }
+
   async respond(prompt: string): Promise<string> {
     return this.#client.chatText(this.#model, [
       { role: 'system', content: '你在扮演幼儿游戏里的一个可爱角色，用简单、温暖、童趣的中文回应小朋友。' },

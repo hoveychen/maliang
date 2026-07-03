@@ -47,13 +47,50 @@ var _voice: AudioStreamPlayer
 var _flipping := false
 var _story_auto_t := 0.0           ## story 页自动翻页倒计时（旁白结束后）
 
+# 自我介绍（intro 页）：按住说话 → 转写 → 名字确认，多轮重问
+const INTRO_MAX_TRIES := 3         ## 重问上限；仍没听到就先叫「小朋友」，进游戏后还能改
+var api: Api
+var mic: MicRecorder
+var _intro_recording := false
+var _intro_pcm := PackedByteArray()
+var _intro_tries := 0
+var _intro_status: Label = null    ## 🎤/🔴/⏳ 状态演出
+var _intro_confirm: Control = null ## ✓/✗ 确认行
+var _pending := {}                 ## 待确认 {name, nickname, transcript}
+var _asr_local: Object = null      ## 端侧 ASR（Android MaliangAsr），null=服务端识别
+var _local_session := false
+
 func _ready() -> void:
 	_setup_background()
 	_setup_book()
 	_voice = AudioStreamPlayer.new()
 	add_child(_voice)
+	api = Api.new()
+	api.name = "Api"
+	add_child(api)
+	mic = MicRecorder.new()
+	mic.name = "MicRecorder"
+	add_child(mic)
+	_setup_local_asr()
 	_setup_skip()
 	_next_page()
+
+## 端侧 ASR（与 world.gd 同路由策略：插件就绪走本地，否则整段 PCM 上传）。
+func _setup_local_asr() -> void:
+	if not Engine.has_singleton("MaliangAsr"):
+		return
+	_asr_local = Engine.get_singleton("MaliangAsr")
+	_asr_local.connect("final_result", _on_local_final)
+	_asr_local.connect("asr_error", func(_msg: String) -> void:
+		_asr_local = null
+		_local_session = false)
+	_asr_local.initialize()
+
+func _exit_tree() -> void:
+	# 场景切走时断开插件信号，防悬空回调
+	if _asr_local != null:
+		if _asr_local.is_connected("final_result", _on_local_final):
+			_asr_local.disconnect("final_result", _on_local_final)
 
 func _setup_background() -> void:
 	var bg := TextureRect.new()
@@ -204,20 +241,149 @@ func _on_option(p: Dictionary, opt: Dictionary, btn: Button) -> void:
 	tw.tween_interval(0.5)
 	tw.tween_callback(_next_page)
 
-## P5 接入 ASR 自我介绍；框架阶段直接提供跳过点继续。
+## ASR 自我介绍：按住大话筒说话 → 转写 → 提取名字 → TTS 复述确认（✓/✗），多轮重问。
 func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
-	var mic := Label.new()
-	mic.text = "🎤"
-	mic.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	mic.add_theme_font_size_override("font_size", 120)
-	box.add_child(mic)
-	var next := Button.new()
-	next.text = "▶"
-	next.add_theme_font_size_override("font_size", 44)
-	next.flat = true
-	next.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	next.pressed.connect(_next_page)
-	box.add_child(next)
+	_intro_tries = 0
+	_intro_status = Label.new()
+	_intro_status.text = "🎤"
+	_intro_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_intro_status.add_theme_font_size_override("font_size", 110)
+	box.add_child(_intro_status)
+
+	var hold := Button.new()
+	hold.text = "按住说话"
+	hold.add_theme_font_size_override("font_size", 40)
+	hold.custom_minimum_size = Vector2(360.0, 110.0)
+	hold.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.95, 0.55, 0.45)
+	style.set_corner_radius_all(55)
+	hold.add_theme_stylebox_override("normal", style)
+	var down := style.duplicate() as StyleBoxFlat
+	down.bg_color = Color(0.85, 0.35, 0.3)
+	hold.add_theme_stylebox_override("pressed", down)
+	hold.add_theme_stylebox_override("hover", style)
+	hold.button_down.connect(_intro_start)
+	hold.button_up.connect(_intro_stop)
+	box.add_child(hold)
+
+	# 名字确认行：听完「你叫X对不对呀」后点 ✓/✗（初始隐藏）
+	_intro_confirm = HBoxContainer.new()
+	(_intro_confirm as HBoxContainer).alignment = BoxContainer.ALIGNMENT_CENTER
+	(_intro_confirm as HBoxContainer).add_theme_constant_override("separation", 40)
+	_intro_confirm.visible = false
+	for spec in [["✓", Color(0.45, 0.8, 0.45), true], ["✗", Color(0.9, 0.5, 0.45), false]]:
+		var b := Button.new()
+		b.text = String(spec[0])
+		b.custom_minimum_size = Vector2(130.0, 110.0)
+		b.add_theme_font_size_override("font_size", 64)
+		var s := StyleBoxFlat.new()
+		s.bg_color = spec[1]
+		s.set_corner_radius_all(30)
+		b.add_theme_stylebox_override("normal", s)
+		b.add_theme_stylebox_override("hover", s)
+		b.add_theme_stylebox_override("pressed", s)
+		b.pressed.connect(_on_intro_confirm.bind(bool(spec[2])))
+		(_intro_confirm as HBoxContainer).add_child(b)
+	box.add_child(_intro_confirm)
+	_intro_confirm.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+
+func _intro_start() -> void:
+	if _intro_recording:
+		return
+	_voice.stop() # 别和旁白抢
+	_intro_recording = true
+	_intro_pcm = PackedByteArray()
+	_intro_status.text = "🔴"
+	mic.start()
+	_local_session = _asr_local != null and _asr_local.isReady()
+	if _local_session:
+		_asr_local.startSession()
+
+func _intro_stop() -> void:
+	if not _intro_recording:
+		return
+	_intro_recording = false
+	_drain_intro()
+	mic.stop()
+	_intro_status.text = "⏳"
+	if _local_session:
+		_asr_local.stopSession() # final_result 信号回来后 _on_local_final
+	else:
+		_submit_intro("", _intro_pcm)
+
+func _drain_intro() -> void:
+	var chunk := mic.drain_pcm16k()
+	if chunk.is_empty():
+		return
+	if _local_session:
+		_asr_local.feedPcm(chunk)
+	else:
+		_intro_pcm.append_array(chunk)
+
+func _on_local_final(text: String) -> void:
+	_local_session = false
+	_submit_intro(text.strip_edges(), PackedByteArray())
+
+## 提交自我介绍：转写（端侧）或 PCM（服务端识别）→ 名字 + 确认音频。
+func _submit_intro(transcript: String, pcm: PackedByteArray) -> void:
+	var body := {}
+	if not transcript.is_empty():
+		body["transcript"] = transcript
+	elif not pcm.is_empty():
+		body["pcmBase64"] = Marshalls.raw_to_base64(pcm)
+		body["rate"] = 16000
+	else:
+		_intro_retry()
+		return
+	var res := await api.post_json("/onboarding/intro", body)
+	var name := String(res.get("name", ""))
+	if name.is_empty():
+		_intro_retry()
+		return
+	_pending = {
+		"name": name,
+		"nickname": String(res.get("nickname", name)),
+		"transcript": String(res.get("transcript", transcript)),
+	}
+	_intro_status.text = "😊"
+	var audio := await api.fetch_audio(String(res.get("confirmTtsAsset", "")))
+	_play_pcm(audio["bytes"] as PackedByteArray, int(audio["rate"]))
+	_intro_confirm.visible = true
+
+## 没听到名字：重问（预制 retry 音频），到达上限先叫「小朋友」继续，不卡住小朋友。
+func _intro_retry() -> void:
+	_intro_tries += 1
+	if _intro_tries >= INTRO_MAX_TRIES:
+		answers["name"] = ""
+		answers["nickname"] = "小朋友"
+		_next_page()
+		return
+	_intro_status.text = "🎤"
+	_play("ob_intro_retry")
+
+func _on_intro_confirm(yes: bool) -> void:
+	_intro_confirm.visible = false
+	if yes:
+		answers["name"] = String(_pending.get("name", ""))
+		answers["nickname"] = String(_pending.get("nickname", "小朋友"))
+		answers["intro"] = String(_pending.get("transcript", ""))
+		_next_page()
+	else:
+		_intro_retry()
+
+## 播服务端返回的 PCM16 音频（确认语等运行期合成内容）。
+func _play_pcm(bytes: PackedByteArray, rate: int) -> void:
+	if bytes.is_empty():
+		return
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.stereo = false
+	wav.data = bytes
+	_voice.stop()
+	_voice.stream = wav
+	_voice.play()
 
 ## P6 接入形象生成确认；框架阶段直接提供跳过点继续。
 func _build_generate(box: VBoxContainer, _p: Dictionary) -> void:
@@ -242,6 +408,8 @@ func _on_page_shown(p: Dictionary) -> void:
 		_story_auto_t = maxf(dur, 0.5) + 1.2 # 旁白讲完停 1.2s 自动翻页
 
 func _process(delta: float) -> void:
+	if _intro_recording:
+		_drain_intro() # 录音时持续排空采集缓冲（端侧喂插件/服务端攒整段）
 	if _story_auto_t > 0.0 and not _flipping:
 		_story_auto_t -= delta
 		if _story_auto_t <= 0.0 and page_idx >= 0 and String(PAGES[page_idx]["kind"]) == "story":

@@ -83,10 +83,8 @@ var online := false
 var _villager_count := 0          ## 村民散开序号（避免堆叠在中心）
 
 # 音频 I/O（真机：麦克风采集 + TTS 播放）
-var _mic_player: AudioStreamPlayer
+var _mic: MicRecorder
 var _tts_player: AudioStreamPlayer
-var _capture: AudioEffectCapture
-var _rec_rate := 44100
 # 边录边传：录音时持续把采集到的 PCM 攒成小块发给后端（上传与说话重叠）
 var _pending_pcm := PackedByteArray()
 var _chunk_accum := 0.0   ## 距上次发分片的累计秒数
@@ -119,18 +117,10 @@ func _ready() -> void:
 	_bootstrap() # 在线引导（best-effort，离线则保留占位 NPC）
 
 func _setup_audio() -> void:
-	# 录音总线 + 采集效果（静音，不外放麦克风）
-	var idx := AudioServer.bus_count
-	AudioServer.add_bus(idx)
-	AudioServer.set_bus_name(idx, "Record")
-	AudioServer.set_bus_mute(idx, true)
-	_capture = AudioEffectCapture.new()
-	AudioServer.add_bus_effect(idx, _capture)
-	_mic_player = AudioStreamPlayer.new()
-	_mic_player.stream = AudioStreamMicrophone.new()
-	_mic_player.bus = "Record"
-	add_child(_mic_player)
-	_rec_rate = int(AudioServer.get_mix_rate())
+	# 麦克风采集抽到 MicRecorder（与 onboarding 共用）；TTS 播放器保留在本场景
+	_mic = MicRecorder.new()
+	_mic.name = "MicRecorder"
+	add_child(_mic)
 	_tts_player = AudioStreamPlayer.new()
 	add_child(_tts_player)
 
@@ -957,10 +947,7 @@ func _on_listen() -> void:
 	_pending_pcm = PackedByteArray()
 	_chunk_accum = 0.0
 	_streamed_any = false
-	if _capture != null:
-		_capture.clear_buffer()
-	if _mic_player != null and not _mic_player.playing:
-		_mic_player.play()
+	_mic.start()
 	# 路由定格：端侧模型就绪 → 本地识别（分片不上传，只送最终文本）；否则服务端流式。
 	_local_asr_session = _asr_local != null and _asr_local.isReady()
 	if _local_asr_session:
@@ -976,10 +963,9 @@ func _on_send() -> void:
 	thinking_label.visible = true
 	banner.visible = false
 	# 收尾：把残留缓冲 + 最后一截采集都发出去，再触发识别/回复。
-	_pending_pcm.append_array(_capture_pcm16k())
+	_pending_pcm.append_array(_mic.drain_pcm16k())
 	_flush_pending_chunk()
-	if _mic_player != null:
-		_mic_player.stop()
+	_mic.stop()
 	if _local_asr_session:
 		_asr_local.stopSession() # final_result 信号回来后走 voice_transcript
 	else:
@@ -991,7 +977,7 @@ func _on_send() -> void:
 
 ## 录音中周期性把采集缓冲攒成分片发出（上传与说话重叠，松手时音频已基本传完）。
 func _stream_recording(delta: float) -> void:
-	_pending_pcm.append_array(_capture_pcm16k())
+	_pending_pcm.append_array(_mic.drain_pcm16k())
 	_chunk_accum += delta
 	if _chunk_accum >= 0.15:
 		_flush_pending_chunk()
@@ -1005,28 +991,6 @@ func _flush_pending_chunk() -> void:
 			backend.send_voice_chunk(Marshalls.raw_to_base64(_pending_pcm))
 		_pending_pcm = PackedByteArray()
 		_streamed_any = true
-
-## 读采集缓冲 → 单声道 + 线性重采样到 16k 16bit PCM 字节。
-func _capture_pcm16k() -> PackedByteArray:
-	var out := PackedByteArray()
-	if _capture == null:
-		return out
-	var avail := _capture.get_frames_available()
-	if avail <= 0:
-		return out
-	var frames := _capture.get_buffer(avail)
-	var ratio := 16000.0 / float(_rec_rate)
-	var dst_n := int(frames.size() * ratio)
-	out.resize(dst_n * 2)
-	for i in range(dst_n):
-		var src_i := int(i / ratio)
-		if src_i >= frames.size():
-			break
-		var s: float = (frames[src_i].x + frames[src_i].y) * 0.5
-		var v := int(clampf(s, -1.0, 1.0) * 32767.0)
-		out[i * 2] = v & 0xFF
-		out[i * 2 + 1] = (v >> 8) & 0xFF
-	return out
 
 func _on_character_response(data: Dictionary) -> void:
 	if _think_timer != null:

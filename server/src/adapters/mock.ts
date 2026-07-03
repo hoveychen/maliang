@@ -65,6 +65,12 @@ export function createMockAdapters(): ServiceAdapters {
         if (likeM) facts.push(`小朋友喜欢${likeM[1]}`);
         return facts.filter((f) => !ctx.existingMemory.includes(f));
       },
+      async extractProfile(transcript: string): Promise<{ name: string; nickname: string }> {
+        // mock：确定性从「我叫X / 我是X」提取；真实接 LLM 自由理解（含称呼、小名）
+        const m = /我(?:叫|是)([^\s，。!！?？]{1,8})/.exec(transcript);
+        const name = m ? m[1] : '';
+        return { name, nickname: name };
+      },
       async respond(prompt: string): Promise<string> {
         return `（mock 回应）你说的是「${prompt}」对吗？`;
       },
