@@ -5,6 +5,10 @@ extends RefCounted
 
 const SPEED := 8.0 ## 世界单位/秒
 const ARRIVE := 1.0
+const DELIVER_ARRIVE := 2.6   ## 送信到达半径：目标角色自身占格，只能走到旁边半格（~1.6m）
+const WAYPOINT_ARRIVE := 0.6  ## waypoint 切换半径（半格 1m 内够近即换下一个）
+const REPATH_WAIT := 0.6      ## 被挡（多为角色互撞）后原地等待再重算的秒数
+const REPATH_MAX := 3         ## 单条指令内允许的重算次数，超过弃指令防死磨
 
 var _target: Dictionary = {}
 var _commands: Array = []
@@ -13,6 +17,13 @@ var _idx := 0
 var _state := "idle" ## idle | move | wait | done
 var _wait_t := 0.0
 var _move_to := Vector2.ZERO
+
+# 寻路状态：waypoint 队列 + 无路直线回退 + 被挡等待/重算
+var _waypoints := PackedVector2Array()
+var _wp_i := 0
+var _direct := false      ## true = 无路回退，直接朝目标滑动（旧行为）
+var _repath_wait := 0.0
+var _repaths := 0
 
 # deliver_message：走到目标角色处把话传到
 var _resolver := Callable()  ## (character_id:String) -> Vector2（找不到返回 Vector2.INF）
@@ -48,12 +59,12 @@ func _start(cmd: Dictionary) -> void:
 	match type:
 		"move_to":
 			_move_to = _resolve_target(params)
-			_state = "move"
+			_begin_move()
 		"wander":
 			var radius := float(params.get("radius", 5.0))
 			var off := Vector2(randf() * 2.0 - 1.0, randf() * 2.0 - 1.0) * radius
 			_move_to = WorldGrid.wrap_pos(_target["logical"] + off)
-			_state = "move"
+			_begin_move()
 		"wait":
 			_wait_t = float(params.get("duration", 1.0))
 			_state = "wait"
@@ -66,7 +77,7 @@ func _start(cmd: Dictionary) -> void:
 			if p != Vector2.INF:
 				_move_to = p
 				_delivering = true
-				_state = "move"
+				_begin_move()
 			else:
 				_advance() ## 解析不到目标角色 → 跳过
 		_:
@@ -82,25 +93,60 @@ func _resolve_target(params: Dictionary) -> Vector2:
 	# TODO(M2-real): location_name → 世界坐标（需把世界角色/地点清单喂给意图 LLM）
 	return WorldGrid.wrap_pos(_target["logical"] + Vector2(24.0, 0.0))
 
+## 进入 move 状态：规划 waypoint 队列；无路（目标不可达/已在原格）回退直线滑动。
+func _begin_move() -> void:
+	_state = "move"
+	_repaths = 0
+	_repath_wait = 0.0
+	_plan_path()
+
+func _plan_path() -> void:
+	_waypoints = Pathfinder.find_path(_target["logical"], _move_to, _span(), _char_id())
+	_wp_i = 0
+	_direct = _waypoints.is_empty()
+
 func _step_move(delta: float) -> void:
 	var cur: Vector2 = _target["logical"]
-	var d := WorldGrid.shortest_delta(cur, _move_to)
-	if d.length() <= ARRIVE:
+	var arrive := DELIVER_ARRIVE if _delivering else ARRIVE
+	if WorldGrid.shortest_delta(cur, _move_to).length() <= arrive:
 		if _delivering:
 			_delivering = false
 			if _deliverer.is_valid():
 				_deliverer.call(_deliver_id, _deliver_msg)
 		_advance()
 		return
+	if _repath_wait > 0.0:
+		_repath_wait -= delta # 被挡后原地等一拍（让对方走开），再从当前位置局部重算
+		if _repath_wait <= 0.0:
+			_plan_path()
+		return
+	# 子目标：当前 waypoint；队列走完（或直线回退）后收尾到精确目标
+	var sub := _move_to if _direct or _wp_i >= _waypoints.size() else _waypoints[_wp_i]
+	var d := WorldGrid.shortest_delta(cur, sub)
+	if not _direct and _wp_i < _waypoints.size() and d.length() <= WAYPOINT_ARRIVE:
+		_wp_i += 1
+		return
 	var step_vec := d.normalized() * SPEED * delta
 	if step_vec.length() > d.length():
 		step_vec = d
-	# 统一走 Mover：地形台阶规则 + 物件占地阻挡（整步不行退化单轴滑动）
-	var moved := Mover.attempt(cur, step_vec, int(_target.get("span", 2)))
+	# 统一走 Mover：地形台阶规则 + 物件占地 + 角色互撞（整步不行退化单轴滑动）
+	var moved := Mover.attempt(cur, step_vec, _span(), _char_id())
 	if moved == cur:
-		_advance() # 被崖壁/水/物件挡死：放弃当前指令，避免原地磨墙
+		_repaths += 1
+		if _repaths > REPATH_MAX:
+			_advance() # 反复被挡（目标被围死等）：放弃当前指令，避免原地磨墙
+			return
+		_repath_wait = REPATH_WAIT
 		return
 	_target["logical"] = moved
+	if _char_id() != "":
+		OccupancyMap.char_register(_char_id(), moved, _span()) # 角色层迁移
+
+func _span() -> int:
+	return int(_target.get("span", 2))
+
+func _char_id() -> String:
+	return String(_target.get("id", ""))
 
 func _step_wait(delta: float) -> void:
 	_wait_t -= delta

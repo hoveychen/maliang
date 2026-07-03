@@ -40,6 +40,16 @@ func _init() -> void:
 	fails += _check("prop wall", WorldGrid.to_tile(into_prop) != Vector2i(3, 68), true)
 	OccupancyMap.clear()
 
+	# 角色层阻挡：他人站位挡路；排除自己后原地小步不被自己脚印挡
+	var me := TerrainMap.tile_center(Vector2i(2, 68))
+	OccupancyMap.char_register("me", me, 2)
+	OccupancyMap.char_register("other", TerrainMap.tile_center(Vector2i(3, 68)), 2)
+	fails += _check("self not wall", Mover.attempt(me, Vector2(0.2, 0.0), 2, "me") != me, true)
+	fails += _check("no exclude self-blocked", Mover.attempt(me, Vector2(0.2, 0.0)) == me, true)
+	var into_char := Mover.attempt(me, Vector2(2.0, 0.0), 2, "me")
+	fails += _check("char wall", WorldGrid.to_tile(into_char) != Vector2i(3, 68), true)
+	OccupancyMap.clear()
+
 	if fails == 0:
 		print("mover tests PASS")
 	else:

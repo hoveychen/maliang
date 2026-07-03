@@ -158,7 +158,9 @@ func _setup_npcs() -> void:
 		var npc := PaperCharacter.new()
 		add_child(npc)
 		npc.setup(critter_tex, d["color"], d["name"])
-		npcs.append({ "node": npc, "logical": d["logical"] })
+		var lg := WorldGrid.wrap_pos(d["logical"])
+		npcs.append({ "node": npc, "logical": lg, "id": "demo_%s" % d["name"] })
+		OccupancyMap.char_register("demo_%s" % d["name"], lg, 2)
 		_start_ambient_wander(npcs[npcs.size() - 1])
 
 ## 让角色自主活动：循环「等一会 → 就近 wander」。
@@ -471,6 +473,7 @@ func _bootstrap() -> void:
 	backend.url = (api.base as String).replace("http", "ws") + "/ws"
 	backend.connect_to_server()
 	for n in npcs:
+		OccupancyMap.char_unregister(String(n.get("id", "")))
 		(n["node"] as Node).queue_free() # 清掉离线占位
 	npcs.clear()
 	var chars: Array = world.get("characters", [])
@@ -522,7 +525,11 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 			_villager_count += 1
 			var ang := float(k) * 2.399963
 			logical = WorldGrid.wrap_pos(center + Vector2(cos(ang), sin(ang)) * (10.0 + float(k) * 3.0))
-	npcs.append({ "node": npc, "logical": logical, "id": String(c.get("id", "")), "is_fairy": is_fairy })
+	var cid := String(c.get("id", ""))
+	if cid.is_empty():
+		cid = String(c.get("name", "")) # 后端无 id 时用名字兜底，保证角色层有主
+	npcs.append({ "node": npc, "logical": logical, "id": cid, "is_fairy": is_fairy })
+	OccupancyMap.char_register(cid, logical, 2)
 	if not is_fairy:
 		_start_ambient_wander(npcs[npcs.size() - 1])
 
