@@ -197,14 +197,36 @@ func _start_ambient_wander(npc_dict: Dictionary) -> void:
 	})
 	_executors.append(ex)
 
-## 玩家角色：占位形象（粉色 critter），后续由 onboarding 生成的形象替换。
+## 玩家角色：称呼来自 onboarding 档案；先占位形象（粉色 critter），
+## 在线后由 _apply_player_sprite 换成档案里生成的形象。
 func _setup_player() -> void:
 	var node := PaperCharacter.new()
 	add_child(node)
-	node.setup(critter_tex, Color(1.0, 0.74, 0.80), "我")
+	var prof := PlayerProfile.load_profile()
+	var pname := String(prof.get("nickname", ""))
+	if pname.is_empty():
+		pname = String(prof.get("name", ""))
+	if pname.is_empty():
+		pname = "我"
+	node.setup(critter_tex, Color(1.0, 0.74, 0.80), pname)
 	var spawn := _find_free_spot(focus_logical, PLAYER_SPAN)
 	player = { "node": node, "logical": spawn, "id": PLAYER_ID, "span": PLAYER_SPAN }
 	OccupancyMap.char_register(PLAYER_ID, spawn, PLAYER_SPAN)
+
+## 档案里有生成形象时，从服务端拉取替换占位（离线/失败静默保留占位）。
+func _apply_player_sprite() -> void:
+	var asset := String(PlayerProfile.load_profile().get("sprite_asset", ""))
+	if asset.is_empty() or player.is_empty():
+		return
+	var tex := await api.fetch_texture(asset)
+	if tex == null or player.is_empty():
+		return
+	var node := player["node"] as PaperCharacter
+	node.texture = tex
+	# 生成图按高度归一化到 5 单位（小朋友比 6 单位的村民略矮），脚底对齐
+	node.pixel_size = 5.0 / float(tex.get_height())
+	node.offset = Vector2(0.0, float(tex.get_height()) / 2.0)
+	node.modulate = Color.WHITE
 
 ## 离线模式的小仙子随从（在线时 _bootstrap 会清掉、换成服务端小神仙）。
 ## 悬浮飞行：不登记占用图、不走寻路，由 _update_fairy 驱动跟随玩家。
@@ -811,6 +833,7 @@ func _on_failed(reason: String) -> void:
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 func _bootstrap() -> void:
+	_apply_player_sprite() # 档案形象替换占位（并行拉取，不阻塞世界引导）
 	# 加载固定的 default 世界（含预生成村民），不再每次新建
 	var world: Dictionary = await api.get_world("default")
 	if world.is_empty():

@@ -27,9 +27,9 @@ func _tick() -> void:
 			if not buttons.is_empty():
 				(buttons[0] as Button).emit_signal("pressed")
 		40:
-			# change_scene_to_file 挂到当前场景；World 场景根名为 "World"
+			# 出发 → 童话书 onboarding（根名 "Onboarding"）
 			var cur := current_scene
-			_check("switched to world", cur != null and cur.name == "World", true)
+			_check("switched to onboarding", cur != null and cur.name == "Onboarding", true)
 			if fails == 0:
 				print("visual_menu PASS")
 			else:
