@@ -6,6 +6,7 @@ import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
+import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
 import { RateLimiter } from './ratelimit.ts';
 import type { Character, VoiceResponse } from './types.ts';
@@ -24,7 +25,7 @@ function seedFairy(worldId: string): Character {
     name: '小神仙',
     personality: '温柔的小神仙，能按小朋友的想法创造新伙伴。',
     voiceId: 'mock-voice-cn-fairy',
-    appearance: { visualDescription: '发光的可爱小神仙', spriteAsset: '', scale: 1.2 },
+    appearance: { visualDescription: FAIRY_VISUAL_DESC, spriteAsset: '', scale: 1.2 },
     memory: [],
     chatHistory: [],
     state: 'idle',
@@ -66,17 +67,25 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { id: world.id, characters: characterListView(store, world.id) };
   });
 
-  // 为世界里的小神仙补一张真实 sprite（幂等：已有则跳过）。一次性 seed 用。
-  app.post<{ Params: { id: string } }>('/worlds/:id/fairy-sprite', async (req, reply) => {
+  // 为世界里的小神仙补一张真实 sprite。幂等：已有则跳过；?force=true 强制重生成；
+  // body 带 pngBase64 时直接存该图（部署验收过的候选，确定性替换，隐含 force）。
+  app.post<{
+    Params: { id: string };
+    Querystring: { force?: string };
+    Body: { pngBase64?: string } | null;
+  }>('/worlds/:id/fairy-sprite', { bodyLimit: 8 * 1024 * 1024 }, async (req, reply) => {
     const fairy = characterListView(store, req.params.id).find((c) => c.isFairy);
     if (!fairy) return reply.code(404).send({ error: 'no fairy in world' });
-    if (fairy.appearance.spriteAsset) {
+    const provided = req.body?.pngBase64;
+    const force = req.query.force === 'true' || req.query.force === '1';
+    if (fairy.appearance.spriteAsset && !force && !provided) {
       return { id: fairy.id, spriteAsset: fairy.appearance.spriteAsset, regenerated: false };
     }
-    const desc =
-      '一个发光的可爱小精灵神仙，圆润 Q 版，柔和暖色光晕，温柔微笑，飘逸的小翅膀，儿童绘本插画风格，干净背景，全身立绘';
-    const hash = await generateSprite(adapters, desc, store);
+    const hash = provided
+      ? store.putAsset({ bytes: Uint8Array.from(Buffer.from(provided, 'base64')), mime: 'image/png' })
+      : await generateSprite(adapters, FAIRY_VISUAL_DESC, store);
     fairy.appearance.spriteAsset = hash;
+    fairy.appearance.visualDescription = FAIRY_VISUAL_DESC;
     store.saveCharacter(fairy);
     return { id: fairy.id, spriteAsset: hash, regenerated: true };
   });

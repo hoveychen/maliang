@@ -100,9 +100,12 @@ export function createAdapters(config: Config): ServiceAdapters {
     return { ...mock, asr, tts };
   }
   const client = new OpenRouterClient(config.openrouterApiKey as string);
+  // 生图单独用长超时客户端：实测 gemini 生图常态 60~75s，共享 25s 客户端必超时；
+  // 语音意图等文本请求仍保持 25s（保护对话闭环延迟）。
+  const imageClient = new OpenRouterClient(config.openrouterApiKey as string, 120000);
   return {
     llm: new OpenRouterLLMAdapter(client, config.llmModel),
-    image: new OpenRouterImageAdapter(client, config.imageModel),
+    image: new OpenRouterImageAdapter(imageClient, config.imageModel),
     cutout: new ChromaKeyCutoutAdapter(),
     asr,
     tts,
