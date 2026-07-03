@@ -19,14 +19,14 @@ const DIRS: Array[Vector2i] = [
 ## 不含起点格，含终点格）；无路/已在原格返回空数组（调用方回退直线滑动）。
 ## 目标格不可通行时（如目标是角色/物件所在），螺旋搜索最近可通行格替代；
 ## exclude_id = 寻路者自己的角色 id（角色层排除自己）；
-## simplify=false 保留逐格路径（测试用），true 时合并同向直线段。
+## simplify=false 保留逐格路径（测试用），true 时做 string-pulling 视线拉直。
 static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id := "", simplify := true, max_iter := 8000) -> PackedVector2Array:
 	var start := OccupancyMap.to_cell(from_pos)
 	var goal := _resolve_goal(to_pos, span, exclude_id)
 	if goal == Vector2i(-1, -1) or _wrap(start) == goal:
 		return PackedVector2Array()
 
-	var start_i := _idx(start)
+	var start_i := _idx(_wrap(start))
 	var goal_i := _idx(goal)
 	var open: Array = []  ## 二叉堆，元素 [f, 序号, cell_idx]（序号作稳定 tiebreak）
 	var g := {start_i: 0}
@@ -40,7 +40,7 @@ static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id 
 		iter += 1
 		var cur_i: int = _heap_pop(open)[2]
 		if cur_i == goal_i:
-			return _reconstruct(came, cur_i, start_i, simplify)
+			return _reconstruct(came, cur_i, start_i, from_pos, span, exclude_id, simplify)
 		if closed.has(cur_i):
 			continue
 		closed[cur_i] = true
@@ -120,33 +120,55 @@ static func _heuristic(a: Vector2i, b: Vector2i) -> int:
 	dz = mini(dz, OccupancyMap.CELLS - dz)
 	return DIAGONAL * mini(dx, dz) + STRAIGHT * absi(dx - dz)
 
-static func _reconstruct(came: Dictionary, goal_i: int, start_i: int, simplify: bool) -> PackedVector2Array:
-	var cells: Array[Vector2i] = []
+static func _reconstruct(came: Dictionary, goal_i: int, start_i: int, from_pos: Vector2, span: int, exclude_id: String, simplify: bool) -> PackedVector2Array:
+	var pts := PackedVector2Array()
 	var cur := goal_i
 	while cur != start_i:
-		cells.push_front(_from_idx(cur))
+		pts.append(cell_center(_from_idx(cur)))
 		cur = came[cur]
-	if simplify:
-		cells = _merge_collinear(cells, _from_idx(start_i))
+	pts.reverse()
+	return _smooth(from_pos, pts, span, exclude_id) if simplify else pts
+
+## string-pulling 视线拉直：从锚点起贪心跳到最远的可通视 waypoint，
+## 把 8 向楼梯折线拉成平滑直线段（也顺带缩短路长）。
+static func _smooth(from_pos: Vector2, pts: PackedVector2Array, span: int, exclude_id: String) -> PackedVector2Array:
 	var out := PackedVector2Array()
-	for c in cells:
-		out.append(cell_center(c))
+	var anchor := WorldGrid.wrap_pos(from_pos)
+	var i := 0
+	while i < pts.size():
+		var best := i
+		var j := pts.size() - 1
+		while j > i:
+			if _segment_ok(anchor, pts[j], span, exclude_id):
+				best = j
+				break
+			j -= 1
+		out.append(pts[best])
+		anchor = pts[best]
+		i = best + 1
 	return out
 
-## 合并同向直线段：只保留方向变化处与终点的 waypoint。
-static func _merge_collinear(cells: Array[Vector2i], start: Vector2i) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	var prev := start
-	var prev_dir := Vector2i.ZERO
-	for i in range(cells.size()):
-		var d := WorldGrid.shortest_delta(cell_center(prev), cell_center(cells[i]))
-		var dir := Vector2i(signi(roundi(d.x * 2.0)), signi(roundi(d.y * 2.0)))
-		if i > 0 and dir != prev_dir:
-			out.append(cells[i - 1])
-		prev_dir = dir
-		prev = cells[i]
-	out.append(cells[cells.size() - 1])
-	return out
+## 线段通视判定：沿 a→b 每 0.1m 采样，逐点复刻 Mover._passable
+## （footprint 双层占用 + 跨 tile can_step），保证运行时微步照样走得通。
+static func _segment_ok(a: Vector2, b: Vector2, span: int, exclude_id: String) -> bool:
+	var d := WorldGrid.shortest_delta(a, b)
+	var dist := d.length()
+	if dist < 0.001:
+		return true
+	var steps := ceili(dist / 0.1)
+	var prev := a
+	for k in range(1, steps + 1):
+		var p := WorldGrid.wrap_pos(a + d * (float(k) / float(steps)))
+		var ft := WorldGrid.to_tile(prev)
+		var tt := WorldGrid.to_tile(p)
+		if ft != tt and not TerrainMap.can_step(ft, tt):
+			return false
+		var origin := OccupancyMap.footprint_origin(p, span)
+		if not OccupancyMap.is_free_rect(origin, span, span) \
+				or not OccupancyMap.char_area_free(origin, span, span, exclude_id):
+			return false
+		prev = p
+	return true
 
 static func _wrap(c: Vector2i) -> Vector2i:
 	return Vector2i(posmod(c.x, OccupancyMap.CELLS), posmod(c.y, OccupancyMap.CELLS))

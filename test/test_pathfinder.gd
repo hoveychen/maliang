@@ -14,10 +14,11 @@ func _init() -> void:
 	fails += _check("flat reaches", _near(p[p.size() - 1], b, 1.0), true)
 	fails += _check("flat mover-executable", _executable(a, p), true)
 
-	# 简化版：同向直线段合并，waypoint 数明显更少且终点一致
+	# 拉直版（string-pulling）：平地无遮挡 → 单段直线；终点一致
 	var ps := Pathfinder.find_path(a, b)
-	fails += _check("simplify shorter", ps.size() < p.size(), true)
-	fails += _check("simplify same end", ps[ps.size() - 1] == p[p.size() - 1], true)
+	fails += _check("smooth flat single segment", ps.size(), 1)
+	fails += _check("smooth same end", ps[ps.size() - 1] == p[p.size() - 1], true)
+	fails += _check("smooth fine-walkable", _fine_walkable(a, ps), true)
 
 	# 绕池塘：南岸→北岸，无 waypoint 踩水，全程可执行
 	var south := TerrainMap.tile_center(Vector2i(24, 31))
@@ -26,6 +27,11 @@ func _init() -> void:
 	fails += _check("pond found", pond.size() > 0, true)
 	fails += _check("pond no water", _no_water(pond), true)
 	fails += _check("pond mover-executable", _executable(south, pond), true)
+	# 拉直后：路长不增、waypoint 更少、0.13m 细步（运行时步长）照样走得通
+	var pond_s := Pathfinder.find_path(south, north)
+	fails += _check("pond smooth shorter", _path_len(south, pond_s) <= _path_len(south, pond) + 0.01, true)
+	fails += _check("pond smooth fewer wp", pond_s.size() < pond.size(), true)
+	fails += _check("pond smooth fine-walkable", _fine_walkable(south, pond_s), true)
 
 	# 绕物件：竖墙 x=10, z=60..66 挡直线，绕行且可执行；全封死 → 空
 	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(Vector2i(10, 60)), 2, 14)
@@ -34,6 +40,7 @@ func _init() -> void:
 	var wall := Pathfinder.find_path(w_from, w_to, 2, "", false)
 	fails += _check("wall found", wall.size() > 0, true)
 	fails += _check("wall mover-executable", _executable(w_from, wall), true)
+	fails += _check("wall smooth fine-walkable", _fine_walkable(w_from, Pathfinder.find_path(w_from, w_to)), true)
 	# 把角色围死在 4 面墙里（2×2 tile 空腔，四周全占用）
 	OccupancyMap.clear()
 	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(Vector2i(49, 60)), 8, 2)  # 北墙
@@ -118,6 +125,26 @@ func _executable(start: Vector2, path: PackedVector2Array) -> bool:
 			printerr("  not executable at %s -> %s (got %s)" % [str(cur), str(wp), str(moved)])
 			return false
 		cur = moved
+	return true
+
+## 拉直路径按运行时步长（0.13m ≈ SPEED 8 / 60fps）细步走完，每步 Mover.attempt 必须前进。
+func _fine_walkable(start: Vector2, path: PackedVector2Array) -> bool:
+	var cur := start
+	for wp in path:
+		var guard := 0
+		while WorldGrid.shortest_delta(cur, wp).length() > 0.14:
+			var d := WorldGrid.shortest_delta(cur, wp)
+			var step := d.normalized() * minf(0.13, d.length())
+			var moved := Mover.attempt(cur, step)
+			if WorldGrid.shortest_delta(moved, WorldGrid.wrap_pos(cur + step)).length() > 0.001:
+				printerr("  fine-walk blocked at %s toward %s" % [str(cur), str(wp)])
+				return false
+			cur = moved
+			guard += 1
+			if guard > 4000:
+				printerr("  fine-walk stuck toward %s" % str(wp))
+				return false
+		cur = wp
 	return true
 
 func _no_water(path: PackedVector2Array) -> bool:
