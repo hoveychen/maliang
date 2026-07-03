@@ -59,7 +59,8 @@ func _setup(scenario: String, start: Vector2, goal: Vector2) -> void:
 func _tick() -> void:
 	if scene == null or ex == null or walker == null:
 		return
-	scene.set("focus_logical", focus)  # 抢回镜头（联网世界会把 focus 拉到小神仙）
+	scene.set("focus_override", focus) # 抢回镜头（相机默认跟随玩家/联网世界聚焦小神仙）
+	scene.set("focus_logical", focus)
 	if not ex.is_done():
 		ex.step(DT)
 	_place(walker, dict["logical"], 1.4)

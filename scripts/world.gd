@@ -4,8 +4,8 @@ extends Node3D
 ## 逻辑/数据是纯平铺环面；弯曲只在渲染。角色精灵不走 shader，改用 CPU 复算
 ## 弯曲量、沿相机上方向落到弯曲地表（曲面世界放置物体的通用解法）。
 
-const PAN_SPEED := 28.0           ## god 相机平移速度（世界单位/秒）
-const GOD_PITCH_DEG := 47.0       ## 默认 god 视角：地平线落屏幕 ~4/5 高度（约 20% 天空）
+const PLAYER_SPEED := 8.0         ## 方向键直接驱动玩家的速度（与 BehaviorExecutor.SPEED 一致）
+const GOD_PITCH_DEG := 47.0       ## 默认跟随视角：地平线落屏幕 ~4/5 高度（约 20% 天空）
 const LOCK_PITCH_DEG := 30.0      ## lock 跟随：明显放平（3/4 平视，地平线 ~3/4、约 25% 天空）
 const SPRITE_LEAN_FACTOR := 0.55  ## 角色固定倾角 = (90-相机角)*该系数（站立感+面向相机折中）
 const GOD_DIST := 36.0
@@ -18,7 +18,8 @@ const THINK_TIMEOUT := 40.0       ## 「思考中」最长等待秒数；超时(
 const PLAYER_ID := "player"
 const PLAYER_SPAN := 2            ## 玩家占地（半格数），与 NPC 一致
 
-var focus_logical := Vector2.ZERO ## god 相机在环面上聚焦的逻辑坐标（取代玩家）
+var focus_logical := Vector2.ZERO   ## 相机在环面上聚焦的逻辑坐标（跟随玩家/交互对象）
+var focus_override := Vector2.INF   ## 测试脚本抢镜头用：非 INF 时聚焦固定到这里
 var _cur_pitch := GOD_PITCH_DEG
 var _cur_dist := GOD_DIST
 var _target_pitch := GOD_PITCH_DEG
@@ -294,25 +295,33 @@ func _style_label(l: Label, size: int) -> void:
 	l.add_theme_constant_override("outline_size", 6)
 
 func _physics_process(delta: float) -> void:
-	# 方向键平移 god 相机聚焦点（拖拽平移在 _unhandled_input）
+	# 方向键直接驱动玩家（桌面调试；与点击移动同一 Mover 规则）
 	var input := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
-	if input != Vector2.ZERO:
-		focus_logical = WorldGrid.wrap_pos(focus_logical + input * PAN_SPEED * delta)
+	if input != Vector2.ZERO and not player.is_empty():
+		var moved := Mover.attempt(player["logical"], input * PLAYER_SPEED * delta, PLAYER_SPAN, PLAYER_ID)
+		if moved != player["logical"]:
+			player["logical"] = moved
+			OccupancyMap.char_register(PLAYER_ID, moved, PLAYER_SPAN)
 
 func _process(delta: float) -> void:
 	_drain_tts_stream()
 	_step_executors(delta)
 	if _recording:
 		_stream_recording(delta)
-	# 视角缓动（god ↔ lock 的 pitch/dist 过渡）
+	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
 	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)
 	_cur_dist = lerpf(_cur_dist, _target_dist, t)
-	# lock 时聚焦缓动跟随选中角色（它可能在自主走动）
-	if _locked != null and is_instance_valid(_locked):
-		var lg: Vector2 = _find_npc_dict(_locked).get("logical", focus_logical)
-		var fd := WorldGrid.shortest_delta(focus_logical, lg)
-		focus_logical = WorldGrid.wrap_pos(focus_logical + fd * t)
+	# 聚焦缓动：测试 override > 交互对象 > 玩家（饥荒式相机永远跟着「我」）
+	var want := focus_logical
+	if focus_override != Vector2.INF:
+		want = focus_override
+	elif _locked != null and is_instance_valid(_locked):
+		want = _find_npc_dict(_locked).get("logical", focus_logical)
+	elif not player.is_empty():
+		want = player["logical"]
+	var fd := WorldGrid.shortest_delta(focus_logical, want)
+	focus_logical = WorldGrid.wrap_pos(focus_logical + fd * t)
 	_update_camera()
 	chunk_manager.update(focus_logical)
 	_reposition_npcs(delta)
@@ -357,8 +366,8 @@ func _update_ear() -> void:
 		ear_icon.visible = false
 
 func _update_hud() -> void:
-	var t := WorldGrid.to_tile(focus_logical)
-	coord_label.text = "god 视角  tile (%d, %d)  /  %d×%d  环面循环" % [t.x, t.y, WorldGrid.GRID_TILES, WorldGrid.GRID_TILES]
+	var t := WorldGrid.to_tile(player["logical"] if not player.is_empty() else focus_logical)
+	coord_label.text = "tile (%d, %d)  /  %d×%d  环面循环" % [t.x, t.y, WorldGrid.GRID_TILES, WorldGrid.GRID_TILES]
 
 func _unhandled_input(event: InputEvent) -> void:
 	# 调试：选中角色后按 Enter/空格。小神仙→造角色；其他→本地 move_to（离线演示）。
@@ -388,13 +397,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 		if event.position.distance_to(_press_pos) > 6.0:
-			_dragging = true
-		_pan_by_screen(event.relative)
+			_dragging = true # 相机跟随玩家，拖拽不再平移；仅防误触发拾取
 		return
-	# 触屏：拖动平移，点触拾取
+	# 触屏：拖动不平移（跟随相机），点触拾取
 	if event is InputEventScreenDrag:
 		_dragging = true
-		_pan_by_screen(event.relative)
 		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
@@ -410,13 +417,6 @@ func _tap_pick(screen_pos: Vector2) -> void:
 		_enter_interaction(hit)
 	else:
 		_exit_interaction()
-
-## 屏幕拖动 → 世界平移（抓住地图拖的手感；高角俯视下屏幕 x→世界x，y→世界z）
-func _pan_by_screen(rel: Vector2) -> void:
-	if _locked != null:
-		return # lock 模式由跟随驱动，不手动平移
-	var k := _cur_dist * 0.0016
-	focus_logical = WorldGrid.wrap_pos(focus_logical - Vector2(rel.x, rel.y) * k)
 
 ## 屏幕空间拾取：精灵未弯曲，其屏幕位置 = unproject(实际渲染坐标)，与点击对比。
 func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
