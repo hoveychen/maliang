@@ -4,6 +4,8 @@ extends SceneTree
 ## 断言打印 PASS/FAIL；配合 --write-movie 出截帧做视觉 QA。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --write-movie screenshots/click/f.png \
 ##       --fixed-fps 10 --quit-after 110 --script res://test/test_visual_click_move.gd
+## headless 回测（无截图，仅断言）：把 --write-movie <路径> 换成 --headless，或直接跑
+## scripts/test-headless.sh；退出码 = 失败断言数。
 
 const DT := 0.1  ## 与 --fixed-fps 10 对应
 
@@ -22,6 +24,10 @@ func _tick() -> void:
 	if scene == null:
 		return
 	frame += 1
+	if frame == 1:
+		# headless 的假窗口视口只有 64×64，80px 拾取半径会罩住全屏、点空地必中角色；
+		# 强制成与带窗一致的尺寸（_initialize 阶段设置会被窗口初始化覆盖，须在首帧设）。
+		root.size = Vector2i(1280, 720)
 	match frame:
 		10:
 			_tap_ground()
@@ -34,6 +40,7 @@ func _tick() -> void:
 				print("visual_click_move PASS")
 			else:
 				printerr("visual_click_move FAILED: %d" % fails)
+			quit(fails)
 
 ## 点玩家东北方向一块空地：走 _tap_pick 全链路（屏幕→地面拾取→寻路移动→落点标记）。
 func _tap_ground() -> void:

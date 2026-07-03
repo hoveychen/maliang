@@ -3,12 +3,15 @@ extends SceneTree
 ## 播 poi_pond 台词、说完飞回玩家身边。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --write-movie screenshots/poi/f.png \
 ##       --fixed-fps 10 --quit-after 130 --script res://test/test_visual_fairy_poi.gd
+## headless 回测（无截图，仅断言）：把 --write-movie <路径> 换成 --headless，或直接跑
+## scripts/test-headless.sh；退出码 = 失败断言数。
 
 var scene: Node
 var frame := 0
 var fails := 0
 var max_dist := 0.0   ## 小仙子离玩家的最大距离（应明显飞出去）
 var spoke := false
+var returned := false ## 说完台词后曾回到玩家身边
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
@@ -39,19 +42,24 @@ func _tick() -> void:
 	if fairy.is_empty() or player.is_empty():
 		return
 	if frame > 12: # 传送稳定后开始记 POI 飞行距离
-		max_dist = maxf(max_dist, WorldGrid.shortest_delta(fairy["logical"], player["logical"]).length())
+		var d := WorldGrid.shortest_delta(fairy["logical"], player["logical"]).length()
+		max_dist = maxf(max_dist, d)
 		var poi: Dictionary = scene.get("_fairy_poi")
 		if not poi.is_empty() and poi.get("spoke", false):
 			spoke = true
+		# 飞回判定按事件记录而非只看末帧：headless 的 dummy 音频让台词瞬时"播完"，
+		# 时间线整体前移，末帧时可能已在第二次 POI 提醒的飞出途中。
+		if spoke and poi.is_empty() and d <= 6.5:
+			returned = true
 	if frame == 115:
 		_check("fairy flew out to POI (max_dist=%.1f)" % max_dist, max_dist > 5.5, true)
 		_check("poi line spoken", spoke, true)
-		var back := WorldGrid.shortest_delta(fairy["logical"], player["logical"]).length()
-		_check("fairy returned (dist=%.1f)" % back, back <= 6.5, true)
+		_check("fairy returned after speaking", returned, true)
 		if fails == 0:
 			print("visual_fairy_poi PASS")
 		else:
 			printerr("visual_fairy_poi FAILED: %d" % fails)
+		quit(fails)
 
 func _check(name: String, got: Variant, want: Variant) -> void:
 	if got == want:

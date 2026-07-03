@@ -3,6 +3,8 @@ extends SceneTree
 ## 玩家点地走远后小仙子追上来;悬浮高度有上下浮动。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --write-movie screenshots/fairy/f.png \
 ##       --fixed-fps 10 --quit-after 90 --script res://test/test_visual_fairy.gd
+## headless 回测（无截图，仅断言）：把 --write-movie <路径> 换成 --headless，或直接跑
+## scripts/test-headless.sh；退出码 = 失败断言数。
 
 var scene: Node
 var frame := 0
@@ -19,6 +21,9 @@ func _tick() -> void:
 	if scene == null:
 		return
 	frame += 1
+	if frame == 1:
+		# headless 假窗口只有 64×64，屏幕拾取的像素判定会失真；强制与带窗一致（须在首帧设）。
+		root.size = Vector2i(1280, 720)
 	var fairy: Dictionary = scene.call("_find_fairy")
 	if not fairy.is_empty():
 		var hov := float(fairy.get("hover", 0.0))
@@ -47,6 +52,7 @@ func _tick() -> void:
 				print("visual_fairy PASS")
 			else:
 				printerr("visual_fairy FAILED: %d" % fails)
+			quit(fails)
 
 func _check_near(name: String, max_dist: float) -> void:
 	var fairy: Dictionary = scene.call("_find_fairy")
