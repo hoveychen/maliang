@@ -2,7 +2,8 @@ extends SceneTree
 ## 童话书框架验证：故事页自动翻页(无音频时 ~1.7s)、问题页点选项记录答案并翻页、
 ## 全部问题答完(intro/generate 框架期点▶跳过)后落盘档案并切世界场景。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --write-movie screenshots/ob/f.png \
-##       --fixed-fps 10 --quit-after 180 --script res://test/test_visual_onboarding.gd
+##       --fixed-fps 10 --quit-after 420 --script res://test/test_visual_onboarding.gd
+## （故事页按预制旁白实际时长自动翻页,3 页 ~23s,全流程 ~35s）
 
 var ob: Node
 var frame := 0
@@ -51,7 +52,7 @@ func _tick() -> void:
 		else:
 			printerr("visual_onboarding FAILED: %d" % fails)
 		return
-	if frame >= 175:
+	if frame >= 410:
 		done = true
 		printerr("visual_onboarding FAILED: 没有在时限内走完流程 (page_idx=%s)" % str(ob.get("page_idx")))
 
