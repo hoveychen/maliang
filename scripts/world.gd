@@ -15,7 +15,7 @@ const ZOOM_MAX := 64.0
 const CAM_EASE := 6.0             ## 视角过渡速度（pitch/dist/focus 一起缓动）
 const PICK_RADIUS_PX := 80.0
 const THINK_TIMEOUT := 40.0       ## 「思考中」最长等待秒数；超时(响应丢失/网络/TLS)自动清除，杜绝永久卡死
-const MIN_TALK_SEC := 0.4         ## 按住说话低于此时长视为误触：静默取消，不打扰角色/服务端
+const UNMUTE_GRACE := 0.3         ## 闭麦（思考/TTS）结束后的静默恢复期：残响尾音不算开口
 const PLAYER_ID := "player"
 const PLAYER_SPAN := 2            ## 玩家占地（半格数），与 NPC 一致
 const APPROACH_ARRIVE := 2.6      ## 跑向 NPC 的到达半径：对象自身占格，走到旁边即算到（同送信）
@@ -53,10 +53,10 @@ var _tap_marker: MeshInstance3D = null
 var _tap_marker_logical := Vector2.ZERO
 var _tap_marker_t := 0.0
 
-# M2 语音交互
+# M2 语音交互（近身开放麦：无按钮，VAD 自动断句，见 _step_voice）
 var backend: Backend
-var talk_btn: Button               ## 按住说话：button_down 开录、button_up 松手即发；短按视为误触取消
-var _talk_down_ms := 0             ## 本次按下时刻（ms），判定误触短按
+var _vad: VoiceVad = null          ## 近身对话期间非 null：端点检测器（进交互创建，退出置空）
+var _unmute_t := 0.0               ## 闭麦恢复期剩余秒数（UNMUTE_GRACE 倒计时）
 var thinking_label: Label
 var _think_timer: Timer            ## 「思考中」兜底超时（响应没回来时自动解卡）
 var emotion_bubble: Label3D
@@ -93,12 +93,13 @@ var _tts_player: AudioStreamPlayer
 # 边录边传：录音时持续把采集到的 PCM 攒成小块发给后端（上传与说话重叠）
 var _pending_pcm := PackedByteArray()
 var _chunk_accum := 0.0   ## 距上次发分片的累计秒数
-var _streamed_any := false
 var _asr_local: Object = null # 端侧 ASR 插件（Android MaliangAsr），null = 服务端识别
 var _local_asr_session := false # 本次录音走端侧（录音开始时定格，中途不切换）
 # 流式 TTS：tts_chunk 分片先积压再按 generator 空位排空（_drain_tts_stream）
 var _tts_stream_pcm := PackedByteArray()
 var _tts_gen_playback: AudioStreamGeneratorPlayback = null
+var _tts_ending := false  ## 已收到 tts_end：积压排空+缓冲播完后主动 stop（generator 不会自己停）
+var _tts_gen_capacity := 0 ## generator 空缓冲容量（开播时实测，播完判定的基准）
 
 func _ready() -> void:
 	critter_tex = load("res://assets/critter.png")
@@ -425,20 +426,6 @@ func _setup_hud() -> void:
 	heard_label.visible = false
 	layer.add_child(heard_label)
 
-	# 按住说话按钮（交互模式下显示）：一步完成「录音→发送」，幼儿无需两步时序操作
-	talk_btn = Button.new()
-	talk_btn.text = "🎤 按住说话"
-	talk_btn.add_theme_font_size_override("font_size", 30)
-	talk_btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	talk_btn.offset_left = -180.0
-	talk_btn.offset_right = 180.0
-	talk_btn.offset_top = -150.0
-	talk_btn.offset_bottom = -100.0
-	talk_btn.visible = false
-	talk_btn.button_down.connect(_on_talk_down)
-	talk_btn.button_up.connect(_on_talk_up)
-	layer.add_child(talk_btn)
-
 	thinking_label = Label.new()
 	thinking_label.set_anchors_preset(Control.PRESET_CENTER)
 	_style_label(thinking_label, 30)
@@ -477,8 +464,7 @@ func _process(delta: float) -> void:
 	_step_executors(delta)
 	_check_approach()
 	_update_fairy(delta)
-	if _recording:
-		_stream_recording(delta)
+	_step_voice(delta)
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
 	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)
@@ -539,9 +525,13 @@ func _place_on_bent_ground(node: Node3D, base_world: Vector3) -> void:
 func _update_ear() -> void:
 	if selected != null and is_instance_valid(selected):
 		ear_icon.visible = true
+		# 听到声音时耳朵放大脉动：告诉孩子「它听到我说话了」（开放麦唯一的聆听反馈）
+		var pulse := 1.0 + (_vad.level if _vad != null else 0.0) * 0.6
+		ear_icon.scale = ear_icon.scale.lerp(Vector3.ONE * pulse, 0.5)
 		ear_icon.global_position = selected.global_position + Vector3(0.0, _char_top(selected) + 0.5, 0.0)
 	else:
 		ear_icon.visible = false
+		ear_icon.scale = Vector3.ONE
 
 ## 角色立绘顶端相对节点原点（脚底）的高度——头顶挂饰（耳朵/气泡）按此定位，小仙子等小体型不悬空。
 func _char_top(npc: PaperCharacter) -> float:
@@ -777,14 +767,19 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	_locked = npc
 	_target_pitch = LOCK_PITCH_DEG
 	_target_dist = LOCK_DIST
-	banner.text = "按住 🎤 跟%s说话吧" % npc.char_name
+	banner.text = "想说什么就直接跟%s说吧" % npc.char_name
 	banner.visible = true
-	talk_btn.visible = true
 	thinking_label.visible = false
+	# 开放麦：进近身即聆听——开口就说、说完自动发送，全程无按钮无模式（见 _step_voice）
+	_mic.start()
+	_vad = VoiceVad.new()
+	_unmute_t = 0.0
 
 func _exit_interaction() -> void:
 	if _recording:
-		_cancel_recording() # 录到一半退出：静默丢弃，不留半开会话
+		_utterance_cancel() # 说到一半退出：静默丢弃，不留半开会话
+	_mic.stop()
+	_vad = null
 	selected = null
 	_resume_stopped_npc() # 被叫停等玩家的对象恢复闲逛
 	# 切回跟随玩家视角（平滑过渡）
@@ -793,7 +788,6 @@ func _exit_interaction() -> void:
 	_target_dist = GOD_DIST
 	banner.visible = false
 	heard_label.visible = false
-	talk_btn.visible = false
 	thinking_label.visible = false
 
 # ── M2 语音交互 ──────────────────────────────────────────────────────────
@@ -804,7 +798,9 @@ func _setup_backend() -> void:
 	add_child(backend)
 	backend.character_response.connect(_on_character_response)
 	backend.tts_chunk.connect(_on_tts_chunk)
-	backend.tts_end.connect(func() -> void: pass) # 残余积压由 _drain_tts_stream 排空，无需专门收尾
+	# 残余积压由 _drain_tts_stream 排空；generator 不会自己停，标记后播完主动 stop
+	# （否则 _tts_player.playing 永真 → 开放麦永久闭麦、小仙子永久闭嘴）
+	backend.tts_end.connect(func() -> void: _tts_ending = true)
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.failed.connect(_on_failed)
@@ -829,7 +825,7 @@ func _on_failed(reason: String) -> void:
 		banner.text = "我没听清呀，再说一次好不好？"
 		banner.visible = true
 		if _recording:
-			_cancel_recording()
+			_utterance_cancel()
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 func _bootstrap() -> void:
@@ -962,68 +958,84 @@ func _on_local_asr_error(msg: String) -> void:
 	_local_asr_session = false
 	_asr_local = null
 
-## 按下开始聆听：显示耳朵（_update_ear 已处理），开始采集麦克风并开一个边录边传会话。
-func _on_talk_down() -> void:
+# ── 近身对话开放麦（VAD 自动断句：开口即录、说完即发，零按钮零模式）─────────
+
+## 每帧驱动：角色思考/说话时闭麦（半双工防自听），其余时间把麦克风增量喂 VAD。
+func _step_voice(delta: float) -> void:
+	if _vad == null:
+		return
+	var pcm := _mic.drain_pcm16k() # 闭麦期间也持续排空采集缓冲，恢复聆听时不会吃到角色的声音
+	if thinking_label.visible or _tts_player.playing \
+			or (fairy_voice != null and fairy_voice.is_playing()):
+		if _recording:
+			_utterance_cancel() # 时序兜底：闭麦瞬间还在录 → 静默丢弃
+		_vad.reset()
+		_unmute_t = UNMUTE_GRACE # 闭麦刚结束的残响尾音不算开口
+		return
+	if _unmute_t > 0.0:
+		_unmute_t -= delta
+		return
+	_feed_voice_pcm(pcm)
+	if _recording:
+		_chunk_accum += delta
+		if _chunk_accum >= 0.15:
+			_flush_pending_chunk() # 上传与说话重叠，断句时音频已基本传完
+			_chunk_accum = 0.0
+
+## VAD 事件驱动。独立函数：headless 测试注入合成 PCM 走同一链路（test_visual_click_move）。
+func _feed_voice_pcm(pcm: PackedByteArray) -> void:
+	if _vad == null:
+		return
+	for ev in _vad.feed(pcm):
+		match String(ev["type"]):
+			"start":
+				_utterance_begin(ev["pcm"] as PackedByteArray)
+			"speech":
+				_pending_pcm.append_array(ev["pcm"] as PackedByteArray)
+			"end":
+				_utterance_commit()
+			"cancel":
+				_utterance_cancel()
+
+## 开口：开一个识别会话（路由定格），VAD 给的预录头块先送（首音节不丢）。
+func _utterance_begin(head: PackedByteArray) -> void:
 	if selected == null or _recording:
 		return
 	_recording = true
-	_talk_down_ms = Time.get_ticks_msec()
-	banner.text = "我在听… 说完松手哦"
-	banner.visible = true
-	_pending_pcm = PackedByteArray()
+	_pending_pcm = head.duplicate()
 	_chunk_accum = 0.0
-	_streamed_any = false
-	_mic.start()
 	# 路由定格：端侧模型就绪 → 本地识别（分片不上传，只送最终文本）；否则服务端流式。
 	_local_asr_session = _asr_local != null and _asr_local.isReady()
 	if _local_asr_session:
 		_asr_local.startSession()
 	else:
 		backend.send_voice_start(world_id, _selected_id())
+	_flush_pending_chunk()
 
-## 松手即发；按住不足 MIN_TALK_SEC 视为误触，静默取消不打扰角色。
-func _on_talk_up() -> void:
+## 说完（静音断句）：残留分片发出，触发识别/回复。
+func _utterance_commit() -> void:
 	if not _recording:
-		return
-	if float(Time.get_ticks_msec() - _talk_down_ms) / 1000.0 < MIN_TALK_SEC:
-		_cancel_recording()
-		if selected != null:
-			banner.text = "按住 🎤 说话，说完再松手哦"
-			banner.visible = true
 		return
 	_recording = false
 	thinking_label.visible = true
 	banner.visible = false
-	# 收尾：把残留缓冲 + 最后一截采集都发出去，再触发识别/回复。
-	_pending_pcm.append_array(_mic.drain_pcm16k())
 	_flush_pending_chunk()
-	_mic.stop()
 	if _local_asr_session:
 		_asr_local.stopSession() # final_result 信号回来后走 voice_transcript
 	else:
-		if not _streamed_any:
-			# 无麦/空采集时塞个占位分片，闭环仍可由后端驱动（与旧行为一致）
-			backend.send_voice_chunk(Marshalls.raw_to_base64(PackedByteArray([0x52, 0x49, 0x46, 0x46])))
 		backend.send_voice_end()
 	_think_timer.start(THINK_TIMEOUT)  # 兜底：响应没回来也会自动解卡
 
-## 静默丢弃当前录音会话（误触短按/录音中退出交互）：双 ASR 路径都不产生任何回复。
-func _cancel_recording() -> void:
+## 太短的误触/中途退出：静默丢弃本段，双 ASR 路径都不产生任何回复。麦克风保持聆听。
+func _utterance_cancel() -> void:
+	if not _recording:
+		return
 	_recording = false
-	_mic.stop()
 	_pending_pcm = PackedByteArray()
 	if _local_asr_session:
 		_local_asr_session = false # 弃会话即可：插件下次 startSession 会自动释放旧流
 	else:
 		backend.send_voice_cancel()
-
-## 录音中周期性把采集缓冲攒成分片发出（上传与说话重叠，松手时音频已基本传完）。
-func _stream_recording(delta: float) -> void:
-	_pending_pcm.append_array(_mic.drain_pcm16k())
-	_chunk_accum += delta
-	if _chunk_accum >= 0.15:
-		_flush_pending_chunk()
-		_chunk_accum = 0.0
 
 func _flush_pending_chunk() -> void:
 	if _pending_pcm.size() > 0:
@@ -1032,7 +1044,6 @@ func _flush_pending_chunk() -> void:
 		else:
 			backend.send_voice_chunk(Marshalls.raw_to_base64(_pending_pcm))
 		_pending_pcm = PackedByteArray()
-		_streamed_any = true
 
 func _on_character_response(data: Dictionary) -> void:
 	if _think_timer != null:
@@ -1067,6 +1078,8 @@ func _start_tts_stream(rate: int) -> void:
 	_tts_player.stream = gen
 	_tts_player.play()
 	_tts_gen_playback = _tts_player.get_stream_playback()
+	_tts_ending = false
+	_tts_gen_capacity = _tts_gen_playback.get_frames_available() # 刚开播缓冲全空 = 实际容量
 
 func _on_tts_chunk(pcm: PackedByteArray) -> void:
 	if _tts_gen_playback != null:
@@ -1075,7 +1088,16 @@ func _on_tts_chunk(pcm: PackedByteArray) -> void:
 
 ## 把积压 PCM16 按 generator 剩余空位转成帧推入（每帧 Vector2 双声道同值）。
 func _drain_tts_stream() -> void:
-	if _tts_gen_playback == null or _tts_stream_pcm.size() < 2:
+	if _tts_gen_playback == null:
+		return
+	if _tts_stream_pcm.size() < 2:
+		# tts_end 已到且积压排空：等 generator 缓冲基本播完（剩余 <0.05s）就主动停，
+		# playing 才会变 false——开放麦闭麦判定与小仙子闭嘴判定都依赖它。
+		if _tts_ending and _tts_gen_playback.get_frames_available() \
+				>= _tts_gen_capacity - int((_tts_player.stream as AudioStreamGenerator).mix_rate * 0.05):
+			_tts_player.stop()
+			_tts_gen_playback = null
+			_tts_ending = false
 		return
 	var n: int = mini(_tts_gen_playback.get_frames_available(), _tts_stream_pcm.size() / 2)
 	if n <= 0:
@@ -1103,6 +1125,7 @@ func _parse_rate(mime: String, fallback: int) -> int:
 ## 下载 TTS（L16 PCM，采样率随 provider：local Kokoro 24k / 讯飞 16k）→ AudioStreamWAV 播放。
 func _play_tts(asset: String) -> void:
 	_tts_gen_playback = null # 切回整段路径时停掉流式排空
+	_tts_ending = false
 	var audio := await api.fetch_audio(asset)
 	var bytes := audio["bytes"] as PackedByteArray
 	if bytes.is_empty():
