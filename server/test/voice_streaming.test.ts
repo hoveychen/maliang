@@ -54,6 +54,34 @@ test('voice_chunk/voice_end 在无活动会话时不崩；voice_end 回 voice_fa
   assert.ok(!sent.some((m) => m.type === 'character_response'), '不应产出回复');
 });
 
+test('voice_cancel：误触取消——不产出任何回包，gate 释放，随后新会话正常', async () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  seedChar(store, 'w1', 'c1');
+  const sent: any[] = [];
+  const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
+  const session = newVoiceSession();
+  const limiter = new RateLimiter(100, 100);
+  const rest = [createMockAdapters(), store, limiter, 'conn1', session] as const;
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_start', worldId: 'w1', characterId: 'c1' }), ...rest);
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_chunk', audio: b64(640) }), ...rest);
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_cancel' }), ...rest);
+  assert.equal(sent.length, 0, '取消不应产生任何回包（无 character_response/voice_failed/error）');
+  assert.equal(session.active, false, '取消后会话应重置');
+  assert.equal(limiter.activeCount, 0, '取消应释放 gate');
+  // 取消后立刻再来一轮完整会话，应正常回复
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_start', worldId: 'w1', characterId: 'c1' }), ...rest);
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_chunk', audio: b64(1280) }), ...rest);
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_end' }), ...rest);
+  assert.ok(sent.some((m) => m.type === 'character_response'), '取消后的新会话应正常产出回复');
+});
+
+test('voice_cancel：无活动会话时静默忽略不崩', async () => {
+  const { sent, socket, rest } = setup();
+  await handleWsMessage(socket, JSON.stringify({ type: 'voice_cancel' }), ...rest);
+  assert.equal(sent.length, 0, '无会话时取消应静默忽略');
+});
+
 test('voice_transcript：端侧转写直送 → character_response（跳过服务端 ASR）', async () => {
   const { sent, socket, rest } = setup();
   await handleWsMessage(socket, JSON.stringify({ type: 'voice_transcript', worldId: 'w1', characterId: 'c1', transcript: '去公园' }), ...rest);

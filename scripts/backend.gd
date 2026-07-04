@@ -31,6 +31,10 @@ func send_voice_chunk(audio_b64: String) -> void:
 func send_voice_end() -> void:
 	_send({ "type": "voice_end" })
 
+## 误触取消（按住说话太短就松手）：服务端丢弃本次会话，不回任何包。
+func send_voice_cancel() -> void:
+	_send({ "type": "voice_cancel" })
+
 ## 端侧 ASR：平板本地已识别，只上传文本（跳过服务端 ASR）。
 func send_voice_transcript(world_id: String, character_id: String, transcript: String) -> void:
 	_send({ "type": "voice_transcript", "worldId": world_id, "characterId": character_id, "transcript": transcript })
