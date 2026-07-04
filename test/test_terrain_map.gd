@@ -31,14 +31,37 @@ func _init() -> void:
 
 	# 已知样本点（与 terrain_map.gd 的 _paint 布局对应）
 	fails += _check("plaza is path", TerrainMap.tile_type(Vector2i(37, 37)), TerrainMap.T_PATH)
-	fails += _check("west road is path", TerrainMap.tile_type(Vector2i(12, 30)), TerrainMap.T_PATH)
+	fails += _check("north road is path", TerrainMap.tile_type(Vector2i(37, 20)), TerrainMap.T_PATH)
+	fails += _check("market square is path", TerrainMap.tile_type(Vector2i(37, 62)), TerrainMap.T_PATH)
 	fails += _check("pond is water", TerrainMap.tile_type(Vector2i(24, 24)), TerrainMap.T_WATER)
+	fails += _check("spring is water", TerrainMap.tile_type(Vector2i(29, 13)), TerrainMap.T_WATER)
+	fails += _check("marsh pool is water", TerrainMap.tile_type(Vector2i(13, 50)), TerrainMap.T_WATER)
 	fails += _check("mountain peak h8", TerrainMap.tile_height(Vector2i(37, 6)), 8)
 	fails += _check("mountain mid h5", TerrainMap.tile_height(Vector2i(33, 8)), 5)
+	fails += _check("shoulder hill h1", TerrainMap.tile_height(Vector2i(51, 8)), 1)
+	fails += _check("shoulder hill top h3", TerrainMap.tile_height(Vector2i(56, 8)), 3)
+	fails += _check("lookout hill h1", TerrainMap.tile_height(Vector2i(55, 58)), 1)
 	fails += _check("far corner grass", TerrainMap.tile_type(Vector2i(2, 70)), TerrainMap.T_GRASS)
 	fails += _check("far corner flat", TerrainMap.tile_height(Vector2i(2, 70)), 0)
 
-	# 全图最高点 = 演示山 8 级
+	# 涉水石滩：西辐路压过出水口——路面处是路，路两侧溪水延续
+	fails += _check("ford is path", TerrainMap.tile_type(Vector2i(21, 37)), TerrainMap.T_PATH)
+	fails += _check("stream above ford", TerrainMap.tile_type(Vector2i(21, 36)), TerrainMap.T_WATER)
+	fails += _check("stream below ford", TerrainMap.tile_type(Vector2i(20, 39)), TerrainMap.T_WATER)
+
+	# 草甸小径穿过环面接缝：南草甸段、接缝另一头的出生空地段都是路
+	fails += _check("meadow trail mid", TerrainMap.tile_type(Vector2i(22, 70)), TerrainMap.T_PATH)
+	fails += _check("meadow trail past seam", TerrainMap.tile_type(Vector2i(2, 7)), TerrainMap.T_PATH)
+
+	# 风车平台：瞭望丘顶 3×3 全部 h3 草地（放得下风车）
+	var bad_plat := 0
+	for z in range(53, 56):
+		for x in range(58, 61):
+			if TerrainMap.tile_height(Vector2i(x, z)) != 3 or TerrainMap.tile_type(Vector2i(x, z)) != TerrainMap.T_GRASS:
+				bad_plat += 1
+	fails += _check("windmill platform flat h3", bad_plat, 0)
+
+	# 全图最高点 = 主峰 8 级（丘陵都更矮）
 	var hmax := 0
 	for z in range(n):
 		for x in range(n):
@@ -54,7 +77,7 @@ func _init() -> void:
 	fails += _check("center roundtrip x", float(WorldGrid.to_tile(c).x), 10.0)
 	fails += _check("center roundtrip z", float(WorldGrid.to_tile(c).y), 20.0)
 
-	# 演示山东西向缓坡可逐级爬：沿 z=6 行从西侧山脚到峰顶，高度单调不减且首尾贯通
+	# 主峰西山脊缓坡可逐级爬：沿 z=6 行从西侧山脚到峰顶，高度单调不减且首尾贯通
 	# （南北向允许多级陡崖——能否攀爬是移动规则的事，不是地形不变量）
 	var prev := 0
 	var monotonic := true
@@ -65,11 +88,48 @@ func _init() -> void:
 		prev = hx
 	fails += _check("west ridge climbs to peak", 1 if (monotonic and prev == 8) else 0, 1)
 
+	# 连通性不变量：从中央广场出发按移动规则（8 向、对角不穿角）BFS，
+	# 每一块非水 tile 都可达——保证雕出来的世界没有走不到的死区。
+	fails += _check("all land reachable from plaza", _unreachable_land(Vector2i(37, 37)), 0)
+
 	if fails == 0:
 		print("terrain_map tests PASS")
 	else:
 		printerr("terrain_map tests FAILED: %d" % fails)
 	quit(fails)
+
+## 从 start 按 can_step 做 8 向 BFS（对角要求两正交邻居也可走，防穿角），
+## 返回不可达的非水 tile 数。
+func _unreachable_land(start: Vector2i) -> int:
+	var n := WorldGrid.GRID_TILES
+	var seen := PackedByteArray()
+	seen.resize(n * n)
+	var queue: Array[Vector2i] = [start]
+	seen[start.y * n + start.x] = 1
+	var head := 0
+	while head < queue.size():
+		var t := queue[head]
+		head += 1
+		for dz in range(-1, 2):
+			for dx in range(-1, 2):
+				if dx == 0 and dz == 0:
+					continue
+				var q := Vector2i(posmod(t.x + dx, n), posmod(t.y + dz, n))
+				if seen[q.y * n + q.x] == 1 or not TerrainMap.can_step(t, q):
+					continue
+				if dx != 0 and dz != 0:  # 对角：两正交邻居都可走才允许
+					if not TerrainMap.can_step(t, Vector2i(posmod(t.x + dx, n), t.y)):
+						continue
+					if not TerrainMap.can_step(t, Vector2i(t.x, posmod(t.y + dz, n))):
+						continue
+				seen[q.y * n + q.x] = 1
+				queue.append(q)
+	var missed := 0
+	for z in range(n):
+		for x in range(n):
+			if seen[z * n + x] == 0 and TerrainMap.tile_type(Vector2i(x, z)) != TerrainMap.T_WATER:
+				missed += 1
+	return missed
 
 func _check(name: String, got: Variant, want: Variant) -> int:
 	if typeof(got) == TYPE_FLOAT:
