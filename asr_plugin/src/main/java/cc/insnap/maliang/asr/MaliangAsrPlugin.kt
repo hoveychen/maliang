@@ -15,7 +15,7 @@ import org.godotengine.godot.plugin.UsedByGodot
 /**
  * 端侧流式中文 ASR（sherpa-onnx Zipformer int8）。
  *
- * 模型从 APK assets 的 [MODEL_DIR] 读取（scripts/fetch-asr-plugin.sh 放入 android/assets/）。
+ * 模型从 APK assets 的 [MODEL_DIR] 读取（scripts/build-asr-plugin.sh 放入本模块 src/main/assets/，随 AAR 合并进 APK）。
  * 生命周期：initialize()（异步加载模型 → asr_ready）→ startSession → feedPcm(16k PCM16LE)×N
  * → stopSession（尾部静音收尾 → final_result）。所有推理都在单线程 executor 上，
  * GDScript 侧只做字节搬运，绝不阻塞主线程/音频线程。

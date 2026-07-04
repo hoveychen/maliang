@@ -1,9 +1,9 @@
 @tool
 extends EditorExportPlugin
 ## Android 导出时把端侧 ASR 的两个 AAR 打进 APK：
-## - maliang-asr-plugin.aar：本插件（scripts/build-asr-plugin.sh 构建）
+## - maliang-asr-plugin.aar：本插件（scripts/build-asr-plugin.sh 构建，模型已打进其 assets/）
 ## - sherpa-onnx-*.aar：推理引擎（同脚本下载）
-## 模型文件不在此注入——它们由 fetch 脚本放进 android/assets/，随 gradle 构建打进 APK assets。
+## 模型文件随插件 AAR 的 assets 一起被 AGP 合并进 APK assets，无需单独注入。
 
 const BIN := "maliang_asr/bin"
 
