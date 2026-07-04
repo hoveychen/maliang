@@ -37,9 +37,9 @@ func _tick() -> void:
 		100:
 			_check_interaction()
 		102:
-			_test_talk_short_press()
+			_test_voice_short_burst()
 		105:
-			_test_talk_long_press()
+			_test_voice_utterance()
 		108:
 			if fails == 0:
 				print("visual_click_move PASS")
@@ -96,26 +96,43 @@ func _check_interaction() -> void:
 			_check("player adjacent to npc (dist=%.2f)" % dist, dist <= 3.2, true)
 	_check("banner visible", (scene.get("banner") as Label).visible, true)
 
-## 按住说话·误触短按：按下即录，立刻松手（<MIN_TALK_SEC）应静默取消——不进思考、留提示横幅。
-func _test_talk_short_press() -> void:
-	var btn := scene.get("talk_btn") as Button
-	btn.button_down.emit()
-	_check("talk press starts recording", scene.get("_recording"), true)
-	scene.set("_talk_down_ms", Time.get_ticks_msec()) # 定格「刚按下」，不依赖帧间真实耗时
-	btn.button_up.emit()
-	_check("short press cancels recording", scene.get("_recording"), false)
-	_check("short press no thinking", (scene.get("thinking_label") as Label).visible, false)
-	_check("short press shows hint banner", (scene.get("banner") as Label).visible, true)
+## 开放麦·短促噪声：触发开口但有声段太短 → 静默取消（不进思考、继续聆听）。
+## 注入合成 PCM 走 _feed_voice_pcm 全链路（VAD 事件 → 会话开/取消），与真实麦克风同路。
+func _test_voice_short_burst() -> void:
+	_check("open mic on enter (vad ready)", scene.get("_vad") != null, true)
+	scene.call("_feed_voice_pcm", _voice_pcm(150))
+	_check("burst opens utterance", scene.get("_recording"), true)
+	scene.call("_feed_voice_pcm", _silence_pcm(1200))
+	_check("burst cancels silently", scene.get("_recording"), false)
+	_check("burst no thinking", (scene.get("thinking_label") as Label).visible, false)
 
-## 按住说话·正常长按：松手即发——退出录音、进入思考态、横幅收起。
-func _test_talk_long_press() -> void:
-	var btn := scene.get("talk_btn") as Button
-	btn.button_down.emit()
-	scene.set("_talk_down_ms", Time.get_ticks_msec() - 1000) # 视为已按住 1s
-	btn.button_up.emit()
-	_check("long release stops recording", scene.get("_recording"), false)
-	_check("long release enters thinking", (scene.get("thinking_label") as Label).visible, true)
-	_check("long release hides banner", (scene.get("banner") as Label).visible, false)
+## 开放麦·正常说话：说完静音自动断句发送——退出录音、进入思考态、横幅收起。
+func _test_voice_utterance() -> void:
+	scene.call("_feed_voice_pcm", _voice_pcm(800))
+	_check("speech opens utterance", scene.get("_recording"), true)
+	scene.call("_feed_voice_pcm", _silence_pcm(1200))
+	_check("silence auto-commits", scene.get("_recording"), false)
+	_check("auto-commit enters thinking", (scene.get("thinking_label") as Label).visible, true)
+	_check("auto-commit hides banner", (scene.get("banner") as Label).visible, false)
+
+func _silence_pcm(ms: int) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(ms * VoiceVad.BYTES_PER_MS)
+	return out
+
+## 440Hz 正弦、幅度 0.5 模拟人声（与 test_voice_vad 同参）。
+func _voice_pcm(ms: int) -> PackedByteArray:
+	var n := ms * VoiceVad.BYTES_PER_MS / 2
+	var out := PackedByteArray()
+	out.resize(n * 2)
+	for i in range(n):
+		var s := sin(TAU * 440.0 * float(i) / 16000.0) * 0.5
+		var v := int(s * 32767.0)
+		if v < 0:
+			v += 65536
+		out[i * 2] = v & 0xFF
+		out[i * 2 + 1] = (v >> 8) & 0xFF
+	return out
 
 ## 逻辑坐标 → 屏幕坐标（与 world 同一弯曲/台阶公式）。
 func _screen_of(logical: Vector2, y_off: float) -> Vector2:
