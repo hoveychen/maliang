@@ -32,6 +32,7 @@ UNIT_TESTS=(
   test_mover
   test_behavior_executor
   test_fairy_voice
+  test_voice_vad
 )
 fails=0
 
