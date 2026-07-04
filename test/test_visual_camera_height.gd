@@ -25,9 +25,11 @@ func _tick() -> void:
 	match frame:
 		15:
 			_check_player_band("平地（村庄）")
+			_check_fog_comp("平地（村庄）", 0.0)
 			_teleport_to_mountain()
 		70:
 			_check_player_band("8级山顶")
+			_check_fog_comp("8级山顶", 16.0)
 			if fails == 0:
 				print("visual_camera_height PASS")
 			else:
@@ -42,6 +44,24 @@ func _teleport_to_mountain() -> void:
 	var player: Dictionary = scene.get("player")
 	player["logical"] = top
 	OccupancyMap.char_register(player["id"], top, player["span"])
+
+## 深度雾起止距离应随相机焦点高度补偿（否则山顶视角地面整体变浓雾）。
+## 基准 40（world.gd _setup_environment），8 级山顶应抬到 40+16。
+func _check_fog_comp(label: String, want_rise: float) -> void:
+	var env := _find_env()
+	if env == null:
+		fails += 1
+		printerr("  FAIL %s: 场景里找不到 WorldEnvironment" % label)
+		return
+	var got: float = env.fog_depth_begin
+	var want := 40.0 + want_rise
+	_check("%s: 雾起点随焦点高度补偿 (begin=%.1f 期望=%.1f)" % [label, got, want], absf(got - want) <= 1.0, true)
+
+func _find_env() -> Environment:
+	for c in scene.get_children():
+		if c is WorldEnvironment:
+			return (c as WorldEnvironment).environment
+	return null
 
 ## 玩家（相机跟随对象）应在相机前方、且投影落在画面中央带 [0.25, 0.85]。
 func _check_player_band(label: String) -> void:
