@@ -6,6 +6,9 @@ export.cfg
 /build/
 # export_presets.cfg 纳入版控（含安卓包名/权限/架构，无敏感信息）
 
+# 安卓 release 签名密钥（绝不入库；Android 更新必须复用同一把 key）
+.keystores/
+
 # Fleet / agent scratch
 .worktrees/
 TASKS.md
