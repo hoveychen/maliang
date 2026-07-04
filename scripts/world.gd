@@ -57,9 +57,14 @@ var _tap_marker_t := 0.0
 var backend: Backend
 var _vad: VoiceVad = null          ## 近身对话期间非 null：端点检测器（进交互创建，退出置空）
 var _unmute_t := 0.0               ## 闭麦恢复期剩余秒数（UNMUTE_GRACE 倒计时）
-var thinking_label: Label
+var thinking_label: Label          ## 思考状态源+家长可读小字（幼儿看角色头顶的 _think_bubble 动画）
 var _think_timer: Timer            ## 「思考中」兜底超时（响应没回来时自动解卡）
+var _think_bubble: Label3D         ## 思考动画气泡：选中角色头顶 ·/··/··· 循环冒泡（不识字友好）
+var _think_anim_t := 0.0           ## 思考气泡动画相位
 var emotion_bubble: Label3D
+var _emotion_pop_t := -1.0         ## 情绪弹出动画已播秒数（<0 = 不在弹出中）
+var _emotion_life := 0.0           ## 情绪气泡剩余展示秒数（尾段淡出后隐藏）
+var _speak_anim_t := 0.0           ## 说话呼吸弹跳相位
 var _recording := false
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
 var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
@@ -428,14 +433,26 @@ func _setup_hud() -> void:
 	heard_label.visible = false
 	layer.add_child(heard_label)
 
+	# 思考状态：小字弱化到顶部（给家长看），幼儿看角色头顶的 _think_bubble 动画
 	thinking_label = Label.new()
-	thinking_label.set_anchors_preset(Control.PRESET_CENTER)
-	_style_label(thinking_label, 30)
+	thinking_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	thinking_label.offset_top = 108.0
+	thinking_label.offset_bottom = 140.0
+	_style_label(thinking_label, 20)
 	thinking_label.text = "思考中…"
 	thinking_label.visible = false
 	layer.add_child(thinking_label)
 
-	# 角色头顶情绪气泡（占位：真实游戏用图标）
+	# 思考动画气泡：·/··/··· 循环冒泡（挂选中角色头顶，_update_think_bubble 驱动）
+	_think_bubble = Label3D.new()
+	_think_bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_think_bubble.pixel_size = 0.02
+	_think_bubble.outline_size = 14
+	_think_bubble.font_size = 110
+	_think_bubble.visible = false
+	add_child(_think_bubble)
+
+	# 角色头顶情绪气泡：大 emoji + 弹出动画（_show_emotion / _update_emotion_bubble）
 	emotion_bubble = Label3D.new()
 	emotion_bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	emotion_bubble.pixel_size = 0.02
@@ -492,7 +509,9 @@ func _process(delta: float) -> void:
 	_reposition_npcs(delta)
 	_update_tap_marker(delta)
 	_update_ear()
-	_update_emotion_bubble()
+	_update_think_bubble(delta)
+	_update_emotion_bubble(delta)
+	_update_speak_anim(delta)
 	_update_hud()
 
 func _step_executors(delta: float) -> void:
@@ -1140,17 +1159,74 @@ func _play_tts(asset: String) -> void:
 	_tts_player.stream = wav
 	_tts_player.play()
 
+## 情绪气泡：大 emoji（3 岁不识字友好）+ 弹出过冲动画，数秒后淡出。
 func _show_emotion(emotion: String) -> void:
-	var glyphs := { "happy": "☺", "think": "?", "wave": "!", "sad": "…" }
-	var glyph: String = glyphs.get(emotion, "♪")
-	emotion_bubble.text = glyph
+	var glyphs := { "happy": "😊", "think": "🤔", "wave": "👋", "sad": "🥺" }
+	emotion_bubble.text = glyphs.get(emotion, "🎵")
 	emotion_bubble.visible = true
+	emotion_bubble.modulate = Color.WHITE
+	emotion_bubble.scale = Vector3.ONE * 0.4
+	_emotion_pop_t = 0.0
+	_emotion_life = 4.0
 
-func _update_emotion_bubble() -> void:
-	if emotion_bubble.visible and selected != null and is_instance_valid(selected):
-		emotion_bubble.global_position = selected.global_position + Vector3(0.0, _char_top(selected) + 1.4, 0.0)
-	elif selected == null:
+func _update_emotion_bubble(delta: float) -> void:
+	if not emotion_bubble.visible:
+		return
+	if selected == null or not is_instance_valid(selected):
 		emotion_bubble.visible = false
+		return
+	emotion_bubble.global_position = selected.global_position + Vector3(0.0, _char_top(selected) + 1.4, 0.0)
+	# 弹出：0.2s 冲到 1.2 过冲，再 0.15s 回落到 1.0
+	if _emotion_pop_t >= 0.0:
+		_emotion_pop_t += delta
+		if _emotion_pop_t < 0.2:
+			emotion_bubble.scale = Vector3.ONE * lerpf(0.4, 1.2, _emotion_pop_t / 0.2)
+		elif _emotion_pop_t < 0.35:
+			emotion_bubble.scale = Vector3.ONE * lerpf(1.2, 1.0, (_emotion_pop_t - 0.2) / 0.15)
+		else:
+			emotion_bubble.scale = Vector3.ONE
+			_emotion_pop_t = -1.0
+	# 展示计时：最后 0.5s 淡出后隐藏
+	_emotion_life -= delta
+	if _emotion_life <= 0.0:
+		emotion_bubble.visible = false
+	elif _emotion_life < 0.5:
+		emotion_bubble.modulate.a = _emotion_life / 0.5
+
+## 思考动画气泡：thinking_label（状态源）可见且有选中角色时，头顶 ·/··/··· 循环冒泡。
+func _update_think_bubble(delta: float) -> void:
+	var show := thinking_label.visible and selected != null and is_instance_valid(selected)
+	_think_bubble.visible = show
+	if not show:
+		return
+	_think_anim_t += delta
+	_think_bubble.text = "···".substr(0, 1 + int(_think_anim_t / 0.4) % 3)
+	# 轻微上浮呼吸，比静态文本更「活」
+	_think_bubble.global_position = selected.global_position \
+		+ Vector3(0.0, _char_top(selected) + 1.4 + sin(_think_anim_t * 2.0) * 0.12, 0.0)
+
+## 说话演出：正在出声的角色呼吸弹跳（脚底锚点的纸片挤压拉伸），停止后回正。
+## 选中角色吃正式 TTS（_tts_player），小仙子吃预制台词（fairy_voice），其余角色回正。
+func _update_speak_anim(delta: float) -> void:
+	_speak_anim_t += delta
+	var s := 1.0 + sin(_speak_anim_t * 9.0) * 0.05
+	var speaking: Array = []
+	if selected != null and is_instance_valid(selected) and _tts_player.playing:
+		speaking.append(selected)
+	var fairy := _find_fairy()
+	if not fairy.is_empty() and fairy_voice != null and fairy_voice.is_playing():
+		if not speaking.has(fairy["node"]):
+			speaking.append(fairy["node"])
+	for n in npcs:
+		_apply_speak_scale(n["node"], speaking.has(n["node"]), s, delta)
+
+func _apply_speak_scale(node: PaperCharacter, is_speaking: bool, s: float, delta: float) -> void:
+	if is_speaking:
+		node.scale = Vector3(1.0 / s, s, 1.0) # 变高略变窄：保「体积感」的纸片呼吸
+	elif node.scale != Vector3.ONE:
+		node.scale = node.scale.lerp(Vector3.ONE, minf(1.0, 12.0 * delta))
+		if node.scale.is_equal_approx(Vector3.ONE):
+			node.scale = Vector3.ONE
 
 ## 在选中角色上执行行为脚本（移动等）。
 func _run_behavior(npc: PaperCharacter, script: Dictionary) -> void:
