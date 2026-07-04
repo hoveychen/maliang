@@ -322,6 +322,16 @@ export async function handleWsMessage(
     return; // 分片实时喂讯飞，不回包
   }
 
+  // 误触/中途放弃（按住说话 <0.4s 松手）：丢弃识别流（finish 让讯飞关 WS/sherpa 释放，
+  // 转写弃用），释放 gate，不回任何包——客户端取消后不该看到任何反馈。
+  if (msg.type === 'voice_cancel') {
+    if (session.asr) void session.asr.finish().catch(() => {});
+    session.active = false;
+    session.asr = null;
+    if (session.gate) { session.gate.release(); session.gate = null; }
+    return;
+  }
+
   if (msg.type === 'voice_end') {
     if (!session.active || !session.asr) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: '没有进行中的录音会话' }));

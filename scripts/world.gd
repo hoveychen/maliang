@@ -15,6 +15,7 @@ const ZOOM_MAX := 64.0
 const CAM_EASE := 6.0             ## 视角过渡速度（pitch/dist/focus 一起缓动）
 const PICK_RADIUS_PX := 80.0
 const THINK_TIMEOUT := 40.0       ## 「思考中」最长等待秒数；超时(响应丢失/网络/TLS)自动清除，杜绝永久卡死
+const MIN_TALK_SEC := 0.4         ## 按住说话低于此时长视为误触：静默取消，不打扰角色/服务端
 const PLAYER_ID := "player"
 const PLAYER_SPAN := 2            ## 玩家占地（半格数），与 NPC 一致
 const APPROACH_ARRIVE := 2.6      ## 跑向 NPC 的到达半径：对象自身占格，走到旁边即算到（同送信）
@@ -54,8 +55,8 @@ var _tap_marker_t := 0.0
 
 # M2 语音交互
 var backend: Backend
-var listen_btn: Button
-var send_btn: Button
+var talk_btn: Button               ## 按住说话：button_down 开录、button_up 松手即发；短按视为误触取消
+var _talk_down_ms := 0             ## 本次按下时刻（ms），判定误触短按
 var thinking_label: Label
 var _think_timer: Timer            ## 「思考中」兜底超时（响应没回来时自动解卡）
 var emotion_bubble: Label3D
@@ -424,31 +425,19 @@ func _setup_hud() -> void:
 	heard_label.visible = false
 	layer.add_child(heard_label)
 
-	# 聆听 / 发送 按钮（交互模式下显示）
-	listen_btn = Button.new()
-	listen_btn.text = "🎤 聆听"
-	listen_btn.add_theme_font_size_override("font_size", 30)
-	listen_btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	listen_btn.offset_left = -210.0
-	listen_btn.offset_right = -30.0
-	listen_btn.offset_top = -150.0
-	listen_btn.offset_bottom = -100.0
-	listen_btn.visible = false
-	listen_btn.pressed.connect(_on_listen)
-	layer.add_child(listen_btn)
-
-	send_btn = Button.new()
-	send_btn.text = "✓ 发送"
-	send_btn.add_theme_font_size_override("font_size", 30)
-	send_btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	send_btn.offset_left = 30.0
-	send_btn.offset_right = 210.0
-	send_btn.offset_top = -150.0
-	send_btn.offset_bottom = -100.0
-	send_btn.visible = false
-	send_btn.disabled = true
-	send_btn.pressed.connect(_on_send)
-	layer.add_child(send_btn)
+	# 按住说话按钮（交互模式下显示）：一步完成「录音→发送」，幼儿无需两步时序操作
+	talk_btn = Button.new()
+	talk_btn.text = "🎤 按住说话"
+	talk_btn.add_theme_font_size_override("font_size", 30)
+	talk_btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	talk_btn.offset_left = -180.0
+	talk_btn.offset_right = 180.0
+	talk_btn.offset_top = -150.0
+	talk_btn.offset_bottom = -100.0
+	talk_btn.visible = false
+	talk_btn.button_down.connect(_on_talk_down)
+	talk_btn.button_up.connect(_on_talk_up)
+	layer.add_child(talk_btn)
 
 	thinking_label = Label.new()
 	thinking_label.set_anchors_preset(Control.PRESET_CENTER)
@@ -788,14 +777,14 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	_locked = npc
 	_target_pitch = LOCK_PITCH_DEG
 	_target_dist = LOCK_DIST
-	banner.text = "%s 在听你说话呀" % npc.char_name
+	banner.text = "按住 🎤 跟%s说话吧" % npc.char_name
 	banner.visible = true
-	listen_btn.visible = true
-	send_btn.visible = true
-	send_btn.disabled = true
+	talk_btn.visible = true
 	thinking_label.visible = false
 
 func _exit_interaction() -> void:
+	if _recording:
+		_cancel_recording() # 录到一半退出：静默丢弃，不留半开会话
 	selected = null
 	_resume_stopped_npc() # 被叫停等玩家的对象恢复闲逛
 	# 切回跟随玩家视角（平滑过渡）
@@ -804,10 +793,8 @@ func _exit_interaction() -> void:
 	_target_dist = GOD_DIST
 	banner.visible = false
 	heard_label.visible = false
-	listen_btn.visible = false
-	send_btn.visible = false
+	talk_btn.visible = false
 	thinking_label.visible = false
-	_recording = false
 
 # ── M2 语音交互 ──────────────────────────────────────────────────────────
 
@@ -841,8 +828,8 @@ func _on_failed(reason: String) -> void:
 	if selected != null:
 		banner.text = "我没听清呀，再说一次好不好？"
 		banner.visible = true
-		send_btn.disabled = true
-		_recording = false
+		if _recording:
+			_cancel_recording()
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 func _bootstrap() -> void:
@@ -975,11 +962,14 @@ func _on_local_asr_error(msg: String) -> void:
 	_local_asr_session = false
 	_asr_local = null
 
-func _on_listen() -> void:
-	# 点一下开始聆听：显示耳朵（_update_ear 已处理），开始采集麦克风并开一个边录边传会话。
+## 按下开始聆听：显示耳朵（_update_ear 已处理），开始采集麦克风并开一个边录边传会话。
+func _on_talk_down() -> void:
+	if selected == null or _recording:
+		return
 	_recording = true
-	send_btn.disabled = false
-	banner.text = "我在听… 说完点发送"
+	_talk_down_ms = Time.get_ticks_msec()
+	banner.text = "我在听… 说完松手哦"
+	banner.visible = true
 	_pending_pcm = PackedByteArray()
 	_chunk_accum = 0.0
 	_streamed_any = false
@@ -991,11 +981,17 @@ func _on_listen() -> void:
 	else:
 		backend.send_voice_start(world_id, _selected_id())
 
-func _on_send() -> void:
-	if selected == null:
+## 松手即发；按住不足 MIN_TALK_SEC 视为误触，静默取消不打扰角色。
+func _on_talk_up() -> void:
+	if not _recording:
+		return
+	if float(Time.get_ticks_msec() - _talk_down_ms) / 1000.0 < MIN_TALK_SEC:
+		_cancel_recording()
+		if selected != null:
+			banner.text = "按住 🎤 说话，说完再松手哦"
+			banner.visible = true
 		return
 	_recording = false
-	send_btn.disabled = true
 	thinking_label.visible = true
 	banner.visible = false
 	# 收尾：把残留缓冲 + 最后一截采集都发出去，再触发识别/回复。
@@ -1010,6 +1006,16 @@ func _on_send() -> void:
 			backend.send_voice_chunk(Marshalls.raw_to_base64(PackedByteArray([0x52, 0x49, 0x46, 0x46])))
 		backend.send_voice_end()
 	_think_timer.start(THINK_TIMEOUT)  # 兜底：响应没回来也会自动解卡
+
+## 静默丢弃当前录音会话（误触短按/录音中退出交互）：双 ASR 路径都不产生任何回复。
+func _cancel_recording() -> void:
+	_recording = false
+	_mic.stop()
+	_pending_pcm = PackedByteArray()
+	if _local_asr_session:
+		_local_asr_session = false # 弃会话即可：插件下次 startSession 会自动释放旧流
+	else:
+		backend.send_voice_cancel()
 
 ## 录音中周期性把采集缓冲攒成分片发出（上传与说话重叠，松手时音频已基本传完）。
 func _stream_recording(delta: float) -> void:
