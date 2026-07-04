@@ -2,8 +2,11 @@ class_name ChunkManager
 extends Node3D
 ## 区块流送（chunk streaming）。
 ## 只实例化玩家周围 (2R+1)² 个区块，用对象池复用；每帧按最短环面位移
-## 重定位每个 slot，并按「wrap 后的区块索引」决定外观（棋盘色 + 一棵确定性的树）。
+## 重定位每个 slot，并按「wrap 后的区块索引」决定外观（autotile 地面 + 布景）。
 ## 越过 GRID 接缝时，区块 (39,·) 之后接 (0,·)，外观连续 → 无缝。
+##
+## 布景两层：LANDMARKS 手工地标（民居/水井/风车/泉石，全局 tile 锚点）+
+## _deco_kind 分区散布（按地形分西南密林/果园/山地岩/岸边苇/村核心/草甸，逐 tile 确定性）。
 
 const CHUNK_TILES := 25
 const CHUNK_WORLD := float(CHUNK_TILES) * WorldGrid.TILE_SIZE          ## 50.0
@@ -45,6 +48,31 @@ const HOUSE_SCENES: Array[PackedScene] = [
 const WELL_SCENE: PackedScene = preload("res://assets/kaykit/hexagon/building_well_blue.gltf")
 const WINDMILL_SCENE: PackedScene = preload("res://assets/kaykit/hexagon/building_windmill_red.gltf")
 const HOUSE_SCALE := 7.0  ## 微缩民居(0.93m 高) → ~6.5m
+
+## 手工地标（tile 为全局 tile 锚点；reserve=1 → 占地 3×3，找不到空位沿环外扩 search 圈）。
+## 村核心 8 栋民居沿广场四角与辐路布置、水井坐镇广场（地标特批压路）、
+## 风车立东南瞭望丘 h3 平台、两块泉石守着主峰南麓涌泉。
+const LANDMARKS := [
+	{ "scene": WELL_SCENE, "tile": Vector2i(37, 37), "scale": 4.5, "yaw": 0.0, "reserve": 1, "search": 0, "path_ok": true },
+	{ "scene": WINDMILL_SCENE, "tile": Vector2i(59, 54), "scale": HOUSE_SCALE, "yaw": 180.0, "reserve": 1, "search": 1 },
+	{ "scene": HOUSE_SCENES[0], "tile": Vector2i(31, 31), "scale": HOUSE_SCALE, "yaw": 90.0, "reserve": 1, "search": 2 },
+	{ "scene": HOUSE_SCENES[1], "tile": Vector2i(44, 31), "scale": HOUSE_SCALE, "yaw": 180.0, "reserve": 1, "search": 2 },
+	{ "scene": HOUSE_SCENES[2], "tile": Vector2i(31, 44), "scale": HOUSE_SCALE, "yaw": 90.0, "reserve": 1, "search": 2 },
+	{ "scene": HOUSE_SCENES[3], "tile": Vector2i(44, 44), "scale": HOUSE_SCALE, "yaw": 270.0, "reserve": 1, "search": 2 },
+	{ "scene": HOUSE_SCENES[1], "tile": Vector2i(27, 40), "scale": HOUSE_SCALE, "yaw": 0.0, "reserve": 1, "search": 2 },
+	{ "scene": HOUSE_SCENES[0], "tile": Vector2i(47, 35), "scale": HOUSE_SCALE, "yaw": 180.0, "reserve": 1, "search": 2 },
+	{ "scene": HOUSE_SCENES[2], "tile": Vector2i(34, 58), "scale": HOUSE_SCALE, "yaw": 90.0, "reserve": 1, "search": 2 },
+	{ "scene": HOUSE_SCENES[3], "tile": Vector2i(33, 23), "scale": HOUSE_SCALE, "yaw": 270.0, "reserve": 1, "search": 2 },
+	{ "scene": ROCK_SCENES[2], "tile": Vector2i(30, 12), "scale": 2.4, "yaw": 40.0 },
+	{ "scene": ROCK_SCENES[0], "tile": Vector2i(28, 12), "scale": 1.7, "yaw": 210.0 },
+]
+
+## 分区散布的判定结果
+const DECO_NONE := 0
+const DECO_TREE := 1
+const DECO_BUSH := 2
+const DECO_ROCK := 3
+const DECO_TUFT := 4
 
 ## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
@@ -101,13 +129,11 @@ func update(player_logical: Vector2) -> void:
 				_skin(slot, wrapped)
 			idx += 1
 
-## 按 wrapped 索引刷新区块外观（autotile 地面 + 确定性装饰）。
+## 按 wrapped 索引刷新区块外观（autotile 地面 + 地标 + 分区散布）。
 ## 地面棋盘/路/水全部由 TerrainMap+TerrainAtlas 决定，不再逐区块调色。
 func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	var tile: MeshInstance3D = slot["tile"]
 	tile.mesh = _chunk_mesh(wrapped)
-	# 世界中心(chunk 1 = 3×3 网格中央，小神仙出生处)一片 3×3 区块为草原村庄。
-	var in_village := absi(wrapped.x - 1) <= 1 and absi(wrapped.y - 1) <= 1
 
 	var deco: Node3D = slot["deco"]
 	for c in deco.get_children():
@@ -118,32 +144,120 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	for cl in _claims.get(wrapped, []):
 		OccupancyMap.free_rect(OccupancyMap.tile_to_cell(cl[0]), cl[1] * 2, cl[2] * 2)
 	_claims[wrapped] = []
-	var base := hash(wrapped)
-	if in_village:
-		# 村庄区块：约一半放房子(其余点缀树)，避免小世界里全是屋顶。
-		# 中心区块(1,1)是小神仙出生地 → 水井坐镇广场（地标特批压路），空地不盖房。
-		if wrapped == Vector2i(1, 1):
-			_spawn_on_tile(deco, wrapped, WELL_SCENE, Vector2i(12, 12), 4.5, 0.0, 1, 0, true)
-			_tree_on_tile(deco, wrapped, Vector2i(5, 6), base + 5)
-		elif posmod(wrapped.x + wrapped.y, 2) == 0:
-			_house_on_tile(deco, wrapped, Vector2i(12, 12), base)
-			_tree_on_tile(deco, wrapped, Vector2i(21, 20), base + 7)
-		else:
-			_tree_on_tile(deco, wrapped, Vector2i(7, 18), base)
-			_tree_on_tile(deco, wrapped, Vector2i(19, 7), base + 3)
-			if wrapped == Vector2i(0, 1):  # 一座风车当村庄地标
-				_spawn_on_tile(deco, wrapped, WINDMILL_SCENE, Vector2i(13, 4), HOUSE_SCALE, 180.0, 1, 3)
-		_scatter(deco, wrapped, base, 4)
-	else:
-		# 旷野区块：散布 2~3 棵树（当前 3×3 世界全是村庄，此分支为世界扩容预留）
-		var count := 2 + posmod(base, 2)
-		for k in range(count):
-			var hk := hash(Vector3i(wrapped.x, wrapped.y, k))
-			if posmod(hk, 4) == 0:
-				continue  # 少量空位，避免太规整
-			var ti := Vector2i(1 + posmod(hk, CHUNK_TILES - 2), 1 + posmod(hk / 1000, CHUNK_TILES - 2))
-			_tree_on_tile(deco, wrapped, ti, hk)
-		_scatter(deco, wrapped, base + 11, 6)
+
+	# 先放手工地标（锚点落在本区块的），后散布——地标优先占地。
+	for lm in LANDMARKS:
+		var anchor: Vector2i = lm["tile"] - wrapped * CHUNK_TILES
+		if anchor.x < 0 or anchor.x >= CHUNK_TILES or anchor.y < 0 or anchor.y >= CHUNK_TILES:
+			continue
+		_spawn_on_tile(deco, wrapped, lm["scene"], anchor, lm["scale"], lm["yaw"],
+			int(lm.get("reserve", 0)), int(lm.get("search", 0)), bool(lm.get("path_ok", false)))
+
+	# 分区散布：逐 tile 确定性判定。草丛不占位（可穿行的纯点缀），其余占 1×1。
+	for j in range(CHUNK_TILES):
+		for i in range(CHUNK_TILES):
+			var ti := Vector2i(i, j)
+			var gt := wrapped * CHUNK_TILES + ti
+			var kind := _deco_kind(gt)
+			if kind == DECO_NONE:
+				continue
+			var hk := hash(gt)
+			var pos := _tile_local(ti, wrapped)
+			if kind == DECO_TUFT:
+				_spawn(deco, TUFT_SCENES[posmod(hk, TUFT_SCENES.size())], pos, 1.5 + float(posmod(hk, 3)) * 0.3, float(posmod(hk, 360)))
+				continue
+			if not OccupancyMap.prop_area_ok(gt, 1, 1):
+				continue
+			_claim(wrapped, gt, 1, 1)
+			match kind:
+				DECO_TREE:
+					_spawn(deco, TREE_SCENES[posmod(hk, TREE_SCENES.size())], pos, 1.1 + float(posmod(hk, 5)) * 0.15, float(posmod(hk, 360)))
+				DECO_BUSH:
+					_spawn(deco, BUSH_SCENES[posmod(hk, BUSH_SCENES.size())], pos, 4.0 + float(posmod(hk, 3)), float(posmod(hk, 360)))
+				DECO_ROCK:
+					_spawn(deco, ROCK_SCENES[posmod(hk, ROCK_SCENES.size())], pos, 1.6 + float(posmod(hk, 3)) * 0.4, float(posmod(hk, 360)))
+
+## 分区散布判定：全局 tile → 长什么（确定性，只在草地上长）。
+## 分区从北往南：山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、
+## 果园（规则行距的浆果灌木）、瞭望丘坡面、村核心（整洁）、出生空地（开阔）、
+## 岸边一圈芦苇灌木、其余草甸疏树。
+static func _deco_kind(gt: Vector2i) -> int:
+	if TerrainMap.tile_type(gt) != TerrainMap.T_GRASS:
+		return DECO_NONE
+	var h := TerrainMap.tile_height(gt)
+	var roll := posmod(hash(Vector2i(gt.x * 3 + 11, gt.y * 7 + 5)), 100)  # 与外观 hash 解耦
+	# 岸边芦苇灌木：紧邻水面一圈
+	if _near_water(gt):
+		if roll < 26:
+			return DECO_BUSH
+		return DECO_TUFT if roll < 52 else DECO_NONE
+	# 出生林间空地（环面距原点 8 tile 内）：保持开阔便于新手起步
+	if _tor_dist(gt, Vector2i.ZERO) <= 8.0:
+		return DECO_TUFT if roll < 10 else DECO_NONE
+	# 北部山地（主峰 + 东肩丘一带）：低台地松树、中台地岩石、峰顶零星立石
+	if gt.y <= 14 and gt.x >= 22:
+		if h == 0:
+			if roll < 7:
+				return DECO_TREE
+			if roll < 11:
+				return DECO_ROCK
+			return DECO_TUFT if roll < 18 else DECO_NONE
+		if h <= 2:
+			if roll < 11:
+				return DECO_TREE
+			if roll < 17:
+				return DECO_ROCK
+			return DECO_NONE
+		if h <= 6:
+			return DECO_ROCK if roll < 8 else DECO_NONE
+		return DECO_ROCK if roll < 4 else DECO_NONE
+	# 西南密林（沼泽小潭周边）：隔位下种防挤团，密度仍显著高于草甸
+	if gt.x >= 4 and gt.x <= 16 and gt.y >= 36 and gt.y <= 66:
+		if posmod(gt.x + gt.y, 2) == 0 and roll < 42:
+			return DECO_TREE
+		if roll < 10:
+			return DECO_BUSH
+		return DECO_TUFT if roll < 20 else DECO_NONE
+	# 果园：集市东侧规则行距的浆果灌木（一眼看出是人种的）
+	if gt.x >= 43 and gt.x <= 50 and gt.y >= 55 and gt.y <= 62:
+		if posmod(gt.x, 3) == 1 and posmod(gt.y, 3) == 1:
+			return DECO_BUSH
+		return DECO_TUFT if roll < 8 else DECO_NONE
+	# 瞭望丘等缓坡草面：草丛 + 零星岩石
+	if h > 0:
+		if roll < 5:
+			return DECO_ROCK
+		return DECO_TUFT if roll < 16 else DECO_NONE
+	# 村核心（切比雪夫距广场 12 tile 内）：保持整洁
+	if maxi(absi(gt.x - 37), absi(gt.y - 37)) <= 12:
+		if roll < 3:
+			return DECO_BUSH
+		return DECO_TUFT if roll < 7 else DECO_NONE
+	# 其余草甸：疏树 + 灌木 + 石 + 草丛
+	if roll < 5:
+		return DECO_TREE
+	if roll < 9:
+		return DECO_BUSH
+	if roll < 11:
+		return DECO_ROCK
+	return DECO_TUFT if roll < 21 else DECO_NONE
+
+## 8 邻里有水（环面 wrap 由 TerrainMap._idx 兜底）。
+static func _near_water(gt: Vector2i) -> bool:
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			if dx == 0 and dz == 0:
+				continue
+			if TerrainMap.tile_type(gt + Vector2i(dx, dz)) == TerrainMap.T_WATER:
+				return true
+	return false
+
+## tile 间环面距离（tile 单位）。
+static func _tor_dist(a: Vector2i, b: Vector2i) -> float:
+	var n := WorldGrid.GRID_TILES
+	var dx := absi(a.x - b.x)
+	var dz := absi(a.y - b.y)
+	return Vector2(float(mini(dx, n - dx)), float(mini(dz, n - dz))).length()
 
 ## 构建（或取缓存）一个 wrapped 区块的地面 ArrayMesh：
 ## 25×25 tile，每 tile 按 Autotile 拆 4 个半 tile 角 quad，UV 指向 atlas 对应变体 cell。
@@ -283,26 +397,6 @@ func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, ya
 		mi.extra_cull_margin = CULL_MARGIN
 	return inst
 
-## 确定性散布小装饰（灌木/石头/草丛）：hash 出候选 tile，
-## 非空闲草地就跳过（填充物不强求），并让开区块中心（房子/水井占位）。
-func _scatter(parent: Node3D, wrapped: Vector2i, seed_h: int, count: int) -> void:
-	for k in range(count):
-		var hk := hash(Vector3i(wrapped.x + 97, wrapped.y, seed_h + k))
-		var ti := Vector2i(posmod(hk, CHUNK_TILES), posmod(hk / 1000, CHUNK_TILES))
-		var pos := _tile_local(ti, wrapped)
-		if Vector2(pos.x, pos.z).length() < CHUNK_WORLD * 0.14:
-			continue
-		if not OccupancyMap.prop_area_ok(wrapped * CHUNK_TILES + ti, 1, 1):
-			continue
-		_claim(wrapped, wrapped * CHUNK_TILES + ti, 1, 1)
-		var kind := posmod(hk / 7, 5)
-		if kind == 0:
-			_spawn(parent, ROCK_SCENES[posmod(hk, ROCK_SCENES.size())], pos, 1.6 + float(posmod(hk, 3)) * 0.4, float(posmod(hk, 360)))
-		elif kind <= 2:
-			_spawn(parent, BUSH_SCENES[posmod(hk, BUSH_SCENES.size())], pos, 4.0 + float(posmod(hk, 3)), float(posmod(hk, 360)))
-		else:
-			_spawn(parent, TUFT_SCENES[posmod(hk, TUFT_SCENES.size())], pos, 1.8, float(posmod(hk, 360)))
-
 ## L1 摆放核心：把场景吸附到 tile 中心。anchor 是区块内 tile 索引(0..24)²，
 ## 占地或压路/水时沿螺旋环向外找至多 search 圈；reserve 是占地半径（0→1×1，1→3×3）。
 ## allow_path 供地标（水井）压路。找不到空位就放弃（确定性，不摆歪）。
@@ -344,12 +438,3 @@ func _tile_local(ti: Vector2i, wrapped: Vector2i) -> Vector3:
 		-half + (float(ti.x) + 0.5) * WorldGrid.TILE_SIZE,
 		y,
 		-half + (float(ti.y) + 0.5) * WorldGrid.TILE_SIZE)
-
-## 村庄民居：KayKit 各色小屋（微缩模型放大到 ~6.5m，占地 3×3 tile）。
-func _house_on_tile(parent: Node3D, wrapped: Vector2i, anchor: Vector2i, h: int) -> void:
-	var yaw := float(posmod(h, 4)) * 90.0
-	_spawn_on_tile(parent, wrapped, HOUSE_SCENES[posmod(h, HOUSE_SCENES.size())], anchor, HOUSE_SCALE, yaw, 1, 4)
-
-func _tree_on_tile(parent: Node3D, wrapped: Vector2i, anchor: Vector2i, h: int) -> void:
-	var scale_f := 1.1 + float(h % 5) * 0.15
-	_spawn_on_tile(parent, wrapped, TREE_SCENES[posmod(h, TREE_SCENES.size())], anchor, scale_f, float(posmod(h, 360)), 0, 2)
