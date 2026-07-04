@@ -40,7 +40,15 @@ func _tick() -> void:
 			_test_voice_short_burst()
 		105:
 			_test_voice_utterance()
-		108:
+		107:
+			_test_think_bubble()
+		109:
+			_test_emotion_pop()
+		111:
+			_test_speak_bob_start()
+		113:
+			_test_speak_bob_active()
+		116:
 			if fails == 0:
 				print("visual_click_move PASS")
 			else:
@@ -114,6 +122,37 @@ func _test_voice_utterance() -> void:
 	_check("silence auto-commits", scene.get("_recording"), false)
 	_check("auto-commit enters thinking", (scene.get("thinking_label") as Label).visible, true)
 	_check("auto-commit hides banner", (scene.get("banner") as Label).visible, false)
+
+## 思考态演出：thinking 期间角色头顶应有动画冒泡气泡（幼儿可读的「在想」信号）。
+func _test_think_bubble() -> void:
+	var bubble := scene.get("_think_bubble") as Label3D
+	_check("think bubble visible while thinking", bubble.visible, true)
+	_check("think bubble has dots", bubble.text.length() >= 1, true)
+
+## 模拟回复到达：思考清除、情绪 emoji 弹出（缩放从小到大）。
+func _test_emotion_pop() -> void:
+	scene.call("_on_character_response",
+		{ "transcript": "你好", "replyText": "你好呀！", "emotion": "happy" })
+	_check("response clears thinking", (scene.get("thinking_label") as Label).visible, false)
+	var emo := scene.get("emotion_bubble") as Label3D
+	_check("emotion shows emoji", emo.text, "😊")
+	_check("emotion visible", emo.visible, true)
+	_check("emotion pop starts small", emo.scale.x < 1.0, true)
+
+## 说话演出准备：思考气泡应已随思考态消失；拉起假 TTS（headless dummy 播放态可置真）。
+func _test_speak_bob_start() -> void:
+	_check("think bubble gone after response", (scene.get("_think_bubble") as Label3D).visible, false)
+	var player := scene.get("_tts_player") as AudioStreamPlayer
+	var gen := AudioStreamGenerator.new()
+	player.stream = gen
+	player.play()
+
+## TTS 播放中：选中角色应处于呼吸弹跳（scale 离开 1）。
+## 注意 headless dummy 音频 stop() 后 playing 可能仍为真（已知陷阱），回正路径不在此断言。
+func _test_speak_bob_active() -> void:
+	var node := npc_node as Node3D
+	_check("speaking bob squashes sprite", node != null and node.scale.y != 1.0, true)
+	(scene.get("_tts_player") as AudioStreamPlayer).stop()
 
 func _silence_pcm(ms: int) -> PackedByteArray:
 	var out := PackedByteArray()
