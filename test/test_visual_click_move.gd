@@ -36,6 +36,11 @@ func _tick() -> void:
 			_tap_npc()
 		100:
 			_check_interaction()
+		102:
+			_test_talk_short_press()
+		105:
+			_test_talk_long_press()
+		108:
 			if fails == 0:
 				print("visual_click_move PASS")
 			else:
@@ -90,6 +95,27 @@ func _check_interaction() -> void:
 			var dist := WorldGrid.shortest_delta(player["logical"], d["logical"]).length()
 			_check("player adjacent to npc (dist=%.2f)" % dist, dist <= 3.2, true)
 	_check("banner visible", (scene.get("banner") as Label).visible, true)
+
+## 按住说话·误触短按：按下即录，立刻松手（<MIN_TALK_SEC）应静默取消——不进思考、留提示横幅。
+func _test_talk_short_press() -> void:
+	var btn := scene.get("talk_btn") as Button
+	btn.button_down.emit()
+	_check("talk press starts recording", scene.get("_recording"), true)
+	scene.set("_talk_down_ms", Time.get_ticks_msec()) # 定格「刚按下」，不依赖帧间真实耗时
+	btn.button_up.emit()
+	_check("short press cancels recording", scene.get("_recording"), false)
+	_check("short press no thinking", (scene.get("thinking_label") as Label).visible, false)
+	_check("short press shows hint banner", (scene.get("banner") as Label).visible, true)
+
+## 按住说话·正常长按：松手即发——退出录音、进入思考态、横幅收起。
+func _test_talk_long_press() -> void:
+	var btn := scene.get("talk_btn") as Button
+	btn.button_down.emit()
+	scene.set("_talk_down_ms", Time.get_ticks_msec() - 1000) # 视为已按住 1s
+	btn.button_up.emit()
+	_check("long release stops recording", scene.get("_recording"), false)
+	_check("long release enters thinking", (scene.get("thinking_label") as Label).visible, true)
+	_check("long release hides banner", (scene.get("banner") as Label).visible, false)
 
 ## 逻辑坐标 → 屏幕坐标（与 world 同一弯曲/台阶公式）。
 func _screen_of(logical: Vector2, y_off: float) -> Vector2:
