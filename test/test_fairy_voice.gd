@@ -41,6 +41,17 @@ func _run_once() -> void:
 	fails += _check("cooldown expired replays", fv.try_play("near_mountain"), true)
 	fv._player.stop()
 
+	# POI 数据完整性：world.gd 的每个 POI 触发器都有对应台词；
+	# 全部台词的预制 WAV 都真实存在（防加词条忘跑 gen_voice_lines.mjs）。
+	fv._t = 1000.0
+	var world_script: GDScript = load("res://scripts/world.gd")
+	for poi in world_script.POIS:
+		var trig := String(poi["trigger"])
+		fails += _check("poi has line: %s" % trig, fv.can_play(trig), true)
+	for l in fv._lines:
+		var wav := "%s/%s.wav" % [FairyVoice.VOICE_DIR, String(l["id"])]
+		fails += _check("wav exists: %s" % l["id"], FileAccess.file_exists(wav), true)
+
 	if fails == 0:
 		print("fairy_voice tests PASS")
 	else:

@@ -12,6 +12,8 @@
     { "id": "fairy_mountain_1", "trigger": "near_mountain", "cooldown": 90, "text": "好高的山呀！我们爬上去看看吧。" },
     { "id": "fairy_village_1", "trigger": "near_village", "cooldown": 90, "text": "这里是小村庄，房子好可爱呀。" },
     { "id": "fairy_poi_pond", "trigger": "poi_pond", "cooldown": 180, "text": "看！那边有个大池塘，我们过去看看吧！" },
-    { "id": "fairy_poi_mountain", "trigger": "poi_mountain", "cooldown": 180, "text": "那边有座大山耶！要不要去爬爬看？" }
+    { "id": "fairy_poi_mountain", "trigger": "poi_mountain", "cooldown": 180, "text": "那边有座大山耶！要不要去爬爬看？" },
+    { "id": "fairy_poi_windmill", "trigger": "poi_windmill", "cooldown": 180, "text": "快看！山坡上有个大风车，呼啦呼啦转呀转！" },
+    { "id": "fairy_poi_marsh", "trigger": "poi_marsh", "cooldown": 180, "text": "小树林里藏着一个小水潭，我们去探险吧！" }
   ]
 }
