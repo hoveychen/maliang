@@ -27,6 +27,7 @@ var _cur_pitch := GOD_PITCH_DEG
 var _cur_dist := GOD_DIST
 var _target_pitch := GOD_PITCH_DEG
 var _target_dist := GOD_DIST
+var _cur_focus_y := 0.0             ## 相机焦点高度 = focus 所在 tile 的台阶高度（缓动，防上台阶时画面跳变）
 var _locked: PaperCharacter = null ## lock 跟随的角色（null=god 自由模式）
 var camera: Camera3D
 var chunk_manager: ChunkManager
@@ -165,10 +166,12 @@ func _setup_camera() -> void:
 
 ## 相机固定在渲染原点上方、看向原点；平移靠改 focus_logical（世界相对滚动），
 ## 角度(pitch)/距离(dist) 由 god/lock 目标缓动得到。
+## 焦点随 focus 所在 tile 的台阶高度整体抬升（_cur_focus_y），否则上高阶地形后角色出画。
 func _update_camera() -> void:
 	var pitch := deg_to_rad(_cur_pitch)
-	camera.global_position = Vector3(0.0, sin(pitch) * _cur_dist, cos(pitch) * _cur_dist)
-	camera.look_at(Vector3.ZERO, Vector3.UP)
+	var focus := Vector3(0.0, _cur_focus_y, 0.0)
+	camera.global_position = focus + Vector3(0.0, sin(pitch) * _cur_dist, cos(pitch) * _cur_dist)
+	camera.look_at(focus, Vector3.UP)
 
 func _setup_npcs() -> void:
 	var defs := [
@@ -497,6 +500,8 @@ func _process(delta: float) -> void:
 		want = player["logical"]
 	var fd := WorldGrid.shortest_delta(focus_logical, want)
 	focus_logical = WorldGrid.wrap_pos(focus_logical + fd * t)
+	var fy := float(TerrainMap.tile_height(WorldGrid.to_tile(focus_logical))) * TerrainMap.STEP_HEIGHT
+	_cur_focus_y = lerpf(_cur_focus_y, fy, t)
 	_update_camera()
 	chunk_manager.update(focus_logical)
 	_reposition_npcs(delta)
