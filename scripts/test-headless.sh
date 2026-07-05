@@ -66,6 +66,7 @@ run_test test_visual_paper         --fixed-fps 10 --quit-after 110
 run_test test_visual_hold_move     --fixed-fps 10 --quit-after 90
 run_test test_visual_sdf           --fixed-fps 10 --quit-after 130
 run_test test_visual_water         --fixed-fps 10 --quit-after 60
+run_test test_visual_camera_gesture --fixed-fps 10 --quit-after 160
 run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
 
 echo
