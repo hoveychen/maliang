@@ -1,6 +1,6 @@
 extends SceneTree
 ## SDF 可动物件世界回归：
-## (1) 摆放——五只 SDF 物件全部落进世界（占地找位成功）；
+## (1) 摆放——七只 SDF 物件全部落进世界（两只会动的+五只安静物品，占地找位成功）；
 ## (2) 结构——单 surface 合并网格 + blend-shell 主材质 + 描边 next_pass + uniform 打包一致；
 ## (3) 活着——观察数秒：走兽/跳跳有位移（锚点游走），所有物件基本体姿态在变（动画在跑）；
 ## (4) 稳定——物理绳/IK 不发散（所有基本体 origin 有限且在物件局部 20m 内）。
@@ -45,7 +45,7 @@ func _collect() -> void:
 		_animated[p.name] = false
 
 func _structural() -> void:
-	_check("五只 SDF 物件全部落进世界", _props.size(), 5)
+	_check("七只 SDF 物件全部落进世界", _props.size(), 7)
 	for p: SdfProp in _props:
 		_check("%s 单 surface 网格" % p.name, p.mesh.get_surface_count(), 1)
 		var mat := p.material_override as ShaderMaterial
@@ -63,7 +63,8 @@ func _observe() -> void:
 		if (p.position - (_pos0[p.name] as Vector3)).length() > 0.08:
 			_moved[p.name] = true
 		var last: SdfMath.Prim = p.prims[p.prims.size() - 1]
-		if (last.xform.origin - (_prim0[p.name] as Vector3)).length() > 0.02:
+		# 阈值 0.01：安静物品（纸/蜡笔）只有待机呼吸（±0.02 的 y 起伏）也要能判活
+		if (last.xform.origin - (_prim0[p.name] as Vector3)).length() > 0.01:
 			_animated[p.name] = true
 
 func _liveness() -> void:
@@ -80,7 +81,7 @@ func _liveness() -> void:
 			if not (is_finite(o.x) and is_finite(o.y) and is_finite(o.z)) or o.length() > 20.0:
 				unstable += 1
 	_check("所有物件动画都在跑（末位基本体动过）", animated_count, _props.size())
-	_check("至少三只在游走（9.5s 观察窗）", moved_count >= 3, true)
+	_check("两只带 locomotion 的在游走（9.5s 观察窗）", moved_count >= 2, true)
 	_check("IK/物理绳不发散（origin 有限且 <20m）", unstable, 0)
 
 func _finish() -> void:
