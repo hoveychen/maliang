@@ -12,6 +12,7 @@ func _init() -> void:
 	fails += _test_walker("res://assets/sdf_props/six_leg_chest.json", 6)
 	fails += _test_hopper()
 	fails += _test_flyer()
+	fails += _test_ropes()
 	if fails == 0:
 		print("sdf_animator tests PASS")
 	else:
@@ -142,6 +143,57 @@ func _test_flyer() -> int:
 	var b_prim: SdfMath.Prim = prop.prims[prop.meta.body[0].idx]
 	var roll: float = (b_prim.xform.basis * Vector3.UP).x
 	fails += _check("banks into motion", absf(roll) > 0.02, true)
+	prop.free()
+	return fails
+
+func _test_ropes() -> int:
+	var fails := 0
+	var prop := SdfProp.from_json_file("res://assets/sdf_props/walking_hut.json")
+	if prop == null:
+		return 1
+	var anim: SdfAnimator = prop.animator
+	var rope: Dictionary = prop.meta.ropes[0]
+	var seg_len: float = rope.seg_len
+
+	# 静置 3 秒：段长守恒 + 锚点钉在身体上
+	for i in range(90):
+		anim.advance(DT)
+	var pts: PackedVector3Array = anim._rope_pts[0]
+	var bad_len := 0
+	for k in range(pts.size() - 1):
+		if absf(pts[k].distance_to(pts[k + 1]) - seg_len) > 0.02:
+			bad_len += 1
+	fails += _check("rope segs keep length", bad_len, 0)
+	var anchor_now: Vector3 = prop.transform * (anim._body_delta_xf() * (rope.anchor as Vector3))
+	fails += _check("rope pinned to body", pts[0].distance_to(anchor_now) < 1e-4, true)
+
+	# 快速平移 1 秒：尾端应甩起来（相对锚点的水平偏移显著变化）
+	var max_sway := 0.0
+	for i in range(30):
+		prop.position += Vector3(2.0, 0, 0) * DT
+		anim.advance(DT)
+		var p: PackedVector3Array = anim._rope_pts[0]
+		var tip_rel := p[p.size() - 1] - p[0]
+		max_sway = maxf(max_sway, absf(tip_rel.x))
+	fails += _check("rope swings when moving", max_sway > 0.08, true)
+
+	# 停下再静置：尾端回到锚点近乎正下方（微风扰动容差）
+	for i in range(240):
+		anim.advance(DT)
+	var p2: PackedVector3Array = anim._rope_pts[0]
+	var rel := p2[p2.size() - 1] - p2[0]
+	fails += _check("rope settles under anchor", Vector2(rel.x, rel.z).length() < 0.12, true)
+
+	# 绳段基本体确实被摆到点之间（物件空间端点重合）
+	var inv := prop.transform.affine_inverse()
+	var bad_seg := 0
+	for k in range(int(rope.count)):
+		var pr: SdfMath.Prim = prop.prims[int(rope.start) + k]
+		var a := pr.xform * Vector3(0, -pr.params.z, 0)
+		# 容差与段长约束残差同级（params.z 是静止段长的一半，运行时长度有 ±0.02 漂移）
+		if a.distance_to(inv * p2[k]) > 0.02:
+			bad_seg += 1
+	fails += _check("rope prims follow points", bad_seg, 0)
 	prop.free()
 	return fails
 

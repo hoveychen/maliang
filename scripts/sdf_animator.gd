@@ -27,6 +27,14 @@ var _hop_t := 0.0
 var _hop_y := 0.0
 var _hop_vy := 0.0
 
+# 物理绳（verlet）：点存父空间，锚点钉在身体件上；绳段基本体每帧按点重摆
+var _rope_pts: Array[PackedVector3Array] = []
+var _rope_prev: Array[PackedVector3Array] = []
+
+const ROPE_GRAVITY := Vector3(0, -6.5, 0)  ## 装饰性偏轻的重力，甩起来更"纸"
+const ROPE_DAMP := 0.985
+const ROPE_ITERS := 3
+
 const STEP_DUR := 0.18       ## 单步耗时
 const STEP_TRIGGER := 0.22   ## 脚锚偏离期望位置多远触发迈步（×hip_h）
 const HOP_GRAVITY := 14.0
@@ -46,22 +54,32 @@ func _init(p: SdfProp) -> void:
 		2: _groups = [[0], [1]]
 		4: _groups = [[0, 3], [1, 2]]
 		6: _groups = [[0, 3, 4], [1, 2, 5]]
-	_reset_feet()
+	reset_pose()
 
-## 把所有脚锚重置到当前节点姿态下的静止位（初始化/被瞬移后调用）。
-func _reset_feet() -> void:
+## 把脚锚与绳点重置到当前节点姿态下的静止位（初始化/被瞬移后调用）。
+func reset_pose() -> void:
 	var xf := _prop_xf()
 	for i in range(_feet.size()):
 		_feet[i].anchor = xf * (prop.meta.legs[i].foot_rest as Vector3)
 		_feet[i].t = -1.0
+	_rope_pts.clear()
+	_rope_prev.clear()
+	for rope in prop.meta.ropes:
+		var pts := PackedVector3Array()
+		for p in rope.rest_points:
+			pts.append(xf * p)
+		_rope_pts.append(pts)
+		_rope_prev.append(pts.duplicate())
 
 func advance(delta: float) -> void:
+	delta = minf(delta, 0.05)  # 掉帧保护：verlet 大步长会爆
 	time += delta
 	match str(_loco.type):
 		"walker": _advance_walker(delta)
 		"hopper": _advance_hopper(delta)
 		"flyer": _advance_flyer(delta)
 		_: _apply_body(_breath_xf())
+	_ropes_step(delta)
 
 ## ---- 通用 ----
 
@@ -146,13 +164,8 @@ func _advance_walker(delta: float) -> void:
 		prop.prims[leg.lower].xform = SdfMath.between_xform(knee, foot_obj)
 
 func _hip_now(leg: Dictionary) -> Vector3:
-	# 髋挂在身体上：取任一 body prim 的当前姿态相对静止姿态的增量
-	var body: Array = prop.meta.body
-	if body.is_empty():
-		return leg.hip
-	var b0: Dictionary = body[0]
-	var delta_xf: Transform3D = prop.prims[b0.idx].xform * (b0.rest as Transform3D).affine_inverse()
-	return delta_xf * (leg.hip as Vector3)
+	# 髋挂在身体上：跟随身体件的刚体增量
+	return _body_delta_xf() * (leg.hip as Vector3)
 
 ## ---- hopper：蹲伸状态机 ----
 
@@ -211,6 +224,59 @@ func _apply_squash(sy: float, y_off: float) -> void:
 				pr.params = Vector3(rp.x * rad_s, rp.y * rad_s, rp.z * long_s)
 			SdfMath.SHAPE_BOX:
 				pr.params = Vector3(rp.x * sx, rp.y * sy, rp.z * sx)
+
+## ---- 物理绳：verlet 链，绳段即 SDF 基本体 ----
+
+## 点在父空间积分（节点跑动/跳跃时绳自然甩动），锚点钉在身体件的当前姿态上；
+## 距离约束迭代收敛后，把每段圆头锥基本体重摆到相邻两点之间——
+## 绳段和身体在同一个 smooth-min 场里，甩动中依然无缝融合。
+func _ropes_step(delta: float) -> void:
+	var ropes: Array = prop.meta.ropes
+	if ropes.is_empty():
+		return
+	var xf := _prop_xf()
+	var inv := xf.affine_inverse()
+	var body_delta := _body_delta_xf()
+	var dt2 := delta * delta
+	for ri in range(ropes.size()):
+		var rope: Dictionary = ropes[ri]
+		var pts := _rope_pts[ri]
+		var prev := _rope_prev[ri]
+		# 锚点跟身体动画走
+		pts[0] = xf * (body_delta * (rope.anchor as Vector3))
+		# verlet 积分（跳过锚点），带一点随时间的微风让静止时也有生气
+		var wind := Vector3(sin(time * 1.3 + float(ri) * 2.1), 0, cos(time * 0.9)) * 0.35
+		for k in range(1, pts.size()):
+			var cur := pts[k]
+			pts[k] = cur + (cur - prev[k]) * ROPE_DAMP + (ROPE_GRAVITY + wind) * dt2
+			prev[k] = cur
+		# 距离约束：保持段长（锚点视为无限质量）
+		var seg_len: float = rope.seg_len
+		for _it in range(ROPE_ITERS):
+			for k in range(pts.size() - 1):
+				var d := pts[k + 1] - pts[k]
+				var l := d.length()
+				if l < 1e-6:
+					continue
+				var corr := d * ((l - seg_len) / l)
+				if k == 0:
+					pts[k + 1] -= corr
+				else:
+					pts[k] += corr * 0.5
+					pts[k + 1] -= corr * 0.5
+		# 写回绳段基本体（物件空间）
+		for k in range(int(rope.count)):
+			var a := inv * pts[k]
+			var b := inv * pts[k + 1]
+			prop.prims[int(rope.start) + k].xform = SdfMath.between_xform(a, b)
+
+## 身体件相对静止姿态的刚体增量（绳锚/髋关节挂载用）。
+func _body_delta_xf() -> Transform3D:
+	var body: Array = prop.meta.body
+	if body.is_empty():
+		return Transform3D.IDENTITY
+	var b0: Dictionary = body[0]
+	return prop.prims[b0.idx].xform * (b0.rest as Transform3D).affine_inverse()
 
 ## ---- flyer：悬停+振翅+倾侧 ----
 
