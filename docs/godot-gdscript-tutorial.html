@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Godot 4 + GDScript 教学 · 以 maliang 为例</title>
+<style>
+  :root{
+    --paper:#f4ecd8; --ink:#2c2419; --ink-soft:#5a4f3c;
+    --coral:#e5624a; --coral-deep:#b8442f; --leaf:#5b8c51; --sky:#3f7a9c;
+    --gold:#c99a3f; --line:#d8cbab; --panel:#fbf6ea; --code-bg:#2b2822;
+    --kw:#e5936b; --typ:#8bc6a9; --str:#d9c07a; --num:#c39ce0; --com:#7c8a6b; --fn:#7fbfe0;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Songti SC",Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.72;
+    background-image:radial-gradient(circle at 12% 8%,rgba(255,255,255,.5),transparent 42%),
+      radial-gradient(circle at 88% 92%,rgba(197,154,63,.10),transparent 40%);}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 26px}
+  /* header */
+  header.hero{padding:64px 26px 40px;text-align:center;position:relative;overflow:hidden}
+  header.hero::after{content:"";position:absolute;left:-10%;right:-10%;bottom:-60px;height:120px;
+    background:radial-gradient(60% 100% at 50% 0,rgba(91,140,81,.22),transparent);}
+  .kicker{font-family:var(--mono);letter-spacing:.28em;font-size:12px;color:var(--coral-deep);text-transform:uppercase}
+  h1{font-family:var(--serif);font-weight:600;font-size:clamp(34px,5.5vw,56px);line-height:1.08;margin:.35em 0 .2em}
+  h1 em{font-style:italic;color:var(--coral)}
+  .sub{max-width:660px;margin:0 auto;color:var(--ink-soft);font-size:18px}
+  /* nav */
+  nav.toc{position:sticky;top:0;z-index:20;background:rgba(244,236,216,.9);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);padding:10px 0}
+  nav.toc .wrap{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+  nav.toc a{font-size:13px;color:var(--ink-soft);text-decoration:none;padding:5px 11px;border-radius:20px;
+    font-family:var(--mono);white-space:nowrap}
+  nav.toc a:hover{background:var(--coral);color:#fff}
+  /* sections */
+  section{padding:46px 0 8px}
+  .num{font-family:var(--mono);color:var(--coral);font-size:14px;letter-spacing:.1em}
+  h2{font-family:var(--serif);font-size:clamp(26px,3.6vw,36px);margin:.15em 0 .5em;font-weight:600;line-height:1.15}
+  h3{font-family:var(--serif);font-size:22px;margin:1.8em 0 .3em;color:var(--coral-deep)}
+  p{margin:.7em 0}
+  a.ref{color:var(--sky);text-decoration:none;border-bottom:1px dotted var(--sky);font-family:var(--mono);font-size:.92em}
+  a.ref:hover{background:var(--sky);color:#fff}
+  code.inl{font-family:var(--mono);background:rgba(197,154,63,.16);padding:1px 6px;border-radius:5px;font-size:.88em;color:var(--coral-deep)}
+  .lead{font-size:19px;color:var(--ink-soft);border-left:3px solid var(--coral);padding-left:16px;margin:1em 0}
+  ul.tick{list-style:none;padding-left:0}
+  ul.tick li{padding:4px 0 4px 26px;position:relative}
+  ul.tick li::before{content:"▸";position:absolute;left:4px;color:var(--leaf);font-weight:700}
+  /* code block */
+  figure.code{margin:18px 0;border-radius:12px;overflow:hidden;box-shadow:0 8px 26px rgba(44,36,25,.18);border:1px solid #1c1a15}
+  figure.code figcaption{background:#1c1a15;color:#cbb98f;font-family:var(--mono);font-size:12px;
+    padding:8px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  figure.code figcaption .path{color:#7fbfe0}
+  figure.code figcaption .tag{color:#7c8a6b}
+  pre{margin:0;background:var(--code-bg);color:#e6ddc8;font-family:var(--mono);font-size:13.5px;line-height:1.65;
+    padding:16px 18px;overflow-x:auto;tab-size:2}
+  .tok-kw{color:var(--kw)} .tok-typ{color:var(--typ)} .tok-str{color:var(--str)}
+  .tok-num{color:var(--num)} .tok-com{color:var(--com);font-style:italic} .tok-fn{color:var(--fn)}
+  /* callout */
+  .note{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--gold);
+    border-radius:10px;padding:14px 18px;margin:18px 0}
+  .note b{color:var(--coral-deep)}
+  .why{background:linear-gradient(180deg,rgba(91,140,81,.10),rgba(91,140,81,.04));border:1px solid #cfe0c4;
+    border-left:4px solid var(--leaf);border-radius:10px;padding:14px 18px;margin:18px 0}
+  .why b{color:var(--leaf)}
+  /* diagram */
+  .diagram{background:#1c1a15;color:#d8ceb4;border-radius:12px;padding:20px;font-family:var(--mono);
+    font-size:12.5px;line-height:1.5;overflow-x:auto;white-space:pre;box-shadow:0 8px 26px rgba(44,36,25,.18)}
+  .diagram b{color:#e5936b}
+  /* grid cards */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin:20px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card h4{margin:0 0 6px;font-family:var(--mono);font-size:13px;color:var(--coral-deep);letter-spacing:.04em}
+  .card p{margin:0;font-size:14.5px;color:var(--ink-soft)}
+  /* table */
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px;background:var(--panel);border-radius:10px;overflow:hidden}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
+  th{background:rgba(197,154,63,.14);font-family:var(--mono);font-size:12.5px;letter-spacing:.05em}
+  tr:last-child td{border-bottom:none}
+  td code{font-family:var(--mono);font-size:.9em;color:var(--coral-deep)}
+  /* step flow */
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0}
+  .flow .step{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 14px;font-size:13.5px}
+  .flow .arr{color:var(--coral);font-family:var(--mono)}
+  footer{padding:50px 26px 70px;text-align:center;color:var(--ink-soft);font-size:14px;border-top:1px solid var(--line);margin-top:40px}
+  .anchor{scroll-margin-top:64px}
+  @media(max-width:640px){pre{font-size:12px}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="kicker">从零到看得懂这个仓库</div>
+  <h1>Godot 4 与 <em>GDScript</em> 图解教学</h1>
+  <p class="sub">不讲空洞语法——每个概念都用 <b>maliang</b>（面向幼儿的语音沙盒游戏）里真实跑着的代码来解释。读完你能看懂这个仓库的语言、引擎模型、架构与核心算法。</p>
+</header>
+
+<nav class="toc"><div class="wrap">
+  <a href="#what">① 是什么</a>
+  <a href="#lang">② GDScript 语言</a>
+  <a href="#nodes">③ 节点与场景</a>
+  <a href="#signals">④ 信号与生命周期</a>
+  <a href="#arch">⑤ 项目架构</a>
+  <a href="#algo">⑥ 核心算法</a>
+  <a href="#shader">⑦ 着色器</a>
+  <a href="#test">⑧ 测试</a>
+  <a href="#flow">⑨ 端到端</a>
+</div></nav>
+
+<main class="wrap">
+
+<!-- ===================== 1 ===================== -->
+<section id="what" class="anchor">
+  <div class="num">01 / 心智模型</div>
+  <h2>Godot 是什么，GDScript 又是什么</h2>
+  <p class="lead">Godot = 一个开源游戏引擎；GDScript = 它内建的脚本语言，语法像 Python，但为游戏和引擎类型系统量身定做。</p>
+  <p>两句话记住它们的关系：<b>引擎</b>负责渲染、物理、音频、输入、场景树这些"跑起来"的底座；<b>你写的 GDScript</b> 挂在场景里的节点上，每帧被引擎回调，用来表达游戏逻辑。你不写主循环——引擎替你循环，你只填 <code class="inl">_ready()</code> / <code class="inl">_process(delta)</code> 这些"钩子"。</p>
+
+  <div class="cards">
+    <div class="card"><h4>引擎（C++ 内核）</h4><p>渲染管线、物理、场景树调度、资源导入。你不碰它的源码，只调用它暴露的类：<code class="inl">Node3D</code>、<code class="inl">Sprite3D</code>、<code class="inl">ShaderMaterial</code>…</p></div>
+    <div class="card"><h4>GDScript（你写的）</h4><p>动态偏静态、带可选类型标注、缩进成块。热重载快，和引擎类型无缝互通。maliang 全部逻辑都是它。</p></div>
+    <div class="card"><h4>场景 .tscn（数据）</h4><p>节点树的序列化文本。谁是谁的孩子、挂什么脚本、初始属性，全在这里。可视化编辑器改的就是它。</p></div>
+    <div class="card"><h4>着色器 .gdshader</h4><p>跑在 GPU 上的一小段程序，决定每个顶点/像素怎么画。maliang 的"小星球弯曲"就是一个顶点着色器。</p></div>
+  </div>
+
+  <div class="note"><b>maliang 是什么？</b> 一个给不识字的幼儿园孩子玩的 Android 平板游戏：动漫风草原小村庄，点角色 → 语音对话 → 地图中央的"小神仙"能按孩子的口头想法<b>实时用 AI 造出新角色</b>。技术上是 <b>HD-2D</b>：3D 场景里立着 2D 纸片角色（织梦岛/纸片马里奥那种观感）。客户端是 Godot 4 + GDScript，后端是 Node/TypeScript。</div>
+</section>
+
+<!-- ===================== 2 ===================== -->
+<section id="lang" class="anchor">
+  <div class="num">02 / 语言</div>
+  <h2>GDScript 语言巡礼</h2>
+  <p>与其罗列语法表，不如读一个真实文件。下面是整个世界坐标系统的数学核心——只有 30 行，却几乎覆盖了 GDScript 的所有基础语法。逐行读它，语言就学了一大半。</p>
+
+  <figure class="code" data-src="wg"></figure>
+
+  <p>这一个文件里出现的每样东西：</p>
+  <table>
+    <tr><th>语法</th><th>含义</th></tr>
+    <tr><td><code>class_name WorldGrid</code></td><td>给这个脚本注册一个全局类名，别处直接 <code class="inl">WorldGrid.wrap_pos(...)</code> 就能用，不必先 load。</td></tr>
+    <tr><td><code>extends RefCounted</code></td><td>继承。<code class="inl">RefCounted</code> 是引用计数对象（无需手动释放），适合"纯工具类"——它不是场景里的节点。</td></tr>
+    <tr><td><code>##</code> 注释</td><td>双井号是<b>文档注释</b>，会显示在编辑器提示里；单 <code class="inl">#</code> 是普通注释。</td></tr>
+    <tr><td><code>const GRID_TILES := 75</code></td><td>常量。<code class="inl">:=</code> 是"推断类型的赋值"——右边是 int，于是 <code class="inl">GRID_TILES</code> 就是 int。</td></tr>
+    <tr><td><code>static func f(v: float) -> float</code></td><td>静态函数（不依赖实例）。<code class="inl">v: float</code> 是参数类型标注，<code class="inl">-> float</code> 是返回类型。类型可选，但标了引擎会检查、编辑器会补全。</td></tr>
+    <tr><td><code>Vector2 / Vector2i</code></td><td>引擎内建类型：二维浮点向量 / 二维整数向量。游戏里到处是它们。</td></tr>
+    <tr><td><code>fposmod(a, b)</code></td><td>引擎全局数学函数（浮点取模，结果恒非负）——GDScript 自带一大批 <code class="inl">clamp</code>/<code class="inl">lerp</code>/<code class="inl">posmod</code> 之类。</td></tr>
+  </table>
+
+  <h3>控制流：match / for / while</h3>
+  <p>GDScript 的分支主力是 <code class="inl">match</code>（比一串 if 清爽），循环是 <code class="inl">for x in 集合</code> 和 <code class="inl">while 条件</code>。行为执行器的状态机就是一个典型 <code class="inl">match</code>：</p>
+  <figure class="code" data-src="match"></figure>
+
+  <h3>字典、数组、可选类型的容器</h3>
+  <p>后端下发的行为脚本是 JSON，进到 GDScript 就是 <code class="inl">Dictionary</code> 和 <code class="inl">Array</code>。取值常用 <code class="inl">dict.get(key, 默认值)</code> 避免缺键崩溃，再用 <code class="inl">String(...)</code>/<code class="inl">float(...)</code> 强转到期望类型：</p>
+  <figure class="code" data-src="dict"></figure>
+  <div class="note"><b>为什么到处 <code class="inl">float(params.get("radius", 5.0))</code>？</b> 因为数据来自外部（JSON、网络），键可能缺、类型可能是 int 也可能是 float。<code class="inl">.get</code> 给默认值兜底，显式转型保证后续数学不出意外——这正是全局规则里"消费外部数据先验证单位/类型"的实践。</div>
+
+  <h3>Callable：把函数当值传</h3>
+  <p>GDScript 里函数可以装进变量、当参数传，这个包装叫 <code class="inl">Callable</code>。autotile 用它把"邻居是不是同类"这个判断<b>外置</b>给调用方——于是同一套自动拼接逻辑既能用于草地，也能用于悬崖：</p>
+  <figure class="code" data-src="callable"></figure>
+</section>
+
+<!-- ===================== 3 ===================== -->
+<section id="nodes" class="anchor">
+  <div class="num">03 / 引擎模型</div>
+  <h2>节点、场景、场景树</h2>
+  <p class="lead">Godot 的世界观只有一句话：<b>一切都是节点（Node），节点组成树，树就是你的游戏。</b></p>
+  <p>一个"节点"是一个有具体职责的对象：<code class="inl">Sprite3D</code> 画一张 3D 空间里的图，<code class="inl">Camera3D</code> 是相机，<code class="inl">AudioStreamPlayer</code> 放声音，<code class="inl">Timer</code> 计时。你把它们拼成父子树，父节点移动/隐藏时孩子跟着走。一棵这样的树存成一个 <code class="inl">.tscn</code> 文件，就叫一个<b>场景</b>。</p>
+
+  <p>maliang 的主场景其实很朴素，看它的 <code class="inl">.tscn</code> 就懂了这个格式：</p>
+  <figure class="code" data-src="tscn"></figure>
+  <ul class="tick">
+    <li><code class="inl">[ext_resource]</code>：外部引用——这里引了脚本 <code class="inl">menu.gd</code>。</li>
+    <li><code class="inl">[node name="Menu" type="Control"]</code>：一个 UI 根节点，类型 <code class="inl">Control</code>（所有 UI 控件的基类）。</li>
+    <li><code class="inl">script = ExtResource("1")</code>：把上面那个脚本挂到这个节点上——<b>脚本 = 节点的行为</b>。</li>
+  </ul>
+
+  <h3>脚本第一行决定"我是哪种节点"</h3>
+  <p>每个 <code class="inl">.gd</code> 顶部的 <code class="inl">extends</code> 说明它要挂在哪类节点上。这是理解任意 GDScript 文件的第一个动作——先看它 extends 什么：</p>
+  <figure class="code" data-src="extends"></figure>
+
+  <div class="cards">
+    <div class="card"><h4>Node3D</h4><p>3D 空间里有位置/旋转/缩放的东西。maliang 的世界根、区块管理器都是它。</p></div>
+    <div class="card"><h4>Sprite3D</h4><p>在 3D 空间里画一张 2D 图片——正是 HD-2D 纸片角色的载体。</p></div>
+    <div class="card"><h4>Node</h4><p>最朴素的节点，没有空间概念。适合放"管理器/服务"，比如网络 <code class="inl">Backend</code>。</p></div>
+    <div class="card"><h4>RefCounted</h4><p>不进场景树的纯逻辑对象。<code class="inl">WorldGrid</code>/<code class="inl">Pathfinder</code>/<code class="inl">Mover</code> 全是它——算法归算法，不占节点。</p></div>
+  </div>
+
+  <h3>纸片角色：一段真实的 Sprite3D 配置</h3>
+  <p>HD-2D 的关键就在这个 <code class="inl">setup</code> 里——如何让一张 2D 图"站"在 3D 地面上、面朝相机又不像广告牌：</p>
+  <figure class="code" data-src="paper"></figure>
+  <div class="why"><b>读代码技巧：</b>注意这些属性名（<code class="inl">billboard</code>、<code class="inl">alpha_cut</code>、<code class="inl">pixel_size</code>、<code class="inl">offset</code>）全是 <code class="inl">Sprite3D</code> 这个引擎类的公开属性。学 Godot 很大一部分就是"认识某个节点类有哪些属性可调"——编辑器右侧的 Inspector 面板列的就是它们，代码里赋值等价于在面板里拖。</div>
+</section>
+
+<!-- ===================== 4 ===================== -->
+<section id="signals" class="anchor">
+  <div class="num">04 / 通信与节奏</div>
+  <h2>信号、生命周期回调</h2>
+  <p class="lead">节点之间不靠互相持有引用乱调，而是<b>发信号（signal）</b>——观察者模式的引擎级实现。谁关心，谁自己去 <code class="inl">connect</code>。</p>
+
+  <h3>声明信号</h3>
+  <p>网络层 <code class="inl">Backend</code> 把"收到了什么"抽象成一组信号，自己完全不关心谁在听：</p>
+  <figure class="code" data-src="signaldecl"></figure>
+
+  <h3>连接信号</h3>
+  <p>世界场景 <code class="inl">world.gd</code> 在启动时把这些信号接到自己的处理函数上。语法是 <code class="inl">信号.connect(处理函数)</code>：</p>
+  <figure class="code" data-src="signalconn"></figure>
+  <ul class="tick">
+    <li><code class="inl">backend.character_response.connect(_on_character_response)</code>：后端一旦发 <code class="inl">character_response</code>，引擎就替你调 <code class="inl">_on_character_response(data)</code>。</li>
+    <li>信号可带参数（<code class="inl">character_response(data: Dictionary)</code>），参数原样传给处理函数。</li>
+    <li>UI 按钮也发信号：<code class="inl">listen_btn.pressed.connect(_on_listen)</code>——"聆听"按钮被按下就录音。</li>
+    <li>还能连匿名函数：<code class="inl">tts_end.connect(func() -> void: pass)</code>。</li>
+  </ul>
+  <div class="why"><b>为什么值得这么做？</b> <code class="inl">Backend</code> 不 import world，world 也不改 Backend 的代码——两者只通过信号名约定耦合。要加个新监听者（比如做个调试面板），再 connect 一次即可，谁都不用改。这就是解耦。</div>
+
+  <h3>生命周期钩子：引擎替你循环</h3>
+  <p>你几乎从不写 <code class="inl">while true</code> 主循环。引擎在固定时机回调这些以下划线开头的方法，你只填内容：</p>
+  <table>
+    <tr><th>钩子</th><th>何时被调</th><th>典型用途</th></tr>
+    <tr><td><code>_ready()</code></td><td>节点进入场景树、孩子都就绪后，调一次</td><td>初始化：接信号、建子节点、拉数据</td></tr>
+    <tr><td><code>_process(delta)</code></td><td>每一帧调一次，<code>delta</code>=距上帧秒数</td><td>动画、跟随、逐帧推进状态机</td></tr>
+    <tr><td><code>_unhandled_input(event)</code></td><td>有输入且没被 UI 吃掉时</td><td>点地图移动、点角色交互</td></tr>
+    <tr><td><code>_init()</code></td><td>对象刚构造时（连节点树都还没进）</td><td>纯逻辑/测试脚本的入口</td></tr>
+  </table>
+  <div class="note"><b><code class="inl">delta</code> 是帧率无关的关键。</b> 移动写成 <code class="inl">位置 += 速度 * delta</code>，无论 30fps 还是 120fps，每秒走的距离都一样。行为执行器里 <code class="inl">step_vec = 方向 * SPEED * delta</code> 正是这个道理——下一节会看到它的完整状态机。</div>
+</section>
+
+<!-- ===================== 5 ===================== -->
+<section id="arch" class="anchor">
+  <div class="num">05 / 工程</div>
+  <h2>项目架构：薄客户端 + 全能后端</h2>
+  <p class="lead">一条铁律贯穿全项目：<b>客户端只做渲染 + 输入 + 缓存，所有复杂度与密钥都在后端。</b> APK 里绝不出现任何 API key。</p>
+
+  <div class="diagram">┌──────────── Android 客户端 (Godot 4 · GDScript) ────────────┐
+│  <b>渲染</b>  HD-2D：Sprite3D 纸片 + world-bending 弯曲着色器      │
+│  <b>逻辑</b>  toroidal grid 环面世界 + chunk streaming 区块流送    │
+│  <b>输入</b>  点角色 → 交互模式 → 录音 → 发送                       │
+│  <b>缓存</b>  已生成 sprite / 世界快照 本地缓存                      │
+└───────────────────────────┬─────────────────────────────────┘
+                            │  WebSocket(流式/推送) + REST(存取/资源)
+┌───────────────────────────┴─────────────────────────────────┐
+│              后端代理 (Node/TypeScript · 自托管 muvee)          │
+│  · 造角色编排：LLM → 生图 → 抠图 → 切片 → 审核 → 落地             │
+│  · 长任务队列 + 进度推送（requestId + progress 阶段）           │
+│  · 世界状态持久化（角色 memory / chat / 位置）                   │
+│  · ASR / TTS 代理 —— <b>所有 API key 只在这里</b>                  │
+└──┬─────────┬─────────┬─────────┬─────────┬────────────────────┘
+   │ LLM     │ 生图     │ ASR     │ TTS     │ 内容审核
+ Claude   OpenRouter  讯飞      讯飞      文 + 图 双审</div>
+
+  <p>为什么这样切？三个工程理由：</p>
+  <div class="cards">
+    <div class="card"><h4>安全</h4><p>面向幼儿，内容必须审核；密钥不能进用户手机。把第三方调用与审核全锁在后端是唯一安全的切法。</p></div>
+    <div class="card"><h4>延迟掩盖</h4><p>造角色是 10–30s 长任务。后端用"requestId + 逐阶段进度推送"，客户端放"施法中"动画盖住等待。</p></div>
+    <div class="card"><h4>可迭代</h4><p>换 LLM、换生图模型、调审核策略，都只动后端，不用重新发 APK。</p></div>
+  </div>
+
+  <h3>客户端脚本的分层</h3>
+  <p>仓库里的 <code class="inl">scripts/*.gd</code> 大致分三层，看 <code class="inl">extends</code> 就能归类：</p>
+  <table>
+    <tr><th>层</th><th>extends</th><th>代表文件</th><th>职责</th></tr>
+    <tr><td>纯算法（无状态）</td><td><code>RefCounted</code></td><td><code>world_grid</code> · <code>pathfinder</code> · <code>mover</code> · <code>autotile</code></td><td>坐标数学、寻路、移动规则、拼接——可单测</td></tr>
+    <tr><td>场景节点</td><td><code>Node3D</code> / <code>Sprite3D</code></td><td><code>world</code> · <code>chunk_manager</code> · <code>paper_character</code></td><td>渲染、每帧驱动、放置角色</td></tr>
+    <tr><td>服务/管理器</td><td><code>Node</code></td><td><code>backend</code> · <code>fairy_voice</code></td><td>网络、语音，靠信号对外通信</td></tr>
+  </table>
+  <div class="why"><b>这个分层的价值：</b>算法层不碰引擎、不进场景树，于是能用 <code class="inl">--headless</code> 无窗口跑单元测试（第 8 节）。渲染层再复杂也只是"调用算法层 + 摆节点"。职责一分开，测试和调试都简单了。</div>
+</section>
+
+<!-- ===================== 6 ===================== -->
+<section id="algo" class="anchor">
+  <div class="num">06 / 算法</div>
+  <h2>四个真正有意思的算法</h2>
+  <p>这个项目工程含量最高的部分。四个算法，每个都能独立成篇。</p>
+
+  <h3>6.1 环面世界（Toroidal Grid）：有限地图，无限循环</h3>
+  <p>世界是 75×75 格的有限网格，但孩子往任意方向一直走都不会到"边缘"——因为它首尾相接，像《吃豆人》穿墙那样，拓扑上是一个<b>环面（甜甜圈面）</b>。实现只靠两个数学函数：</p>
+  <figure class="code" data-src="wg2"></figure>
+  <ul class="tick">
+    <li><b>wrap_pos</b>：任何坐标用 <code class="inl">fposmod</code> 折回 <code class="inl">[0, 150)</code>。走过右边界 149.9 → 0.1，无缝。</li>
+    <li><b>shortest_delta</b>：从 A 到 B 的<b>最短</b>环面位移。关键技巧是 <code class="inl">fposmod(dx + half, span) - half</code>，把差值折进 <code class="inl">[-75, +75)</code>——于是从 999.x 到 0.x 算出的是 +10，而不是绕大半圈的 -140。</li>
+  </ul>
+  <div class="note"><b>浮动原点渲染：</b>玩家永远画在渲染原点 (0,0)，世界相对他滚动。每帧对每个物体用 <code class="inl">shortest_delta</code> 求"离玩家最近的等价位置"再摆放。这样跨 1000 单位边界时画面零跳变——这是无缝大世界的经典手法。</div>
+
+  <h3>6.2 区块流送（Chunk Streaming）：对象池</h3>
+  <p>不可能把整张地图的节点都实例化。<code class="inl">chunk_manager.gd</code> 只维护玩家周围 3×3 个区块的节点，用<b>对象池</b>复用：玩家移动时，滑出视野的区块不销毁，而是"搬"到新出现的位置并按 wrap 后的索引重刷外观。</p>
+  <figure class="code" data-src="chunk"></figure>
+  <div class="why"><b>为什么用池而不是"销毁+新建"？</b> 创建/释放节点有开销且产生 GC 抖动，在手机上尤其致命。固定 9 个 slot 反复搬位置，内存和帧时间都恒定。注意 <code class="inl">CULL_MARGIN</code> 那条注释——因为弯曲是 GPU 干的，CPU 端的视锥裁剪不知道顶点被压弯了，得给大裁剪边距防止整块地面被误剔除。这种"GPU 变形 vs CPU 裁剪"的错位是图形工程的典型坑。</div>
+
+  <h3>6.3 半格 A* 寻路：带穿角防护与路径拉直</h3>
+  <p>角色要绕开树、房子、彼此走到目标。<code class="inl">pathfinder.gd</code> 是一套手写 A*，且为环面世界和 HD-2D 做了几处精心处理。先看主循环：</p>
+  <figure class="code" data-src="astar"></figure>
+  <p>四个值得学的设计点：</p>
+  <div class="cards">
+    <div class="card"><h4>手写二叉堆</h4><p>GDScript 没有内建优先队列，于是自己用数组实现最小堆（<code class="inl">_heap_push/_heap_pop</code>）。元素是 <code class="inl">[f, 序号, cell]</code>，序号做稳定 tiebreak，保证同代价路径确定。</p></div>
+    <div class="card"><h4>环面 octile 启发</h4><p>启发函数每个轴取<b>最短 wrap 距离</b>（<code class="inl">min(d, CELLS-d)</code>），否则跨接缝的目标会被高估、算出绕远路。</p></div>
+    <div class="card"><h4>防穿角</h4><p>对角走一步，要求两个正交邻居也可通行——否则角色会从两块石头的对角缝里"钻"过去。</p></div>
+    <div class="card"><h4>路径拉直</h4><p>A* 出的是 8 向锯齿。<code class="inl">_smooth</code> 做 string-pulling：从锚点贪心跳到最远可通视的 waypoint，把楼梯折线拉成自然直线。</p></div>
+  </div>
+  <div class="note"><b>一致性是灵魂：</b>寻路的单步判定 <code class="inl">_step_ok</code> 和运行时移动的 <code class="inl">Mover._passable</code> 用<b>完全相同</b>的规则（地形台阶 + 双层占用）。否则会出现"寻路说能走，实际卡住"的鬼畜。连拉直后的直线段也按 0.1m 采样逐点复刻同一判定——保证规划与执行永不打架。</div>
+
+  <h3>6.4 Blob 自动拼接（Autotile）：位掩码 → 边角变体</h3>
+  <p>草地边缘要自动画出圆角过渡，不能每块手摆。经典做法看 8 个邻居生成一个位掩码，再查表。maliang 用更省的<b>角/对偶网格</b>变体：把一格拆成 4 个角，每个角只看 3 位邻居，得 5 种变体——比整块 47 变体简单得多，视觉等价。</p>
+  <figure class="code" data-src="autotile2"></figure>
+  <ul class="tick">
+    <li><code class="inl">const N := 1, NE := 2, E := 4 …</code>：8 个方向各占一个二进制位，用 <code class="inl">|=</code> 拼成一个 0–255 的掩码。</li>
+    <li><code class="inl">mask & N != 0</code>：位与判断"北边是不是同类"。</li>
+    <li>每个角只喂 3 个 bool（横向、纵向、对角邻居），<code class="inl">corner_variant</code> 映射到 5 种角形。</li>
+    <li>邻居判定用 <code class="inl">Callable</code> 外置（第 2 节那段），所以草地和悬崖复用同一套逻辑。</li>
+  </ul>
+
+  <h3>6.5 行为执行器：一台跑在每帧里的状态机</h3>
+  <p>后端下发 <code class="inl">{ commands:[…], loop:true }</code>，客户端逐条执行驱动角色移动。<code class="inl">behavior_executor.gd</code> 是一台 <code class="inl">idle → move → wait → done</code> 的状态机，<code class="inl">step(delta)</code> 每帧推进一次：</p>
+  <figure class="code" data-src="behavior"></figure>
+  <ul class="tick">
+    <li>成员变量存状态（<code class="inl">_state</code> / <code class="inl">_idx</code> / <code class="inl">_waypoints</code>）——它 <code class="inl">extends RefCounted</code>，一个执行器管一个角色。</li>
+    <li>进 move 就调 6.3 的寻路拿 waypoint 队列；无路可走则回退直线滑动（<code class="inl">_direct</code>）。</li>
+    <li>被别的角色挡住 → 原地等一拍再局部重算（<code class="inl">REPATH_WAIT</code>）；反复被挡超过 <code class="inl">REPATH_MAX</code> 次就放弃当前指令，防止"磨墙"。</li>
+    <li><code class="inl">deliver_message</code> 是 maliang 的扩展：走到目标角色旁边，触发一次回调把话传到。</li>
+  </ul>
+</section>
+
+<!-- ===================== 7 ===================== -->
+<section id="shader" class="anchor">
+  <div class="num">07 / GPU</div>
+  <h2>着色器：把平地弯成小星球</h2>
+  <p class="lead">maliang 那种"站在小行星上、远处地平线向下弯"的观感，不是建模建出来的——数据层永远是纯平的环面，弯曲只发生在 GPU 渲染的一瞬间。</p>
+  <p>整个魔法就一行顶点位移。着色器语言（GLSL 风格的 <code class="inl">.gdshader</code>）和 GDScript 是两回事，但很好读：</p>
+  <figure class="code" data-src="shader"></figure>
+  <ul class="tick">
+    <li><code class="inl">shader_type spatial</code>：这是 3D 空间着色器（对应 2D 是 <code class="inl">canvas_item</code>）。</li>
+    <li><code class="inl">uniform</code>：从 GDScript 传进来的参数。<code class="inl">BendMat.make()</code>（第 2 节工厂）就是在设 <code class="inl">curvature</code> / <code class="inl">albedo</code>。</li>
+    <li><code class="inl">void vertex()</code>：对每个顶点跑一次。<code class="inl">VERTEX.y -= curvature * dot(VERTEX.xz, VERTEX.xz)</code>——离原点水平距离的<b>平方</b>决定下沉多少，于是近处几乎平、远处急弯，弯出弧形地平线。</li>
+    <li><code class="inl">void fragment()</code>：对每个像素跑一次，决定颜色/粗糙度/法线。</li>
+  </ul>
+  <div class="why"><b>注释里藏着一个真实教训：</b>代码写 <code class="inl">world_vertex_coords</code>（世界空间位移）而不是视图空间。因为阴影是从光源视角再渲一遍的——若在"视图空间"弯曲，相机 pass 和阴影 pass 的"视图"不是同一个，阴影就会错位。改到世界空间后两个 pass 几何一致，阴影才对。这类"为什么非得这么写"的注释，是读工程代码时最该停下来品的地方。</div>
+</section>
+
+<!-- ===================== 8 ===================== -->
+<section id="test" class="anchor">
+  <div class="num">08 / 质量</div>
+  <h2>测试：无头模式跑纯逻辑</h2>
+  <p>因为算法层 <code class="inl">extends RefCounted</code>、不依赖任何节点，就能不开窗口、不加载场景直接测。测试脚本 <code class="inl">extends SceneTree</code>，用 <code class="inl">_init()</code> 当入口，跑完 <code class="inl">quit(失败数)</code> 返回退出码：</p>
+  <figure class="code" data-src="test"></figure>
+  <p>命令行一句话跑（CI 里就这么跑）：</p>
+  <figure class="code" data-src="testcmd"></figure>
+  <div class="note"><b>断言用 <code class="inl">is_equal_approx</code> 而非 <code class="inl">==</code>。</b> 浮点数几乎不会精确相等，比较必须带容差。这是数值代码测试的基本功——<code class="inl">_check</code> 里正是这么写的。</div>
+  <p>仓库里 <code class="inl">test/</code> 分两类：<code class="inl">test_*.gd</code> 是这种纯逻辑单测（world_grid / pathfinder / autotile…），<code class="inl">test_visual_*.gd</code> 是截图型的可视化回归测试（启动场景、跑一段、截图比对），配合 <a class="ref" href="#">godot-visual-debug</a> 这类工具做视觉 QA。</p>
+</section>
+
+<!-- ===================== 9 ===================== -->
+<section id="flow" class="anchor">
+  <div class="num">09 / 全景</div>
+  <h2>把一切串起来：一次语音交互</h2>
+  <p>孩子点一下小兔子说"去河边"，背后所有模块协同的完整链路——现在你应该每一环都认得了：</p>
+
+  <div class="flow">
+    <span class="step">👆 点角色</span><span class="arr">→</span>
+    <span class="step">🎧 显耳朵图标·录音</span><span class="arr">→</span>
+    <span class="step">📤 发送 PCM</span><span class="arr">→</span>
+    <span class="step">☁️ 后端 ASR(讯飞)</span><span class="arr">→</span>
+    <span class="step">🧠 LLM(Claude) 抽意图</span>
+  </div>
+  <div class="flow">
+    <span class="step">🧠 闲聊? or 指令?</span><span class="arr">→</span>
+    <span class="step">🔊 TTS 回应</span><span class="arr">+</span>
+    <span class="step">📜 behavior_script 下发</span><span class="arr">→</span>
+    <span class="step">🐇 BehaviorExecutor 寻路移动</span><span class="arr">→</span>
+    <span class="step">💾 更新 memory 持久化</span>
+  </div>
+
+  <table>
+    <tr><th>环节</th><th>由谁负责</th><th>本教程哪一节</th></tr>
+    <tr><td>点角色 / 显耳朵图标</td><td><code>world.gd</code> 的 <code>_unhandled_input</code> + <code>PaperCharacter</code></td><td>§3 §4</td></tr>
+    <tr><td>录音、发送</td><td><code>mic_recorder.gd</code> + 按钮 <code>pressed</code> 信号</td><td>§4</td></tr>
+    <tr><td>ASR / LLM / TTS / 审核</td><td>Node 后端（密钥全在这）</td><td>§5</td></tr>
+    <tr><td>收到回应，播 TTS + 执行脚本</td><td><code>Backend</code> 信号 → <code>world.gd</code> → <code>BehaviorExecutor</code></td><td>§4 §6.5</td></tr>
+    <tr><td>角色绕障走到目标</td><td><code>Pathfinder</code> + <code>Mover</code>（环面 + 占用）</td><td>§6.1 §6.3</td></tr>
+    <tr><td>全程画面弯曲成小星球</td><td><code>world_bend.gdshader</code></td><td>§7</td></tr>
+  </table>
+
+  <div class="lead" style="border-color:var(--leaf)">读到这里，仓库里 <code class="inl">scripts/</code> 的每个文件你都能猜出它 extends 什么、属于哪一层、大概在解决什么问题。这就是看懂一个 Godot 项目的全部起点。</div>
+</section>
+
+</main>
+
+<footer>
+  <p>maliang · Godot 4 (Mobile 渲染) + GDScript · 后端 Node/TypeScript<br>
+  本页所有代码片段均摘自当前仓库真实文件，非示意伪代码。</p>
+</footer>
+
+<!-- ============ 代码片段数据（避免 HTML 转义问题，用 text/plain 承载） ============ -->
+<script type="text/plain" id="src-wg" data-path="scripts/world_grid.gd" data-tag="纯静态工具 · extends RefCounted">
+class_name WorldGrid
+extends RefCounted
+## Toroidal（环面）世界坐标数学——纯静态工具，无状态。
+
+const GRID_TILES := 75
+const TILE_SIZE := 2.0
+const WORLD_SPAN := float(GRID_TILES) * TILE_SIZE  ## = 150.0
+
+## 把单个坐标分量 wrap 回 [0, WORLD_SPAN)。
+static func wrap_scalar(v: float) -> float:
+	return fposmod(v, WORLD_SPAN)
+
+## 把世界坐标（XZ 平面）wrap 回 [0, WORLD_SPAN)²。
+static func wrap_pos(p: Vector2) -> Vector2:
+	return Vector2(fposmod(p.x, WORLD_SPAN), fposmod(p.y, WORLD_SPAN))
+
+## 从 a 到 b 的最短环面位移；每个分量落在 [-WORLD_SPAN/2, WORLD_SPAN/2)。
+static func shortest_delta(a: Vector2, b: Vector2) -> Vector2:
+	var half := WORLD_SPAN * 0.5
+	var dx := fposmod(b.x - a.x + half, WORLD_SPAN) - half
+	var dy := fposmod(b.y - a.y + half, WORLD_SPAN) - half
+	return Vector2(dx, dy)
+
+## 世界坐标 → tile 索引（0..GRID_TILES-1）。
+static func to_tile(p: Vector2) -> Vector2i:
+	var w := wrap_pos(p)
+	return Vector2i(int(w.x / TILE_SIZE), int(w.y / TILE_SIZE))
+</script>
+
+<script type="text/plain" id="src-match" data-path="scripts/behavior_executor.gd" data-tag="match 分支 + 每帧推进">
+func step(delta: float) -> void:
+	if _state == "done":
+		return
+	if _state == "idle":
+		_start(_commands[_idx])
+	match _state:
+		"move": _step_move(delta)
+		"wait": _step_wait(delta)
+</script>
+
+<script type="text/plain" id="src-dict" data-path="scripts/behavior_executor.gd" data-tag="Dictionary 取值 + 显式转型">
+func _start(cmd: Dictionary) -> void:
+	var type := String(cmd.get("type", ""))
+	var params: Dictionary = cmd.get("params", {})
+	match type:
+		"wander":
+			var radius := float(params.get("radius", 5.0))
+			var off := Vector2(randf() * 2.0 - 1.0, randf() * 2.0 - 1.0) * radius
+			_move_to = WorldGrid.wrap_pos(_target["logical"] + off)
+			_begin_move()
+		"wait":
+			_wait_t = float(params.get("duration", 1.0))
+			_state = "wait"
+</script>
+
+<script type="text/plain" id="src-callable" data-path="scripts/autotile.gd" data-tag="Callable：把判断函数当参数传">
+## 用谓词 same(tile: Vector2i) -> bool 生成 8 邻居掩码。
+static func mask_of(t: Vector2i, same: Callable) -> int:
+	var m := 0
+	if same.call(t + Vector2i(0, -1)): m |= N
+	if same.call(t + Vector2i(1, 0)):  m |= E
+	if same.call(t + Vector2i(0, 1)):  m |= S
+	if same.call(t + Vector2i(-1, 0)): m |= W
+	# …其余对角同理
+	return m
+</script>
+
+<script type="text/plain" id="src-tscn" data-path="menu.tscn" data-tag="场景文件 = 节点树的文本序列化">
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/menu.gd" id="1"]
+
+[node name="Menu" type="Control"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1")
+</script>
+
+<script type="text/plain" id="src-extends" data-path="各脚本首行" data-tag="extends 决定这个脚本是哪种节点">
+extends Node3D          # world.gd —— 3D 世界根
+extends Sprite3D        # paper_character.gd —— HD-2D 纸片角色
+extends Node            # backend.gd —— 无空间的服务/管理器
+extends RefCounted      # world_grid.gd / pathfinder.gd —— 纯逻辑，不进场景树
+extends SceneTree       # test_world_grid.gd —— 无头测试入口
+</script>
+
+<script type="text/plain" id="src-paper" data-path="scripts/paper_character.gd" data-tag="Sprite3D 属性配置 —— 让 2D 图站进 3D">
+func setup(tex: Texture2D, color: Color, cname: String) -> void:
+	texture = tex
+	modulate = color
+	billboard = BaseMaterial3D.BILLBOARD_DISABLED   # 不做广告牌，靠固定倾角保留立体感
+	shaded = false
+	double_sided = true
+	alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD       # 透明像素直接丢弃，边缘干净
+	texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	# 按高度归一化到固定世界高度；锚点移到脚底，绕脚底站立/倾斜
+	var h := float(tex.get_height())
+	pixel_size = PLACEHOLDER_HEIGHT / h
+	offset = Vector2(0.0, h / 2.0)
+</script>
+
+<script type="text/plain" id="src-signaldecl" data-path="scripts/backend.gd" data-tag="signal 声明 —— 发射方不关心谁在听">
+class_name Backend
+extends Node
+
+signal connected
+signal character_response(data: Dictionary)
+signal tts_chunk(pcm: PackedByteArray)
+signal tts_end
+signal gen_progress(stage: String)
+signal gen_complete(character: Dictionary)
+signal failed(reason: String)
+</script>
+
+<script type="text/plain" id="src-signalconn" data-path="scripts/world.gd" data-tag="connect —— 谁关心谁自己接">
+backend.character_response.connect(_on_character_response)
+backend.tts_chunk.connect(_on_tts_chunk)
+backend.tts_end.connect(func() -> void: pass)   # 连匿名函数
+backend.gen_progress.connect(_on_gen_progress)
+backend.gen_complete.connect(_on_gen_complete)
+backend.failed.connect(_on_failed)
+
+# UI 按钮也发信号
+listen_btn.pressed.connect(_on_listen)
+send_btn.pressed.connect(_on_send)
+</script>
+
+<script type="text/plain" id="src-wg2" data-path="scripts/world_grid.gd" data-tag="环面折返的两个核心函数">
+static func wrap_pos(p: Vector2) -> Vector2:
+	return Vector2(fposmod(p.x, WORLD_SPAN), fposmod(p.y, WORLD_SPAN))
+
+## 最短环面位移：把差值折进 [-half, +half)，跨接缝也走近路
+static func shortest_delta(a: Vector2, b: Vector2) -> Vector2:
+	var half := WORLD_SPAN * 0.5
+	var dx := fposmod(b.x - a.x + half, WORLD_SPAN) - half
+	var dy := fposmod(b.y - a.y + half, WORLD_SPAN) - half
+	return Vector2(dx, dy)
+</script>
+
+<script type="text/plain" id="src-chunk" data-path="scripts/chunk_manager.gd" data-tag="对象池：固定 3×3 slot 反复复用">
+class_name ChunkManager
+extends Node3D
+## 只实例化玩家周围 (2R+1)² 个区块，用对象池复用；
+## 每帧按最短环面位移重定位每个 slot，按 wrap 后的区块索引决定外观。
+
+const CHUNK_TILES := 25
+const CHUNKS_PER_SIDE := WorldGrid.GRID_TILES / CHUNK_TILES   ## 3（75/25）
+const R := 1                                                 ## 半径 → 3×3
+## world-bending 在 GPU 位移顶点，但视锥裁剪按原始 AABB → 会误剔除远处网格，
+## 故给所有弯曲网格设大裁剪边距。
+const CULL_MARGIN := 220.0
+</script>
+
+<script type="text/plain" id="src-astar" data-path="scripts/pathfinder.gd" data-tag="A* 主循环 · 手写二叉堆做优先队列">
+static func find_path(from_pos, to_pos, span := 2, exclude_id := "", simplify := true, max_iter := 8000) -> PackedVector2Array:
+	var start := OccupancyMap.to_cell(from_pos)
+	var goal := _resolve_goal(to_pos, span, exclude_id)
+	if goal == Vector2i(-1, -1) or _wrap(start) == goal:
+		return PackedVector2Array()
+
+	var open: Array = []            ## 二叉堆，元素 [f, 序号, cell_idx]
+	var g := {start_i: 0}
+	var came := {}
+	var closed := {}
+	_heap_push(open, [_heuristic(start, goal), 0, start_i])
+
+	while not open.is_empty() and iter < max_iter:
+		var cur_i: int = _heap_pop(open)[2]
+		if cur_i == goal_i:
+			return _reconstruct(came, cur_i, ...)   # 命中 → 回溯路径
+		if closed.has(cur_i): continue
+		closed[cur_i] = true
+		for dir in DIRS:
+			var nxt := _wrap(cur + dir)
+			if closed.has(_idx(nxt)) or not _step_ok(cur, nxt, span, exclude_id):
+				continue
+			if dir.x != 0 and dir.y != 0:            # 防穿角：两正交邻居也须通行
+				if not _step_ok(cur, _wrap(cur + Vector2i(dir.x, 0)), span, exclude_id) \
+				or not _step_ok(cur, _wrap(cur + Vector2i(0, dir.y)), span, exclude_id):
+					continue
+			var cost := DIAGONAL if (dir.x != 0 and dir.y != 0) else STRAIGHT
+			# …松弛 g 值、记 came、push 进堆
+	return PackedVector2Array()
+
+## 环面 octile 启发：每轴取最短 wrap 距离（否则跨接缝目标被高估）
+static func _heuristic(a: Vector2i, b: Vector2i) -> int:
+	var dx := absi(a.x - b.x); dx = mini(dx, OccupancyMap.CELLS - dx)
+	var dz := absi(a.y - b.y); dz = mini(dz, OccupancyMap.CELLS - dz)
+	return DIAGONAL * mini(dx, dz) + STRAIGHT * absi(dx - dz)
+</script>
+
+<script type="text/plain" id="src-autotile2" data-path="scripts/autotile.gd" data-tag="位掩码：8 方向各占一位">
+## 8 邻居位（自北起顺时针）
+const N := 1
+const NE := 2
+const E := 4
+const SE := 8
+const S := 16
+const SW := 32
+const W := 64
+const NW := 128
+
+## 单角变体：h=横向同类, v=纵向同类, d=对角同类 → 5 种角形
+static func corner_variant(h: bool, v: bool, d: bool) -> int:
+	if h and v:
+		return V_FULL if d else V_INNER
+	if h:
+		return V_EDGE_H
+	if v:
+		return V_EDGE_V
+	return V_OUTER
+
+## 8 位掩码 → [NW, NE, SW, SE] 四个角的变体
+static func corners_from_mask(mask: int) -> PackedInt32Array:
+	return PackedInt32Array([
+		corner_variant(mask & W != 0, mask & N != 0, mask & NW != 0),
+		corner_variant(mask & E != 0, mask & N != 0, mask & NE != 0),
+		corner_variant(mask & W != 0, mask & S != 0, mask & SW != 0),
+		corner_variant(mask & E != 0, mask & S != 0, mask & SE != 0),
+	])
+</script>
+
+<script type="text/plain" id="src-behavior" data-path="scripts/behavior_executor.gd" data-tag="状态机 · 寻路 + 被挡重算 + 送信">
+const SPEED := 8.0        ## 世界单位/秒
+const REPATH_MAX := 3     ## 反复被挡超此次数就弃指令，防止磨墙
+
+var _state := "idle"      ## idle | move | wait | done
+var _waypoints := PackedVector2Array()
+
+func _step_move(delta: float) -> void:
+	var cur: Vector2 = _target["logical"]
+	if WorldGrid.shortest_delta(cur, _move_to).length() <= ARRIVE:
+		_advance()                                   # 到了 → 下一条指令
+		return
+	var sub := _move_to if _direct else _waypoints[_wp_i]    # 当前子目标
+	var d := WorldGrid.shortest_delta(cur, sub)
+	var step_vec := d.normalized() * SPEED * delta            # 帧率无关位移
+	var moved := Mover.attempt(cur, step_vec, _span(), _char_id())
+	if moved == cur:                                 # 被挡住了
+		_repaths += 1
+		if _repaths > REPATH_MAX:
+			_advance()                               # 放弃当前指令
+			return
+		_repath_wait = REPATH_WAIT                    # 等一拍再重算
+		return
+	_target["logical"] = moved
+	OccupancyMap.char_register(_char_id(), moved, _span())    # 更新角色占用层
+</script>
+
+<script type="text/plain" id="src-shader" data-path="shaders/world_bend.gdshader" data-tag="顶点着色器 · 一行弯出小星球">
+shader_type spatial;
+render_mode cull_back, diffuse_lambert, specular_disabled, world_vertex_coords;
+// world_vertex_coords：世界空间位移 → 相机 pass 与阴影 pass 几何一致，阴影不错位。
+
+uniform vec3 albedo : source_color = vec3(0.46, 0.72, 0.40);
+uniform sampler2D albedo_tex : source_color;
+uniform float roughness : hint_range(0.0, 1.0) = 0.95;
+uniform float curvature = 0.018;
+
+void vertex() {
+	// 离原点(玩家)水平距离的平方 → 下沉量：近处平、远处急弯出弧形地平线
+	VERTEX.y -= curvature * dot(VERTEX.xz, VERTEX.xz);
+}
+
+void fragment() {
+	ALBEDO = albedo * texture(albedo_tex, UV).rgb;
+	ROUGHNESS = roughness;
+}
+</script>
+
+<script type="text/plain" id="src-test" data-path="test/test_world_grid.gd" data-tag="无头单测 · extends SceneTree">
+extends SceneTree
+## 运行: godot --headless --path . --script res://test/test_world_grid.gd
+
+func _init() -> void:
+	var span := WorldGrid.WORLD_SPAN
+	var fails := 0
+	fails += _check("wrap over", WorldGrid.wrap_scalar(span + 5.0), 5.0)
+	fails += _check("wrap neg",  WorldGrid.wrap_scalar(-5.0), span - 5.0)
+	# 跨接缝走最短路：999.x→0.x 应是 +10 而非绕大圈
+	var d := WorldGrid.shortest_delta(Vector2(span - 5.0, 0.0), Vector2(5.0, 0.0))
+	fails += _check("seam delta x", d.x, 10.0)
+
+	if fails == 0:
+		print("world_grid tests PASS")
+	quit(fails)   # 退出码 = 失败数，CI 据此判定
+
+func _check(name: String, got: float, want: float) -> int:
+	if is_equal_approx(got, want):   # 浮点必须带容差，不用 ==
+		return 0
+	printerr("  FAIL %s: got %f want %f" % [name, got, want])
+	return 1
+</script>
+
+<script type="text/plain" id="src-testcmd" data-path="终端" data-tag="命令行跑测试（CI 同款）">
+# 无窗口、指定项目路径、直接跑某个测试脚本
+godot --headless --path . --script res://test/test_world_grid.gd
+# 退出码 0 = 全过；非 0 = 失败数
+</script>
+
+<script>
+// ---- 极简 GDScript / shader 高亮器（离线，无依赖）----
+const KW = new Set(("func var const static extends class_name signal enum if elif else for while "+
+  "return match and or not in is as true false null void pass break continue await self "+
+  "shader_type render_mode uniform hint_range source_color").split(" "));
+const TY = new Set(("int float bool String Vector2 Vector2i Vector3 Dictionary Array Color "+
+  "Texture2D Node Node3D Sprite3D RefCounted SceneTree ShaderMaterial Shader Callable Material "+
+  "PackedVector2Array PackedInt32Array PackedByteArray MeshInstance3D BaseMaterial3D StandardMaterial3D "+
+  "SpriteBase3D vec2 vec3 vec4 sampler2D").split(" "));
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function highlight(src, isShader){
+  const commentRe = isShader ? /(\/\/[^\n]*)/ : /(#[^\n]*)/;
+  // token regex: comment | string | number | identifier | ws | punctuation
+  const re = new RegExp(
+    (isShader ? "(\\/\\/[^\\n]*)" : "(#[^\\n]*)") +
+    "|(\"(?:[^\"\\\\]|\\\\.)*\")" +
+    "|(\\b\\d+\\.?\\d*\\b)" +
+    "|([A-Za-z_@][A-Za-z0-9_]*)" +
+    "|(\\s+)" +
+    "|([^\\sA-Za-z0-9_\"#\\/]+)", "g");
+  let out="", m, lastIdx=0;
+  while((m=re.exec(src))!==null){
+    if(m.index>lastIdx){ out+=esc(src.slice(lastIdx,m.index)); }
+    lastIdx = re.lastIndex;
+    if(m[1]!==undefined){ out+='<span class="tok-com">'+esc(m[1])+'</span>'; }
+    else if(m[2]!==undefined){ out+='<span class="tok-str">'+esc(m[2])+'</span>'; }
+    else if(m[3]!==undefined){ out+='<span class="tok-num">'+esc(m[3])+'</span>'; }
+    else if(m[4]!==undefined){
+      const w=m[4];
+      if(KW.has(w)) out+='<span class="tok-kw">'+esc(w)+'</span>';
+      else if(TY.has(w) || /^[A-Z]/.test(w)) out+='<span class="tok-typ">'+esc(w)+'</span>';
+      else {
+        // function call if followed by (
+        const rest=src.slice(re.lastIndex);
+        if(/^\s*\(/.test(rest)) out+='<span class="tok-fn">'+esc(w)+'</span>';
+        else out+=esc(w);
+      }
+    }
+    else { out+=esc(m[0]); }
+  }
+  if(lastIdx<src.length) out+=esc(src.slice(lastIdx));
+  return out;
+}
+// build every <figure data-src="X"> from its <script id="src-X">
+document.querySelectorAll('figure.code[data-src]').forEach(fig=>{
+  const key = fig.getAttribute('data-src');
+  const data = document.getElementById('src-'+key);
+  if(!data){ fig.textContent='[missing snippet: '+key+']'; return; }
+  const raw = data.textContent.replace(/^\n/,'').replace(/\s+$/,'');
+  const path = data.getAttribute('data-path')||'';
+  const tag = data.getAttribute('data-tag')||'';
+  const isShader = path.endsWith('.gdshader');
+  const cap = document.createElement('figcaption');
+  cap.innerHTML = '<span class="path">'+esc(path)+'</span><span class="tag">'+esc(tag)+'</span>';
+  const pre = document.createElement('pre');
+  const code = document.createElement('code');
+  code.innerHTML = highlight(raw, isShader);
+  pre.appendChild(code);
+  fig.appendChild(cap);
+  fig.appendChild(pre);
+});
+</script>
+</body>
+</html>

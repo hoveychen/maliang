@@ -10,7 +10,7 @@ import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
-import { stickerGlyph, type ActiveTask, type Character, type VoiceResponse } from './types.ts';
+import { stickerGlyph, type ActiveTask, type Character, type VoiceResponse, type WorldProp } from './types.ts';
 import { completeTaskOnEvent, praiseLine, thanksLine } from './tasks.ts';
 
 export interface ServerDeps {
@@ -33,7 +33,7 @@ function seedFairy(worldId: string): Character {
     state: 'idle',
     behaviorScript: { commands: [{ type: 'wait', params: { duration: 1 } }], loop: true },
     position: { tileX: 500, tileY: 500 },
-    abilities: ['move_to', 'deliver_message', 'create_character'],
+    abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop'],
     relationships: {},
   };
 }
@@ -66,7 +66,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       store.addCharacter(seedFairy('default'));
     }
     if (!world) return reply.code(404).send({ error: 'world not found' });
-    return { id: world.id, characters: characterListView(store, world.id) };
+    return { id: world.id, characters: characterListView(store, world.id), props: store.listProps(world.id) };
   });
 
   // 为世界里的小神仙补一张真实 sprite。幂等：已有则跳过；?force=true 强制重生成；
@@ -212,6 +212,34 @@ async function pushLineTts(
   }
 }
 
+/** create_prop 异步落地：审核 → LLM 设计 spec → 校验 → 持久化 → prop_created 推送（失败推 prop_failed）。 */
+export async function createPropAsync(
+  socket: { send: (data: string) => void },
+  worldId: string,
+  description: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+): Promise<void> {
+  try {
+    const check = await adapters.moderation.moderateText(description);
+    if (!check.allowed) {
+      socket.send(JSON.stringify({ type: 'prop_failed', reason: 'moderation blocked' }));
+      return;
+    }
+    const spec = await adapters.llm.designSdfProp(description);
+    const validated = validateSdfPropSpec(spec);
+    if (!validated.ok) {
+      socket.send(JSON.stringify({ type: 'prop_failed', reason: validated.error }));
+      return;
+    }
+    const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null };
+    store.addProp(worldId, prop);
+    socket.send(JSON.stringify({ type: 'prop_created', worldId, prop }));
+  } catch (err) {
+    socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
+  }
+}
+
 export async function handleWsMessage(
   socket: { send: (data: string) => void },
   raw: string,
@@ -238,6 +266,9 @@ export async function handleWsMessage(
     npcId?: string;
     itemId?: string;
     toCharacterId?: string;
+    propId?: string; // prop_place：语音生成物件的落位回报
+    tileX?: number;
+    tileY?: number;
   };
   try {
     msg = JSON.parse(raw);
@@ -362,6 +393,9 @@ export async function handleWsMessage(
         store,
       );
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
+      if (response.propRequest) {
+        void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store);
+      }
       // 长期记忆后台累积：在回复发出后再做，不阻塞对话；失败/超时只影响这次记忆。
       void accumulateMemory(
         msg.worldId ?? '',
@@ -407,6 +441,9 @@ export async function handleWsMessage(
         ttsHooks,
       );
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
+      if (response.propRequest) {
+        void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store);
+      }
       void accumulateMemory(
         msg.worldId ?? '',
         msg.characterId ?? '',
@@ -471,11 +508,23 @@ export async function handleWsMessage(
       };
       const response = await respondToTranscript(worldId, characterId, transcript, adapters, store, ttsHooks);
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
+      if (response.propRequest) {
+        void createPropAsync(socket, worldId, response.propRequest, adapters, store);
+      }
       void accumulateMemory(worldId, characterId, response.transcript, response.replyText, adapters, store).catch(() => {});
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {
       if (session.gate) { session.gate.release(); session.gate = null; }
+    }
+    return;
+  }
+
+  // 语音生成物件的落位回报：客户端就近找到空位后上报 tile，重载世界按此恢复
+  if (msg.type === 'prop_place') {
+    const tile: [number, number] = [Math.trunc(Number(msg.tileX ?? -1)), Math.trunc(Number(msg.tileY ?? -1))];
+    if (!store.setPropTile(msg.worldId ?? '', msg.propId ?? '', tile)) {
+      socket.send(JSON.stringify({ type: 'error', error: 'prop not found' }));
     }
     return;
   }

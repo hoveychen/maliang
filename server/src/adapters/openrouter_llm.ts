@@ -51,6 +51,7 @@ const ABILITY_DESC: Record<string, string> = {
   chat_with: 'chat_with=走到某个角色身边和它聊天，params:{"character_name":"角色名"}',
   deliver_message: 'deliver_message=给某个角色带一句话，params:{"to":"角色名","message":"要带的话"}',
   give: 'give=小朋友把自己的贴纸送给某个角色（小朋友亲自走过去送），params:{"character_name":"角色名","item":"贴纸id"}',
+  create_prop: 'create_prop=变出/造一个物件或小建筑（小花/风车/纸/小房子…），params:{"description":"物件的中文描述，尽量保留小朋友的原话细节"}',
 };
 
 function stripFences(s: string): string {

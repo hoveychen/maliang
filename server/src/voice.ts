@@ -97,18 +97,28 @@ export async function respondToTranscript(
     emotion: intent.emotion,
   };
   if (intent.kind === 'command' && intent.behaviorScript) {
-    response.behaviorScript = intent.behaviorScript;
-    // 执行者：小朋友点名让别的角色做（「小蓝跟我来」）→ 脚本挂到那个角色；缺省挂正在对话的角色
-    const performer = intent.performerName ? findByName(roster, intent.performerName) : undefined;
-    if (performer) {
-      response.performerId = performer.id;
-      const target = store.getCharacter(worldId, performer.id);
-      if (target) {
-        target.behaviorScript = intent.behaviorScript;
-        store.saveCharacter(target);
+    // create_prop 不是客户端执行器能力：从脚本里摘走，交给 WS 层异步造物（prop_created 推送）。
+    // 摘完若脚本空了就不下发 behaviorScript（这轮只是造物+口头回应）。
+    const propCmd = intent.behaviorScript.commands.find((c) => c.type === 'create_prop');
+    if (propCmd) {
+      const desc = String(propCmd.params?.description ?? '').trim();
+      if (desc) response.propRequest = desc;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'create_prop');
+    }
+    if (intent.behaviorScript.commands.length > 0) {
+      response.behaviorScript = intent.behaviorScript;
+      // 执行者：小朋友点名让别的角色做（「小蓝跟我来」）→ 脚本挂到那个角色；缺省挂正在对话的角色
+      const performer = intent.performerName ? findByName(roster, intent.performerName) : undefined;
+      if (performer) {
+        response.performerId = performer.id;
+        const target = store.getCharacter(worldId, performer.id);
+        if (target) {
+          target.behaviorScript = intent.behaviorScript;
+          store.saveCharacter(target);
+        }
+      } else {
+        character.behaviorScript = intent.behaviorScript; // 指令即时生效
       }
-    } else {
-      character.behaviorScript = intent.behaviorScript; // 指令即时生效
     }
   }
   // LLM 在这句回应里发起了委托候选 → 设为进行中，随 character_response 下发给客户端做提示

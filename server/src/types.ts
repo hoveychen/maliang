@@ -174,4 +174,13 @@ export interface VoiceResponse {
   performerId?: string;
   /** 这句回应里新发起的委托（LLM offerTask 且服务端已设为进行中）→ 客户端显示任务提示。 */
   task?: ActiveTask;
+  /** create_prop 意图的物件描述：不下发客户端，由 WS 层摘走并异步造物（prop_created 推送）。 */
+  propRequest?: string;
+}
+
+/** 世界里由语音生成的 SDF 物件（spec 结构见 sdf_prop.ts；tile 为客户端落位后回报）。 */
+export interface WorldProp {
+  id: string;
+  spec: import('./sdf_prop.ts').SdfPropSpec;
+  tile: [number, number] | null;
 }

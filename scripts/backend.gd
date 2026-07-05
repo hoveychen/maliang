@@ -8,6 +8,8 @@ signal tts_chunk(pcm: PackedByteArray)
 signal tts_end
 signal gen_progress(stage: String)
 signal gen_complete(character: Dictionary)
+signal prop_created(prop: Dictionary)
+signal prop_failed(reason: String)
 signal failed(reason: String)
 # 奖赏系统：world_info 后的状态同步 / 委托完成发奖 / 转赠结果
 signal world_state(data: Dictionary)
@@ -23,6 +25,9 @@ var _ws := WebSocketPeer.new()
 var _open := false
 
 func connect_to_server() -> void:
+	# 默认入站缓冲 64KB：慢帧场景（录屏/低端机）下一帧间隔内的 TTS 分片突发
+	# 会撑爆缓冲直接断连，后续推送（如 prop_created）全部丢失——调大到 2MB。
+	_ws.inbound_buffer_size = 2 * 1024 * 1024
 	_ws.connect_to_url(url)
 
 func send_voice(world_id: String, character_id: String, audio_b64: String, fmt := "audio/wav") -> void:
@@ -63,6 +68,10 @@ func send_task_event(world_id: String, kind: String, extra := {}) -> void:
 func send_give_item(world_id: String, to_character_id: String, item_id: String) -> void:
 	_send({ "type": "give_item", "worldId": world_id, "toCharacterId": to_character_id, "itemId": item_id })
 
+## 语音生成物件的落位回报：客户端就近找到空位后上报 tile，服务端持久化供重载恢复。
+func send_prop_place(world_id: String, prop_id: String, tile: Vector2i) -> void:
+	_send({ "type": "prop_place", "worldId": world_id, "propId": prop_id, "tileX": tile.x, "tileY": tile.y })
+
 func _send(obj: Dictionary) -> void:
 	sent.emit(obj)
 	if _open:
@@ -84,6 +93,8 @@ func _process(_delta: float) -> void:
 		_open = false
 
 func _dispatch(data: Dictionary) -> void:
+	if OS.get_environment("MALIANG_WS_DEBUG") != "":
+		print("[ws] ", String(data.get("type", "")))
 	match String(data.get("type", "")):
 		"character_response":
 			character_response.emit(data)
@@ -103,5 +114,9 @@ func _dispatch(data: Dictionary) -> void:
 			give_result.emit(data)
 		"praise_tts":
 			praise_tts.emit(String(data.get("ttsAsset", "")))
+		"prop_created":
+			prop_created.emit(data.get("prop", {}))
+		"prop_failed":
+			prop_failed.emit(String(data.get("reason", "")))
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))
