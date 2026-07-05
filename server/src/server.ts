@@ -8,6 +8,7 @@ import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
+import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import type { Character, VoiceResponse } from './types.ts';
 
@@ -125,6 +126,19 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       confirmTtsAsset: hash,
       confirmMime: audio.mime,
     };
+  });
+
+  // SDF 可动物件：描述 → LLM 设计 spec（~15 行 JSON）→ 服务端校验 → 下发。
+  // 客户端 SdfProp.from_spec 再做一次同规则校验（防传输/版本偏差），双保险。
+  app.post<{ Body: { description?: string } | null }>('/sdf-props', async (req, reply) => {
+    const desc = (req.body?.description ?? '').trim();
+    if (desc.length === 0) return reply.code(400).send({ error: 'description required' });
+    const check = await adapters.moderation.moderateText(desc);
+    if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
+    const spec = await adapters.llm.designSdfProp(desc);
+    const validated = validateSdfPropSpec(spec);
+    if (!validated.ok) return reply.code(502).send({ error: `spec invalid: ${validated.error}` });
+    return { spec: validated.spec };
   });
 
   // 取生成的 sprite 资源

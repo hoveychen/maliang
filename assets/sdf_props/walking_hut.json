@@ -1,0 +1,87 @@
+{
+  "name": "walking_hut",
+  "palette": [
+    "#b1543f",
+    "#6e4a32",
+    "#f4ead4",
+    "#e8b04b"
+  ],
+  "blend": 0.22,
+  "outline": 0.045,
+  "parts": [
+    {
+      "shape": "box",
+      "pos": [
+        0,
+        1.3,
+        0
+      ],
+      "size": [
+        1.7,
+        1.2,
+        1.5
+      ],
+      "color": 2
+    },
+    {
+      "shape": "cone",
+      "pos": [
+        0,
+        2.35,
+        0
+      ],
+      "r1": 1.05,
+      "r2": 0.18,
+      "h": 0.55,
+      "color": 0
+    },
+    {
+      "shape": "capsule",
+      "pos": [
+        0.5,
+        2.75,
+        0.22
+      ],
+      "r": 0.11,
+      "len": 0.3,
+      "color": 1,
+      "blend": 0.1
+    },
+    {
+      "shape": "sphere",
+      "pos": [
+        0,
+        1.15,
+        0.8
+      ],
+      "r": 0.17,
+      "color": 3,
+      "blend": 0.12
+    }
+  ],
+  "locomotion": {
+    "type": "walker",
+    "legs": 4,
+    "leg_r": 0.12,
+    "hip_h": 0.78,
+    "stance": [
+      0.6,
+      0.5
+    ],
+    "speed": 0.7
+  },
+  "ropes": [
+    {
+      "pos": [
+        0,
+        2.05,
+        -0.85
+      ],
+      "segments": 4,
+      "r": 0.09,
+      "len": 0.26,
+      "color": 3
+    }
+  ],
+  "color_k": 0.1
+}

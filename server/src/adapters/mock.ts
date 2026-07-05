@@ -1,5 +1,6 @@
 import type { ServiceAdapters, ImageBlob, AudioBlob } from './types.ts';
 import type { CharacterSpec, IntentContext, IntentResult, MemoryExtractionContext } from '../types.ts';
+import type { SdfPropSpec } from '../sdf_prop.ts';
 
 // 1x1 透明 PNG，作为生图占位。（须是合法 PNG：Godot 客户端会真解码，CRC 错会拒收；
 // 旧值 IDAT CRC 损坏，Node 侧从未校验所以一直没暴露）
@@ -41,6 +42,28 @@ export function createMockAdapters(): ServiceAdapters {
           voiceId: 'mock-voice-cn-child',
           scale: 1.0,
           abilities: ['move_to', 'deliver_message'],
+        };
+      },
+      async designSdfProp(intentText: string): Promise<SdfPropSpec> {
+        // mock：按关键词确定性挑运动方式，结构固定（真实实现由 LLM 自由拼形状）
+        const hop = /(跳|蹦|兔)/.test(intentText);
+        const fly = /(飞|翅|蝶|鸟)/.test(intentText);
+        const locomotion: SdfPropSpec['locomotion'] = fly
+          ? { type: 'flyer', hover_h: 1.4, wing_len: 0.4, rate: 3, speed: 1 }
+          : hop
+            ? { type: 'hopper', hop_h: 0.45, rate: 1.5, speed: 0.9 }
+            : { type: 'walker', legs: 4, leg_r: 0.1, hip_h: 0.6, stance: [0.45, 0.4], speed: 0.8 };
+        return {
+          name: 'mock_prop',
+          palette: ['#e8b04b', '#f4ead4'],
+          blend: 0.26,
+          outline: 0.04,
+          parts: [
+            { shape: 'box', pos: [0, 0.95, 0], size: [0.9, 0.7, 0.8], color: 1 },
+            { shape: 'sphere', pos: [0, 1.5, 0.2], r: 0.22, color: 0, blend: 0.15 },
+          ],
+          locomotion,
+          ropes: [{ pos: [0, 1.2, -0.45], segments: 3, r: 0.06, len: 0.2, color: 0 }],
         };
       },
       async routeIntent(transcript: string, _ctx: IntentContext): Promise<IntentResult> {

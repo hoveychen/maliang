@@ -67,6 +67,17 @@ const LANDMARKS := [
 	{ "scene": ROCK_SCENES[0], "tile": Vector2i(28, 12), "scale": 1.7, "yaw": 210.0 },
 ]
 
+## SDF blend-shell 可动物件/建筑（spec 即 JSON，见 assets/sdf_props/）。
+## 与 LANDMARKS 同一套 tile 锚点+占地逻辑；wander 是围绕锚点的漫游半径（米），
+## reserve 1（3×3 tile = 6m 见方）足够容纳游走范围。
+const SDF_PROPS := [
+	{ "spec": "res://assets/sdf_props/walking_hut.json", "tile": Vector2i(24, 47), "yaw": 150.0, "reserve": 1, "search": 2, "wander": 1.6 },
+	{ "spec": "res://assets/sdf_props/six_leg_chest.json", "tile": Vector2i(60, 44), "yaw": 250.0, "reserve": 1, "search": 2, "wander": 1.5 },
+	{ "spec": "res://assets/sdf_props/hop_mailbox.json", "tile": Vector2i(41, 34), "yaw": 200.0, "reserve": 1, "search": 2, "wander": 1.2 },
+	{ "spec": "res://assets/sdf_props/fly_lantern.json", "tile": Vector2i(27, 27), "yaw": 90.0, "reserve": 0, "search": 2, "wander": 1.0 },
+	{ "spec": "res://assets/sdf_props/sign_scout.json", "tile": Vector2i(35, 22), "yaw": 0.0, "reserve": 1, "search": 2, "wander": 1.4 },
+]
+
 ## 分区散布的判定结果
 const DECO_NONE := 0
 const DECO_TREE := 1
@@ -152,6 +163,13 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 			continue
 		_spawn_on_tile(deco, wrapped, lm["scene"], anchor, lm["scale"], lm["yaw"],
 			int(lm.get("reserve", 0)), int(lm.get("search", 0)), bool(lm.get("path_ok", false)))
+
+	# SDF 可动物件：与地标同权重的手工锚点，先于散布占地。
+	for sp in SDF_PROPS:
+		var sp_anchor: Vector2i = sp["tile"] - wrapped * CHUNK_TILES
+		if sp_anchor.x < 0 or sp_anchor.x >= CHUNK_TILES or sp_anchor.y < 0 or sp_anchor.y >= CHUNK_TILES:
+			continue
+		_spawn_sdf_on_tile(deco, wrapped, sp, sp_anchor)
 
 	# 分区散布：逐 tile 确定性判定。草丛不占位（可穿行的纯点缀），其余占 1×1。
 	for j in range(CHUNK_TILES):
@@ -410,6 +428,27 @@ func _spawn_on_tile(parent: Node3D, wrapped: Vector2i, scene: PackedScene, ancho
 				continue
 			_claim(wrapped, origin, span, span)
 			_spawn(parent, scene, _tile_local(ti, wrapped), scale_f, yaw_deg)
+			return
+
+## SDF 可动物件版 _spawn_on_tile：同一套占地/螺旋找位，实例化 SdfProp 并启用锚点游走。
+## 材质自带 world-bend 项（sdf_field.gdshaderinc），不走 BendMat.wrap_scene。
+func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, anchor: Vector2i) -> void:
+	var reserve := int(entry.get("reserve", 0))
+	var search := int(entry.get("search", 0))
+	var span := reserve * 2 + 1
+	for r in range(search + 1):
+		for ti in _ring(anchor, r):
+			var origin: Vector2i = wrapped * CHUNK_TILES + ti - Vector2i(reserve, reserve)
+			if not OccupancyMap.prop_area_ok(origin, span, span):
+				continue
+			var prop := SdfProp.from_json_file(str(entry["spec"]))
+			if prop == null:
+				return  # spec 坏了：占地不登记，直接放弃
+			_claim(wrapped, origin, span, span)
+			prop.position = _tile_local(ti, wrapped)
+			prop.rotation_degrees = Vector3(0.0, float(entry.get("yaw", 0.0)), 0.0)
+			parent.add_child(prop)
+			prop.enable_wander(float(entry.get("wander", 0.0)), hash(entry["spec"]) + hash(ti))
 			return
 
 ## 向 OccupancyMap 登记 w×h tile 占地，并记入 _claims 供区块重刷时释放。

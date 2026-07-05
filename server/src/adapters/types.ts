@@ -5,6 +5,7 @@ import type {
   MemoryExtractionContext,
   ModerationResult,
 } from '../types.ts';
+import type { SdfPropSpec } from '../sdf_prop.ts';
 
 export interface ImageBlob {
   bytes: Uint8Array;
@@ -19,6 +20,8 @@ export interface AudioBlob {
 /** LLM：造角色 spec / 意图路由 / 角色对话。真实实现接 OpenRouter。 */
 export interface LLMAdapter {
   designCharacter(intentText: string, byFairy: boolean): Promise<CharacterSpec>;
+  /** 按小朋友的描述设计一只 SDF 可动物件/建筑（走路小屋、蹦蹦邮筒…），产物必须过 validateSdfPropSpec。 */
+  designSdfProp(intentText: string): Promise<SdfPropSpec>;
   routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult>;
   /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条简短中文，去重后由 voice 落地）。 */
   extractMemory(ctx: MemoryExtractionContext): Promise<string[]>;
