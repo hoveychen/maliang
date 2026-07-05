@@ -81,6 +81,10 @@ func advance(delta: float) -> void:
 		_: _apply_body(_breath_xf())
 	_ropes_step(delta)
 
+## 当前是否允许平移（hopper 只在腾空段位移，蹲伸阶段原地蓄力）。
+func can_translate() -> bool:
+	return str(_loco.type) != "hopper" or _hop_state == "air"
+
 ## ---- 通用 ----
 
 func _prop_xf() -> Transform3D:

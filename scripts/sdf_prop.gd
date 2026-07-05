@@ -18,6 +18,15 @@ var meta: Dictionary = {}
 var animator: SdfAnimator = null
 var _mats: Array[ShaderMaterial] = []
 
+# 锚点游走（世界摆放用）：围绕启用时的位置在小半径内漫游，走走停停
+var _wander_r := 0.0
+var _wander_center := Vector3.ZERO
+var _wander_target := Vector3.ZERO
+var _wander_wait := 0.0
+var _wander_rng := RandomNumberGenerator.new()
+
+const TURN_RATE := 5.0  ## 朝向追速度方向的角速度 rad/s
+
 ## 从 spec 字典创建；spec 不合法返回 null 并 push_warning（LLM 产物要能安全拒收）。
 static func from_spec(spec: Dictionary) -> SdfProp:
 	var cfg := SdfSpec.parse(spec)
@@ -89,8 +98,49 @@ func push_uniforms() -> void:
 		m.set_shader_parameter("prim_rot", rot)
 		m.set_shader_parameter("prim_params", par)
 
+## 启用锚点游走：以当前局部位置为圆心、radius 为半径漫游（父空间为区块局部系，
+## 跟随世界环面重定位）。seed 用于确定性行为（同一 tile 的物件每次表现一致）。
+func enable_wander(radius: float, seed_v: int = 0) -> void:
+	_wander_r = radius
+	_wander_center = position
+	_wander_target = position
+	_wander_wait = 0.5
+	_wander_rng.seed = seed_v if seed_v != 0 else hash(name)
+	if animator != null:
+		animator.reset_pose()
+
+func _wander_step(delta: float) -> void:
+	if _wander_r <= 0.0 or animator == null:
+		return
+	var loco: Dictionary = config.locomotion
+	if loco.type == "none":
+		return
+	var to_target := _wander_target - position
+	to_target.y = 0.0
+	if to_target.length() < 0.12:
+		animator.move_vel = Vector3.ZERO
+		_wander_wait -= delta
+		if _wander_wait <= 0.0:
+			var a := _wander_rng.randf() * TAU
+			var r := sqrt(_wander_rng.randf()) * _wander_r
+			_wander_target = _wander_center + Vector3(cos(a) * r, 0, sin(a) * r)
+			_wander_wait = _wander_rng.randf_range(1.2, 3.5)
+		return
+	var dir := to_target.normalized()
+	# 朝运动方向转身（模型正面朝 +Z）
+	var want_yaw := atan2(dir.x, dir.z)
+	rotation.y = lerp_angle(rotation.y, want_yaw, minf(TURN_RATE * delta, 1.0))
+	var speed: float = loco.speed
+	var vel := dir * speed
+	# hopper 只在腾空时平移（蹲/落地时原地蓄力）
+	if not animator.can_translate():
+		vel = Vector3.ZERO
+	position += vel * minf(delta, to_target.length() / maxf(speed, 0.01))
+	animator.move_vel = transform.basis.inverse() * (dir * speed)
+
 func _process(delta: float) -> void:
 	if animator == null:
 		return
+	_wander_step(delta)
 	animator.advance(delta)
 	push_uniforms()

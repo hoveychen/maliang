@@ -13,6 +13,7 @@ func _init() -> void:
 	fails += _test_hopper()
 	fails += _test_flyer()
 	fails += _test_ropes()
+	fails += _test_wander()
 	if fails == 0:
 		print("sdf_animator tests PASS")
 	else:
@@ -195,6 +196,43 @@ func _test_ropes() -> int:
 			bad_seg += 1
 	fails += _check("rope prims follow points", bad_seg, 0)
 	prop.free()
+	return fails
+
+func _test_wander() -> int:
+	var fails := 0
+	# walker 游走：始终在半径内，且确实动了
+	var hut := SdfProp.from_json_file("res://assets/sdf_props/walking_hut.json")
+	hut.position = Vector3(4, 0, -6)
+	hut.enable_wander(1.6, 42)
+	var center := hut.position
+	var max_dist := 0.0
+	var moved := 0.0
+	var prev := hut.position
+	for i in range(600):
+		hut._wander_step(DT)
+		hut.animator.advance(DT)
+		max_dist = maxf(max_dist, (hut.position - center).length())
+		moved += (hut.position - prev).length()
+		prev = hut.position
+	fails += _check("wander stays in radius", max_dist < 1.6 + 0.3, true)
+	fails += _check("wander actually moves", moved > 1.0, true)
+	hut.free()
+
+	# hopper 游走：只在腾空段平移
+	var box := SdfProp.from_json_file("res://assets/sdf_props/hop_mailbox.json")
+	box.enable_wander(1.2, 7)
+	var ground_shift := 0
+	prev = box.position
+	for i in range(600):
+		# 位移闸门看的是 _wander_step 执行时的状态，采样要在 advance 之前
+		var was_air: bool = box.animator._hop_state == "air"
+		box._wander_step(DT)
+		box.animator.advance(DT)
+		if not was_air and (box.position - prev).length() > 1e-6:
+			ground_shift += 1
+		prev = box.position
+	fails += _check("hopper moves only airborne", ground_shift, 0)
+	box.free()
 	return fails
 
 func _spread(vals: Array[float]) -> float:
