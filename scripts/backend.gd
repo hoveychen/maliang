@@ -18,6 +18,9 @@ var _ws := WebSocketPeer.new()
 var _open := false
 
 func connect_to_server() -> void:
+	# 默认入站缓冲 64KB：慢帧场景（录屏/低端机）下一帧间隔内的 TTS 分片突发
+	# 会撑爆缓冲直接断连，后续推送（如 prop_created）全部丢失——调大到 2MB。
+	_ws.inbound_buffer_size = 2 * 1024 * 1024
 	_ws.connect_to_url(url)
 
 func send_voice(world_id: String, character_id: String, audio_b64: String, fmt := "audio/wav") -> void:
@@ -72,6 +75,8 @@ func _process(_delta: float) -> void:
 		_open = false
 
 func _dispatch(data: Dictionary) -> void:
+	if OS.get_environment("MALIANG_WS_DEBUG") != "":
+		print("[ws] ", String(data.get("type", "")))
 	match String(data.get("type", "")):
 		"character_response":
 			character_response.emit(data)
