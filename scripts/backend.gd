@@ -9,6 +9,10 @@ signal tts_end
 signal gen_progress(stage: String)
 signal gen_complete(character: Dictionary)
 signal failed(reason: String)
+# 奖赏系统：world_info 后的状态同步 / 委托完成发奖 / 转赠结果
+signal world_state(data: Dictionary)
+signal task_complete(data: Dictionary)
+signal give_result(data: Dictionary)
 
 @export var url := "ws://127.0.0.1:8080/ws"
 
@@ -46,6 +50,16 @@ func send_create_character(world_id: String, intent_text: String) -> void:
 func send_world_info(world_id: String, locations: Array) -> void:
 	_send({ "type": "world_info", "worldId": world_id, "locations": locations })
 
+## 委托完成事件（客户端确定性判定：送达/带到/到点）。服务端匹配进行中委托则回 task_complete。
+func send_task_event(world_id: String, kind: String, extra := {}) -> void:
+	var msg := { "type": "task_event", "worldId": world_id, "kind": kind }
+	msg.merge(extra)
+	_send(msg)
+
+## 转赠贴纸给 NPC（走到对方旁交接后调用）。服务端扣背包+写受赠记忆，回 give_result。
+func send_give_item(world_id: String, to_character_id: String, item_id: String) -> void:
+	_send({ "type": "give_item", "worldId": world_id, "toCharacterId": to_character_id, "itemId": item_id })
+
 func _send(obj: Dictionary) -> void:
 	if _open:
 		_ws.send_text(JSON.stringify(obj))
@@ -77,5 +91,11 @@ func _dispatch(data: Dictionary) -> void:
 			gen_progress.emit(String(data.get("stage", "")))
 		"gen_complete":
 			gen_complete.emit(data.get("character", {}))
+		"world_state":
+			world_state.emit(data)
+		"task_complete":
+			task_complete.emit(data)
+		"give_result":
+			give_result.emit(data)
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))
