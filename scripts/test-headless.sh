@@ -25,6 +25,7 @@ echo "== import（刷新类缓存）=="
 UNIT_TESTS=(
   test_sdf_math
   test_sdf_prop
+  test_sdf_animator
   test_world_grid
   test_terrain_map
   test_terrain_atlas

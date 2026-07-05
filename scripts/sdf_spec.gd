@@ -167,7 +167,7 @@ static func build_rig(config: Dictionary) -> Dictionary:
 				var foot := Vector3(hip.x * 1.15, loco.leg_r * 0.8, hip.z)
 				# 骨长：直立距离的 55%，留出常态微屈
 				var seg_len: float = hip.distance_to(foot) * 0.55
-				var knee := _solve_knee(hip, foot, seg_len, side)
+				var knee := solve_knee(hip, foot, seg_len, side)
 				var color: Color = config.palette[config.palette.size() - 1]
 				var upper := SdfMath.capsule_between(hip, knee, loco.leg_r, color, leg_blend)
 				var lower := SdfMath.cone_between(knee, foot, loco.leg_r, loco.leg_r * 0.75, color, leg_blend)
@@ -230,7 +230,7 @@ static func build_rig(config: Dictionary) -> Dictionary:
 	}
 
 ## 两段等长骨的膝盖解：余弦定理求膝点，弯曲方向朝外侧偏前（顶视）。
-static func _solve_knee(hip: Vector3, foot: Vector3, seg_len: float, side: float) -> Vector3:
+static func solve_knee(hip: Vector3, foot: Vector3, seg_len: float, side: float) -> Vector3:
 	var mid := (hip + foot) * 0.5
 	var d := hip.distance_to(foot)
 	var h2 := seg_len * seg_len - d * d * 0.25
