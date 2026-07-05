@@ -40,14 +40,14 @@ export class WorldStore {
     const wf = join(this.#dir as string, 'worlds.json');
     if (existsSync(wf)) {
       const data = JSON.parse(readFileSync(wf, 'utf8')) as {
-        worlds: Array<{ id: string; characters: Character[]; inventory?: Record<string, number>; activeTask?: ActiveTask | null; props?: WorldProp[] }>;
+        worlds: Array<{ id: string; characters: Character[]; inventory?: Record<string, number>; activeTask?: ActiveTask | null; props?: Array<Omit<WorldProp, 'state'> & { state?: WorldProp['state'] }> }>;
       };
       for (const w of data.worlds) {
         const map = new Map<string, Character>();
         for (const c of w.characters) map.set(c.id, c);
-        // 旧存档没有背包/委托/物件字段：给默认值，向后兼容
+        // 旧存档没有背包/委托/物件字段：给默认值，向后兼容（物件缺 state 视为已摆放）
         const props = new Map<string, WorldProp>();
-        for (const p of w.props ?? []) props.set(p.id, p);
+        for (const p of w.props ?? []) props.set(p.id, { ...p, state: p.state ?? 'placed' });
         this.#worlds.set(w.id, { id: w.id, characters: map, inventory: w.inventory ?? {}, activeTask: w.activeTask ?? null, props });
       }
     }
@@ -118,6 +118,35 @@ export class WorldStore {
   setPropTile(worldId: string, propId: string, tile: [number, number]): boolean {
     const prop = this.#worlds.get(worldId)?.props.get(propId);
     if (!prop) return false;
+    prop.tile = tile;
+    this.#persistWorlds();
+    return true;
+  }
+
+  /** 收纳：已摆物件收进收集册物品页（tile 清空）。不存在或已在背包 → false 不动账。 */
+  storeProp(worldId: string, propId: string): boolean {
+    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    if (!prop || prop.state !== 'placed') return false;
+    prop.state = 'bagged';
+    prop.tile = null;
+    this.#persistWorlds();
+    return true;
+  }
+
+  /** 摆出：背包物件放回世界指定 tile（客户端已过占地校验）。不存在或不在背包 → false。 */
+  takeProp(worldId: string, propId: string, tile: [number, number]): boolean {
+    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    if (!prop || prop.state !== 'bagged') return false;
+    prop.state = 'placed';
+    prop.tile = tile;
+    this.#persistWorlds();
+    return true;
+  }
+
+  /** 挪位：已摆物件换 tile（长按拖拽后回报）。不存在或在背包 → false。 */
+  movePropTile(worldId: string, propId: string, tile: [number, number]): boolean {
+    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    if (!prop || prop.state !== 'placed') return false;
     prop.tile = tile;
     this.#persistWorlds();
     return true;

@@ -232,7 +232,7 @@ export async function createPropAsync(
       socket.send(JSON.stringify({ type: 'prop_failed', reason: validated.error }));
       return;
     }
-    const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null };
+    const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed' };
     store.addProp(worldId, prop);
     socket.send(JSON.stringify({ type: 'prop_created', worldId, prop }));
   } catch (err) {
@@ -525,6 +525,29 @@ export async function handleWsMessage(
     const tile: [number, number] = [Math.trunc(Number(msg.tileX ?? -1)), Math.trunc(Number(msg.tileY ?? -1))];
     if (!store.setPropTile(msg.worldId ?? '', msg.propId ?? '', tile)) {
       socket.send(JSON.stringify({ type: 'error', error: 'prop not found' }));
+    }
+    return;
+  }
+
+  // 物品摆放/背包（tile 占地校验在客户端 OccupancyMap，服务端只管状态机+持久化）：
+  // prop_store 收纳 / prop_take 摆出 / prop_move 挪位。成功无回包（与 prop_place 一致），非法转换回 error。
+  if (msg.type === 'prop_store') {
+    if (!store.storeProp(msg.worldId ?? '', msg.propId ?? '')) {
+      socket.send(JSON.stringify({ type: 'error', error: 'prop not placed' }));
+    }
+    return;
+  }
+  if (msg.type === 'prop_take') {
+    const tile: [number, number] = [Math.trunc(Number(msg.tileX ?? -1)), Math.trunc(Number(msg.tileY ?? -1))];
+    if (!store.takeProp(msg.worldId ?? '', msg.propId ?? '', tile)) {
+      socket.send(JSON.stringify({ type: 'error', error: 'prop not bagged' }));
+    }
+    return;
+  }
+  if (msg.type === 'prop_move') {
+    const tile: [number, number] = [Math.trunc(Number(msg.tileX ?? -1)), Math.trunc(Number(msg.tileY ?? -1))];
+    if (!store.movePropTile(msg.worldId ?? '', msg.propId ?? '', tile)) {
+      socket.send(JSON.stringify({ type: 'error', error: 'prop not placed' }));
     }
     return;
   }

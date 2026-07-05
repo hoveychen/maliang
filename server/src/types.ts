@@ -183,4 +183,6 @@ export interface WorldProp {
   id: string;
   spec: import('./sdf_prop.ts').SdfPropSpec;
   tile: [number, number] | null;
+  /** placed=摆在世界（tile 有效）；bagged=收进收集册物品页（tile 置 null）。 */
+  state: 'placed' | 'bagged';
 }
