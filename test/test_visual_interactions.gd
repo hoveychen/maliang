@@ -15,6 +15,7 @@ var blue: Dictionary = {}
 var green: Dictionary = {}
 var yellow: Dictionary = {}
 var chat_started := 0
+var relay_done := 0
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
@@ -58,12 +59,27 @@ func _tick() -> void:
 			_inject(green, { "commands": [{ "type": "chat_with", "params": { "character_name": "小黄" } }], "loop": false })
 		310:
 			_check("chat happened", chat_started > 0, true)
-		320:
+		312:
+			# 点名指派传话链路：设玩家正与小绿对话，点名小蓝跳——小绿应跑腿传话，小蓝收到才动
+			scene.set("selected", green["node"])
+			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false })
+		316:
+			_check("performer not remote-controlled", blue.has("paper_action"), false)
+			_check("speaker runs errand", scene.call("_has_executor_for", green), true)
+		395:
+			_check("relay reached performer", relay_done > 0, true)
+			scene.set("selected", null)
+		400:
 			if fails == 0:
 				print("visual_interactions PASS")
 			else:
 				printerr("visual_interactions FAILED: %d" % fails)
 			quit(fails)
+	# 传话到达时刻不定：小蓝出现动作键（点头应答/跳）即传到，此刻小绿应已跑到小蓝旁
+	if frame > 312 and relay_done == 0 and blue.has("paper_action"):
+		relay_done = frame
+		_check("errand runner adjacent on handoff (d=%.1f)" % _dist(green, blue), _dist(green, blue) <= 3.4, true)
+		_check("performer acks with nod", String(blue.get("paper_action", "")), "nod")
 	# chat_with 到达时刻不定（起点受闲逛影响）：轮询里程碑
 	if frame > 205 and chat_started == 0 and green.has("chat_with"):
 		chat_started = frame

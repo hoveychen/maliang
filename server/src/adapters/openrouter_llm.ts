@@ -94,7 +94,7 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
 ${abilityLines}${rosterLine}${locationLine}${memoryLine}
 严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
-- 小朋友点名让「别的」角色做事时（如对你说「小蓝跟我来」），performer 填那个角色的名字，replyText 仍由你来说（如「我帮你叫小蓝啦！」）；让你自己做就省略 performer。
+- 小朋友点名让「别的」角色做事时（如对你说「小蓝跟我来」），performer 填那个角色的名字，replyText 仍由你来说，而且你会亲自跑过去把指令带给它，所以回应要像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。

@@ -1280,12 +1280,16 @@ func _on_character_response(data: Dictionary) -> void:
 	_show_emotion(String(data.get("emotion", "happy")))
 	var script: Variant = data.get("behaviorScript", null)
 	if typeof(script) == TYPE_DICTIONARY:
-		# 执行者：小朋友点名让别的角色做（performerId）→ 那个角色执行；缺省=正在对话的角色
-		var actor := _find_npc_by_id(String(data.get("performerId", "")))
-		if actor == null:
-			actor = selected
-		if actor != null:
-			_run_behavior(actor, script)
+		# 点名指派（performerId）：不隔空遥控——正在对话的角色跑腿到执行者旁把指令带到，
+		# 对方点头应答才开始做（见 _relay_command）；没有说话者在场才直接下发。
+		var performer := _find_npc_by_id(String(data.get("performerId", "")))
+		if performer != null and selected != null and performer != selected:
+			_run_behavior(selected, { "commands": [{ "type": "relay_command",
+				"params": { "to": String(data.get("performerId", "")), "script": script } }], "loop": false })
+		elif performer != null:
+			_run_behavior(performer, script)
+		elif selected != null:
+			_run_behavior(selected, script)
 	if bool(data.get("ttsStreaming", false)):
 		_start_tts_stream(_parse_rate(String(data.get("ttsMime", "")), 24000))
 	else:
@@ -1507,8 +1511,22 @@ func _run_behavior(npc: PaperCharacter, script: Dictionary) -> void:
 			(old as BehaviorExecutor).cancel()
 	var ex := BehaviorExecutor.new()
 	ex.setup(dict, script, Callable(self, "_resolve_char_pos"), Callable(self, "_deliver_message"),
-		Callable(self, "_resolve_location"))
+		Callable(self, "_resolve_location"), Callable(self, "_relay_command"))
 	_executors.append(ex)
+
+## relay_command 到达回调：跑腿的把指令带到了——执行者先点头应答（收到！），再执行脚本。
+func _relay_command(target_id: String, script: Dictionary) -> void:
+	var node := _find_npc_by_id(target_id)
+	if node == null:
+		for n in npcs:
+			if (n["node"] as PaperCharacter).char_name == target_id:
+				node = n["node"]
+				break
+	if node == null:
+		return
+	var cmds: Array = [{ "type": "do_action", "params": { "action": "nod" } }]
+	cmds.append_array(script.get("commands", []))
+	_run_behavior(node, { "commands": cmds, "loop": bool(script.get("loop", false)) })
 
 ## 按 id 或名字找角色逻辑坐标（deliver_message/move_to 角色名/follow 用）；
 ## 「玩家」/player 解析到玩家角色；找不到返回 Vector2.INF。

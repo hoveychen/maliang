@@ -1,9 +1,10 @@
 extends SceneTree
 ## 临时视觉验证（不进回测，服务人眼 QA）：基础交互演出截帧。
 ## 编排（--fixed-fps 8）：1s 小蓝开始跟随玩家 → 玩家绕广场走一圈（跟随拖尾）→
-## 6s 小蓝连做四个动作（挥手/跳/转圈/点头）→ 12s 小绿去找小黄聊天（面对+轮流气泡）→ 21s 结束。
+## 6s 小蓝连做四个动作（挥手/跳/转圈/点头）→ 12s 小绿去找小黄聊天（面对+轮流气泡）→
+## 19s 点名传话：对小绿点名小蓝跳——小绿跑腿到小蓝旁交接，小蓝点头应答后跳 → 25s 结束。
 ## 环境变量：PITCH/DIST 调相机（如 PITCH=30 DIST=16 近景）。
-## 运行: godot --write-movie <目录>/f.png --fixed-fps 8 --quit-after 170 \
+## 运行: godot --write-movie <目录>/f.png --fixed-fps 8 --quit-after 200 \
 ##       --script res://test/test_visual_interactions_shot.gd
 ## 注意：--write-movie 须带窗跑（headless 段错误），且不要改 root.size（会冻结截帧）。
 
@@ -43,6 +44,12 @@ func _tick() -> void:
 		_teleport(green, Vector2i(34, 36))
 		_teleport(yellow, Vector2i(34, 40))
 		return
+	# ONLY_RELAY=1：只录点名传话段（短时长，降低带窗录像被窗口遮挡节流的风险）
+	if OS.get_environment("ONLY_RELAY") != "":
+		if frame == 8:
+			scene.set("selected", green["node"])
+			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false })
+		return
 	match frame:
 		8:
 			_inject(blue, { "commands": [{ "type": "follow", "params": { "target_name": "玩家" } }], "loop": false })
@@ -55,6 +62,10 @@ func _tick() -> void:
 			], "loop": false })
 		96:
 			_inject(green, { "commands": [{ "type": "chat_with", "params": { "character_name": "小黄" } }], "loop": false })
+		152:
+			# 点名传话：玩家正与小绿对话，点名小蓝跳——小绿跑腿交接，小蓝点头应答后跳
+			scene.set("selected", green["node"])
+			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false })
 	# 玩家走一段折线（8m/s@8fps，走东/南开阔路面别让房子挡镜头），跟随者拖尾；动作/聊天阶段站住看戏
 	var step := Vector2.ZERO
 	if frame >= 9 and frame <= 20:

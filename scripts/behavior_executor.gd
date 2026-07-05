@@ -42,6 +42,10 @@ var _deliver_msg := ""
 var _chatting := false ## chat_with：到达目标后写 chat_with 契约键并停留聊天
 var _deliver_track_t := 0.0 ## 送信/聊天目标是活人会走动：节流重解析坐标，别走到旧位置
 
+# relay_command：跑腿传指令——点名指派不隔空遥控，走到执行者旁把脚本交给它
+var _relayer := Callable()   ## (target_id:String, script:Dictionary) -> void
+var _relay_script: Dictionary = {}
+
 # 地点解析：location_name → 世界坐标（world.gd 的 POI 名/别名模糊匹配，找不到 Vector2.INF）
 var _loc_resolver := Callable()
 
@@ -50,13 +54,14 @@ var _follow_id := ""
 var _follow_moving := false
 var _follow_replan_t := 0.0
 
-func setup(target: Dictionary, script: Dictionary, resolver := Callable(), deliverer := Callable(), loc_resolver := Callable()) -> void:
+func setup(target: Dictionary, script: Dictionary, resolver := Callable(), deliverer := Callable(), loc_resolver := Callable(), relayer := Callable()) -> void:
 	_target = target
 	_commands = script.get("commands", [])
 	_loop = bool(script.get("loop", false))
 	_resolver = resolver
 	_deliverer = deliverer
 	_loc_resolver = loc_resolver
+	_relayer = relayer
 	_idx = 0
 	_state = "idle" if not _commands.is_empty() else "done"
 
@@ -151,6 +156,20 @@ func _start(cmd: Dictionary) -> void:
 				_begin_move()
 			else:
 				_advance() ## 解析不到聊天对象 → 跳过
+		"relay_command":
+			# 跑腿传指令：走到执行者旁（复用送信走位），到达把脚本交给它（_relayer 回调）
+			_deliver_id = String(params.get("to", ""))
+			_relay_script = params.get("script", {})
+			var rp := Vector2.INF
+			if _resolver.is_valid():
+				rp = _resolver.call(_deliver_id)
+			if rp != Vector2.INF and not _relay_script.is_empty():
+				_move_to = rp
+				_delivering = true
+				_begin_move()
+			else:
+				_relay_script = {}
+				_advance() ## 解析不到执行者/空脚本 → 跳过
 		_:
 			_advance() ## say / emote / face 等暂跳过（动作由 UI 层处理）
 
@@ -206,7 +225,12 @@ func _step_move(delta: float) -> void:
 				_wait_t = CHAT_DUR
 				_state = "wait" # 站着聊完再走（气泡演出由 world.gd 驱动/收尾）
 				return
-			if _deliverer.is_valid():
+			if not _relay_script.is_empty():
+				var s := _relay_script
+				_relay_script = {}
+				if _relayer.is_valid():
+					_relayer.call(_deliver_id, s) # 指令送到，执行者接棒
+			elif _deliverer.is_valid():
 				_deliverer.call(_deliver_id, _deliver_msg)
 		_advance()
 		return

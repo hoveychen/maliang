@@ -220,6 +220,45 @@ func _init() -> void:
 		ex13.step(dt)
 	fails += _check("chat_with done after CHAT_DUR", ex13.is_done(), true)
 	fails += _check("chat_with stays put while chatting", d13["logical"], chat_pos)
+
+	# relay_command：跑腿传指令——走到执行者旁才把脚本交出去（点名指派不隔空遥控）
+	OccupancyMap.clear()
+	var r_start := TerrainMap.tile_center(Vector2i(90, 68))
+	var r_target := TerrainMap.tile_center(Vector2i(94, 68))
+	OccupancyMap.char_register("runner", r_start, 2)
+	OccupancyMap.char_register("performer", r_target, 2)
+	var d14 := { "logical": r_start, "id": "runner" }
+	var relayed := {}
+	var jump_script := { "commands": [ { "type": "do_action", "params": { "action": "jump" } } ], "loop": false }
+	var ex14 := BehaviorExecutor.new()
+	ex14.setup(d14, { "commands": [ { "type": "relay_command", "params": { "to": "performer", "script": jump_script } } ] },
+		func(_id: String) -> Vector2: return r_target,
+		Callable(), Callable(),
+		func(id: String, s: Dictionary) -> void:
+			relayed["id"] = id
+			relayed["script"] = s)
+	ex14.step(dt)
+	fails += _check("relay not fired at start", relayed.is_empty(), true)
+	for i in range(3000):
+		if ex14.is_done():
+			break
+		ex14.step(dt)
+	fails += _check("relay done", ex14.is_done(), true)
+	fails += _check("relay walked adjacent", WorldGrid.shortest_delta(d14["logical"], r_target).length() <= 2.6, true)
+	fails += _check("relay handed to performer", String(relayed.get("id", "")), "performer")
+	fails += _check("relay passes script", (relayed.get("script", {}) as Dictionary).get("commands", []), jump_script["commands"])
+	# 解析不到执行者 → 跳过不触发
+	var d15 := { "logical": r_start, "id": "runner2" }
+	OccupancyMap.char_register("runner2", r_start, 2)
+	var relayed2 := {}
+	var ex15 := BehaviorExecutor.new()
+	ex15.setup(d15, { "commands": [ { "type": "relay_command", "params": { "to": "ghost", "script": jump_script } } ] },
+		func(_id: String) -> Vector2: return Vector2.INF,
+		Callable(), Callable(),
+		func(id: String, _s: Dictionary) -> void: relayed2["id"] = id)
+	ex15.step(dt)
+	fails += _check("relay unknown performer skipped", ex15.is_done(), true)
+	fails += _check("relay unknown performer not fired", relayed2.is_empty(), true)
 	OccupancyMap.clear()
 
 	if fails == 0:
