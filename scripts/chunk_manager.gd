@@ -49,6 +49,18 @@ const WELL_SCENE: PackedScene = preload("res://assets/kaykit/hexagon/building_we
 const WINDMILL_SCENE: PackedScene = preload("res://assets/kaykit/hexagon/building_windmill_red.gltf")
 const HOUSE_SCALE := 7.0  ## 微缩民居(0.93m 高) → ~6.5m
 
+## 水彩地面贴图（CC0，assets/textures/watercolor）：世界 UV 平铺，控制图选域/调色。
+const GRASS_TEX: Texture2D = preload("res://assets/textures/watercolor/grass.png")
+const DIRT_TEX: Texture2D = preload("res://assets/textures/watercolor/dirt.png")
+const STONE_TEX: Texture2D = preload("res://assets/textures/watercolor/stone.png")
+const WATER_TEX: Texture2D = preload("res://assets/textures/watercolor/water.png")
+## 各贴图全图均值（magick -resize 1x1 实测，sRGB）；shader 用 tex/mean 归一出细节层
+const GRASS_MEAN := Color(72.0 / 255.0, 92.0 / 255.0, 39.0 / 255.0)
+const DIRT_MEAN := Color(77.0 / 255.0, 48.0 / 255.0, 36.0 / 255.0)
+const STONE_MEAN := Color(91.0 / 255.0, 91.0 / 255.0, 97.0 / 255.0)
+const WATER_MEAN := Color(72.0 / 255.0, 122.0 / 255.0, 132.0 / 255.0)
+const WATER_DIP := 0.35   ## 水面低于岸沿的落差（米）：露出一小截岸壁 = 可读的水位线
+
 ## 手工地标（tile 为全局 tile 锚点；reserve=1 → 占地 3×3，找不到空位沿环外扩 search 圈）。
 ## 村核心 8 栋民居沿广场四角与辐路布置、水井坐镇广场（地标特批压路）、
 ## 风车立东南瞭望丘 h3 平台、两块泉石守着主峰南麓涌泉。
@@ -85,13 +97,17 @@ const DECO_BUSH := 2
 const DECO_ROCK := 3
 const DECO_TUFT := 4
 
-## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
+## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, water:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
 ## wrapped 区块索引 → 逐 tile autotile 地面 ArrayMesh。全世界只有 3×3 个
 ## wrapped 区块，mesh 各建一次后永久缓存（首帧 9 次，之后零开销）。
 var _chunk_meshes: Dictionary = {}
-## 所有地面共享一个 atlas 材质（颜色全烘在 TerrainAtlas 里，albedo 置白）。
+## wrapped 区块索引 → 水面 ArrayMesh（无水区块存 null），同样永久缓存。
+var _water_meshes: Dictionary = {}
+## 所有地面共享一个控制图+水彩贴图材质（terrain_ground.gdshader）。
 var _ground_mat: ShaderMaterial = null
+## 所有水面共享一个半透明水面材质（water_surface.gdshader）。
+var _water_mat: ShaderMaterial = null
 ## wrapped 区块 → 已向 OccupancyMap 登记的占地 [[origin_tile, w, h], ...]，重刷时释放。
 var _claims: Dictionary = {}
 
@@ -102,16 +118,57 @@ func _ready() -> void:
 
 func _make_slot() -> Dictionary:
 	if _ground_mat == null:
-		_ground_mat = BendMat.make_textured(TerrainAtlas.texture(), Color.WHITE, 0.95)
+		_ground_mat = _make_ground_mat()
+		_water_mat = _make_water_mat()
 	var root := Node3D.new()
 	add_child(root)
 	var tile := MeshInstance3D.new()
 	tile.material_override = _ground_mat
 	tile.extra_cull_margin = CULL_MARGIN
 	root.add_child(tile)
+	var water := MeshInstance3D.new()
+	water.material_override = _water_mat
+	water.extra_cull_margin = CULL_MARGIN
+	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF  # 半透明水面不投影
+	root.add_child(water)
 	var deco := Node3D.new()
 	root.add_child(deco)
-	return { "root": root, "tile": tile, "deco": deco, "wrapped": Vector2i(-999, -999) }
+	return { "root": root, "tile": tile, "water": water, "deco": deco, "wrapped": Vector2i(-999, -999) }
+
+## 地形专用材质：控制图 atlas（域/描边/类型/明暗）+ 世界 UV 平铺水彩贴图，
+## 调色板 tint 全部取自 TerrainAtlas 常量（shaders/terrain_ground.gdshader）。
+static func _make_ground_mat() -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/terrain_ground.gdshader")
+	m.set_shader_parameter("control_tex", TerrainAtlas.texture())
+	m.set_shader_parameter("grass_tex", GRASS_TEX)
+	m.set_shader_parameter("dirt_tex", DIRT_TEX)
+	m.set_shader_parameter("stone_tex", STONE_TEX)
+	m.set_shader_parameter("grass_mean", GRASS_MEAN)
+	m.set_shader_parameter("dirt_mean", DIRT_MEAN)
+	m.set_shader_parameter("stone_mean", STONE_MEAN)
+	m.set_shader_parameter("grass_tint", TerrainAtlas.GRASS_TINT)
+	m.set_shader_parameter("path_tint", TerrainAtlas.PATH_TINT)
+	m.set_shader_parameter("bed_tint", TerrainAtlas.BED_TINT)
+	m.set_shader_parameter("lip_tint", TerrainAtlas.CLIFF_LIP_TINT)
+	m.set_shader_parameter("wall_tint", TerrainAtlas.WALL_TINT)
+	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
+	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
+	m.set_shader_parameter("curvature", BendMat.CURVATURE)
+	return m
+
+## 半透明水面材质（shaders/water_surface.gdshader）：水彩水贴图双层滚动 + 深度调色。
+static func _make_water_mat() -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/water_surface.gdshader")
+	m.set_shader_parameter("control_tex", TerrainAtlas.texture())
+	m.set_shader_parameter("water_tex", WATER_TEX)
+	m.set_shader_parameter("water_mean", WATER_MEAN)
+	m.set_shader_parameter("shallow_color", TerrainAtlas.WATER_SHALLOW)
+	m.set_shader_parameter("deep_color", TerrainAtlas.WATER_DEEP)
+	m.set_shader_parameter("foam_color", TerrainAtlas.WATER_FOAM)
+	m.set_shader_parameter("curvature", BendMat.CURVATURE)
+	return m
 
 func update(player_logical: Vector2) -> void:
 	var pcx := int(floor(player_logical.x / CHUNK_WORLD))
@@ -145,6 +202,8 @@ func update(player_logical: Vector2) -> void:
 func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	var tile: MeshInstance3D = slot["tile"]
 	tile.mesh = _chunk_mesh(wrapped)
+	var water: MeshInstance3D = slot["water"]
+	water.mesh = _water_mesh(wrapped)
 
 	var deco: Node3D = slot["deco"]
 	for c in deco.get_children():
@@ -287,25 +346,28 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 	var verts := PackedVector3Array()
 	var norms := PackedVector3Array()
 	var uvs := PackedVector2Array()
+	var uv2s := PackedVector2Array()  # 逻辑世界米坐标：贴图平铺锚在环面上，玩家居中重摆不游动
 	var idx := PackedInt32Array()
 	var base_tile := wrapped * CHUNK_TILES
 	var half := CHUNK_WORLD * 0.5
 	var half_tile := WorldGrid.TILE_SIZE * 0.5
+	var loff := Vector2(wrapped) * CHUNK_WORLD + Vector2(half, half)  # 区块局部 → 逻辑坐标偏移
 	for j in range(CHUNK_TILES):
 		for i in range(CHUNK_TILES):
 			var t := base_tile + Vector2i(i, j)
 			var ttype := TerrainMap.tile_type(t)
-			var h := TerrainMap.tile_height(t)
-			var y := float(h) * TerrainMap.STEP_HEIGHT
+			var fl := TerrainMap.tile_floor_level(t)
+			var y := float(fl) * TerrainMap.STEP_HEIGHT  # 地面 = 有效级：水 tile 湖床下沉
 			var parity := posmod(t.x + t.y, 2)
-			# 角变体与取图类型：路/水走同类过渡；草地在有更低邻居时换悬崖边草皮
+			# 角变体与取图类型：路走同类过渡；水是整格湖床（岸线由草侧崖缘+岸壁表达）；
+			# 草地在「有效级更低」的邻居（矮台地或水域湖床）旁换悬崖边草皮
 			var uv_type := ttype
-			var corners := PackedInt32Array([0, 0, 0, 0])  # 平草地不看变体
-			if ttype != TerrainMap.T_GRASS:
+			var corners := PackedInt32Array([0, 0, 0, 0])  # 平草地/湖床不看变体
+			if ttype == TerrainMap.T_PATH:
 				var same := func(q: Vector2i) -> bool: return TerrainMap.tile_type(q) == ttype
 				corners = Autotile.corners_from_mask(Autotile.mask_of(t, same))
-			elif h > 0:
-				var not_lower := func(q: Vector2i) -> bool: return TerrainMap.tile_height(q) >= h
+			elif ttype == TerrainMap.T_GRASS:
+				var not_lower := func(q: Vector2i) -> bool: return TerrainMap.tile_floor_level(q) >= fl
 				var mask := Autotile.mask_of(t, not_lower)
 				if mask != 255:
 					uv_type = TerrainAtlas.CLIFF_RIM
@@ -316,23 +378,101 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 				var cx := x0 + (half_tile if (c == Autotile.C_NE or c == Autotile.C_SE) else 0.0)
 				var cz := z0 + (half_tile if (c == Autotile.C_SW or c == Autotile.C_SE) else 0.0)
 				var r := TerrainAtlas.uv_rect(uv_type, c, corners[c], parity)
-				_emit_quad(verts, norms, uvs, idx, cx, cz, y, half_tile, r)
-			# L3 侧壁：邻居更低的边，从邻居高度到本 tile 高度逐级发墙 quad
-			if h > 0:
-				_emit_walls(verts, norms, uvs, idx, t, h, x0, z0)
+				_emit_quad(verts, norms, uvs, uv2s, idx, cx, cz, y, half_tile, r, loff)
+			# L3 侧壁：邻居有效级更低的边（矮台地或湖床落差），逐级发墙 quad
+			_emit_walls(verts, norms, uvs, uv2s, idx, t, fl, x0, z0, loff)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_NORMAL] = norms
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
 	arrays[Mesh.ARRAY_INDEX] = idx
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	_chunk_meshes[wrapped] = mesh
 	return mesh
 
+## 构建（或取缓存）一个 wrapped 区块的水面 ArrayMesh；区块内没有水返回 null。
+## 每个水 tile 与地面同构切 4 个角 quad，水位 = 岸沿 - WATER_DIP：
+## - UV → atlas 水 cell（角变体 = 水-水邻接掩码）：G 通道是沿岸圆角泡沫带，
+##   子 tile 精度——窄溪也只在贴岸处起沫，不会整条变白
+## - 顶点色 R = 深度归一(depth/MAX_DEPTH，角点四邻水 tile 均值，双线性到子角点)
+## - UV2 同地面（逻辑米坐标，波纹滚动锚定环面）
+func _water_mesh(wrapped: Vector2i) -> ArrayMesh:
+	if _water_meshes.has(wrapped):
+		return _water_meshes[wrapped]
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var uv2s := PackedVector2Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	var base_tile := wrapped * CHUNK_TILES
+	var half := CHUNK_WORLD * 0.5
+	var ts := WorldGrid.TILE_SIZE
+	var half_tile := ts * 0.5
+	var loff := Vector2(wrapped) * CHUNK_WORLD + Vector2(half, half)
+	var is_water := func(q: Vector2i) -> bool: return TerrainMap.tile_type(q) == TerrainMap.T_WATER
+	for j in range(CHUNK_TILES):
+		for i in range(CHUNK_TILES):
+			var t := base_tile + Vector2i(i, j)
+			if TerrainMap.tile_type(t) != TerrainMap.T_WATER:
+				continue
+			var y := float(TerrainMap.tile_height(t)) * TerrainMap.STEP_HEIGHT - WATER_DIP
+			var x0 := -half + float(i) * ts
+			var z0 := -half + float(j) * ts
+			var corners := Autotile.corners_from_mask(Autotile.mask_of(t, is_water))
+			# tile 四角点的深度色，子角 quad 顶点按 (u,v) 双线性取值
+			var c00 := _water_node_color(t + Vector2i(0, 0))
+			var c10 := _water_node_color(t + Vector2i(1, 0))
+			var c01 := _water_node_color(t + Vector2i(0, 1))
+			var c11 := _water_node_color(t + Vector2i(1, 1))
+			for c in range(4):
+				var cx := x0 + (half_tile if (c == Autotile.C_NE or c == Autotile.C_SE) else 0.0)
+				var cz := z0 + (half_tile if (c == Autotile.C_SW or c == Autotile.C_SE) else 0.0)
+				var r := TerrainAtlas.uv_rect(TerrainMap.T_WATER, c, corners[c], 0)
+				var b := verts.size()
+				_emit_quad(verts, norms, uvs, uv2s, idx, cx, cz, y, half_tile, r, loff)
+				for k in range(4):
+					var v := verts[b + k]
+					var u := (v.x - x0) / ts
+					var w := (v.z - z0) / ts
+					cols.append(c00.lerp(c10, u).lerp(c01.lerp(c11, u), w))
+	if verts.is_empty():
+		_water_meshes[wrapped] = null
+		return null
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
+	arrays[Mesh.ARRAY_COLOR] = cols
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_water_meshes[wrapped] = mesh
+	return mesh
+
+## 网格角点 node（tile 角点的整格索引）→ 水面顶点色。
+## 共享该角点的四个 tile：node 的西北四邻 (node.x-1..node.x)×(node.y-1..node.y)。
+## R = 水 tile 深度均值 / MAX_DEPTH（岸角点只有部分邻居是水 → 天然偏浅）。
+static func _water_node_color(node: Vector2i) -> Color:
+	var depth_sum := 0.0
+	var water_n := 0
+	for dz in range(-1, 1):
+		for dx in range(-1, 1):
+			var q := node + Vector2i(dx, dz)
+			if TerrainMap.tile_type(q) == TerrainMap.T_WATER:
+				depth_sum += float(TerrainMap.tile_depth(q))
+				water_n += 1
+	var depth01 := (depth_sum / float(water_n)) / float(TerrainMap.MAX_DEPTH) if water_n > 0 else 0.0
+	return Color(depth01, 0.0, 0.0)
+
 ## 水平角 quad：NW/NE/SE/SW 顶点序，从上往下看顺时针（Godot 正面绕序）。
-func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, idx: PackedInt32Array, cx: float, cz: float, y: float, size: float, r: Rect2) -> void:
+## UV2 = 逻辑世界米坐标（局部坐标 + loff）。
+func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, idx: PackedInt32Array, cx: float, cz: float, y: float, size: float, r: Rect2, loff: Vector2) -> void:
 	var b := verts.size()
 	verts.append(Vector3(cx, y, cz))
 	verts.append(Vector3(cx + size, y, cz))
@@ -344,13 +484,19 @@ func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Packe
 	uvs.append(Vector2(r.end.x, r.position.y))
 	uvs.append(r.end)
 	uvs.append(Vector2(r.position.x, r.end.y))
+	var lu := loff + Vector2(cx, cz)
+	uv2s.append(lu)
+	uv2s.append(lu + Vector2(size, 0.0))
+	uv2s.append(lu + Vector2(size, size))
+	uv2s.append(lu + Vector2(0.0, size))
 	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
 
-## tile 四边中「邻居更低」的边发竖直崖壁。每级 = 一个 2m×2m 墙格，
+## tile 四边中「邻居有效级更低」的边发竖直崖壁/水下岸壁。每级 = 一个 2m×2m 墙格，
 ## 墙格对同一墙面的 8 邻墙格（沿墙走向左右 × 层级上下 × 对角）做 corner autotile：
 ## 有邻墙 = 相连，无邻墙侧出凹缝暗边 + 亮棱线。墙格再切 4 个 1m 角 quad 按变体取 UV。
-## tile 局部范围 [x0, x0+2]×[z0, z0+2]，本 tile 高 h 级。
-func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, idx: PackedInt32Array, t: Vector2i, h: int, x0: float, z0: float) -> void:
+## tile 局部范围 [x0, x0+2]×[z0, z0+2]，本 tile 有效级 fl（湖床可为负）。
+## UV2 = (沿墙逻辑坐标, 世界 y)——竖直面按墙走向平铺贴图。
+func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, idx: PackedInt32Array, t: Vector2i, fl: int, x0: float, z0: float, loff: Vector2) -> void:
 	var ts := WorldGrid.TILE_SIZE
 	var x1 := x0 + ts
 	var z1 := z0 + ts
@@ -365,8 +511,8 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 	for s in sides:
 		var n_off: Vector2i = s["n"]
 		var tang: Vector2i = s["tang"]
-		var nh := TerrainMap.tile_height(t + n_off)
-		for lvl in range(nh, h):
+		var nfl := TerrainMap.tile_floor_level(t + n_off)
+		for lvl in range(nfl, fl):
 			# (q.x, q.y) = (沿墙偏移, 视觉上下偏移)；atlas 的 N(-1) = 上一级
 			var pred := func(q: Vector2i) -> bool:
 				return _wall_exists(t + tang * q.x, n_off, lvl - q.y)
@@ -396,12 +542,19 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 				uvs.append(Vector2(r.end.x, r.position.y))
 				uvs.append(r.end)
 				uvs.append(Vector2(r.position.x, r.end.y))
+				# 沿墙逻辑坐标：东西向墙取 x、南北向墙取 z（+loff 对应轴分量）
+				var a0 := (loff.x + h0.x) if n_off.x == 0 else (loff.y + h0.z)
+				var a1 := (loff.x + h1.x) if n_off.x == 0 else (loff.y + h1.z)
+				uv2s.append(Vector2(a0, yt))
+				uv2s.append(Vector2(a1, yt))
+				uv2s.append(Vector2(a1, yb))
+				uv2s.append(Vector2(a0, yb))
 				idx.append_array(PackedInt32Array([base, base + 1, base + 2, base, base + 2, base + 3]))
 
 ## 墙格存在性：tile 在 lvl 层朝 n_off 方向有裸露墙面
-## （本 tile 高过该层，且该方向邻居的地面在该层或以下）。
+## （本 tile 有效级高过该层，且该方向邻居的有效地面在该层或以下）。
 func _wall_exists(tile: Vector2i, n_off: Vector2i, lvl: int) -> bool:
-	return TerrainMap.tile_height(tile) > lvl and lvl >= TerrainMap.tile_height(tile + n_off)
+	return TerrainMap.tile_floor_level(tile) > lvl and lvl >= TerrainMap.tile_floor_level(tile + n_off)
 
 ## 实例化 KayKit 场景：包裹 bend 材质 + 大裁剪边距（弯曲位移会超出原始 AABB）。
 func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, yaw_deg: float) -> Node3D:

@@ -6,15 +6,18 @@ func _init() -> void:
 	var fails := 0
 	var n := WorldGrid.GRID_TILES
 
-	# 全图不变量：类型合法、高度 0..MAX、水面必为高度 0 且四邻高度 0（岸边平地）
+	# 全图不变量：类型合法、高度 0..MAX、水面必为高度 0 且四邻高度 0（岸边平地）、
+	# 深度只在水面非零（水 1..MAX_DEPTH，陆地恒 0）
 	var bad_type := 0
 	var bad_h := 0
 	var bad_water := 0
+	var bad_depth := 0
 	for z in range(n):
 		for x in range(n):
 			var t := Vector2i(x, z)
 			var ty := TerrainMap.tile_type(t)
 			var h := TerrainMap.tile_height(t)
+			var dep := TerrainMap.tile_depth(t)
 			if ty < 0 or ty > TerrainMap.T_WATER:
 				bad_type += 1
 			if h < 0 or h > TerrainMap.MAX_HEIGHT:
@@ -25,9 +28,23 @@ func _init() -> void:
 				for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 					if TerrainMap.tile_height(t + d) != 0:
 						bad_water += 1
+				if dep < 1 or dep > TerrainMap.MAX_DEPTH:
+					bad_depth += 1
+			elif dep != 0:
+				bad_depth += 1
 	fails += _check("types valid", bad_type, 0)
 	fails += _check("heights in range", bad_h, 0)
 	fails += _check("water flat & flat shore", bad_water, 0)
+	fails += _check("depth only on water", bad_depth, 0)
+
+	# 水深样本：池塘中心深水 2 级、池塘边缘/溪流/沼泽浅水 1 级、涉水石滩（路）深度 0；
+	# 湖床有效级 = 高度 - 深度（池塘中心 -2）
+	fails += _check("pond center deep", TerrainMap.tile_depth(Vector2i(24, 24)), 2)
+	fails += _check("pond edge shallow", TerrainMap.tile_depth(Vector2i(20, 24)), 1)
+	fails += _check("stream shallow", TerrainMap.tile_depth(Vector2i(27, 17)), 1)
+	fails += _check("marsh shallow", TerrainMap.tile_depth(Vector2i(13, 50)), 1)
+	fails += _check("ford no depth", TerrainMap.tile_depth(Vector2i(21, 37)), 0)
+	fails += _check("pond floor level", TerrainMap.tile_floor_level(Vector2i(24, 24)), -2)
 
 	# 已知样本点（与 terrain_map.gd 的 _paint 布局对应）
 	fails += _check("plaza is path", TerrainMap.tile_type(Vector2i(37, 37)), TerrainMap.T_PATH)
