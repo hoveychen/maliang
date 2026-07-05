@@ -58,6 +58,7 @@ run_test test_visual_click_move    --fixed-fps 10 --quit-after 130
 run_test test_visual_fairy_poi     --fixed-fps 10 --quit-after 130
 run_test test_visual_camera_height --fixed-fps 10 --quit-after 80
 run_test test_visual_sky           --fixed-fps 10 --quit-after 40
+run_test test_visual_paper         --fixed-fps 10 --quit-after 110
 
 echo
 if [ "$fails" -eq 0 ]; then
