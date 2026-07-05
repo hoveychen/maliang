@@ -527,6 +527,8 @@ func _setup_hud() -> void:
 
 	album_panel = PanelContainer.new()
 	album_panel.set_anchors_preset(Control.PRESET_CENTER)
+	album_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH # 内容撑开时仍以屏幕中心为锚
+	album_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	album_panel.visible = false
 	var grid := GridContainer.new()
 	grid.columns = 4
@@ -1952,7 +1954,8 @@ func _spawn_gift_fly(item_id: String, d: Dictionary) -> void:
 	add_child(l)
 	var pnode := player["node"] as Node3D
 	var nnode := d["node"] as Node3D
-	l.global_position = pnode.global_position + Vector3(0.0, 2.2, 0.0)
+	# 起点在玩家头顶上方（立绘 ~5 单位高，埋低了会被自己的纸片挡住）
+	l.global_position = pnode.global_position + Vector3(0.0, _char_top(player["node"]) + 0.8, 0.0)
 	var tw := create_tween()
 	tw.tween_property(l, "global_position",
 		nnode.global_position + Vector3(0.0, _char_top(d["node"]) + 1.0, 0.0), 0.6) \
