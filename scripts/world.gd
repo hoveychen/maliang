@@ -106,6 +106,12 @@ var inventory: Dictionary = {}     ## 贴纸背包 id→数量
 var task_chip: Label               ## 右上角委托提示（🎯目标 ⇒ 奖励）
 var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _pending_give: Dictionary = {} ## give 转赠途中 { "item": 贴纸id, "npc": 受赠者字典 }
+var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
+var album_button: Button           ## 左下角收集册按钮（📖）
+var album_panel: PanelContainer    ## 收集册面板：贴纸图标网格+数量角标
+var _album_cells: Dictionary = {}  ## 贴纸 id → { "glyph": Label, "count": Label }
+## 收集册展示顺序（与 STICKER_GLYPHS 同集）
+const STICKER_ORDER := ["flower", "apple", "star", "shell", "ladybug", "candy", "clover", "gem"]
 ## 贴纸 id→emoji（与 server/src/types.ts STICKERS 对齐）
 const STICKER_GLYPHS := { "flower": "🌸", "apple": "🍎", "star": "⭐", "shell": "🐚",
 	"ladybug": "🐞", "candy": "🍬", "clover": "🍀", "gem": "💎" }
@@ -490,6 +496,7 @@ func _setup_ear() -> void:
 func _setup_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	_hud_layer = layer
 
 	coord_label = Label.new()
 	coord_label.position = Vector2(16.0, 12.0)
@@ -505,6 +512,46 @@ func _setup_hud() -> void:
 	_style_label(banner, 28)
 	banner.visible = false
 	layer.add_child(banner)
+
+	# 贴纸收集册：左下角大按钮（📖）+ 居中弹出图标网格（去文字化，数量角标）
+	album_button = Button.new()
+	album_button.text = "📖"
+	album_button.add_theme_font_size_override("font_size", 44)
+	album_button.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	album_button.offset_left = 16.0
+	album_button.offset_top = -96.0
+	album_button.offset_right = 100.0
+	album_button.offset_bottom = -16.0
+	album_button.pressed.connect(_toggle_album)
+	layer.add_child(album_button)
+
+	album_panel = PanelContainer.new()
+	album_panel.set_anchors_preset(Control.PRESET_CENTER)
+	album_panel.visible = false
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 28)
+	grid.add_theme_constant_override("v_separation", 16)
+	for id in STICKER_ORDER:
+		var cell := VBoxContainer.new()
+		cell.alignment = BoxContainer.ALIGNMENT_CENTER
+		var glyph := Label.new()
+		glyph.text = String(STICKER_GLYPHS.get(id, "⭐"))
+		glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		glyph.add_theme_font_size_override("font_size", 56)
+		var count := Label.new()
+		count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_style_label(count, 22)
+		cell.add_child(glyph)
+		cell.add_child(count)
+		grid.add_child(cell)
+		_album_cells[id] = { "glyph": glyph, "count": count }
+	var margin := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		margin.add_theme_constant_override(side, 28)
+	margin.add_child(grid)
+	album_panel.add_child(margin)
+	layer.add_child(album_panel)
 
 	# 进行中委托的提示 chip（右上角，emoji 为主：🎯目标 ⇒ 奖励贴纸）
 	task_chip = Label.new()
@@ -1708,6 +1755,7 @@ func _send_world_info() -> void:
 func _on_world_state(data: Dictionary) -> void:
 	inventory = data.get("inventory", {})
 	_set_active_task(data.get("activeTask"))
+	_refresh_album()
 
 func _set_active_task(task: Variant) -> void:
 	active_task = task if typeof(task) == TYPE_DICTIONARY else {}
@@ -1736,10 +1784,11 @@ func _update_task_chip() -> void:
 	task_chip.text = "🎯 %s ⇒ %s" % [goal, _sticker_glyph(String(active_task.get("rewardId", "")))]
 	task_chip.visible = true
 
-## 委托完成：更新背包、收起 chip、庆祝演出（P5 完整版：飞入收集册）。
+## 委托完成：更新背包、收起 chip、庆祝演出 + 奖励飞入收集册。
 func _on_task_complete(data: Dictionary) -> void:
 	inventory = data.get("inventory", inventory)
 	_set_active_task(null)
+	_refresh_album()
 	var glyph := String(data.get("rewardGlyph", "⭐"))
 	banner.text = "太棒啦！得到一个 %s" % glyph
 	banner.visible = true
@@ -1748,17 +1797,73 @@ func _on_task_complete(data: Dictionary) -> void:
 ## 转赠结果：背包以服务端为准（P4 的 give 交接完成后回包）。
 func _on_give_result(data: Dictionary) -> void:
 	inventory = data.get("inventory", inventory)
+	_refresh_album()
 
-## 庆祝演出占位：委托人跳一下+✨（P5 扩为奖励飞入收集册）。
-func _celebrate_reward(_glyph: String, task: Dictionary) -> void:
+## 庆祝演出：委托人跳跃+头顶 🎉 爆点，奖励贴纸从屏幕中心飞进左下角收集册按钮。
+func _celebrate_reward(glyph: String, task: Dictionary) -> void:
 	var npc := _find_npc_by_id(String(task.get("npcId", "")))
 	if npc != null:
 		var d := _find_npc_dict(npc)
 		if not d.is_empty() and not d.get("is_fairy", false):
 			d["paper_action"] = "jump"
 			d["paper_action_t"] = 0.0
+		_spawn_burst(npc)
 	if game_audio != null:
 		game_audio.play_sfx("enter")
+	_fly_reward_to_album(glyph)
+
+## 🎉 在角色头顶弹出过冲后淡出（临时 Label3D，不占用全局情绪气泡）。
+func _spawn_burst(npc: PaperCharacter) -> void:
+	var l := Label3D.new()
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.pixel_size = 0.02
+	l.outline_size = 12
+	l.font_size = 96
+	l.text = "🎉"
+	add_child(l)
+	l.global_position = npc.global_position + Vector3(0.0, _char_top(npc) + 1.6, 0.0)
+	l.scale = Vector3.ONE * 0.3
+	var tw := create_tween()
+	tw.tween_property(l, "scale", Vector3.ONE * 1.25, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(0.9)
+	tw.tween_property(l, "modulate:a", 0.0, 0.4)
+	tw.tween_callback(l.queue_free)
+
+## 奖励贴纸从屏幕中心飞进收集册按钮并缩小，按钮脉冲一下提示「收进册子了」。
+func _fly_reward_to_album(glyph: String) -> void:
+	var l := Label.new()
+	l.text = glyph
+	l.add_theme_font_size_override("font_size", 80)
+	_hud_layer.add_child(l)
+	var vp := get_viewport().get_visible_rect().size
+	l.position = vp * 0.5 - Vector2(40.0, 40.0)
+	l.pivot_offset = Vector2(40.0, 40.0)
+	var tw := create_tween()
+	tw.tween_interval(0.5) # 停一拍让孩子看清得到了什么
+	tw.tween_property(l, "position", album_button.global_position + Vector2(12.0, -6.0), 0.7) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(l, "scale", Vector2(0.45, 0.45), 0.7)
+	tw.tween_callback(l.queue_free)
+	tw.tween_callback(_pulse_album_button)
+
+func _pulse_album_button() -> void:
+	album_button.pivot_offset = album_button.size * 0.5
+	var tw := create_tween()
+	tw.tween_property(album_button, "scale", Vector2(1.3, 1.3), 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(album_button, "scale", Vector2.ONE, 0.2)
+
+## 收集册开合与刷新：拥有的亮+数量，没拥有的暗剪影（收集感）。
+func _toggle_album() -> void:
+	album_panel.visible = not album_panel.visible
+	if album_panel.visible:
+		_refresh_album()
+
+func _refresh_album() -> void:
+	for id in _album_cells:
+		var cell: Dictionary = _album_cells[id]
+		var n := int(inventory.get(id, 0))
+		(cell["glyph"] as Label).modulate = Color.WHITE if n > 0 else Color(0.28, 0.28, 0.34)
+		(cell["count"] as Label).text = ("x%d" % n) if n > 0 else ""
 
 ## bring/visit 的完成判定（节流轮询）：deliver 在 _enter_interaction 里判，gift 在 give 交接里判。
 func _step_task(delta: float) -> void:
