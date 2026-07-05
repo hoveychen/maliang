@@ -1,12 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Character } from './types.ts';
+import type { ActiveTask, Character } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 
 export interface World {
   id: string;
   characters: Map<string, Character>;
+  /** 玩家的贴纸收集册：贴纸 id → 数量（委托奖励累积，可转赠扣减）。 */
+  inventory: Record<string, number>;
+  /** 进行中的 NPC 委托（至多一个，见 types.ActiveTask）。 */
+  activeTask: ActiveTask | null;
 }
 
 /**
@@ -33,11 +37,14 @@ export class WorldStore {
   #load(): void {
     const wf = join(this.#dir as string, 'worlds.json');
     if (existsSync(wf)) {
-      const data = JSON.parse(readFileSync(wf, 'utf8')) as { worlds: Array<{ id: string; characters: Character[] }> };
+      const data = JSON.parse(readFileSync(wf, 'utf8')) as {
+        worlds: Array<{ id: string; characters: Character[]; inventory?: Record<string, number>; activeTask?: ActiveTask | null }>;
+      };
       for (const w of data.worlds) {
         const map = new Map<string, Character>();
         for (const c of w.characters) map.set(c.id, c);
-        this.#worlds.set(w.id, { id: w.id, characters: map });
+        // 旧存档没有背包/委托字段：给默认值，向后兼容
+        this.#worlds.set(w.id, { id: w.id, characters: map, inventory: w.inventory ?? {}, activeTask: w.activeTask ?? null });
       }
     }
     const mf = join(this.#dir as string, 'assets.json');
@@ -53,7 +60,12 @@ export class WorldStore {
   #persistWorlds(): void {
     if (this.#dir === null) return;
     mkdirSync(this.#dir, { recursive: true });
-    const worlds = [...this.#worlds.values()].map((w) => ({ id: w.id, characters: [...w.characters.values()] }));
+    const worlds = [...this.#worlds.values()].map((w) => ({
+      id: w.id,
+      characters: [...w.characters.values()],
+      inventory: w.inventory,
+      activeTask: w.activeTask,
+    }));
     writeFileSync(join(this.#dir, 'worlds.json'), JSON.stringify({ worlds }, null, 2));
   }
 
@@ -65,7 +77,7 @@ export class WorldStore {
   }
 
   createWorld(id: string = randomUUID()): World {
-    const world: World = { id, characters: new Map() };
+    const world: World = { id, characters: new Map(), inventory: {}, activeTask: null };
     this.#worlds.set(id, world);
     this.#persistWorlds();
     return world;
@@ -96,6 +108,41 @@ export class WorldStore {
 
   getLocations(worldId: string): string[] {
     return this.#locations.get(worldId) ?? [];
+  }
+
+  // ── 奖赏系统：玩家贴纸背包 + 进行中委托 ──────────────────────────────────
+
+  getInventory(worldId: string): Record<string, number> {
+    return this.#worlds.get(worldId)?.inventory ?? {};
+  }
+
+  /** 发贴纸（委托奖励）。 */
+  addSticker(worldId: string, stickerId: string, n = 1): void {
+    const world = this.#worlds.get(worldId);
+    if (!world) return;
+    world.inventory[stickerId] = (world.inventory[stickerId] ?? 0) + n;
+    this.#persistWorlds();
+  }
+
+  /** 扣贴纸（转赠/gift 委托）。不够扣返回 false 且不动账。 */
+  removeSticker(worldId: string, stickerId: string, n = 1): boolean {
+    const world = this.#worlds.get(worldId);
+    if (!world || (world.inventory[stickerId] ?? 0) < n) return false;
+    world.inventory[stickerId] = (world.inventory[stickerId] ?? 0) - n;
+    if (world.inventory[stickerId] === 0) delete world.inventory[stickerId];
+    this.#persistWorlds();
+    return true;
+  }
+
+  getActiveTask(worldId: string): ActiveTask | null {
+    return this.#worlds.get(worldId)?.activeTask ?? null;
+  }
+
+  setActiveTask(worldId: string, task: ActiveTask | null): void {
+    const world = this.#worlds.get(worldId);
+    if (!world) return;
+    world.activeTask = task;
+    this.#persistWorlds();
   }
 
   listCharacters(worldId: string): Character[] {

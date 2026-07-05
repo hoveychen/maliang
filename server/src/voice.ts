@@ -1,6 +1,7 @@
 import type { ServiceAdapters, AudioBlob } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, VoiceResponse } from './types.ts';
+import { pickTaskCandidate } from './tasks.ts';
 
 export interface VoiceInput {
   worldId: string;
@@ -67,6 +68,10 @@ export async function respondToTranscript(
     .filter((c) => c.id !== characterId && !c.isFairy)
     .map((c) => ({ id: c.id, name: c.name }));
 
+  // 委托：进行中的给 LLM 提醒；没有进行中的生成候选让 LLM 挑时机发起（模板池确定性生成）
+  const activeTask = store.getActiveTask(worldId) ?? undefined;
+  const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, store) ?? undefined;
+
   const intent = await adapters.llm.routeIntent(transcript, {
     characterName: character.name,
     personality: character.personality,
@@ -75,6 +80,9 @@ export async function respondToTranscript(
     memory: character.memory,
     worldCharacters: roster,
     locations: store.getLocations(worldId),
+    activeTask,
+    taskCandidate,
+    inventory: store.getInventory(worldId),
   });
 
   // 语音回复不再过文字审核（Boss 2026-06-18 决策：多一次 LLM 调用拖慢对话、伤体验）。
@@ -102,6 +110,13 @@ export async function respondToTranscript(
     } else {
       character.behaviorScript = intent.behaviorScript; // 指令即时生效
     }
+  }
+  // LLM 在这句回应里发起了委托候选 → 设为进行中，随 character_response 下发给客户端做提示
+  if (intent.offerTask && taskCandidate) {
+    store.setActiveTask(worldId, taskCandidate);
+    response.task = taskCandidate;
+  } else if (activeTask) {
+    response.task = activeTask; // 已有委托随回应带下去（客户端断线重连后也能补提示）
   }
 
   const streamFn = adapters.tts.synthesizeStream?.bind(adapters.tts);
