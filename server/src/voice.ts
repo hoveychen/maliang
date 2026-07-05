@@ -61,12 +61,20 @@ export async function respondToTranscript(
   const character = store.getCharacter(worldId, characterId);
   if (!character) throw new CharacterNotFoundError(worldId, characterId);
 
+  // 花名册：世界里其他可指挥的角色（不含自己、不含小神仙——她悬浮不走地面寻路）
+  const roster = store
+    .listCharacters(worldId)
+    .filter((c) => c.id !== characterId && !c.isFairy)
+    .map((c) => ({ id: c.id, name: c.name }));
+
   const intent = await adapters.llm.routeIntent(transcript, {
     characterName: character.name,
     personality: character.personality,
     abilities: character.abilities,
     recentHistory: character.chatHistory.slice(-RECENT_TURNS), // 这轮之前的近 N 轮
     memory: character.memory,
+    worldCharacters: roster,
+    locations: store.getLocations(worldId),
   });
 
   // 语音回复不再过文字审核（Boss 2026-06-18 决策：多一次 LLM 调用拖慢对话、伤体验）。
@@ -82,7 +90,18 @@ export async function respondToTranscript(
   };
   if (intent.kind === 'command' && intent.behaviorScript) {
     response.behaviorScript = intent.behaviorScript;
-    character.behaviorScript = intent.behaviorScript; // 指令即时生效
+    // 执行者：小朋友点名让别的角色做（「小蓝跟我来」）→ 脚本挂到那个角色；缺省挂正在对话的角色
+    const performer = intent.performerName ? findByName(roster, intent.performerName) : undefined;
+    if (performer) {
+      response.performerId = performer.id;
+      const target = store.getCharacter(worldId, performer.id);
+      if (target) {
+        target.behaviorScript = intent.behaviorScript;
+        store.saveCharacter(target);
+      }
+    } else {
+      character.behaviorScript = intent.behaviorScript; // 指令即时生效
+    }
   }
 
   const streamFn = adapters.tts.synthesizeStream?.bind(adapters.tts);
@@ -115,6 +134,19 @@ export async function respondToTranscript(
   response.ttsAsset = store.putAsset(tts);
   finishTurn(store, character, transcript, replyText);
   return response;
+}
+
+/** 花名册按名字找角色：先精确，再互相包含（ASR 可能多字/少字，如「小蓝呀」↔「小蓝」）。 */
+function findByName(
+  roster: { id: string; name: string }[],
+  name: string,
+): { id: string; name: string } | undefined {
+  const n = name.trim();
+  if (!n) return undefined;
+  return (
+    roster.find((c) => c.name === n) ??
+    roster.find((c) => c.name.includes(n) || n.includes(c.name))
+  );
 }
 
 /** 回合收尾：更新对话历史并持久化（chatHistory/behaviorScript 变更）。 */

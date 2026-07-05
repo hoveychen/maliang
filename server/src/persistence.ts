@@ -18,6 +18,8 @@ export class WorldStore {
   readonly #dir: string | null;
   readonly #worlds = new Map<string, World>();
   readonly #assets = new Map<string, ImageBlob>();
+  // 世界地点名清单（POI，客户端 world_info 上报）：纯内存，客户端每次连上重发，不持久化
+  readonly #locations = new Map<string, string[]>();
 
   constructor(dataDir?: string) {
     this.#dir = dataDir ?? null;
@@ -85,6 +87,15 @@ export class WorldStore {
     const world = this.#worlds.get(character.worldId);
     if (world) world.characters.set(character.id, character);
     this.#persistWorlds();
+  }
+
+  /** 客户端上报的世界地点名（喂给意图 LLM 让「去某地」说的是真实地名）。 */
+  setLocations(worldId: string, names: string[]): void {
+    this.#locations.set(worldId, names);
+  }
+
+  getLocations(worldId: string): string[] {
+    return this.#locations.get(worldId) ?? [];
   }
 
   listCharacters(worldId: string): Character[] {

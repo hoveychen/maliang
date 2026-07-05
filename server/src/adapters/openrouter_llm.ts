@@ -1,10 +1,11 @@
 import type { LLMAdapter } from './types.ts';
-import type {
-  BehaviorScript,
-  CharacterSpec,
-  IntentContext,
-  IntentResult,
-  MemoryExtractionContext,
+import {
+  BASE_ABILITIES,
+  type BehaviorScript,
+  type CharacterSpec,
+  type IntentContext,
+  type IntentResult,
+  type MemoryExtractionContext,
 } from '../types.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
 import { fallbackSdfPropSpec, validateSdfPropSpec, type SdfPropSpec } from '../sdf_prop.ts';
@@ -36,6 +37,16 @@ const SDF_PROP_SYSTEM = `你是幼儿园游戏「maliang」的物件设计师。
 - 明快温暖的配色；绝不包含暴力、恐怖、武器、成人内容。
 示例（会走路的小屋）：
 {"name":"walking_hut","palette":["#b1543f","#f4ead4","#e8b04b"],"blend":0.3,"outline":0.045,"parts":[{"shape":"box","pos":[0,1.3,0],"size":[1.7,1.2,1.5],"color":1},{"shape":"cone","pos":[0,2.35,0],"r1":1.05,"r2":0.18,"h":0.55,"color":0}],"locomotion":{"type":"walker","legs":4,"leg_r":0.12,"hip_h":0.78,"stance":[0.6,0.5],"speed":0.7},"ropes":[{"pos":[0,2.05,-0.85],"segments":4,"r":0.09,"len":0.26,"color":2}]}`;
+
+/** 每个能力喂给意图 LLM 的说明（能力名=一句用途 + params 形状）。 */
+const ABILITY_DESC: Record<string, string> = {
+  move_to: 'move_to=去某个地方或某个角色身边，params:{"location_name":"地点名"} 或 {"character_name":"角色名"}（小朋友说「过来/到我这来」时 character_name 填"玩家"）',
+  follow: 'follow=跟着一个人一起走，params:{"target_name":"玩家"}（跟着小朋友）或 {"target_name":"角色名"}',
+  stop_follow: 'stop_follow=停止跟随，params:{}',
+  do_action: 'do_action=做一个动作，params:{"action":"wave|jump|spin|nod"}（挥手/跳/转圈/点头）',
+  chat_with: 'chat_with=走到某个角色身边和它聊天，params:{"character_name":"角色名"}',
+  deliver_message: 'deliver_message=给某个角色带一句话，params:{"to":"角色名","message":"要带的话"}',
+};
 
 function stripFences(s: string): string {
   return s.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/i, '').trim();
@@ -79,7 +90,7 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
       visualDescription: str(raw.visualDescription, FALLBACK_VISUAL),
       voiceId: 'cn-child-default', // 真实音色 id 在 M2 接讯飞时确定
       scale: 1.0,
-      abilities: ['move_to', 'deliver_message'], // 系统预设能力，固定（不取 LLM 的flavor）
+      abilities: [...BASE_ABILITIES], // 系统预设能力，固定（不取 LLM 的flavor）
     };
   }
 
@@ -104,11 +115,23 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     const memoryLine = ctx.memory && ctx.memory.length > 0
       ? `\n你记得关于小朋友的事：${ctx.memory.join('；')}。回应时自然地体现你记得这些。`
       : '';
+    // 能力 = 基础交互集 ∪ 角色自带（存量角色只存了旧两项，取并集免迁移）
+    const abilities = [...new Set([...BASE_ABILITIES, ...ctx.abilities])];
+    const abilityLines = abilities.map((a) => `- ${ABILITY_DESC[a] ?? a}`).join('\n');
+    const rosterLine = ctx.worldCharacters && ctx.worldCharacters.length > 0
+      ? `\n世界里的其他角色：${ctx.worldCharacters.map((c) => c.name).join('、')}。指令里出现角色名时必须用这些名字（口音/识别不准时对应到最像的一个）。`
+      : '';
+    const locationLine = ctx.locations && ctx.locations.length > 0
+      ? `\n世界里的地点：${ctx.locations.join('、')}。move_to 的 location_name 优先归一到这些名字（说「有风车的地方」就填「风车」）。`
+      : '';
     const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。
-小朋友对你说了一句话，判断这是「闲聊」还是「让你做一件你会做的事」。
-你会做的事(abilities)：${ctx.abilities.join('、')}（move_to=去某地，deliver_message=给某角色带话）。${memoryLine}
-严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
+小朋友对你说了一句话，判断这是「闲聊」还是「让你（或别的角色）做一件会做的事」。
+会做的事(abilities)：
+${abilityLines}${rosterLine}${locationLine}${memoryLine}
+严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
+- 小朋友点名让「别的」角色做事时（如对你说「小蓝跟我来」），performer 填那个角色的名字，replyText 仍由你来说，而且你会亲自跑过去把指令带给它，所以回应要像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
+- follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
 - 绝不包含暴力、恐怖、成人内容。`;
@@ -130,6 +153,7 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
       kind?: unknown;
       replyText?: unknown;
       emotion?: unknown;
+      performer?: unknown;
       behaviorScript?: unknown;
     } = {};
     try {
@@ -145,6 +169,8 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     };
     if (kind === 'command' && raw.behaviorScript && typeof raw.behaviorScript === 'object') {
       result.behaviorScript = raw.behaviorScript as BehaviorScript;
+      const performer = str(raw.performer, '');
+      if (performer && performer !== ctx.characterName) result.performerName = performer;
     }
     return result;
   }

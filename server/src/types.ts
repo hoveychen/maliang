@@ -8,7 +8,7 @@ export interface ChatTurn {
 }
 
 export interface BehaviorCommand {
-  type: string; // move_to | wander | wait | say | emote | face | deliver_message | create_character
+  type: string; // move_to | wander | wait | follow | stop_follow | do_action | chat_with | deliver_message | say | emote | face | create_character
   params: Record<string, unknown>;
 }
 
@@ -16,6 +16,10 @@ export interface BehaviorScript {
   commands: BehaviorCommand[];
   loop: boolean;
 }
+
+/** 所有村民共有的基础交互能力（与 scripts/behavior_executor.gd 的指令集对齐）。
+ * 存量角色 abilities 里可能只有旧的两项，意图 prompt 按「基础集 ∪ 角色自带」取并集，免数据迁移。 */
+export const BASE_ABILITIES = ['move_to', 'follow', 'stop_follow', 'do_action', 'chat_with', 'deliver_message'];
 
 /** LLM 从玩家意图产出的角色设定（落地前）。 */
 export interface CharacterSpec {
@@ -68,6 +72,8 @@ export interface IntentResult {
   replyText: string; // 闲聊回应 / 指令的口头确认（中文）
   behaviorScript?: BehaviorScript; // command 时
   emotion: string; // happy | think | wave | ...（图标化情绪）
+  /** 指令执行者的名字：小朋友点名让「别的」角色做时才有（如对小绿说「小蓝跟我来」）。缺省=正在对话的角色。 */
+  performerName?: string;
 }
 
 /** 意图路由的上下文（喂给 LLM）。 */
@@ -77,6 +83,10 @@ export interface IntentContext {
   abilities: string[];
   recentHistory?: ChatTurn[]; // 近 N 轮对话，给角色上下文让回应连贯
   memory?: string[]; // 角色长期记忆要点（自我累积，跨对话保留）
+  /** 世界里的其他角色花名册（不含自己/小神仙）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
+  worldCharacters?: { id: string; name: string }[];
+  /** 世界地点名清单（客户端 world_info 上报的 POI 名）：move_to 的 location_name 优先归一到这些名字。 */
+  locations?: string[];
 }
 
 /** 对话后让角色「自己决定记什么」的上下文（extractMemory 用）。 */
@@ -100,4 +110,6 @@ export interface VoiceResponse {
   /** 流式 TTS：character_response 先行，音频随 tts_chunk 推送（PCM16，mime 见 ttsMime）。 */
   ttsStreaming?: boolean;
   ttsMime?: string; // 如 audio/L16;rate=24000，客户端据此设采样率
+  /** behaviorScript 的执行者角色 id：小朋友点名让别的角色做时才有，缺省=characterId。 */
+  performerId?: string;
 }

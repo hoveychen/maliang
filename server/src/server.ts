@@ -202,12 +202,23 @@ export async function handleWsMessage(
     audio?: string; // base64
     format?: string;
     transcript?: string; // voice_transcript：端侧 ASR 已识别的文本
+    locations?: unknown; // world_info：世界地点名清单
   };
   try {
     msg = JSON.parse(raw);
   } catch {
     socket.send(JSON.stringify({ type: 'error', error: 'invalid json' }));
     return;
+  }
+
+  // 客户端上报世界地点名（连上 WS 后一次）：喂给意图 LLM，让「去某地」归一到真实地名
+  if (msg.type === 'world_info') {
+    const names = (Array.isArray(msg.locations) ? msg.locations : [])
+      .filter((n): n is string => typeof n === 'string' && n.trim().length > 0 && n.length <= 20)
+      .map((n) => n.trim())
+      .slice(0, 32);
+    store.setLocations(msg.worldId ?? '', names);
+    return; // 上报型消息，不回包
   }
 
   if (msg.type === 'create_character_request') {

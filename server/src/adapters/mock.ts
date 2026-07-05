@@ -1,5 +1,11 @@
 import type { ServiceAdapters, ImageBlob, AudioBlob } from './types.ts';
-import type { CharacterSpec, IntentContext, IntentResult, MemoryExtractionContext } from '../types.ts';
+import {
+  BASE_ABILITIES,
+  type CharacterSpec,
+  type IntentContext,
+  type IntentResult,
+  type MemoryExtractionContext,
+} from '../types.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
 
 // 1x1 透明 PNG，作为生图占位。（须是合法 PNG：Godot 客户端会真解码，CRC 错会拒收；
@@ -41,7 +47,7 @@ export function createMockAdapters(): ServiceAdapters {
           visualDescription: `Paper Mario 动漫风格的可爱${name}，圆润、色彩明亮、儿童友好，纯绿色背景`,
           voiceId: 'mock-voice-cn-child',
           scale: 1.0,
-          abilities: ['move_to', 'deliver_message'],
+          abilities: [...BASE_ABILITIES],
         };
       },
       async designSdfProp(intentText: string): Promise<SdfPropSpec> {
@@ -66,7 +72,50 @@ export function createMockAdapters(): ServiceAdapters {
           ropes: [{ pos: [0, 1.2, -0.45], segments: 3, r: 0.06, len: 0.2, color: 0 }],
         };
       },
-      async routeIntent(transcript: string, _ctx: IntentContext): Promise<IntentResult> {
+      async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
+        // 点名让别的角色执行：转写里出现花名册角色名 → performer（真实实现由 LLM 判断语气）
+        const named = (ctx.worldCharacters ?? []).find((c) => transcript.includes(c.name));
+        const performerName = named?.name;
+        if (/(别跟|不用跟|停下)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好哒，我不跟啦！',
+            behaviorScript: { commands: [{ type: 'stop_follow', params: {} }], loop: false },
+            emotion: 'happy',
+            performerName,
+          };
+        }
+        if (/(跟我来|跟着我|一起走)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好呀，我跟着你！',
+            behaviorScript: { commands: [{ type: 'follow', params: { target_name: '玩家' } }], loop: false },
+            emotion: 'happy',
+            performerName,
+          };
+        }
+        const actionM = /(挥手|跳一?下|转个?圈|点头)/.exec(transcript);
+        if (actionM) {
+          const action = ({ 挥: 'wave', 跳: 'jump', 转: 'spin', 点: 'nod' } as Record<string, string>)[actionM[1]![0]!] ?? 'wave';
+          return {
+            kind: 'command',
+            replyText: '看我的！',
+            behaviorScript: { commands: [{ type: 'do_action', params: { action } }], loop: false },
+            emotion: 'wave',
+            performerName,
+          };
+        }
+        if (named && /(聊天|说说话|玩)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: `我去找${named.name}聊聊天！`,
+            behaviorScript: {
+              commands: [{ type: 'chat_with', params: { character_name: named.name } }],
+              loop: false,
+            },
+            emotion: 'happy',
+          };
+        }
         if (GO_WORDS.test(transcript)) {
           return {
             kind: 'command',
@@ -76,6 +125,7 @@ export function createMockAdapters(): ServiceAdapters {
               loop: false,
             },
             emotion: 'wave',
+            performerName,
           };
         }
         return { kind: 'chat', replyText: `（mock 回应）你说的是「${transcript}」对吗？`, emotion: 'happy' };

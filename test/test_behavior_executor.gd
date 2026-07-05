@@ -102,6 +102,165 @@ func _init() -> void:
 	fails += _check("no move after cancel", d5["logical"], mid)
 	OccupancyMap.clear()
 
+	# follow：跟随移动目标——追上后保持距离停下（滞回），目标走远重新起步，永不自行完成
+	OccupancyMap.clear()
+	var f_start := TerrainMap.tile_center(Vector2i(40, 68))
+	var leader := { "pos": TerrainMap.tile_center(Vector2i(44, 68)) }
+	OccupancyMap.char_register("walker", f_start, 2)
+	var d6 := { "logical": f_start, "id": "walker" }
+	var ex6 := BehaviorExecutor.new()
+	ex6.setup(d6, { "commands": [ { "type": "follow", "params": { "target_name": "leader" } } ] },
+		func(_id: String) -> Vector2: return leader["pos"])
+	for i in range(600):
+		ex6.step(dt)
+	var fdist: float = WorldGrid.shortest_delta(d6["logical"], leader["pos"]).length()
+	fails += _check("follow catches up (<=3.4)", fdist <= 3.4, true)
+	fails += _check("follow never done", ex6.is_done(), false)
+	fails += _check("follow reports target", ex6.following_id(), "leader")
+	var settle: Vector2 = d6["logical"]
+	for i in range(120):
+		ex6.step(dt) # 目标不动：滞回内不该抖动挪步
+	fails += _check("follow holds distance (no jitter)", d6["logical"], settle)
+	leader["pos"] = TerrainMap.tile_center(Vector2i(50, 68)) # 目标走远 → 重新起步追
+	for i in range(900):
+		ex6.step(dt)
+	fdist = WorldGrid.shortest_delta(d6["logical"], leader["pos"]).length()
+	fails += _check("follow chases moved target (<=3.4)", fdist <= 3.4, true)
+	ex6.cancel()
+	fails += _check("follow cancel done", ex6.is_done(), true)
+
+	# stop_follow：立即完成 + 清掉交互叫停记下的 resume_follow 标记
+	OccupancyMap.clear()
+	OccupancyMap.char_register("walker", f_start, 2)
+	var d7 := { "logical": f_start, "id": "walker", "resume_follow": "player" }
+	var ex7 := BehaviorExecutor.new()
+	ex7.setup(d7, { "commands": [ { "type": "stop_follow", "params": {} } ] })
+	ex7.step(dt)
+	fails += _check("stop_follow done", ex7.is_done(), true)
+	fails += _check("stop_follow clears resume flag", d7.has("resume_follow"), false)
+
+	# move_to character_name：经 resolver 找到角色，走到旁边（对方占格）即到
+	OccupancyMap.clear()
+	var c_start := TerrainMap.tile_center(Vector2i(60, 68))
+	var c_target := TerrainMap.tile_center(Vector2i(64, 68))
+	OccupancyMap.char_register("walker", c_start, 2)
+	OccupancyMap.char_register("buddy", c_target, 2)
+	var d8 := { "logical": c_start, "id": "walker" }
+	var ex8 := BehaviorExecutor.new()
+	ex8.setup(d8, { "commands": [ { "type": "move_to", "params": { "character_name": "buddy" } } ] },
+		func(_id: String) -> Vector2: return c_target)
+	for i in range(3000):
+		if ex8.is_done():
+			break
+		ex8.step(dt)
+	fails += _check("move_to char done", ex8.is_done(), true)
+	fails += _check("move_to char stops adjacent", WorldGrid.shortest_delta(d8["logical"], c_target).length() <= 2.6, true)
+
+	# move_to location_name：经 loc_resolver 解析地点；解析不到 → 跳过不动
+	OccupancyMap.clear()
+	var l_start := TerrainMap.tile_center(Vector2i(70, 68))
+	var l_goal := TerrainMap.tile_center(Vector2i(74, 68))
+	OccupancyMap.char_register("walker", l_start, 2)
+	var d9 := { "logical": l_start, "id": "walker" }
+	var ex9 := BehaviorExecutor.new()
+	ex9.setup(d9, { "commands": [ { "type": "move_to", "params": { "location_name": "池塘" } } ] },
+		Callable(), Callable(),
+		func(loc: String) -> Vector2: return l_goal if loc == "池塘" else Vector2.INF)
+	for i in range(3000):
+		if ex9.is_done():
+			break
+		ex9.step(dt)
+	fails += _check("move_to location done", ex9.is_done(), true)
+	fails += _check("move_to location arrived", WorldGrid.shortest_delta(d9["logical"], l_goal).length() <= 1.2, true)
+	var d10 := { "logical": l_start, "id": "walker2" }
+	OccupancyMap.char_register("walker2", l_start, 2)
+	var ex10 := BehaviorExecutor.new()
+	ex10.setup(d10, { "commands": [ { "type": "move_to", "params": { "location_name": "月球" } } ] },
+		Callable(), Callable(),
+		func(_loc: String) -> Vector2: return Vector2.INF)
+	ex10.step(dt)
+	fails += _check("unknown location skipped", ex10.is_done(), true)
+	fails += _check("unknown location no move", d10["logical"], l_start)
+
+	# do_action：写 paper_action 契约键（world 动画层演出），阻塞动作时长后完成
+	var d11 := { "logical": l_start, "id": "actor" }
+	var ex11 := BehaviorExecutor.new()
+	ex11.setup(d11, { "commands": [ { "type": "do_action", "params": { "action": "jump" } } ] })
+	ex11.step(dt)
+	fails += _check("do_action sets key", String(d11.get("paper_action", "")), "jump")
+	fails += _check("do_action blocks", ex11.is_done(), false)
+	for i in range(80): # jump 时长 1.0s + 余量
+		ex11.step(dt)
+	fails += _check("do_action done after duration", ex11.is_done(), true)
+	var d12 := { "logical": l_start, "id": "actor2" }
+	var ex12 := BehaviorExecutor.new()
+	ex12.setup(d12, { "commands": [ { "type": "do_action", "params": { "action": "backflip" } } ] })
+	ex12.step(dt)
+	fails += _check("unknown action falls back to wave", String(d12.get("paper_action", "")), "wave")
+
+	# chat_with：走到聊天对象旁 → 写 chat_with/chat_t 契约键 → 停留 CHAT_DUR 后完成
+	OccupancyMap.clear()
+	var ch_start := TerrainMap.tile_center(Vector2i(80, 68))
+	var ch_target := TerrainMap.tile_center(Vector2i(84, 68))
+	OccupancyMap.char_register("walker", ch_start, 2)
+	OccupancyMap.char_register("buddy", ch_target, 2)
+	var d13 := { "logical": ch_start, "id": "walker" }
+	var ex13 := BehaviorExecutor.new()
+	ex13.setup(d13, { "commands": [ { "type": "chat_with", "params": { "character_name": "buddy" } } ] },
+		func(_id: String) -> Vector2: return ch_target)
+	for i in range(3000):
+		if d13.has("chat_with"):
+			break
+		ex13.step(dt)
+	fails += _check("chat_with reaches and sets key", String(d13.get("chat_with", "")), "buddy")
+	fails += _check("chat_with stops adjacent", WorldGrid.shortest_delta(d13["logical"], ch_target).length() <= 2.6, true)
+	fails += _check("chat_with lingers", ex13.is_done(), false)
+	var chat_pos: Vector2 = d13["logical"]
+	for i in range(int(BehaviorExecutor.CHAT_DUR * 60.0) + 10):
+		ex13.step(dt)
+	fails += _check("chat_with done after CHAT_DUR", ex13.is_done(), true)
+	fails += _check("chat_with stays put while chatting", d13["logical"], chat_pos)
+
+	# relay_command：跑腿传指令——走到执行者旁才把脚本交出去（点名指派不隔空遥控）
+	OccupancyMap.clear()
+	var r_start := TerrainMap.tile_center(Vector2i(90, 68))
+	var r_target := TerrainMap.tile_center(Vector2i(94, 68))
+	OccupancyMap.char_register("runner", r_start, 2)
+	OccupancyMap.char_register("performer", r_target, 2)
+	var d14 := { "logical": r_start, "id": "runner" }
+	var relayed := {}
+	var jump_script := { "commands": [ { "type": "do_action", "params": { "action": "jump" } } ], "loop": false }
+	var ex14 := BehaviorExecutor.new()
+	ex14.setup(d14, { "commands": [ { "type": "relay_command", "params": { "to": "performer", "script": jump_script } } ] },
+		func(_id: String) -> Vector2: return r_target,
+		Callable(), Callable(),
+		func(id: String, s: Dictionary) -> void:
+			relayed["id"] = id
+			relayed["script"] = s)
+	ex14.step(dt)
+	fails += _check("relay not fired at start", relayed.is_empty(), true)
+	for i in range(3000):
+		if ex14.is_done():
+			break
+		ex14.step(dt)
+	fails += _check("relay done", ex14.is_done(), true)
+	fails += _check("relay walked adjacent", WorldGrid.shortest_delta(d14["logical"], r_target).length() <= 2.6, true)
+	fails += _check("relay handed to performer", String(relayed.get("id", "")), "performer")
+	fails += _check("relay passes script", (relayed.get("script", {}) as Dictionary).get("commands", []), jump_script["commands"])
+	# 解析不到执行者 → 跳过不触发
+	var d15 := { "logical": r_start, "id": "runner2" }
+	OccupancyMap.char_register("runner2", r_start, 2)
+	var relayed2 := {}
+	var ex15 := BehaviorExecutor.new()
+	ex15.setup(d15, { "commands": [ { "type": "relay_command", "params": { "to": "ghost", "script": jump_script } } ] },
+		func(_id: String) -> Vector2: return Vector2.INF,
+		Callable(), Callable(),
+		func(id: String, _s: Dictionary) -> void: relayed2["id"] = id)
+	ex15.step(dt)
+	fails += _check("relay unknown performer skipped", ex15.is_done(), true)
+	fails += _check("relay unknown performer not fired", relayed2.is_empty(), true)
+	OccupancyMap.clear()
+
 	if fails == 0:
 		print("behavior_executor tests PASS")
 	else:
