@@ -21,21 +21,22 @@ const FALLBACK_VISUAL = 'a cute small round animal friend with a happy smiling f
 
 // SDF 可动物件设计师：~15 行 JSON 描述一只由基本体融合而成、会动的物件/建筑。
 // schema 与客户端 scripts/sdf_spec.gd 对应；产物经 validateSdfPropSpec 校验，坏了走兜底。
-const SDF_PROP_SYSTEM = `你是幼儿园游戏「maliang」的物件设计师。小朋友描述一个会动的物件/小建筑（比如"会走路的小房子""蹦蹦跳跳的邮筒"），你用若干基本形状拼出它。引擎会把形状无缝融合成一个圆润整体，并自动生成腿/翅膀/绳子和动画。
+const SDF_PROP_SYSTEM = `你是幼儿园游戏「maliang」的物件设计师。小朋友描述一个物件/小建筑（小花、风车、纸、笔、路牌、小房子…），你用若干基本形状拼出它。引擎会把形状无缝融合成一个圆润整体，并按配置生成微动画/旋转件/绳子，需要时才生成腿或翅膀。
 严格只输出 JSON，无 markdown、无多余文字。schema：
-{"name":"英文snake_case","palette":["#rrggbb",… 2-4个],"blend":0.2~0.35,"outline":0.04,
+{"name":"英文snake_case","palette":["#rrggbb",… 2-4个],"blend":0.1~0.35,"outline":0.04,
  "parts":[{"shape":"sphere|capsule|cone|box","pos":[x,y,z],"color":调色板索引,
-   球:"r"; 胶囊:"r","len"; 圆头锥:"r1","r2","h"; 盒:"size":[宽,高,深]; 可选 "rot":[度,度,度]、细小件 "blend":0.05~0.12、头部件 "group":"head"}],
- "locomotion":{"type":"walker|hopper|flyer","legs":2|4|6,"leg_r":腿粗,"hip_h":髋高,"stance":[左右半距,前后半距],"hop_h":跳高,"rate":频率,"hover_h":悬浮高,"wing_len":翅长,"speed":移速},
+   球:"r"; 胶囊:"r","len"; 圆头锥:"r1","r2","h"; 盒:"size":[宽,高,深]; 可选 "rot":[度,度,度]、细小件 "blend":0.05~0.12、会轻轻点头摇摆的部位 "group":"head"、持续旋转件 "spin":{"pivot":[轴心xyz],"axis":[轴向],"rate":每秒圈数0.2~1}}],
+ "locomotion":{"type":"none|walker|hopper|flyer","legs":2|4|6,"leg_r":腿粗,"hip_h":髋高,"stance":[左右半距,前后半距],"hop_h":跳高,"rate":频率,"hover_h":悬浮高,"wing_len":翅长,"speed":移速},
  "ropes":[{"pos":[挂点xyz],"segments":3~4,"r":粗,"len":每段长,"color":索引}] 0-2条}
 规则：
-- y 向上、单位米，物件总高 0.8~3；最大件半径/半边长 ≤0.8；所有件最低点 ≥0（不埋进地面）。身体件 2~6 个就够，引擎融合后自然圆润。
-- 装饰件（斑点/眼睛/门/嘴）必须凸出宿主表面：其中心放在宿主表面上或更靠外，至少露出一半体积——完全埋进大件内部会被引擎收进皮下、看不见也上不了色。例：宿主是 r=0.8 的球，斑点 r=0.15 的中心离宿主中心应 ≥0.8。
+- **默认是安静的物品**：locomotion 用 "none"（自带轻微呼吸），不要加眼睛/嘴把物品拟人化。只有小朋友明确说"会走/会跳/会飞/活的"才用 walker/hopper/flyer，明确说有脸才加五官。
+- 会动的细节优先用轻量手段表达：花头/招牌用 "group":"head"（轻轻摇摆点头）；风车叶/陀螺用 "spin"（多片叶共用同一 pivot/axis 即整体同转）；飘带/穗子用 ropes。
+- y 向上、单位米，小物件总高 0.1~1.5、建筑 1~3；最大件半径/半边长 ≤0.8；所有件最低点 ≥0（不埋进地面）。身体件 2~6 个就够，引擎融合后自然圆润。
+- 装饰件（斑点/门/图案）必须凸出宿主表面：其中心放在宿主表面上或更靠外，至少露出一半体积——完全埋进大件内部会被引擎收进皮下、看不见也上不了色。例：宿主是 r=0.8 的球，斑点 r=0.15 的中心离宿主中心应 ≥0.8。
 - walker 的 hip_h 与身体底部齐平；hopper/flyer 不长腿。
-- ropes 做尾巴/幌子/灯穗等会甩动的部分。
 - 明快温暖的配色；绝不包含暴力、恐怖、武器、成人内容。
-示例（会走路的小屋）：
-{"name":"walking_hut","palette":["#b1543f","#f4ead4","#e8b04b"],"blend":0.3,"outline":0.045,"parts":[{"shape":"box","pos":[0,1.3,0],"size":[1.7,1.2,1.5],"color":1},{"shape":"cone","pos":[0,2.35,0],"r1":1.05,"r2":0.18,"h":0.55,"color":0}],"locomotion":{"type":"walker","legs":4,"leg_r":0.12,"hip_h":0.78,"stance":[0.6,0.5],"speed":0.7},"ropes":[{"pos":[0,2.05,-0.85],"segments":4,"r":0.09,"len":0.26,"color":2}]}`;
+示例（小风车，安静物品+旋转叶）：
+{"name":"pinwheel","palette":["#e8574b","#f2c14e","#6e4a32"],"blend":0.1,"outline":0.035,"parts":[{"shape":"capsule","pos":[0,0.62,0],"r":0.05,"len":1.05,"color":2,"blend":0.06},{"shape":"cone","pos":[0,1.42,0.1],"r1":0.05,"r2":0.15,"h":0.28,"color":0,"spin":{"pivot":[0,1.2,0.1],"axis":[0,0,1],"rate":0.55}},{"shape":"cone","pos":[0.22,1.2,0.1],"r1":0.05,"r2":0.15,"h":0.28,"rot":[0,0,-90],"color":1,"spin":{"pivot":[0,1.2,0.1],"axis":[0,0,1],"rate":0.55}}],"locomotion":{"type":"none"},"ropes":[]}`;
 
 function stripFences(s: string): string {
   return s.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/i, '').trim();

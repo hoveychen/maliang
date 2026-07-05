@@ -124,3 +124,26 @@ test('POST /sdf-props: 描述 → 校验后的 spec；空描述 400；违禁词 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('validateSdfPropSpec: spin 简写/对象归一化，零轴拒收', () => {
+  const ok = validateSdfPropSpec({
+    palette: ['#abc'],
+    parts: [
+      { shape: 'cone', pos: [0, 1.4, 0.1], r1: 0.05, r2: 0.15, h: 0.28, color: 0,
+        spin: { pivot: [0, 1.2, 0.1], axis: [0, 0, 1], rate: 0.55 } },
+      { shape: 'sphere', pos: [0, 0.5, 0], r: 0.2, color: 0, spin: 9 },
+    ],
+    locomotion: { type: 'none' },
+  });
+  assert.ok(ok.ok);
+  if (ok.ok) {
+    const s0 = ok.spec.parts[0].spin;
+    assert.ok(typeof s0 === 'object' && s0 !== null && s0.rate === 0.55);
+    assert.equal(ok.spec.parts[1].spin, 4); // 简写数字 clamp 到 ±4
+  }
+  const bad = validateSdfPropSpec({
+    palette: ['#abc'],
+    parts: [{ shape: 'sphere', pos: [0, 0.5, 0], r: 0.2, color: 0, spin: { axis: [0, 0, 0] } }],
+  });
+  assert.equal(bad.ok, false);
+});
