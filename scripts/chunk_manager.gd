@@ -59,6 +59,7 @@ const GRASS_MEAN := Color(72.0 / 255.0, 92.0 / 255.0, 39.0 / 255.0)
 const DIRT_MEAN := Color(77.0 / 255.0, 48.0 / 255.0, 36.0 / 255.0)
 const STONE_MEAN := Color(91.0 / 255.0, 91.0 / 255.0, 97.0 / 255.0)
 const WATER_MEAN := Color(72.0 / 255.0, 122.0 / 255.0, 132.0 / 255.0)
+const WATER_DIP := 0.35   ## 水面低于岸沿的落差（米）：露出一小截岸壁 = 可读的水位线
 
 ## 手工地标（tile 为全局 tile 锚点；reserve=1 → 占地 3×3，找不到空位沿环外扩 search 圈）。
 ## 村核心 8 栋民居沿广场四角与辐路布置、水井坐镇广场（地标特批压路）、
@@ -85,13 +86,17 @@ const DECO_BUSH := 2
 const DECO_ROCK := 3
 const DECO_TUFT := 4
 
-## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
+## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, water:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
 ## wrapped 区块索引 → 逐 tile autotile 地面 ArrayMesh。全世界只有 3×3 个
 ## wrapped 区块，mesh 各建一次后永久缓存（首帧 9 次，之后零开销）。
 var _chunk_meshes: Dictionary = {}
-## 所有地面共享一个 atlas 材质（颜色全烘在 TerrainAtlas 里，albedo 置白）。
+## wrapped 区块索引 → 水面 ArrayMesh（无水区块存 null），同样永久缓存。
+var _water_meshes: Dictionary = {}
+## 所有地面共享一个控制图+水彩贴图材质（terrain_ground.gdshader）。
 var _ground_mat: ShaderMaterial = null
+## 所有水面共享一个半透明水面材质（water_surface.gdshader）。
+var _water_mat: ShaderMaterial = null
 ## wrapped 区块 → 已向 OccupancyMap 登记的占地 [[origin_tile, w, h], ...]，重刷时释放。
 var _claims: Dictionary = {}
 
@@ -103,15 +108,21 @@ func _ready() -> void:
 func _make_slot() -> Dictionary:
 	if _ground_mat == null:
 		_ground_mat = _make_ground_mat()
+		_water_mat = _make_water_mat()
 	var root := Node3D.new()
 	add_child(root)
 	var tile := MeshInstance3D.new()
 	tile.material_override = _ground_mat
 	tile.extra_cull_margin = CULL_MARGIN
 	root.add_child(tile)
+	var water := MeshInstance3D.new()
+	water.material_override = _water_mat
+	water.extra_cull_margin = CULL_MARGIN
+	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF  # 半透明水面不投影
+	root.add_child(water)
 	var deco := Node3D.new()
 	root.add_child(deco)
-	return { "root": root, "tile": tile, "deco": deco, "wrapped": Vector2i(-999, -999) }
+	return { "root": root, "tile": tile, "water": water, "deco": deco, "wrapped": Vector2i(-999, -999) }
 
 ## 地形专用材质：控制图 atlas（域/描边/类型/明暗）+ 世界 UV 平铺水彩贴图，
 ## 调色板 tint 全部取自 TerrainAtlas 常量（shaders/terrain_ground.gdshader）。
@@ -132,6 +143,18 @@ static func _make_ground_mat() -> ShaderMaterial:
 	m.set_shader_parameter("wall_tint", TerrainAtlas.WALL_TINT)
 	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
 	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
+	m.set_shader_parameter("curvature", BendMat.CURVATURE)
+	return m
+
+## 半透明水面材质（shaders/water_surface.gdshader）：水彩水贴图双层滚动 + 深度调色。
+static func _make_water_mat() -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/water_surface.gdshader")
+	m.set_shader_parameter("water_tex", WATER_TEX)
+	m.set_shader_parameter("water_mean", WATER_MEAN)
+	m.set_shader_parameter("shallow_color", TerrainAtlas.WATER_SHALLOW)
+	m.set_shader_parameter("deep_color", TerrainAtlas.WATER_DEEP)
+	m.set_shader_parameter("foam_color", TerrainAtlas.WATER_FOAM)
 	m.set_shader_parameter("curvature", BendMat.CURVATURE)
 	return m
 
@@ -167,6 +190,8 @@ func update(player_logical: Vector2) -> void:
 func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	var tile: MeshInstance3D = slot["tile"]
 	tile.mesh = _chunk_mesh(wrapped)
+	var water: MeshInstance3D = slot["water"]
+	water.mesh = _water_mesh(wrapped)
 
 	var deco: Node3D = slot["deco"]
 	for c in deco.get_children():
@@ -348,6 +373,71 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	_chunk_meshes[wrapped] = mesh
 	return mesh
+
+## 构建（或取缓存）一个 wrapped 区块的水面 ArrayMesh；区块内没有水返回 null。
+## 每个水 tile 一个 2m quad，水位 = 岸沿 - WATER_DIP；顶点色按共享该角点的
+## 四个 tile 计算：R = 水 tile 深度均值/MAX_DEPTH（浅→深平滑渐变），
+## G = 角点贴岸（四邻中有非水）= 1 → shader 的岸边泡沫带。UV2 同地面（逻辑米坐标）。
+func _water_mesh(wrapped: Vector2i) -> ArrayMesh:
+	if _water_meshes.has(wrapped):
+		return _water_meshes[wrapped]
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var uv2s := PackedVector2Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	var base_tile := wrapped * CHUNK_TILES
+	var half := CHUNK_WORLD * 0.5
+	var ts := WorldGrid.TILE_SIZE
+	var loff := Vector2(wrapped) * CHUNK_WORLD + Vector2(half, half)
+	for j in range(CHUNK_TILES):
+		for i in range(CHUNK_TILES):
+			var t := base_tile + Vector2i(i, j)
+			if TerrainMap.tile_type(t) != TerrainMap.T_WATER:
+				continue
+			var y := float(TerrainMap.tile_height(t)) * TerrainMap.STEP_HEIGHT - WATER_DIP
+			var x0 := -half + float(i) * ts
+			var z0 := -half + float(j) * ts
+			var b := verts.size()
+			# 顶点序 NW/NE/SE/SW（俯视顺时针 = 正面朝上）
+			var corner_off: Array[Vector2i] = [Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1)]
+			for co in corner_off:
+				verts.append(Vector3(x0 + float(co.x) * ts, y, z0 + float(co.y) * ts))
+				norms.append(Vector3.UP)
+				uv2s.append(loff + Vector2(x0 + float(co.x) * ts, z0 + float(co.y) * ts))
+				cols.append(_water_vertex_color(t + co))
+			idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
+	if verts.is_empty():
+		_water_meshes[wrapped] = null
+		return null
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
+	arrays[Mesh.ARRAY_COLOR] = cols
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_water_meshes[wrapped] = mesh
+	return mesh
+
+## 网格角点 node（tile 角点的整格索引）→ 水面顶点色。
+## 共享该角点的四个 tile：node 的西北四邻 (node.x-1..node.x)×(node.y-1..node.y)。
+static func _water_vertex_color(node: Vector2i) -> Color:
+	var depth_sum := 0.0
+	var water_n := 0
+	var shore := 0.0
+	for dz in range(-1, 1):
+		for dx in range(-1, 1):
+			var q := node + Vector2i(dx, dz)
+			if TerrainMap.tile_type(q) == TerrainMap.T_WATER:
+				depth_sum += float(TerrainMap.tile_depth(q))
+				water_n += 1
+			else:
+				shore = 1.0
+	var depth01 := (depth_sum / float(water_n)) / float(TerrainMap.MAX_DEPTH) if water_n > 0 else 0.0
+	return Color(depth01, shore, 0.0)
 
 ## 水平角 quad：NW/NE/SE/SW 顶点序，从上往下看顺时针（Godot 正面绕序）。
 ## UV2 = 逻辑世界米坐标（局部坐标 + loff）。
