@@ -1,0 +1,13 @@
+{
+  "name": "fly_lantern",
+  "palette": ["#e8574b", "#f2c14e", "#f4ead4"],
+  "blend": 0.22,
+  "outline": 0.04,
+  "parts": [
+    {"shape": "capsule", "pos": [0, 1.5, 0], "r": 0.33, "len": 0.24, "color": 0},
+    {"shape": "cone", "pos": [0, 1.96, 0], "r1": 0.28, "r2": 0.11, "h": 0.14, "color": 1, "blend": 0.15},
+    {"shape": "sphere", "pos": [0, 1.05, 0], "r": 0.15, "color": 1, "blend": 0.12}
+  ],
+  "locomotion": {"type": "flyer", "hover_h": 1.5, "wing_r": 0.07, "wing_len": 0.42, "wing_pos": [0.32, 1.62, 0], "rate": 3.2, "speed": 1.1},
+  "ropes": [{"pos": [0, 0.95, 0], "segments": 4, "r": 0.05, "len": 0.15, "color": 2}]
+}

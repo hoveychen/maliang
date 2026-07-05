@@ -1,0 +1,96 @@
+class_name SdfProp
+extends MeshInstance3D
+## SDF blend-shell 可动物件：一段 JSON spec → 单 draw call 的无缝融合网格。
+## 网格只在 setup 时构建一次（顶点存基本体局部坐标）；之后动画每帧只改
+## uniform 里的基本体变换（SdfAnimator 驱动），GPU 顶点阶段重新吸附表面。
+##
+## 摆放约定：节点只做 yaw 旋转+平移、不缩放（shader 的 world-bend 换算依赖此约定，
+## 见 sdf_field.gdshaderinc 的 apply_bend）；尺寸在 spec 里改。
+
+const CULL_MARGIN := 220.0  ## 与 chunk_manager 一致：world-bend 位移大，防误剔除
+
+static var _shell_shader: Shader = null
+static var _outline_shader: Shader = null
+
+var config: Dictionary = {}
+var prims: Array = []
+var meta: Dictionary = {}
+var animator: SdfAnimator = null
+var _mats: Array[ShaderMaterial] = []
+
+## 从 spec 字典创建；spec 不合法返回 null 并 push_warning（LLM 产物要能安全拒收）。
+static func from_spec(spec: Dictionary) -> SdfProp:
+	var cfg := SdfSpec.parse(spec)
+	if not cfg.ok:
+		push_warning("SdfProp spec 不合法: %s" % cfg.error)
+		return null
+	var prop := SdfProp.new()
+	prop._setup(cfg)
+	return prop
+
+static func from_json_file(path: String) -> SdfProp:
+	var text := FileAccess.get_file_as_string(path)
+	var data: Variant = JSON.parse_string(text)
+	if not (data is Dictionary):
+		push_warning("SdfProp JSON 解析失败: %s" % path)
+		return null
+	return from_spec(data)
+
+func _setup(cfg: Dictionary) -> void:
+	config = cfg
+	name = str(cfg.name)
+	var rig := SdfSpec.build_rig(cfg)
+	prims = rig.prims
+	meta = rig.meta
+
+	mesh = SdfMeshBuilder.build(prims)
+	extra_cull_margin = CULL_MARGIN
+
+	if _shell_shader == null:
+		_shell_shader = load("res://shaders/sdf_blend_shell.gdshader")
+		_outline_shader = load("res://shaders/sdf_outline.gdshader")
+	var main := ShaderMaterial.new()
+	main.shader = _shell_shader
+	main.set_shader_parameter("color_k", cfg.color_k)
+	_mats = [main]
+	if cfg.outline > 0.0:
+		var outline := ShaderMaterial.new()
+		outline.shader = _outline_shader
+		outline.set_shader_parameter("outline_width", cfg.outline)
+		main.next_pass = outline
+		_mats.append(outline)
+	for m in _mats:
+		m.set_shader_parameter("prim_count", prims.size())
+		m.set_shader_parameter("blend_k", cfg.blend)
+		m.set_shader_parameter("curvature", BendMat.CURVATURE)
+	material_override = main
+
+	var colors := PackedVector4Array()
+	for pr: SdfMath.Prim in prims:
+		colors.append(Vector4(pr.color.r, pr.color.g, pr.color.b, 1.0))
+	main.set_shader_parameter("prim_color", colors)
+
+	animator = SdfAnimator.new(self)
+	push_uniforms()
+
+## 把当前基本体姿态打包进两个 pass 的 uniform（动画每帧调用）。
+func push_uniforms() -> void:
+	var pos := PackedVector4Array()
+	var rot := PackedVector4Array()
+	var par := PackedVector4Array()
+	for pr: SdfMath.Prim in prims:
+		var o := pr.xform.origin
+		pos.append(Vector4(o.x, o.y, o.z, float(pr.shape)))
+		var q := pr.xform.basis.get_rotation_quaternion()
+		rot.append(Vector4(q.x, q.y, q.z, q.w))
+		par.append(Vector4(pr.params.x, pr.params.y, pr.params.z, pr.blend))
+	for m in _mats:
+		m.set_shader_parameter("prim_pos", pos)
+		m.set_shader_parameter("prim_rot", rot)
+		m.set_shader_parameter("prim_params", par)
+
+func _process(delta: float) -> void:
+	if animator == null:
+		return
+	animator.advance(delta)
+	push_uniforms()

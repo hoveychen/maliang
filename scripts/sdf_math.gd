@@ -62,6 +62,25 @@ static func box(xform: Transform3D, half_extents: Vector3, color := Color.WHITE,
 	p.xform = xform
 	return p
 
+## 让局部 Y 轴对准 a→b、原点在中点的刚体变换（腿骨/绳段摆位用）。
+static func between_xform(a: Vector3, b: Vector3) -> Transform3D:
+	var d := b - a
+	var dir := d / maxf(d.length(), 1e-6)
+	var q: Quaternion
+	if dir.dot(Vector3.UP) < -0.9999:
+		q = Quaternion(Vector3.RIGHT, PI)
+	else:
+		q = Quaternion(Vector3.UP, dir)
+	return Transform3D(Basis(q), (a + b) * 0.5)
+
+## 两球心分别在 a、b 的胶囊。
+static func capsule_between(a: Vector3, b: Vector3, r: float, color := Color.WHITE, blend := 0.25) -> Prim:
+	return capsule(between_xform(a, b), r, a.distance_to(b) * 0.5, color, blend)
+
+## 底球心在 a（半径 r1）、顶球心在 b（半径 r2）的圆头锥。
+static func cone_between(a: Vector3, b: Vector3, r1: float, r2: float, color := Color.WHITE, blend := 0.25) -> Prim:
+	return cone(between_xform(a, b), r1, r2, a.distance_to(b) * 0.5, color, blend)
+
 ## ---- 距离场 ----
 
 static func prim_dist(pr: Prim, p: Vector3) -> float:

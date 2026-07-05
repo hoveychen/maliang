@@ -1,0 +1,13 @@
+{
+  "name": "hop_mailbox",
+  "palette": ["#4a76c9", "#f4ead4", "#e8574b"],
+  "blend": 0.26,
+  "outline": 0.04,
+  "parts": [
+    {"shape": "sphere", "pos": [0, 0.42, 0], "r": 0.38, "color": 0},
+    {"shape": "capsule", "pos": [0, 0.9, 0], "r": 0.33, "len": 0.36, "color": 0},
+    {"shape": "box", "pos": [0, 1.3, 0.2], "size": [0.5, 0.09, 0.3], "color": 1, "blend": 0.12}
+  ],
+  "locomotion": {"type": "hopper", "hop_h": 0.5, "rate": 1.5, "speed": 0.9},
+  "ropes": [{"pos": [0.38, 1.12, 0], "segments": 3, "r": 0.06, "len": 0.18, "color": 2}]
+}
