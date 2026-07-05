@@ -1,16 +1,22 @@
 class_name TerrainAtlas
 extends RefCounted
-## 运行时程序生成的地形 atlas（延续 grass_tile.png 的"手绘三角草纹"思路，
-## 但不再落二进制资产）。颜色全部烘焙进纹理，地面材质 albedo 用纯白。
+## 运行时程序生成的地形「控制图」atlas。
+## 自从地面颜色改由水彩贴图（assets/textures/watercolor）按世界 UV 平铺提供后，
+## 本 atlas 不再烘焙最终颜色，改为逐像素输出控制通道，由 terrain_ground.gdshader 解码：
+##   R = 主体域掩码（1 = 路面/湖床/崖唇/崖壁主体，0 = 草地基底）
+##   G = 描边掩码（路亮边 / 崖缘深草；湖床无描边——岸沫归水面 shader）
+##   B = 主体类型 / 8（1 路 2 湖床 3 崖唇 4 崖壁；整 cell 恒定，线性过滤安全）
+##   A = 明暗纹样 ×0.5（保留动森式三角草纹/棋盘 parity/沙土斑点/崖壁地层带，shader ×2 还原）
+## 调色板 tint 仍集中在本类常量里，由 chunk_manager 喂给 shader。
 ##
-## 布局：5 列（Autotile 变体）× 9 行，cell 内容 32px + 四周 4px 边缘外扩 gutter
+## 布局：5 列（Autotile 变体）× 17 行，cell 内容 32px + 四周 4px 边缘外扩 gutter
 ## （防 mipmap/双线性跨 cell 渗色），行分配：
-##   row 0        草地（col 0/1 = 棋盘 parity 两种色深，与变体无关）
+##   row 0        草地（col 0/1 = 棋盘 parity 两种明暗，与变体无关）
 ##   row 1..4     路  （行 = Autotile 角 NW/NE/SW/SE，列 = 变体）
-##   row 5..8     水  （同上）
-##   row 9..12    悬崖边草皮（同上；「邻居更低」侧出深色草缘 + 土色崖唇）
-##   row 13..16   崖壁（同上；墙格 8 邻掩码选变体——无邻墙侧出凹缝暗边 + 亮棱线）
-## 过渡 cell 统一按 NW 角绘制再镜像；grass 背景用中间色深（棋盘对比极低，接缝不可见）。
+##   row 5..8     湖床（水 tile 下沉后的池底；全 cell 主体，无过渡——岸线由草侧崖缘+岸壁负责）
+##   row 9..12    悬崖边草皮（「邻居更低」侧出深色草缘 + 土色崖唇；水岸同用）
+##   row 13..16   崖壁（墙格 8 邻掩码选变体——无邻墙侧出凹缝暗边 + 亮棱线；水下岸壁同用）
+## 过渡 cell 统一按 NW 角绘制再镜像。
 
 const CELL := 32          ## cell 内容像素（半 tile = 1m → 32px/m）
 const GUTTER := 4
@@ -32,18 +38,23 @@ const RIM := 3.0
 const R_OUT_CLIFF := 10.0  ## 悬崖凸角用小圆角：大圆角会在崖角剥出一大片土唇
 const R_OUT_WALL := 6.0    ## 崖壁棱角 bevel 更小：墙面转角只要一条窄棱
 
-## 调色板（烘焙色；动森感：亮草绿 + 沙土路 + 湖蓝）
-const GRASS_A := Color(0.545, 0.78, 0.47)
-const GRASS_B := Color(0.52, 0.755, 0.44)
-const GRASS_MID := Color(0.532, 0.768, 0.455)
-const PATH_BODY := Color(0.87, 0.77, 0.55)
+## 调色板（terrain_ground.gdshader 的 tint/rim uniform；动森感：亮草绿 + 沙土路 + 湖蓝）
+const GRASS_TINT := Color(0.545, 0.78, 0.47)
+const PATH_TINT := Color(0.87, 0.77, 0.55)
 const PATH_RIM := Color(0.95, 0.885, 0.68)
-const WATER_BODY := Color(0.36, 0.63, 0.86)
-const WATER_RIM := Color(0.92, 0.975, 1.0)
-const CLIFF_LIP := Color(0.66, 0.55, 0.38)   ## 崖顶土唇
+const BED_TINT := Color(0.76, 0.69, 0.55)    ## 湖床沙底（透过水色看到）
+const CLIFF_LIP_TINT := Color(0.66, 0.55, 0.38)   ## 崖顶土唇
 const CLIFF_RIM_GRASS := Color(0.44, 0.63, 0.37)  ## 崖缘深色草
-const WALL_BODY := Color(0.60, 0.49, 0.35)   ## 崖壁
-const WALL_BAND := Color(0.52, 0.42, 0.29)   ## 崖壁横向地层带
+const WALL_TINT := Color(0.60, 0.49, 0.35)   ## 崖壁
+## 水面 shader 调色（water_surface.gdshader）
+const WATER_SHALLOW := Color(0.42, 0.72, 0.88)
+const WATER_DEEP := Color(0.13, 0.35, 0.62)
+const WATER_FOAM := Color(0.92, 0.975, 1.0)
+
+## 明暗纹样常量（A 通道，shader ×2 还原为乘数）
+const LUM_GRASS_A := 1.0      ## 棋盘亮格
+const LUM_GRASS_B := 0.965    ## 棋盘暗格
+const LUM_GRASS_MID := 0.985  ## 过渡 cell 的草（介于棋盘两档之间，接缝不可见）
 
 static var _tex: ImageTexture = null
 
@@ -80,15 +91,15 @@ static func uv_rect(type: int, corner: int, variant: int, parity: int) -> Rect2:
 		float(CELL) / float(W),
 		float(CELL) / float(H))
 
-## 生成整张 atlas Image（headless 可测，不碰 RenderingServer）。
+## 生成整张控制图 Image（headless 可测，不碰 RenderingServer）。
 static func build_image() -> Image:
-	var img := Image.create(W, H, false, Image.FORMAT_RGB8)
-	_fill_cell(img, 0, 0, func(x: float, y: float) -> Color: return _grass_px(x, y, GRASS_A))
-	_fill_cell(img, 1, 0, func(x: float, y: float) -> Color: return _grass_px(x, y, GRASS_B))
+	var img := Image.create(W, H, false, Image.FORMAT_RGBA8)
+	_fill_cell(img, 0, 0, func(x: float, y: float) -> Color: return _grass_ctl(x, y, LUM_GRASS_A))
+	_fill_cell(img, 1, 0, func(x: float, y: float) -> Color: return _grass_ctl(x, y, LUM_GRASS_B))
 	for corner in range(4):
 		for variant in range(Autotile.VARIANT_COUNT):
-			_fill_cell(img, variant, 1 + corner, _transition_fn(corner, variant, false))
-			_fill_cell(img, variant, 5 + corner, _transition_fn(corner, variant, true))
+			_fill_cell(img, variant, 1 + corner, _transition_fn(corner, variant))
+			_fill_cell(img, variant, 5 + corner, func(x: float, y: float) -> Color: return _bed_ctl(x, y))
 			_fill_cell(img, variant, 9 + corner, _cliff_fn(corner, variant))
 			_fill_cell(img, variant, 13 + corner, _wall_fn(corner, variant))
 	return img
@@ -103,46 +114,53 @@ static func _fill_cell(img: Image, col: int, row: int, px_fn: Callable) -> void:
 			var cy := clampf(float(py - GUTTER) + 0.5, 0.5, CELL - 0.5)
 			img.set_pixel(ox + px, oy + py, px_fn.call(cx, cy))
 
-## 过渡 cell 像素函数：镜像到 NW 规范角（外缘 = x0/y0 两边），
-## 按变体算到路/水边界的有符号距离 d（正 = 域内），再分 草/描边/主体 三段上色。
-static func _transition_fn(corner: int, variant: int, water: bool) -> Callable:
+## 路过渡 cell：镜像到 NW 规范角（外缘 = x0/y0 两边），按变体算有符号距离 d
+## （正 = 路域内），分 草 / 描边 / 路面 三段输出控制值。B 整 cell 恒为路型。
+static func _transition_fn(corner: int, variant: int) -> Callable:
 	return func(x: float, y: float) -> Color:
 		var cx := x if (corner == Autotile.C_NW or corner == Autotile.C_SW) else CELL - x
 		var cy := y if (corner == Autotile.C_NW or corner == Autotile.C_NE) else CELL - y
 		var d := _signed_dist(cx, cy, variant)
+		var b := float(TerrainMap.T_PATH) / 8.0
 		if d < 0.0:
-			return _grass_px(x, y, GRASS_MID)
+			return _grass_ctl(x, y, LUM_GRASS_MID, b)
 		if d < RIM:
-			return WATER_RIM if water else PATH_RIM
-		return _water_px(x, y) if water else _path_px(x, y)
+			return Color(0.0, 1.0, b, 0.5)
+		return Color(1.0, 0.0, b, _speckle_lum(x, y) * 0.5)
+
+## 湖床 cell：全 cell 主体（水 tile 已整体下沉，岸线由草侧崖缘+岸壁表达），沙底斑点。
+static func _bed_ctl(x: float, y: float) -> Color:
+	return Color(1.0, 0.0, float(TerrainMap.T_WATER) / 8.0, _speckle_lum(x, y) * 0.5)
 
 ## 悬崖边草皮 cell：域内 = 高地草面，域外（朝更低邻居一侧）= 崖唇土色，
-## 边界带 = 深色草缘。几何与路/水过渡同构，凸角用小半径。
+## 边界带 = 深色草缘。几何与路过渡同构，凸角用小半径。
 static func _cliff_fn(corner: int, variant: int) -> Callable:
 	return func(x: float, y: float) -> Color:
 		var cx := x if (corner == Autotile.C_NW or corner == Autotile.C_SW) else CELL - x
 		var cy := y if (corner == Autotile.C_NW or corner == Autotile.C_NE) else CELL - y
 		var d := _signed_dist(cx, cy, variant, R_OUT_CLIFF)
+		var b := float(CLIFF_RIM) / 8.0
 		if d < 0.0:
-			return CLIFF_LIP
+			return Color(1.0, 0.0, b, 0.5)  # 崖唇（土色主体，平光）
 		if d < RIM:
-			return CLIFF_RIM_GRASS
-		return _grass_px(x, y, GRASS_MID)
+			return Color(0.0, 1.0, b, 0.5)  # 深色草缘（rim 色查表）
+		return _grass_ctl(x, y, LUM_GRASS_MID, b)
 
-## 崖壁 cell：域内 = 岩壁主体，无邻墙一侧出凹缝暗边（d<0）+ 亮棱线（边界带）。
-## 小圆角 bevel；几何与其他过渡 cell 同构。
+## 崖壁 cell：域内 = 岩壁主体（地层带明暗），无邻墙一侧出凹缝暗边（d<0）
+## + 亮棱线（边界带）——凹缝/棱线全走 A 明暗，不占 rim 色。
 static func _wall_fn(corner: int, variant: int) -> Callable:
 	return func(x: float, y: float) -> Color:
 		var cx := x if (corner == Autotile.C_NW or corner == Autotile.C_SW) else CELL - x
 		var cy := y if (corner == Autotile.C_NW or corner == Autotile.C_NE) else CELL - y
 		var d := _signed_dist(cx, cy, variant, R_OUT_WALL)
+		var b := float(CLIFF_WALL) / 8.0
 		if d < 0.0:
-			return WALL_BAND * 0.75  # 凹缝阴影
+			return Color(1.0, 0.0, b, 0.325)  # 凹缝阴影（~0.65×）
 		if d < RIM:
-			return WALL_BODY * 1.15  # 亮棱线
-		return _wall_px(x, y)
+			return Color(1.0, 0.0, b, 0.575)  # 亮棱线（~1.15×）
+		return Color(1.0, 0.0, b, _wall_lum(x, y) * 0.5)
 
-## NW 规范角坐标下，到域边界的有符号距离（正 = 在路/水/高地内）。
+## NW 规范角坐标下，到域边界的有符号距离（正 = 在路/高地内）。
 static func _signed_dist(cx: float, cy: float, variant: int, r_out := R_OUT) -> float:
 	match variant:
 		Autotile.V_FULL:
@@ -159,41 +177,35 @@ static func _signed_dist(cx: float, cy: float, variant: int, r_out := R_OUT) -> 
 		_:
 			return Vector2(cx, cy).length() - R_IN  # V_INNER：外角点一小片草圆
 
-static func _grass_px(x: float, y: float, base: Color) -> Color:
-	# 动森式三角草纹：16px 方块内上/下三角交替，三角内微暗
+## 草地控制值：动森式三角草纹（16px 方块内上/下三角交替，三角内微暗）+ 零星草尖亮点。
+## body_b：过渡 cell 里草区也要带上整 cell 的类型 B，保证线性过滤下 B 恒定。
+static func _grass_ctl(x: float, y: float, base_lum: float, body_b := 0.0) -> Color:
 	var bx := fmod(x, 16.0)
 	var by := fmod(y, 16.0)
 	var up := posmod(int(x / 16.0) + int(y / 16.0), 2) == 0
 	var ty := by if up else 16.0 - by
 	var inside := (ty - 2.0) * 8.0 >= absf(bx - 8.0) * 12.0
-	var c := base * 0.94 if inside else base
+	var lum := base_lum * 0.94 if inside else base_lum
 	if _hash2(int(x), int(y)) % 29 == 0:
-		c = base * 1.05  # 零星亮点（草尖）
-	return c
+		lum = base_lum * 1.05  # 零星亮点（草尖）
+	return Color(0.0, 0.0, body_b, lum * 0.5)
 
-static func _path_px(x: float, y: float) -> Color:
+## 沙土斑点明暗（路面/湖床共用）。
+static func _speckle_lum(x: float, y: float) -> float:
 	var h := _hash2(int(x), int(y))
 	if h % 17 == 0:
-		return PATH_BODY * 0.92  # 沙土斑点
+		return 0.92
 	if h % 23 == 1:
-		return PATH_BODY * 1.05
-	return PATH_BODY
+		return 1.05
+	return 1.0
 
-static func _water_px(x: float, y: float) -> Color:
-	# 横向波纹：每 8px 一道微亮行 + 零星亮点
-	var wave := fmod(y + sin(x * 0.6) * 1.5, 8.0) < 1.2
-	var c := WATER_BODY * 1.08 if wave else WATER_BODY
-	if _hash2(int(x), int(y)) % 37 == 0:
-		c = WATER_BODY * 1.18
-	return c
-
-static func _wall_px(x: float, y: float) -> Color:
-	# 崖壁主体：土色 + 横向地层带（边缘处理由 _wall_fn 的变体负责）
+## 崖壁主体明暗：横向地层带 + 零星亮点。
+static func _wall_lum(x: float, y: float) -> float:
 	var band := fmod(y + sin(x * 0.5) * 1.2, 11.0) < 2.5
-	var c := WALL_BAND if band else WALL_BODY
+	var lum := 0.86 if band else 1.0
 	if _hash2(int(x), int(y)) % 19 == 0:
-		c = WALL_BODY * 1.08
-	return c
+		lum = 1.08
+	return lum
 
 static func _hash2(x: int, y: int) -> int:
 	var h := x * 73856093 ^ y * 19349663
