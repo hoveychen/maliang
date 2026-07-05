@@ -31,7 +31,7 @@ func _tick() -> void:
 		return
 	var player: Dictionary = world.get("player")
 	if not player.is_empty():
-		var node: Sprite3D = player["node"]
+		var node: PaperCharacter = player["node"]
 		var applied: bool = node.texture != null and node.texture.get_height() == 1 # mock 1x1 stub
 		if applied:
 			_check("player sprite applied", applied, true)
