@@ -90,13 +90,20 @@ func can_translate() -> bool:
 func _prop_xf() -> Transform3D:
 	return prop.transform
 
-## 把身体组（body/head）按 body_xf 相对静止姿态摆位；head 额外一点点点头/摇头。
+## 把身体组（body/head）按 body_xf 相对静止姿态摆位；head 额外一点点点头/摇头；
+## 带 spin 的件绕各自 pivot/axis 持续旋转（风车叶/陀螺——多件共用 pivot 即刚性同转）。
 func _apply_body(body_xf: Transform3D) -> void:
 	var head_xf := body_xf * Transform3D(
 		Basis.from_euler(Vector3(sin(time * 1.7) * 0.05, sin(time * 1.1) * 0.08, 0.0)), Vector3.ZERO)
 	for b in prop.meta.body:
 		var xf := head_xf if b.group == "head" else body_xf
-		prop.prims[b.idx].xform = xf * (b.rest as Transform3D)
+		var rest: Transform3D = b.rest
+		var spin: Dictionary = b.get("spin", {})
+		if not spin.is_empty():
+			var pivot: Vector3 = spin.pivot
+			var rot := Transform3D(Basis(spin.axis as Vector3, time * float(spin.rate) * TAU), Vector3.ZERO)
+			rest = Transform3D(Basis.IDENTITY, pivot) * rot * Transform3D(Basis.IDENTITY, -pivot) * rest
+		prop.prims[b.idx].xform = xf * rest
 
 func _breath_xf() -> Transform3D:
 	return Transform3D(Basis.IDENTITY, Vector3(0, sin(time * 1.6) * 0.02, 0))

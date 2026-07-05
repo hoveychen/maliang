@@ -58,6 +58,21 @@ static func parse(spec: Dictionary) -> Dictionary:
 		if ci < 0 or ci >= palette.size():
 			return _err("color 索引越界: %d" % ci)
 		var rot_deg := _vec3(rp.get("rot", [0, 0, 0]))
+		# 旋转件（风车叶/陀螺）：数字 = 每秒圈数（绕自身中心、局部 Z 轴），
+		# 或对象 {"rate", "axis", "pivot"}——多片叶共用同一 pivot/axis 即成刚性风车。
+		var spin: Dictionary = {}
+		var raw_spin: Variant = rp.get("spin", null)
+		if raw_spin is float or raw_spin is int:
+			spin = {"rate": clampf(float(raw_spin), -4.0, 4.0), "axis": Vector3(0, 0, 1), "pivot": pos}
+		elif raw_spin is Dictionary:
+			var axis := _vec3(raw_spin.get("axis", [0, 0, 1]))
+			if axis.length() < 1e-4:
+				return _err("spin.axis 不能为零向量")
+			spin = {
+				"rate": clampf(_f(raw_spin.get("rate", 0.5)), -4.0, 4.0),
+				"axis": axis.normalized(),
+				"pivot": _vec3(raw_spin.get("pivot", [pos.x, pos.y, pos.z])),
+			}
 		parts.append({
 			"shape": shape,
 			"pos": pos,
@@ -66,6 +81,7 @@ static func parse(spec: Dictionary) -> Dictionary:
 			"color": palette[ci],
 			"blend": _f(rp.get("blend", -1.0)),  # <0 表示用全局 blend
 			"group": str(rp.get("group", "body")),
+			"spin": spin,
 		})
 
 	var raw_loco: Dictionary = spec.get("locomotion", {})
@@ -152,7 +168,7 @@ static func build_rig(config: Dictionary) -> Dictionary:
 		pr.color = part.color
 		pr.blend = part.blend if part.blend >= 0.0 else global_blend
 		pr.xform = Transform3D(part.rot, part.pos)
-		body.append({"idx": prims.size(), "rest": pr.xform, "group": part.group})
+		body.append({"idx": prims.size(), "rest": pr.xform, "group": part.group, "spin": part.spin})
 		prims.append(pr)
 
 	var loco: Dictionary = config.locomotion

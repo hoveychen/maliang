@@ -1,0 +1,21 @@
+{
+  "name": "nodding_flower",
+  "palette": ["#f2a0b5", "#f2c14e", "#7a9e4f"],
+  "blend": 0.12,
+  "outline": 0.035,
+  "color_k": 0.08,
+  "parts": [
+    {"shape": "capsule", "pos": [0, 0.45, 0], "r": 0.055, "len": 0.7, "color": 2, "blend": 0.07},
+    {"shape": "cone", "pos": [0.14, 0.3, 0], "r1": 0.03, "r2": 0.09, "h": 0.16, "rot": [0, 0, -70], "color": 2, "blend": 0.08},
+    {"shape": "cone", "pos": [-0.13, 0.42, 0], "r1": 0.03, "r2": 0.08, "h": 0.14, "rot": [0, 0, 70], "color": 2, "blend": 0.08},
+    {"shape": "sphere", "pos": [0, 0.95, 0.02], "r": 0.14, "color": 1, "group": "head"},
+    {"shape": "sphere", "pos": [0.2, 0.95, -0.02], "r": 0.11, "color": 0, "group": "head", "blend": 0.1},
+    {"shape": "sphere", "pos": [-0.2, 0.95, -0.02], "r": 0.11, "color": 0, "group": "head", "blend": 0.1},
+    {"shape": "sphere", "pos": [0, 1.15, -0.02], "r": 0.11, "color": 0, "group": "head", "blend": 0.1},
+    {"shape": "sphere", "pos": [0, 0.75, -0.02], "r": 0.11, "color": 0, "group": "head", "blend": 0.1},
+    {"shape": "sphere", "pos": [0.14, 1.09, -0.02], "r": 0.1, "color": 0, "group": "head", "blend": 0.1},
+    {"shape": "sphere", "pos": [-0.14, 1.09, -0.02], "r": 0.1, "color": 0, "group": "head", "blend": 0.1}
+  ],
+  "locomotion": {"type": "none"},
+  "ropes": []
+}

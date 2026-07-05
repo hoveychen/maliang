@@ -14,6 +14,8 @@ func _init() -> void:
 	fails += _test_flyer()
 	fails += _test_ropes()
 	fails += _test_wander()
+	fails += _test_spinner()
+	fails += _test_quiet_flower()
 	if fails == 0:
 		print("sdf_animator tests PASS")
 	else:
@@ -233,6 +235,81 @@ func _test_wander() -> int:
 		prev = box.position
 	fails += _check("hopper moves only airborne", ground_shift, 0)
 	box.free()
+	return fails
+
+func _test_spinner() -> int:
+	var fails := 0
+	var pw := SdfProp.from_json_file("res://assets/sdf_props/pinwheel.json")
+	if pw == null:
+		printerr("  FAIL pinwheel load")
+		return 1
+	# 叶片 = 带 spin 的 body 件
+	var blade_idx: Array[int] = []
+	for b in pw.meta.body:
+		if not (b.spin as Dictionary).is_empty():
+			blade_idx.append(b.idx)
+	fails += _check("pinwheel 4 spinning blades", blade_idx.size(), 4)
+
+	var start: Array[Vector3] = []
+	for bi in blade_idx:
+		start.append((pw.prims[bi] as SdfMath.Prim).xform.origin)
+	var d0 := start[0].distance_to(start[1])  # 刚性判定基准
+	for i in range(15):  # 0.5s：rate 0.55 → 约 1/4 圈
+		pw.animator.advance(DT)
+	var moved := 0
+	var rigid_break := 0
+	var now: Array[Vector3] = []
+	for k in range(blade_idx.size()):
+		var o := (pw.prims[blade_idx[k]] as SdfMath.Prim).xform.origin
+		now.append(o)
+		if o.distance_to(start[k]) > 0.1:
+			moved += 1
+	for k in range(now.size() - 1):
+		if absf(now[k].distance_to(now[k + 1]) - d0) > 5e-3:
+			rigid_break += 1
+	fails += _check("blades orbit", moved, 4)
+	fails += _check("blades stay rigid", rigid_break, 0)
+	# 杆不转：非 spin 件 xz 不动（只受呼吸的 y 影响）
+	var pole := (pw.prims[0] as SdfMath.Prim).xform.origin
+	fails += _check("pole stays put (xz)", Vector2(pole.x, pole.z).length() < 1e-3, true)
+	pw.free()
+
+	# spec 解析：数字简写归一化 + 零轴拒收
+	var short := SdfSpec.parse({
+		"palette": ["#fff"],
+		"parts": [{"shape": "sphere", "pos": [0, 1, 0], "r": 0.2, "spin": 1.5}],
+	})
+	fails += _check("spin shorthand ok", short.ok, true)
+	if short.ok:
+		var sp: Dictionary = short.parts[0].spin
+		fails += _check("spin shorthand rate", sp.rate, 1.5)
+		fails += _check("spin shorthand pivot", (sp.pivot as Vector3).distance_to(Vector3(0, 1, 0)) < 1e-4, true)
+	var zero_axis := SdfSpec.parse({
+		"palette": ["#fff"],
+		"parts": [{"shape": "sphere", "pos": [0, 1, 0], "r": 0.2, "spin": {"axis": [0, 0, 0]}}],
+	})
+	fails += _check("reject zero spin axis", zero_axis.ok, false)
+	return fails
+
+func _test_quiet_flower() -> int:
+	var fails := 0
+	var fl := SdfProp.from_json_file("res://assets/sdf_props/nodding_flower.json")
+	if fl == null:
+		printerr("  FAIL flower load")
+		return 1
+	fails += _check("flower no legs", fl.meta.legs.size(), 0)
+	var stem := fl.prims[0] as SdfMath.Prim
+	var petal := fl.prims[4] as SdfMath.Prim
+	var stem0 := stem.xform.origin
+	var sway := 0.0
+	for i in range(90):  # 3s 待机
+		fl.animator.advance(DT)
+		sway = maxf(sway, Vector2(petal.xform.origin.x - 0.2, petal.xform.origin.z + 0.02).length())
+	# 茎（body 组）xz 纹丝不动，花头（head 组）在摇
+	var stem_now := stem.xform.origin
+	fails += _check("stem xz still", Vector2(stem_now.x - stem0.x, stem_now.z - stem0.z).length() < 1e-4, true)
+	fails += _check("flower head sways", sway > 0.03, true)
+	fl.free()
 	return fails
 
 func _spread(vals: Array[float]) -> float:
