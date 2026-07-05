@@ -75,10 +75,11 @@ func _tick() -> void:
 			else:
 				printerr("visual_interactions FAILED: %d" % fails)
 			quit(fails)
-	# 传话到达时刻不定：小蓝出现动作键（点头应答/跳）即传到，此刻小绿应已跑到小蓝旁
+	# 传话到达时刻不定：小蓝出现动作键（点头应答/跳）即传到，此刻小绿应已跑到小蓝旁。
+	# 阈值 = 送达半径 2.6 + 追踪节流 0.5s 内对方闲逛再挪的余量（~8*0.5*漫步占比）
 	if frame > 312 and relay_done == 0 and blue.has("paper_action"):
 		relay_done = frame
-		_check("errand runner adjacent on handoff (d=%.1f)" % _dist(green, blue), _dist(green, blue) <= 3.4, true)
+		_check("errand runner adjacent on handoff (d=%.1f)" % _dist(green, blue), _dist(green, blue) <= 4.5, true)
 		_check("performer acks with nod", String(blue.get("paper_action", "")), "nod")
 	# chat_with 到达时刻不定（起点受闲逛影响）：轮询里程碑
 	if frame > 205 and chat_started == 0 and green.has("chat_with"):
@@ -86,7 +87,8 @@ func _tick() -> void:
 	elif chat_started > 0 and frame == chat_started + 20:
 		_check("chat keeps partner (in_chat)", yellow.get("in_chat", false), true)
 		_check("chat bubble visible", (scene.get("_npc_chat_bubble") as Label3D).visible, true)
-		_check("chatters adjacent (d=%.1f)" % _dist(green, yellow), _dist(green, yellow) <= 3.2, true)
+		# 阈值同传话：送达半径 2.6 + 对方被叫停前追踪节流窗口内的闲逛漂移余量
+		_check("chatters adjacent (d=%.1f)" % _dist(green, yellow), _dist(green, yellow) <= 4.5, true)
 		var dx := WorldGrid.shortest_delta(green["logical"], yellow["logical"]).x
 		_check("green faces yellow", float(green.get("paper_face", -1.0)), 0.0 if dx > 0.0 else PI)
 		_check("yellow faces green", float(yellow.get("paper_face", -1.0)), 0.0 if dx <= 0.0 else PI)
