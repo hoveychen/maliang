@@ -2,6 +2,12 @@
 // 与客户端 scripts/sdf_spec.gd 的 parse 规则一一对应（形状/腿数/基本体预算上限），
 // LLM 产物必须过这层才下发——宁可 clamp 修正也不给客户端喂坏数据。
 
+export interface SdfPropSpin {
+  rate: number;
+  axis?: [number, number, number];
+  pivot?: [number, number, number];
+}
+
 export interface SdfPropPart {
   shape: 'sphere' | 'capsule' | 'cone' | 'box';
   pos: [number, number, number];
@@ -9,6 +15,7 @@ export interface SdfPropPart {
   color: number;
   blend?: number;
   group?: 'body' | 'head';
+  spin?: SdfPropSpin | number;
   r?: number;
   len?: number;
   r1?: number;
@@ -101,6 +108,22 @@ export function validateSdfPropSpec(raw: unknown): SdfPropValidation {
     if (rot) part.rot = rot;
     if (typeof p.blend === 'number') part.blend = num(p.blend, 0.2, 0.01, 0.6);
     if (p.group === 'head') part.group = 'head';
+    // 旋转件：数字 = 每秒圈数（简写），或 {rate, axis, pivot}；零轴拒收（与客户端一致）
+    if (typeof p.spin === 'number') {
+      part.spin = num(p.spin, 0.5, -4, 4);
+    } else if (typeof p.spin === 'object' && p.spin !== null) {
+      const rawSpin = p.spin as Record<string, unknown>;
+      const axis = vec3(rawSpin.axis ?? [0, 0, 1], -1, 1);
+      if (!axis || Math.hypot(axis[0], axis[1], axis[2]) < 1e-4) {
+        return { ok: false, error: 'spin.axis 不合法' };
+      }
+      const pivot = vec3(rawSpin.pivot ?? p.pos, -5, 5);
+      part.spin = {
+        rate: num(rawSpin.rate, 0.5, -4, 4),
+        axis,
+        pivot: pivot ?? pos,
+      };
+    }
     switch (part.shape) {
       case 'sphere':
         part.r = num(p.r, 0.2, 0.02, 2.5);

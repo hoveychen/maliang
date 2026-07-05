@@ -1,0 +1,14 @@
+{
+  "name": "village_sign",
+  "palette": ["#6e4a32", "#f4ead4", "#e8574b"],
+  "blend": 0.1,
+  "outline": 0.035,
+  "color_k": 0.07,
+  "parts": [
+    {"shape": "capsule", "pos": [0, 0.62, 0], "r": 0.07, "len": 1.05, "color": 0, "blend": 0.07},
+    {"shape": "box", "pos": [0, 1.22, 0], "size": [0.85, 0.36, 0.1], "color": 1, "group": "head"},
+    {"shape": "cone", "pos": [0.52, 1.22, 0], "r1": 0.1, "r2": 0.02, "h": 0.18, "rot": [0, 0, -90], "color": 2, "group": "head", "blend": 0.08}
+  ],
+  "locomotion": {"type": "none"},
+  "ropes": [{"pos": [0, 1.42, 0.02], "segments": 3, "r": 0.035, "len": 0.11, "color": 2}]
+}

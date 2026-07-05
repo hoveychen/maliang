@@ -84,10 +84,12 @@ const LANDMARKS := [
 ## reserve 1（3×3 tile = 6m 见方）足够容纳游走范围。
 const SDF_PROPS := [
 	{ "spec": "res://assets/sdf_props/walking_hut.json", "tile": Vector2i(24, 47), "yaw": 150.0, "reserve": 1, "search": 2, "wander": 1.6 },
-	{ "spec": "res://assets/sdf_props/six_leg_chest.json", "tile": Vector2i(60, 44), "yaw": 250.0, "reserve": 1, "search": 2, "wander": 1.5 },
 	{ "spec": "res://assets/sdf_props/hop_mailbox.json", "tile": Vector2i(41, 34), "yaw": 200.0, "reserve": 1, "search": 2, "wander": 1.2 },
-	{ "spec": "res://assets/sdf_props/fly_lantern.json", "tile": Vector2i(27, 27), "yaw": 90.0, "reserve": 0, "search": 2, "wander": 1.0 },
-	{ "spec": "res://assets/sdf_props/sign_scout.json", "tile": Vector2i(35, 22), "yaw": 0.0, "reserve": 1, "search": 2, "wander": 1.4 },
+	{ "spec": "res://assets/sdf_props/nodding_flower.json", "tile": Vector2i(3, 4), "yaw": 160.0, "reserve": 0, "search": 2, "wander": 0.0 },
+	{ "spec": "res://assets/sdf_props/pinwheel.json", "tile": Vector2i(40, 40), "yaw": 200.0, "reserve": 0, "search": 2, "wander": 0.0 },
+	{ "spec": "res://assets/sdf_props/paper_note.json", "tile": Vector2i(33, 34), "yaw": 30.0, "reserve": 0, "search": 2, "wander": 0.0 },
+	{ "spec": "res://assets/sdf_props/crayon.json", "tile": Vector2i(34, 34), "yaw": 300.0, "reserve": 0, "search": 2, "wander": 0.0 },
+	{ "spec": "res://assets/sdf_props/village_sign.json", "tile": Vector2i(36, 24), "yaw": 190.0, "reserve": 0, "search": 2, "wander": 0.0 },
 ]
 
 ## 分区散布的判定结果

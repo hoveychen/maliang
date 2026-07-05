@@ -1,0 +1,14 @@
+{
+  "name": "crayon",
+  "palette": ["#e8823a", "#f4ead4", "#6e4a32"],
+  "blend": 0.08,
+  "outline": 0.032,
+  "color_k": 0.06,
+  "parts": [
+    {"shape": "capsule", "pos": [0, 0.16, 0], "r": 0.08, "len": 0.5, "rot": [0, 0, 72], "color": 0, "blend": 0.07},
+    {"shape": "capsule", "pos": [0, 0.17, 0], "r": 0.09, "len": 0.14, "rot": [0, 0, 72], "color": 1, "blend": 0.06},
+    {"shape": "cone", "pos": [-0.31, 0.26, 0], "r1": 0.075, "r2": 0.015, "h": 0.14, "rot": [0, 0, 72], "color": 2, "blend": 0.06}
+  ],
+  "locomotion": {"type": "none"},
+  "ropes": []
+}
