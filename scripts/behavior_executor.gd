@@ -40,6 +40,7 @@ var _delivering := false
 var _deliver_id := ""
 var _deliver_msg := ""
 var _chatting := false ## chat_with：到达目标后写 chat_with 契约键并停留聊天
+var _deliver_track_t := 0.0 ## 送信/聊天目标是活人会走动：节流重解析坐标，别走到旧位置
 
 # 地点解析：location_name → 世界坐标（world.gd 的 POI 名/别名模糊匹配，找不到 Vector2.INF）
 var _loc_resolver := Callable()
@@ -185,6 +186,15 @@ func _plan_path() -> void:
 
 func _step_move(delta: float) -> void:
 	var cur: Vector2 = _target["logical"]
+	# 送信/聊天的目标角色在走动：节流重解析，目标挪远了就更新终点重寻路
+	if _delivering and _resolver.is_valid():
+		_deliver_track_t -= delta
+		if _deliver_track_t <= 0.0:
+			_deliver_track_t = FOLLOW_REPLAN
+			var np: Vector2 = _resolver.call(_deliver_id)
+			if np != Vector2.INF and WorldGrid.shortest_delta(np, _move_to).length() > 1.0:
+				_move_to = np
+				_plan_path()
 	var arrive := DELIVER_ARRIVE if _delivering else (_arrive_override if _arrive_override > 0.0 else ARRIVE)
 	if WorldGrid.shortest_delta(cur, _move_to).length() <= arrive:
 		if _delivering:
