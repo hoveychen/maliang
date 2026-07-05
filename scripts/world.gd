@@ -1300,16 +1300,7 @@ func _bootstrap() -> void:
 	var chars: Array = world.get("characters", [])
 	for c in chars:
 		await _spawn_server_character(c as Dictionary, Vector2.INF)
-	# 语音生成的物件：全部记入 world_props（物品页要列 bagged 的），
-	# 只有 placed 且有落位 tile 的才进世界（从未落位的跳过，bagged 的留在背包）
-	for p in world.get("props", []):
-		var pd: Dictionary = p
-		var state := String(pd.get("state", "placed")) # 旧服务端无 state 字段：视为已摆放
-		var tile: Variant = pd.get("tile", null)
-		world_props[String(pd.get("id", ""))] = { "spec": pd.get("spec", {}), "state": state, "tile": tile }
-		if state == "placed" and tile is Array and (tile as Array).size() >= 2:
-			var t := Vector2i(int(tile[0]), int(tile[1]))
-			chunk_manager.add_dynamic_prop(pd.get("spec", {}), t, float(hash(pd.get("id", "")) % 360), _prop_wander(pd.get("spec", {})), String(pd.get("id", "")))
+	_restore_world_props(world.get("props", []))
 	# 玩家搬到小神仙旁边降生，相机跟着玩家过去
 	var fairy := _find_fairy()
 	if not fairy.is_empty():
@@ -1418,6 +1409,18 @@ func _prop_wander(spec: Dictionary) -> float:
 	return 1.2 if String(loco.get("type", "none")) != "none" else 0.0
 
 # ── 物品摆放：长按拾起 + 拖拽 tile 吸附 + 松手落地/收纳（服务端状态机同步） ──────
+
+## 服务端 props → world_props 登记；placed 且有 tile 的落进世界（重载/重启恢复）。
+## 旧服务端无 state 字段：视为已摆放。bagged 的留在收集册物品页，不进世界。
+func _restore_world_props(props: Array) -> void:
+	for p in props:
+		var pd: Dictionary = p
+		var state := String(pd.get("state", "placed"))
+		var tile: Variant = pd.get("tile", null)
+		world_props[String(pd.get("id", ""))] = { "spec": pd.get("spec", {}), "state": state, "tile": tile }
+		if state == "placed" and tile is Array and (tile as Array).size() >= 2:
+			var t := Vector2i(int(tile[0]), int(tile[1]))
+			chunk_manager.add_dynamic_prop(pd.get("spec", {}), t, float(hash(pd.get("id", "")) % 360), _prop_wander(pd.get("spec", {})), String(pd.get("id", "")))
 
 ## 按下时记录指下的语音物件（长按候选）。按在 NPC/玩家上的交互优先，不算物件。
 func _begin_prop_press(screen_pos: Vector2) -> void:

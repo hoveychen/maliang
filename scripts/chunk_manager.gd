@@ -612,8 +612,9 @@ func add_dynamic_prop(spec_data: Dictionary, want_tile: Vector2i, yaw := 0.0, wa
 			break
 	if deco == null:
 		return Vector2i(-1, -1)
+	# 不预钳 anchor：贴区块边的 tile 也要能精确命中（重载恢复保真），
+	# 螺旋出界的候选由 _spawn_sdf_on_tile 逐个跳过（防跨块归属混乱）。
 	var anchor := want_tile - wrapped * CHUNK_TILES
-	anchor = anchor.clamp(Vector2i(search, search), Vector2i(CHUNK_TILES - 1 - search, CHUNK_TILES - 1 - search))
 	# 同一 dict 既传给 spawn（记 node 引用）又进清单：重刷/拾起都认得它
 	var entry := { "id": id, "spec_data": spec_data, "yaw": yaw, "wander": wander, "reserve": 0, "search": search }
 	var placed := _spawn_sdf_on_tile(deco, wrapped, entry, anchor)
@@ -661,6 +662,8 @@ func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, an
 	var span := reserve * 2 + 1
 	for r in range(search + 1):
 		for ti in _ring(anchor, r):
+			if ti.x < 0 or ti.x >= CHUNK_TILES or ti.y < 0 or ti.y >= CHUNK_TILES:
+				continue # 螺旋越出本区块的候选跳过（占地/归属都按本区块记）
 			var origin: Vector2i = wrapped * CHUNK_TILES + ti - Vector2i(reserve, reserve)
 			if not OccupancyMap.prop_area_ok(origin, span, span):
 				continue
