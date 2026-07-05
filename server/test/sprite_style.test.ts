@@ -17,3 +17,14 @@ test('画风后缀锁定动森风格与绿幕抠图约束', () => {
     assert.ok(SPRITE_STYLE_SUFFIX.includes(kw), `缺少关键词: ${kw}`);
   }
 });
+
+test('画风后缀锁定纸片贴纸感（粗黑描边+白色贴纸边+扁平上色）', () => {
+  for (const kw of ['Paper Mario', 'bold black outline', 'white die-cut sticker border', 'flat cel shading']) {
+    assert.ok(SPRITE_STYLE_SUFFIX.includes(kw), `缺少关键词: ${kw}`);
+  }
+});
+
+test('画风后缀锁定统一朝右（客户端水平翻转做朝左，防螃蟹步）', () => {
+  assert.ok(SPRITE_STYLE_SUFFIX.includes('facing right'), '缺少关键词: facing right');
+  assert.ok(!SPRITE_STYLE_SUFFIX.includes('facing viewer'), '不应再有 facing viewer（正面立绘会导致左右移动螃蟹步）');
+});
