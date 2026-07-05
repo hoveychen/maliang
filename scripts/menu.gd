@@ -6,12 +6,18 @@ extends Control
 var _fairy: TextureRect
 var _t := 0.0
 var _fairy_base_y := 0.0
+var game_audio: GameAudio
+var _leaving := false
 
 func _ready() -> void:
 	_setup_background()
 	_setup_fairy()
 	_setup_title()
 	_setup_buttons()
+	game_audio = GameAudio.new()
+	game_audio.name = "GameAudio"
+	add_child(game_audio)
+	game_audio.start_bgm([GameAudio.BGM_STEPS[0]]) # 菜单只垫最安静的第一段
 
 func _setup_background() -> void:
 	# 柔和天空渐变（与世界的天空色一脉相承）
@@ -105,7 +111,16 @@ func _process(delta: float) -> void:
 		_fairy.offset_bottom = _fairy_base_y + 178.0 + off
 
 func _on_start() -> void:
-	get_tree().change_scene_to_file("res://onboarding.tscn")
+	_go_to("res://onboarding.tscn")
 
 func _on_continue() -> void:
-	get_tree().change_scene_to_file("res://main.tscn")
+	_go_to("res://main.tscn")
+
+## 点按音效放完再切场景（本节点一切走音就断了）
+func _go_to(scene_path: String) -> void:
+	if _leaving:
+		return
+	_leaving = true
+	game_audio.play_sfx("click")
+	await get_tree().create_timer(0.15).timeout
+	get_tree().change_scene_to_file(scene_path)

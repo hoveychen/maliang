@@ -84,6 +84,7 @@ var _recording := false
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
 var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
 var fairy_voice: FairyVoice       ## 预制台词播放器（构建期 TTS，运行期零调用）
+var game_audio: GameAudio         ## BGM + 音效（语音/思考时自动 duck）
 var _fairy_bubble: Label3D        ## 小仙子说话时的 ♪ 气泡
 var _fairy_greeted := false       ## 每次启动只问候一次
 var _fairy_chat_t := 3.0          ## 下一次闲聊倒计时（首次 ~3s 内问候）
@@ -151,6 +152,10 @@ func _setup_audio() -> void:
 	add_child(_mic)
 	_tts_player = AudioStreamPlayer.new()
 	add_child(_tts_player)
+	game_audio = GameAudio.new()
+	game_audio.name = "GameAudio"
+	add_child(game_audio)
+	game_audio.start_bgm() # 三段渐进 loop 轮换
 
 func _setup_environment() -> void:
 	var light := DirectionalLight3D.new()
@@ -531,6 +536,9 @@ func _process(delta: float) -> void:
 	_check_approach()
 	_update_fairy(delta)
 	_step_voice(delta)
+	# 语音链路占用时压低 BGM，给人声让路（与开放麦闭麦判定同一组信号）
+	game_audio.set_ducked(_recording or thinking_label.visible or _tts_player.playing \
+			or (fairy_voice != null and fairy_voice.is_playing()))
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
 	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)
@@ -814,6 +822,7 @@ func _show_tap_marker(logical: Vector2) -> void:
 	_tap_marker_logical = logical
 	_tap_marker_t = TAP_MARKER_LIFE
 	_tap_marker.visible = true
+	game_audio.play_sfx("pluck")
 
 func _update_tap_marker(delta: float) -> void:
 	if _tap_marker == null or not _tap_marker.visible:
@@ -907,6 +916,7 @@ func _check_approach() -> void:
 
 func _enter_interaction(npc: PaperCharacter) -> void:
 	selected = npc
+	game_audio.play_sfx("enter")
 	# lock：相机平滑切到更低角(3/4)+拉近，聚焦跟随该角色
 	_locked = npc
 	_target_pitch = LOCK_PITCH_DEG
@@ -920,6 +930,7 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	_unmute_t = 0.0
 
 func _exit_interaction() -> void:
+	game_audio.play_sfx("exit")
 	if _recording:
 		_utterance_cancel() # 说到一半退出：静默丢弃，不留半开会话
 	_mic.stop()
@@ -964,6 +975,7 @@ func _on_failed(reason: String) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
 	thinking_label.visible = false
+	game_audio.play_sfx("oops")
 	push_warning("voice/gen failed: %s" % reason)
 	if selected != null:
 		banner.text = "我没听清呀，再说一次好不好？"
@@ -1065,6 +1077,7 @@ func _on_gen_complete(character: Dictionary) -> void:
 	var anchor: Vector2 = fairy["logical"] if not fairy.is_empty() else focus_logical
 	var spawn_at: Vector2 = anchor + Vector2(6.0, 4.0)
 	await _spawn_server_character(character, spawn_at)
+	game_audio.play_sfx("fanfare")
 	banner.text = "%s 来啦！" % String(character.get("name", "新朋友"))
 	banner.visible = true
 
@@ -1146,6 +1159,7 @@ func _utterance_begin(head: PackedByteArray) -> void:
 	if selected == null or _recording:
 		return
 	_recording = true
+	game_audio.play_sfx("mic_on")
 	_pending_pcm = head.duplicate()
 	_chunk_accum = 0.0
 	# 路由定格：端侧模型就绪 → 本地识别（分片不上传，只送最终文本）；否则服务端流式。
@@ -1161,6 +1175,7 @@ func _utterance_commit() -> void:
 	if not _recording:
 		return
 	_recording = false
+	game_audio.play_sfx("mic_off")
 	thinking_label.visible = true
 	banner.visible = false
 	_flush_pending_chunk()
@@ -1196,8 +1211,10 @@ func _on_character_response(data: Dictionary) -> void:
 	var transcript := String(data.get("transcript", ""))
 	if transcript.is_empty():
 		heard_label.text = "👂 没听清，再说一次试试"
+		game_audio.play_sfx("oops")
 	else:
 		heard_label.text = "👂 听到：%s" % transcript
+		game_audio.play_sfx("bell")
 	heard_label.visible = true
 	banner.text = String(data.get("replyText", ""))
 	banner.visible = true
@@ -1284,6 +1301,7 @@ func _play_tts(asset: String) -> void:
 
 ## 情绪气泡：大 emoji（3 岁不识字友好）+ 弹出过冲动画，数秒后淡出。
 func _show_emotion(emotion: String) -> void:
+	game_audio.play_sfx("pop")
 	var glyphs := { "happy": "😊", "think": "🤔", "wave": "👋", "sad": "🥺" }
 	emotion_bubble.text = glyphs.get(emotion, "🎵")
 	emotion_bubble.visible = true
