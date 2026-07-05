@@ -77,6 +77,7 @@ var _think_timer: Timer            ## 「思考中」兜底超时（响应没回
 var _think_bubble: Label3D         ## 思考动画气泡：选中角色头顶 ·/··/··· 循环冒泡（不识字友好）
 var _think_anim_t := 0.0           ## 思考气泡动画相位
 var emotion_bubble: Label3D
+var _npc_chat_bubble: Label3D      ## NPC 间聊天轮流气泡（同一时刻只演一场，见 _update_npc_chats）
 var _emotion_pop_t := -1.0         ## 情绪弹出动画已播秒数（<0 = 不在弹出中）
 var _emotion_life := 0.0           ## 情绪气泡剩余展示秒数（尾段淡出后隐藏）
 var _speak_anim_t := 0.0           ## 说话呼吸弹跳相位
@@ -508,6 +509,15 @@ func _setup_hud() -> void:
 	emotion_bubble.visible = false
 	add_child(emotion_bubble)
 
+	# NPC 间聊天的轮流气泡（chat_with 演出，见 _update_npc_chats）
+	_npc_chat_bubble = Label3D.new()
+	_npc_chat_bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_npc_chat_bubble.pixel_size = 0.02
+	_npc_chat_bubble.outline_size = 12
+	_npc_chat_bubble.font_size = 84
+	_npc_chat_bubble.visible = false
+	add_child(_npc_chat_bubble)
+
 func _style_label(l: Label, size: int) -> void:
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", Color.WHITE)
@@ -559,6 +569,7 @@ func _process(delta: float) -> void:
 	_update_ear()
 	_update_think_bubble(delta)
 	_update_emotion_bubble(delta)
+	_update_npc_chats(delta)
 	_update_speak_anim(delta)
 	_update_hud()
 
@@ -573,7 +584,7 @@ func _step_executors(delta: float) -> void:
 		for n in npcs:
 			if not (e as BehaviorExecutor).drives(n):
 				continue
-			if n.get("is_fairy", false) or n == _stopped \
+			if n.get("is_fairy", false) or n == _stopped or n.get("in_chat", false) \
 					or (selected != null and n.get("node") == selected) \
 					or _has_executor_for(n):
 				break
@@ -965,6 +976,12 @@ func _check_approach() -> void:
 
 func _enter_interaction(npc: PaperCharacter) -> void:
 	selected = npc
+	# 面对面：进近身时双方朝向对方（paper_face 由动作层每帧收敛）
+	var d := _find_npc_dict(npc)
+	if not d.is_empty() and not player.is_empty():
+		var dx := WorldGrid.shortest_delta(d["logical"], player["logical"]).x
+		d["paper_face"] = 0.0 if dx > 0.0 else PI
+		player["paper_face"] = 0.0 if dx <= 0.0 else PI
 	# lock：相机平滑切到更低角(3/4)+拉近，聚焦跟随该角色
 	_locked = npc
 	_target_pitch = LOCK_PITCH_DEG
@@ -1414,6 +1431,69 @@ func _apply_speak_scale(node: PaperCharacter, is_speaking: bool, s: float, delta
 		node.scale = node.scale.lerp(Vector3.ONE, minf(1.0, 12.0 * delta))
 		if node.scale.is_equal_approx(Vector3.ONE):
 			node.scale = Vector3.ONE
+
+const CHAT_GLYPHS := ["♪", "😊", "✨", "🎵", "😄"]  ## NPC 聊天轮流冒的符号（去文字化）
+const CHAT_ROUND := 1.5  ## 一人一轮的秒数
+
+## NPC 间聊天演出：executor 到达聊天对象旁写 chat_with/chat_t 契约键后，这里接管——
+## 叫停对方、双方相互面对、轮流头顶冒符号气泡；CHAT_DUR 走完清键、对方恢复闲逛。
+func _update_npc_chats(delta: float) -> void:
+	var showing := false
+	for n in npcs:
+		if not n.has("chat_with"):
+			continue
+		var partner := _find_chat_partner(String(n["chat_with"]), n)
+		if partner.is_empty() or not is_instance_valid(n.get("node")):
+			_end_npc_chat(n, partner)
+			continue
+		partner["in_chat"] = true # 拦住 _step_executors 的「跑完恢复闲逛」，聊完才放
+		var t := float(n.get("chat_t", 0.0))
+		if t == 0.0:
+			# 聊天开局：叫停对方，别聊一半人走了
+			for ex in _executors:
+				if (ex as BehaviorExecutor).drives(partner):
+					(ex as BehaviorExecutor).cancel()
+		t += delta
+		n["chat_t"] = t
+		if t >= BehaviorExecutor.CHAT_DUR:
+			_end_npc_chat(n, partner)
+			continue
+		# 相互面对（paper_face 由动作层每帧收敛到位）
+		var dx := WorldGrid.shortest_delta(n["logical"], partner["logical"]).x
+		n["paper_face"] = 0.0 if dx > 0.0 else PI
+		partner["paper_face"] = 0.0 if dx <= 0.0 else PI
+		if showing:
+			continue # 气泡只演最先找到的一场（多场并发罕见，其余只做面对）
+		showing = true
+		var round_i := int(t / CHAT_ROUND)
+		var speaker: Dictionary = n if round_i % 2 == 0 else partner
+		var node := speaker["node"] as PaperCharacter
+		_npc_chat_bubble.text = CHAT_GLYPHS[round_i % CHAT_GLYPHS.size()]
+		_npc_chat_bubble.visible = true
+		_npc_chat_bubble.global_position = node.global_position \
+			+ Vector3(0.0, _char_top(node) + 1.4 + sin(t * 3.0) * 0.1, 0.0)
+	if not showing:
+		_npc_chat_bubble.visible = false
+
+func _find_chat_partner(id: String, exclude: Dictionary) -> Dictionary:
+	for n in npcs:
+		if n == exclude:
+			continue
+		if String(n.get("id", "")) == id or (n["node"] as PaperCharacter).char_name == id:
+			return n
+	return {}
+
+## 聊天收尾：清契约键；被叫停的对方若闲着（无执行器、不在交互中）恢复闲逛。
+func _end_npc_chat(n: Dictionary, partner: Dictionary) -> void:
+	n.erase("chat_with")
+	n.erase("chat_t")
+	if partner.is_empty():
+		return
+	partner.erase("in_chat")
+	if not partner.get("is_fairy", false) \
+			and not _has_executor_for(partner) and partner != _stopped \
+			and (selected == null or partner.get("node") != selected):
+		_start_ambient_wander(partner)
 
 ## 在角色上执行行为脚本（移动等）。新脚本替换该角色进行中的行为（防双执行器同驱）。
 func _run_behavior(npc: PaperCharacter, script: Dictionary) -> void:

@@ -197,6 +197,29 @@ func _init() -> void:
 	ex12.setup(d12, { "commands": [ { "type": "do_action", "params": { "action": "backflip" } } ] })
 	ex12.step(dt)
 	fails += _check("unknown action falls back to wave", String(d12.get("paper_action", "")), "wave")
+
+	# chat_with：走到聊天对象旁 → 写 chat_with/chat_t 契约键 → 停留 CHAT_DUR 后完成
+	OccupancyMap.clear()
+	var ch_start := TerrainMap.tile_center(Vector2i(80, 68))
+	var ch_target := TerrainMap.tile_center(Vector2i(84, 68))
+	OccupancyMap.char_register("walker", ch_start, 2)
+	OccupancyMap.char_register("buddy", ch_target, 2)
+	var d13 := { "logical": ch_start, "id": "walker" }
+	var ex13 := BehaviorExecutor.new()
+	ex13.setup(d13, { "commands": [ { "type": "chat_with", "params": { "character_name": "buddy" } } ] },
+		func(_id: String) -> Vector2: return ch_target)
+	for i in range(3000):
+		if d13.has("chat_with"):
+			break
+		ex13.step(dt)
+	fails += _check("chat_with reaches and sets key", String(d13.get("chat_with", "")), "buddy")
+	fails += _check("chat_with stops adjacent", WorldGrid.shortest_delta(d13["logical"], ch_target).length() <= 2.6, true)
+	fails += _check("chat_with lingers", ex13.is_done(), false)
+	var chat_pos: Vector2 = d13["logical"]
+	for i in range(int(BehaviorExecutor.CHAT_DUR * 60.0) + 10):
+		ex13.step(dt)
+	fails += _check("chat_with done after CHAT_DUR", ex13.is_done(), true)
+	fails += _check("chat_with stays put while chatting", d13["logical"], chat_pos)
 	OccupancyMap.clear()
 
 	if fails == 0:
