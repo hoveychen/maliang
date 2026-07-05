@@ -599,8 +599,8 @@ func _spawn_on_tile(parent: Node3D, wrapped: Vector2i, scene: PackedScene, ancho
 ## 材质自带 world-bend 项（sdf_field.gdshaderinc），不走 BendMat.wrap_scene。
 ## 语音生成的物件进世界：围绕 want_tile 螺旋找空位（钳在区块内防跨块归属混乱），
 ## 成功则登记运行时清单（此后区块重刷自动原位重生成）并返回落位 tile；失败返回 (-1,-1)。
-func add_dynamic_prop(spec_data: Dictionary, want_tile: Vector2i, yaw := 0.0, wander := 0.0) -> Vector2i:
-	var search := 3
+## id 供拾起/挪位按物件寻址；search=0 表示精确落位（拖拽摆放 tile 吸附，不螺旋）。
+func add_dynamic_prop(spec_data: Dictionary, want_tile: Vector2i, yaw := 0.0, wander := 0.0, id := "", search := 3) -> Vector2i:
 	var n := WorldGrid.GRID_TILES
 	want_tile = Vector2i(posmod(want_tile.x, n), posmod(want_tile.y, n))
 	var wrapped := Vector2i(want_tile.x / CHUNK_TILES, want_tile.y / CHUNK_TILES)
@@ -614,11 +614,44 @@ func add_dynamic_prop(spec_data: Dictionary, want_tile: Vector2i, yaw := 0.0, wa
 		return Vector2i(-1, -1)
 	var anchor := want_tile - wrapped * CHUNK_TILES
 	anchor = anchor.clamp(Vector2i(search, search), Vector2i(CHUNK_TILES - 1 - search, CHUNK_TILES - 1 - search))
-	var entry := { "spec_data": spec_data, "yaw": yaw, "wander": wander, "reserve": 0, "search": search }
+	# 同一 dict 既传给 spawn（记 node 引用）又进清单：重刷/拾起都认得它
+	var entry := { "id": id, "spec_data": spec_data, "yaw": yaw, "wander": wander, "reserve": 0, "search": search }
 	var placed := _spawn_sdf_on_tile(deco, wrapped, entry, anchor)
 	if placed.x >= 0:
-		_dynamic_props.append({ "spec_data": spec_data, "tile": placed, "yaw": yaw, "wander": wander, "reserve": 0, "search": 0 })
+		entry["tile"] = placed
+		entry["search"] = 0 # 落定后重刷钉死原位
+		_dynamic_props.append(entry)
 	return placed
+
+## 指定 tile 上（或紧邻一圈，容忍游走漂移）的语音物件 id；没有返回 ""。
+func dynamic_prop_at(tile: Vector2i) -> String:
+	for r in range(2):
+		for ti in _ring(tile, r):
+			for dp in _dynamic_props:
+				if dp["tile"] == ti:
+					return String(dp.get("id", ""))
+	return ""
+
+## 拾起：释放占地、从清单摘除（重刷不再重生成），交出节点给调用方拖拽。
+## 返回 { id, spec_data, yaw, wander, tile, node }；找不到返回空字典。
+func pickup_dynamic_prop(id: String) -> Dictionary:
+	if id.is_empty():
+		return {}
+	for i in range(_dynamic_props.size()):
+		var dp: Dictionary = _dynamic_props[i]
+		if String(dp.get("id", "")) != id:
+			continue
+		var tile: Vector2i = dp["tile"]
+		var wrapped := Vector2i(tile.x / CHUNK_TILES, tile.y / CHUNK_TILES)
+		OccupancyMap.free_rect(OccupancyMap.tile_to_cell(tile), 2, 2)
+		var claims: Array = _claims.get(wrapped, [])
+		for c in range(claims.size()):
+			if claims[c][0] == tile:
+				claims.remove_at(c)
+				break
+		_dynamic_props.remove_at(i)
+		return dp
+	return {}
 
 ## entry 支持两种 spec 来源："spec"=res:// JSON 路径（手工锚点表）或 "spec_data"=已解析字典
 ## （语音生成）。返回实际落位的全局 tile；找不到空位/坏 spec 返回 (-1,-1)。
@@ -643,6 +676,8 @@ func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, an
 			prop.rotation_degrees = Vector3(0.0, float(entry.get("yaw", 0.0)), 0.0)
 			parent.add_child(prop)
 			prop.enable_wander(float(entry.get("wander", 0.0)), hash(str(entry.get("spec", prop.name))) + hash(ti))
+			if entry.has("id"): # 动态物件（语音造物）：记节点引用供拾起拖拽（SDF_PROPS 常量表不可写）
+				entry["node"] = prop
 			return wrapped * CHUNK_TILES + ti
 	return Vector2i(-1, -1)
 
