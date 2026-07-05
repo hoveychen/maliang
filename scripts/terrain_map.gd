@@ -1,7 +1,9 @@
 class_name TerrainMap
 extends RefCounted
 ## 世界地形数据模型——纯静态，首次访问时确定性生成，无随机状态。
-## 每 tile 两个字节：类型（草/路/水）+ 高度（0..2 级台阶）。
+## 每 tile 三个字节：类型（草/路/水）+ 高度（0..2 级台阶）+ 水深（湖床下挖级数）。
+## 高度 = 地表/水面所在台阶级（山湖水面可为正）；深度只对水 tile 非零，
+## 表示湖床相对水面向下挖几级——渲染用（湖床下沉/水色深浅），移动规则不看它。
 ## 逻辑网格沿用 WorldGrid（75×75 tile，环面 wrap）；本类只是数据，渲染在 chunk_manager。
 ##
 ## 默认地形布局（手绘式确定性生成，坐标单位 = tile 索引 0..74）：
@@ -9,7 +11,8 @@ extends RefCounted
 ## - 东北肩丘：(56.5, 8.5) 三级矮丘，与主峰之间留一条山口谷地
 ## - 东南瞭望丘：(59.5, 54.5) 三级缓坡（每环 +1 级可直接走上去），顶上是风车平台
 ## - 水系：主峰南麓涌泉 → 溪流汇入池塘 (24.5, 24.5) → 南出水口蜿蜒 → 西南沼泽小潭；
-##   水面全部高度 0、岸边平地；西辐路压过出水口形成涉水石滩（先画水后画路）
+##   水面全部高度 0、岸边平地；西辐路压过出水口形成涉水石滩（先画水后画路）；
+##   水深：溪流/沼泽全浅水(1 级)，池塘中心一圈深水(2 级)——湖床同心下挖
 ## - 路网：中央广场 + 四条辐路（北→登山口接上山小径、西→池塘观景、东→拐向风车丘
 ##   再有支径爬上丘顶、南→集市小广场），另有一条草甸小径从集市穿过环面接缝回到
 ##   西北出生林间空地——环面世界「一直往南走会从山背后回来」的示范
@@ -19,9 +22,11 @@ const T_PATH := 1
 const T_WATER := 2
 const MAX_HEIGHT := 255   ## 数据上限（存储为 byte）；默认地形主峰只到 8 级
 const STEP_HEIGHT := 2.0  ## 每级台阶的世界高度（米）= 1 格（tile 边长）；相邻 tile 跳变可超 1 级（陡崖）
+const MAX_DEPTH := 2      ## 默认地形的最大水深级数（1=浅水 2=深水；湖床 = 高度 - 深度）
 
 static var _types := PackedByteArray()
 static var _heights := PackedByteArray()
+static var _depths := PackedByteArray()
 
 ## 世界坐标（XZ，米）→ tile 类型；直接用 tile 索引请走 tile_type。
 static func type_at(p: Vector2) -> int:
@@ -34,6 +39,16 @@ static func tile_type(t: Vector2i) -> int:
 static func tile_height(t: Vector2i) -> int:
 	_ensure_built()
 	return _heights[_idx(t)]
+
+## 水深级数（湖床相对水面向下挖几级）；陆地恒 0。渲染专用，移动规则不看它。
+static func tile_depth(t: Vector2i) -> int:
+	_ensure_built()
+	return _depths[_idx(t)]
+
+## 渲染用「有效地面级」：湖床所在级 = 高度 - 深度（陆地就是高度）。
+## chunk_manager 按它发地面 quad 与崖壁/水下岸壁，可为负（高度 0 的水域湖床）。
+static func tile_floor_level(t: Vector2i) -> int:
+	return tile_height(t) - tile_depth(t)
 
 ## 移动规则（纯函数，供 can_step 与测试）：目标是水不可进；
 ## 一次最多升 1 级；下落超过 4 级视为空气墙。
@@ -64,6 +79,7 @@ static func _ensure_built() -> void:
 	var n := WorldGrid.GRID_TILES
 	_types.resize(n * n)   # 清零 = 全草地
 	_heights.resize(n * n) # 清零 = 高度 0
+	_depths.resize(n * n)  # 清零 = 无水深
 	_paint()
 
 static func _paint() -> void:
@@ -112,6 +128,13 @@ static func _paint() -> void:
 		Vector2(37.5, 63.5), Vector2(30.5, 67.5), Vector2(22.5, 70.5),
 		Vector2(14.5, 73.5), Vector2(9.5, 77.5), Vector2(4.5, 80.5), Vector2(2.5, 82.5)], 0.7, T_PATH)
 
+	# ---- 水深（最后画：路盖过水的涉水石滩已成路，天然深度 0）----
+	# 所有存留水面基础浅水 1 级；池塘中心一圈同心加深到 2 级
+	for i in range(_types.size()):
+		if _types[i] == T_WATER:
+			_depths[i] = 1
+	_paint_ellipse_depth(24.5, 24.5, 3.6, 2.7, 2)
+
 ## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂类型（含端点）。
 static func _paint_rect_type(x0: int, z0: int, x1: int, z1: int, t: int) -> void:
 	for z in range(z0, z1 + 1):
@@ -124,6 +147,13 @@ static func _paint_ellipse_type(cx: float, cz: float, rx: float, rz: float, t: i
 		for x in range(int(cx - rx), int(cx + rx) + 1):
 			if _in_ellipse(x, z, cx, cz, rx, rz):
 				_types[_idx(Vector2i(x, z))] = t
+
+## 椭圆内（tile 中心判定）且已是水面的 tile 涂水深——深水只在水域内加深，不越岸。
+static func _paint_ellipse_depth(cx: float, cz: float, rx: float, rz: float, d: int) -> void:
+	for z in range(int(cz - rz), int(cz + rz) + 1):
+		for x in range(int(cx - rx), int(cx + rx) + 1):
+			if _in_ellipse(x, z, cx, cz, rx, rz) and _types[_idx(Vector2i(x, z))] == T_WATER:
+				_depths[_idx(Vector2i(x, z))] = d
 
 ## 椭圆内（tile 中心判定）涂高度。
 static func _paint_ellipse_height(cx: float, cz: float, rx: float, rz: float, h: int) -> void:
