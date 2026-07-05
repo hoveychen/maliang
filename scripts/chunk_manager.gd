@@ -112,6 +112,9 @@ var _ground_mat: ShaderMaterial = null
 var _water_mat: ShaderMaterial = null
 ## wrapped 区块 → 已向 OccupancyMap 登记的占地 [[origin_tile, w, h], ...]，重刷时释放。
 var _claims: Dictionary = {}
+## 语音生成的动态 SDF 物件（运行时登记，区块重刷幸存）：
+## { "spec_data": Dictionary, "tile": Vector2i(全局), "yaw": float, "wander": float }
+var _dynamic_props: Array = []
 
 func _ready() -> void:
 	for i in range(-R, R + 1):
@@ -231,6 +234,13 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 		if sp_anchor.x < 0 or sp_anchor.x >= CHUNK_TILES or sp_anchor.y < 0 or sp_anchor.y >= CHUNK_TILES:
 			continue
 		_spawn_sdf_on_tile(deco, wrapped, sp, sp_anchor)
+
+	# 语音生成的动态物件：落位 tile 归属本区块的，重刷时原位重生成（search 0 钉死）。
+	for dp in _dynamic_props:
+		var dp_anchor: Vector2i = dp["tile"] - wrapped * CHUNK_TILES
+		if dp_anchor.x < 0 or dp_anchor.x >= CHUNK_TILES or dp_anchor.y < 0 or dp_anchor.y >= CHUNK_TILES:
+			continue
+		_spawn_sdf_on_tile(deco, wrapped, dp, dp_anchor)
 
 	# 分区散布：逐 tile 确定性判定。草丛不占位（可穿行的纯点缀），其余占 1×1。
 	for j in range(CHUNK_TILES):
@@ -587,7 +597,32 @@ func _spawn_on_tile(parent: Node3D, wrapped: Vector2i, scene: PackedScene, ancho
 
 ## SDF 可动物件版 _spawn_on_tile：同一套占地/螺旋找位，实例化 SdfProp 并启用锚点游走。
 ## 材质自带 world-bend 项（sdf_field.gdshaderinc），不走 BendMat.wrap_scene。
-func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, anchor: Vector2i) -> void:
+## 语音生成的物件进世界：围绕 want_tile 螺旋找空位（钳在区块内防跨块归属混乱），
+## 成功则登记运行时清单（此后区块重刷自动原位重生成）并返回落位 tile；失败返回 (-1,-1)。
+func add_dynamic_prop(spec_data: Dictionary, want_tile: Vector2i, yaw := 0.0, wander := 0.0) -> Vector2i:
+	var search := 3
+	var n := WorldGrid.GRID_TILES
+	want_tile = Vector2i(posmod(want_tile.x, n), posmod(want_tile.y, n))
+	var wrapped := Vector2i(want_tile.x / CHUNK_TILES, want_tile.y / CHUNK_TILES)
+	# 找当前持有该 wrapped 区块的 slot（3×3 池覆盖全图，必在）
+	var deco: Node3D = null
+	for slot in _slots:
+		if slot["wrapped"] == wrapped:
+			deco = slot["deco"]
+			break
+	if deco == null:
+		return Vector2i(-1, -1)
+	var anchor := want_tile - wrapped * CHUNK_TILES
+	anchor = anchor.clamp(Vector2i(search, search), Vector2i(CHUNK_TILES - 1 - search, CHUNK_TILES - 1 - search))
+	var entry := { "spec_data": spec_data, "yaw": yaw, "wander": wander, "reserve": 0, "search": search }
+	var placed := _spawn_sdf_on_tile(deco, wrapped, entry, anchor)
+	if placed.x >= 0:
+		_dynamic_props.append({ "spec_data": spec_data, "tile": placed, "yaw": yaw, "wander": wander, "reserve": 0, "search": 0 })
+	return placed
+
+## entry 支持两种 spec 来源："spec"=res:// JSON 路径（手工锚点表）或 "spec_data"=已解析字典
+## （语音生成）。返回实际落位的全局 tile；找不到空位/坏 spec 返回 (-1,-1)。
+func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, anchor: Vector2i) -> Vector2i:
 	var reserve := int(entry.get("reserve", 0))
 	var search := int(entry.get("search", 0))
 	var span := reserve * 2 + 1
@@ -596,15 +631,20 @@ func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, an
 			var origin: Vector2i = wrapped * CHUNK_TILES + ti - Vector2i(reserve, reserve)
 			if not OccupancyMap.prop_area_ok(origin, span, span):
 				continue
-			var prop := SdfProp.from_json_file(str(entry["spec"]))
+			var prop: SdfProp
+			if entry.has("spec_data"):
+				prop = SdfProp.from_spec(entry["spec_data"])
+			else:
+				prop = SdfProp.from_json_file(str(entry["spec"]))
 			if prop == null:
-				return  # spec 坏了：占地不登记，直接放弃
+				return Vector2i(-1, -1)  # spec 坏了：占地不登记，直接放弃
 			_claim(wrapped, origin, span, span)
 			prop.position = _tile_local(ti, wrapped)
 			prop.rotation_degrees = Vector3(0.0, float(entry.get("yaw", 0.0)), 0.0)
 			parent.add_child(prop)
-			prop.enable_wander(float(entry.get("wander", 0.0)), hash(entry["spec"]) + hash(ti))
-			return
+			prop.enable_wander(float(entry.get("wander", 0.0)), hash(str(entry.get("spec", prop.name))) + hash(ti))
+			return wrapped * CHUNK_TILES + ti
+	return Vector2i(-1, -1)
 
 ## 向 OccupancyMap 登记 w×h tile 占地，并记入 _claims 供区块重刷时释放。
 func _claim(wrapped: Vector2i, origin_tile: Vector2i, w: int, h: int) -> void:

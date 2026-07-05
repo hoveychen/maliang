@@ -8,6 +8,8 @@ signal tts_chunk(pcm: PackedByteArray)
 signal tts_end
 signal gen_progress(stage: String)
 signal gen_complete(character: Dictionary)
+signal prop_created(prop: Dictionary)
+signal prop_failed(reason: String)
 signal failed(reason: String)
 
 @export var url := "ws://127.0.0.1:8080/ws"
@@ -46,6 +48,10 @@ func send_create_character(world_id: String, intent_text: String) -> void:
 func send_world_info(world_id: String, locations: Array) -> void:
 	_send({ "type": "world_info", "worldId": world_id, "locations": locations })
 
+## 语音生成物件的落位回报：客户端就近找到空位后上报 tile，服务端持久化供重载恢复。
+func send_prop_place(world_id: String, prop_id: String, tile: Vector2i) -> void:
+	_send({ "type": "prop_place", "worldId": world_id, "propId": prop_id, "tileX": tile.x, "tileY": tile.y })
+
 func _send(obj: Dictionary) -> void:
 	if _open:
 		_ws.send_text(JSON.stringify(obj))
@@ -77,5 +83,9 @@ func _dispatch(data: Dictionary) -> void:
 			gen_progress.emit(String(data.get("stage", "")))
 		"gen_complete":
 			gen_complete.emit(data.get("character", {}))
+		"prop_created":
+			prop_created.emit(data.get("prop", {}))
+		"prop_failed":
+			prop_failed.emit(String(data.get("reason", "")))
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))

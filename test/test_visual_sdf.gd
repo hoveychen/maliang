@@ -5,7 +5,7 @@ extends SceneTree
 ## (3) 活着——观察数秒：走兽/跳跳有位移（锚点游走），所有物件基本体姿态在变（动画在跑）；
 ## (4) 稳定——物理绳/IK 不发散（所有基本体 origin 有限且在物件局部 20m 内）。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 10 \
-##       --quit-after 130 --script res://test/test_visual_sdf.gd
+##       --quit-after 140 --script res://test/test_visual_sdf.gd
 ## 退出码 = 失败断言数（同 scripts/test-headless.sh 约定）。
 
 var scene: Node
@@ -16,6 +16,7 @@ var _pos0: Dictionary = {}        ## name → 初始 position
 var _prim0: Dictionary = {}       ## name → 第一个非 body 基本体的初始 origin
 var _moved: Dictionary = {}       ## name → 是否观察到位移
 var _animated: Dictionary = {}    ## name → 是否观察到基本体姿态变化
+var _dyn_return := Vector2.ZERO   ## 动态物件测试：玩家跨区前的原位
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
@@ -34,6 +35,19 @@ func _tick() -> void:
 			_observe()
 		_ when frame == 110:
 			_liveness()
+		_ when frame == 112:
+			_dynamic_add()
+		_ when frame == 114:
+			_check("动态物件出现在树里", _find_dynamic() != null, true)
+			# 玩家跨半个世界：3×3 区块池全部换皮（动态物件所在区块必被重刷）
+			var player: Dictionary = scene.get("player")
+			_dyn_return = player["logical"]
+			player["logical"] = WorldGrid.wrap_pos((_dyn_return as Vector2) + Vector2(70.0, 0.0))
+		_ when frame == 120:
+			var player2: Dictionary = scene.get("player")
+			player2["logical"] = _dyn_return
+		_ when frame == 126:
+			_check("区块重刷后动态物件原位重生成", _find_dynamic() != null, true)
 			_finish()
 
 func _collect() -> void:
@@ -83,6 +97,26 @@ func _liveness() -> void:
 	_check("所有物件动画都在跑（末位基本体动过）", animated_count, _props.size())
 	_check("两只带 locomotion 的在游走（9.5s 观察窗）", moved_count >= 2, true)
 	_check("IK/物理绳不发散（origin 有限且 <20m）", unstable, 0)
+
+## 语音造物路径（离线直调）：add_dynamic_prop 就近落位并登记运行时清单。
+func _dynamic_add() -> void:
+	var spec := {
+		"name": "test_dyn_prop",
+		"palette": ["#e8574b"],
+		"parts": [{ "shape": "sphere", "pos": [0, 0.3, 0], "r": 0.25 }],
+		"locomotion": { "type": "none" },
+	}
+	var player: Dictionary = scene.get("player")
+	var want := WorldGrid.to_tile(WorldGrid.wrap_pos((player["logical"] as Vector2) + Vector2(3.0, 2.0)))
+	var cm: ChunkManager = scene.get("chunk_manager")
+	var placed: Vector2i = cm.add_dynamic_prop(spec, want, 45.0, 0.0)
+	_check("动态物件成功落位", placed.x >= 0, true)
+
+func _find_dynamic() -> SdfProp:
+	for p: SdfProp in root.find_children("*", "SdfProp", true, false):
+		if String(p.config.get("name", "")) == "test_dyn_prop":
+			return p
+	return null
 
 func _finish() -> void:
 	if fails == 0:

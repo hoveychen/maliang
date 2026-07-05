@@ -1116,6 +1116,8 @@ func _setup_backend() -> void:
 	backend.tts_end.connect(func() -> void: _tts_ending = true)
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
+	backend.prop_created.connect(_on_prop_created)
+	backend.prop_failed.connect(_on_prop_failed)
 	backend.failed.connect(_on_failed)
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
 	# 也在 THINK_TIMEOUT 秒后自动解卡——这是无论后端如何都不再永久卡死的最后一道保险。
@@ -1159,6 +1161,13 @@ func _bootstrap() -> void:
 	var chars: Array = world.get("characters", [])
 	for c in chars:
 		await _spawn_server_character(c as Dictionary, Vector2.INF)
+	# 语音生成的物件：按持久化的落位 tile 原位恢复（从未落位的跳过）
+	for p in world.get("props", []):
+		var pd: Dictionary = p
+		var tile: Variant = pd.get("tile", null)
+		if tile is Array and (tile as Array).size() >= 2:
+			var t := Vector2i(int(tile[0]), int(tile[1]))
+			chunk_manager.add_dynamic_prop(pd.get("spec", {}), t, float(hash(pd.get("id", "")) % 360), _prop_wander(pd.get("spec", {})))
 	# 玩家搬到小神仙旁边降生，相机跟着玩家过去
 	var fairy := _find_fairy()
 	if not fairy.is_empty():
@@ -1238,6 +1247,32 @@ func _on_gen_complete(character: Dictionary) -> void:
 	game_audio.play_sfx("fanfare")
 	banner.text = "%s 来啦！" % String(character.get("name", "新朋友"))
 	banner.visible = true
+
+## 语音造物完成：物件在玩家身旁就近落位，落位 tile 回报服务端持久化。
+func _on_prop_created(prop: Dictionary) -> void:
+	thinking_label.visible = false
+	var spec: Dictionary = prop.get("spec", {})
+	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
+	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
+	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec))
+	if placed.x < 0:
+		banner.text = "这里放不下啦，换个地方试试"
+		banner.visible = true
+		return
+	backend.send_prop_place(world_id, String(prop.get("id", "")), placed)
+	game_audio.play_sfx("fanfare")
+	banner.text = "变出来啦！"
+	banner.visible = true
+
+func _on_prop_failed(_reason: String) -> void:
+	thinking_label.visible = false
+	banner.text = "没变出来，再说一次试试"
+	banner.visible = true
+
+## 会动的物件给一点游走半径，安静物品钉在原地。
+func _prop_wander(spec: Dictionary) -> float:
+	var loco: Dictionary = spec.get("locomotion", {})
+	return 1.2 if String(loco.get("type", "none")) != "none" else 0.0
 
 ## 小神仙造角色（在线）。
 func _request_create(intent: String) -> void:
