@@ -888,17 +888,29 @@ func _approach_npc(npc: PaperCharacter) -> void:
 	_approach = d
 	_move_player_to(d["logical"], APPROACH_ARRIVE)
 
-## 叫停一个 NPC 的所有行为（闲逛/服务端指令），退出交互时恢复闲逛。
+## 叫停一个 NPC 的所有行为（闲逛/服务端指令），退出交互时恢复。
+## 正在跟随的记下目标（resume_follow），恢复时继续跟而不是回去闲逛。
 func _halt_npc(d: Dictionary) -> void:
 	for ex in _executors:
 		if (ex as BehaviorExecutor).drives(d):
+			var fid := (ex as BehaviorExecutor).following_id()
+			if not fid.is_empty():
+				d["resume_follow"] = fid
 			(ex as BehaviorExecutor).cancel()
 	_stopped = d
 
 func _resume_stopped_npc() -> void:
 	if not _stopped.is_empty() and not _stopped.get("is_fairy", false) \
 			and is_instance_valid(_stopped.get("node")):
-		_start_ambient_wander(_stopped)
+		var fid := String(_stopped.get("resume_follow", ""))
+		if not fid.is_empty():
+			_stopped.erase("resume_follow")
+			_run_behavior(_stopped["node"], {
+				"commands": [{ "type": "follow", "params": { "target_name": fid } }],
+				"loop": false,
+			})
+		else:
+			_start_ambient_wander(_stopped)
 	_stopped = {}
 
 ## 放弃当前「跑向 NPC」目标（点了别处/换目标），恢复被叫停的对象。
