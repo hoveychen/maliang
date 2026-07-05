@@ -1,13 +1,78 @@
 {
   "name": "six_leg_chest",
-  "palette": ["#8a5a33", "#d9a659", "#3f3a36"],
+  "palette": [
+    "#8a5a33",
+    "#d9a659",
+    "#3f3a36"
+  ],
   "blend": 0.24,
   "outline": 0.042,
   "parts": [
-    {"shape": "box", "pos": [0, 0.85, 0], "size": [1.2, 0.62, 0.85], "color": 0},
-    {"shape": "capsule", "pos": [0, 1.2, 0], "r": 0.42, "len": 0.66, "rot": [0, 0, 90], "color": 1},
-    {"shape": "sphere", "pos": [0, 1.1, 0.46], "r": 0.13, "color": 2, "blend": 0.1}
+    {
+      "shape": "box",
+      "pos": [
+        0,
+        0.85,
+        0
+      ],
+      "size": [
+        1.2,
+        0.62,
+        0.85
+      ],
+      "color": 0
+    },
+    {
+      "shape": "capsule",
+      "pos": [
+        0,
+        1.2,
+        0
+      ],
+      "r": 0.42,
+      "len": 0.66,
+      "rot": [
+        0,
+        0,
+        90
+      ],
+      "color": 1
+    },
+    {
+      "shape": "sphere",
+      "pos": [
+        0,
+        1.1,
+        0.46
+      ],
+      "r": 0.13,
+      "color": 2,
+      "blend": 0.1
+    }
   ],
-  "locomotion": {"type": "walker", "legs": 6, "leg_r": 0.09, "hip_h": 0.6, "stance": [0.62, 0.42], "speed": 0.8},
-  "ropes": [{"pos": [0, 1.05, -0.5], "segments": 3, "r": 0.07, "len": 0.2, "color": 1}]
+  "locomotion": {
+    "type": "walker",
+    "legs": 6,
+    "leg_r": 0.09,
+    "hip_h": 0.6,
+    "stance": [
+      0.62,
+      0.42
+    ],
+    "speed": 0.8
+  },
+  "ropes": [
+    {
+      "pos": [
+        0,
+        1.05,
+        -0.5
+      ],
+      "segments": 3,
+      "r": 0.07,
+      "len": 0.2,
+      "color": 1
+    }
+  ],
+  "color_k": 0.1
 }
