@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Character } from './types.ts';
+import type { Character, WorldProp } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 
 export interface World {
   id: string;
   characters: Map<string, Character>;
+  props: Map<string, WorldProp>;
 }
 
 /**
@@ -33,11 +34,15 @@ export class WorldStore {
   #load(): void {
     const wf = join(this.#dir as string, 'worlds.json');
     if (existsSync(wf)) {
-      const data = JSON.parse(readFileSync(wf, 'utf8')) as { worlds: Array<{ id: string; characters: Character[] }> };
+      const data = JSON.parse(readFileSync(wf, 'utf8')) as {
+        worlds: Array<{ id: string; characters: Character[]; props?: WorldProp[] }>;
+      };
       for (const w of data.worlds) {
         const map = new Map<string, Character>();
         for (const c of w.characters) map.set(c.id, c);
-        this.#worlds.set(w.id, { id: w.id, characters: map });
+        const props = new Map<string, WorldProp>();
+        for (const p of w.props ?? []) props.set(p.id, p); // 旧档没有 props 字段 → 空
+        this.#worlds.set(w.id, { id: w.id, characters: map, props });
       }
     }
     const mf = join(this.#dir as string, 'assets.json');
@@ -53,7 +58,11 @@ export class WorldStore {
   #persistWorlds(): void {
     if (this.#dir === null) return;
     mkdirSync(this.#dir, { recursive: true });
-    const worlds = [...this.#worlds.values()].map((w) => ({ id: w.id, characters: [...w.characters.values()] }));
+    const worlds = [...this.#worlds.values()].map((w) => ({
+      id: w.id,
+      characters: [...w.characters.values()],
+      props: [...w.props.values()],
+    }));
     writeFileSync(join(this.#dir, 'worlds.json'), JSON.stringify({ worlds }, null, 2));
   }
 
@@ -65,7 +74,7 @@ export class WorldStore {
   }
 
   createWorld(id: string = randomUUID()): World {
-    const world: World = { id, characters: new Map() };
+    const world: World = { id, characters: new Map(), props: new Map() };
     this.#worlds.set(id, world);
     this.#persistWorlds();
     return world;
@@ -87,6 +96,27 @@ export class WorldStore {
     const world = this.#worlds.get(character.worldId);
     if (world) world.characters.set(character.id, character);
     this.#persistWorlds();
+  }
+
+  /** 语音生成的 SDF 物件：新增（tile 待客户端落位回报）。 */
+  addProp(worldId: string, prop: WorldProp): void {
+    const world = this.#worlds.get(worldId);
+    if (!world) throw new Error(`world not found: ${worldId}`);
+    world.props.set(prop.id, prop);
+    this.#persistWorlds();
+  }
+
+  /** 客户端落位回报：记下物件的 tile，重载世界时按此恢复。 */
+  setPropTile(worldId: string, propId: string, tile: [number, number]): boolean {
+    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    if (!prop) return false;
+    prop.tile = tile;
+    this.#persistWorlds();
+    return true;
+  }
+
+  listProps(worldId: string): WorldProp[] {
+    return [...(this.#worlds.get(worldId)?.props.values() ?? [])];
   }
 
   /** 客户端上报的世界地点名（喂给意图 LLM 让「去某地」说的是真实地名）。 */

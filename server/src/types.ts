@@ -112,4 +112,13 @@ export interface VoiceResponse {
   ttsMime?: string; // 如 audio/L16;rate=24000，客户端据此设采样率
   /** behaviorScript 的执行者角色 id：小朋友点名让别的角色做时才有，缺省=characterId。 */
   performerId?: string;
+  /** create_prop 意图的物件描述：不下发客户端，由 WS 层摘走并异步造物（prop_created 推送）。 */
+  propRequest?: string;
+}
+
+/** 世界里由语音生成的 SDF 物件（spec 结构见 sdf_prop.ts；tile 为客户端落位后回报）。 */
+export interface WorldProp {
+  id: string;
+  spec: import('./sdf_prop.ts').SdfPropSpec;
+  tile: [number, number] | null;
 }
