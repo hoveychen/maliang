@@ -13,6 +13,8 @@ signal failed(reason: String)
 signal world_state(data: Dictionary)
 signal task_complete(data: Dictionary)
 signal give_result(data: Dictionary)
+## 出站消息观测（连接未开也发射）：headless 测试/调试用，正常逻辑不要依赖它
+signal sent(msg: Dictionary)
 
 @export var url := "ws://127.0.0.1:8080/ws"
 
@@ -61,6 +63,7 @@ func send_give_item(world_id: String, to_character_id: String, item_id: String) 
 	_send({ "type": "give_item", "worldId": world_id, "toCharacterId": to_character_id, "itemId": item_id })
 
 func _send(obj: Dictionary) -> void:
+	sent.emit(obj)
 	if _open:
 		_ws.send_text(JSON.stringify(obj))
 

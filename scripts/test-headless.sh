@@ -68,6 +68,7 @@ run_test test_visual_sdf           --fixed-fps 10 --quit-after 130
 run_test test_visual_water         --fixed-fps 10 --quit-after 60
 run_test test_visual_camera_gesture --fixed-fps 10 --quit-after 160
 run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
+run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
 
 echo
 if [ "$fails" -eq 0 ]; then
