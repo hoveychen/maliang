@@ -10,7 +10,8 @@ import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
-import type { Character, VoiceResponse } from './types.ts';
+import { stickerGlyph, type Character, type VoiceResponse } from './types.ts';
+import { completeTaskOnEvent } from './tasks.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -203,6 +204,13 @@ export async function handleWsMessage(
     format?: string;
     transcript?: string; // voice_transcript：端侧 ASR 已识别的文本
     locations?: unknown; // world_info：世界地点名清单
+    // 奖赏系统：task_event 完成事件 / give_item 转赠
+    kind?: string;
+    targetName?: string;
+    locationName?: string;
+    npcId?: string;
+    itemId?: string;
+    toCharacterId?: string;
   };
   try {
     msg = JSON.parse(raw);
@@ -211,14 +219,72 @@ export async function handleWsMessage(
     return;
   }
 
-  // 客户端上报世界地点名（连上 WS 后一次）：喂给意图 LLM，让「去某地」归一到真实地名
+  // 客户端上报世界地点名（连上 WS 后一次）：喂给意图 LLM，让「去某地」归一到真实地名。
+  // 回 world_state 同步贴纸背包与进行中委托（断线重连/重启后客户端补状态）。
   if (msg.type === 'world_info') {
+    const worldId = msg.worldId ?? '';
     const names = (Array.isArray(msg.locations) ? msg.locations : [])
       .filter((n): n is string => typeof n === 'string' && n.trim().length > 0 && n.length <= 20)
       .map((n) => n.trim())
       .slice(0, 32);
-    store.setLocations(msg.worldId ?? '', names);
-    return; // 上报型消息，不回包
+    store.setLocations(worldId, names);
+    socket.send(JSON.stringify({
+      type: 'world_state',
+      inventory: store.getInventory(worldId),
+      activeTask: store.getActiveTask(worldId),
+    }));
+    return;
+  }
+
+  // 委托完成事件（客户端确定性判定后上报）：匹配进行中委托则发奖+清任务
+  if (msg.type === 'task_event') {
+    const worldId = msg.worldId ?? '';
+    const done = completeTaskOnEvent(worldId, {
+      kind: msg.kind ?? '',
+      targetName: msg.targetName,
+      locationName: msg.locationName,
+      npcId: msg.npcId,
+      itemId: msg.itemId,
+    }, store);
+    if (done) {
+      socket.send(JSON.stringify({
+        type: 'task_complete',
+        task: done,
+        rewardId: done.rewardId,
+        rewardGlyph: stickerGlyph(done.rewardId),
+        inventory: store.getInventory(worldId),
+      }));
+    }
+    return; // 不匹配静默忽略（迟到/重复上报无副作用）
+  }
+
+  // 转赠贴纸给 NPC：扣背包 + 写进对方长期记忆；若正好是 gift 委托则顺带完成发奖
+  if (msg.type === 'give_item') {
+    const worldId = msg.worldId ?? '';
+    const itemId = msg.itemId ?? '';
+    const ok = store.removeSticker(worldId, itemId);
+    if (ok) {
+      const npc = store.getCharacter(worldId, msg.toCharacterId ?? '');
+      if (npc) {
+        const line = `小朋友送过我一个${stickerGlyph(itemId)}`;
+        if (!npc.memory.includes(line)) {
+          npc.memory.push(line);
+          store.saveCharacter(npc);
+        }
+      }
+      const done = completeTaskOnEvent(worldId, { kind: 'gift_done', npcId: msg.toCharacterId, itemId }, store);
+      if (done) {
+        socket.send(JSON.stringify({
+          type: 'task_complete',
+          task: done,
+          rewardId: done.rewardId,
+          rewardGlyph: stickerGlyph(done.rewardId),
+          inventory: store.getInventory(worldId),
+        }));
+      }
+    }
+    socket.send(JSON.stringify({ type: 'give_result', ok, itemId, inventory: store.getInventory(worldId) }));
+    return;
   }
 
   if (msg.type === 'create_character_request') {

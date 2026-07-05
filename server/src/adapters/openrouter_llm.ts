@@ -1,12 +1,15 @@
 import type { LLMAdapter } from './types.ts';
 import {
   BASE_ABILITIES,
+  STICKER_NAMES,
+  stickerGlyph,
   type BehaviorScript,
   type CharacterSpec,
   type IntentContext,
   type IntentResult,
   type MemoryExtractionContext,
 } from '../types.ts';
+import { describeTask } from '../tasks.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
 import { fallbackSdfPropSpec, validateSdfPropSpec, type SdfPropSpec } from '../sdf_prop.ts';
 
@@ -46,6 +49,7 @@ const ABILITY_DESC: Record<string, string> = {
   do_action: 'do_action=做一个动作，params:{"action":"wave|jump|spin|nod"}（挥手/跳/转圈/点头）',
   chat_with: 'chat_with=走到某个角色身边和它聊天，params:{"character_name":"角色名"}',
   deliver_message: 'deliver_message=给某个角色带一句话，params:{"to":"角色名","message":"要带的话"}',
+  give: 'give=小朋友把自己的贴纸送给某个角色（小朋友亲自走过去送），params:{"character_name":"角色名","item":"贴纸id"}',
 };
 
 function stripFences(s: string): string {
@@ -124,14 +128,27 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     const locationLine = ctx.locations && ctx.locations.length > 0
       ? `\n世界里的地点：${ctx.locations.join('、')}。move_to 的 location_name 优先归一到这些名字（说「有风车的地方」就填「风车」）。`
       : '';
+    // 贴纸背包与委托（奖赏系统）：背包给 give 词汇；进行中委托提醒；候选委托由 LLM 挑时机发起
+    const vocab = Object.entries(STICKER_NAMES).map(([cn, id]) => `${cn}${stickerGlyph(id)}=${id}`).join('、');
+    const inv = ctx.inventory ?? {};
+    const invItems = Object.entries(inv).filter(([, n]) => n > 0);
+    const inventoryLine = invItems.length > 0
+      ? `\n小朋友的贴纸背包：${invItems.map(([id, n]) => `${stickerGlyph(id)}x${n}`).join('、')}。贴纸叫法：${vocab}。`
+      : `\n小朋友的贴纸背包现在是空的（说要送贴纸时温柔告诉他先帮大家做点小事赢贴纸）。贴纸叫法：${vocab}。`;
+    const taskLine = ctx.activeTask
+      ? `\n进行中的小任务：${describeTask(ctx.activeTask)}（委托人是${ctx.activeTask.npcName}，完成有贴纸奖励）。小朋友问起就温柔提醒，不要重复发起新任务。`
+      : ctx.taskCandidate
+        ? `\n当下没有进行中的任务。时机合适时（小朋友问「有什么要帮忙的」，或聊天里自然接得上），你可以发起这个小委托：${describeTask(ctx.taskCandidate)}，奖励一个${stickerGlyph(ctx.taskCandidate.rewardId)}贴纸。若这句回应里发起了它，输出 "offerTask": true 并用你的口吻把请求和奖励说出来；不合适就别硬塞。`
+        : '';
     const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。
 小朋友对你说了一句话，判断这是「闲聊」还是「让你（或别的角色）做一件会做的事」。
 会做的事(abilities)：
-${abilityLines}${rosterLine}${locationLine}${memoryLine}
-严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
+${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLine}
+严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","offerTask":true或省略,"behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跟我来」），performer 填那个角色的名字，replyText 仍由你来说，而且你会亲自跑过去把指令带给它，所以回应要像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。
+- 小朋友说要把贴纸送给谁（如「把花送给小蓝」）→ kind=command，behaviorScript 里一条 {"type":"give","params":{"character_name":"小蓝","item":"flower"}}（item 用贴纸叫法表里的 id；背包没有就 chat 温柔说明）。
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
 - 绝不包含暴力、恐怖、成人内容。`;
@@ -154,6 +171,7 @@ ${abilityLines}${rosterLine}${locationLine}${memoryLine}
       replyText?: unknown;
       emotion?: unknown;
       performer?: unknown;
+      offerTask?: unknown;
       behaviorScript?: unknown;
     } = {};
     try {
@@ -172,6 +190,7 @@ ${abilityLines}${rosterLine}${locationLine}${memoryLine}
       const performer = str(raw.performer, '');
       if (performer && performer !== ctx.characterName) result.performerName = performer;
     }
+    if (raw.offerTask === true && ctx.taskCandidate) result.offerTask = true;
     return result;
   }
 
