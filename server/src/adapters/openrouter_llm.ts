@@ -148,7 +148,8 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
 ${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLine}
 严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","offerTask":true或省略,"behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
-- 小朋友点名让「别的」角色做事时（如对你说「小蓝跟我来」），performer 填那个角色的名字，replyText 仍由你来说，而且你会亲自跑过去把指令带给它，所以回应要像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
+- 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
+- 小朋友说「告诉X…」「帮我跟X说…」是带话：用 deliver_message（to=X，message=要带的话），不要用 move_to——光走过去话就丢了。
 - follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。
 - 小朋友说要把贴纸送给谁（如「把花送给小蓝」）→ kind=command，behaviorScript 里一条 {"type":"give","params":{"character_name":"小蓝","item":"flower"}}（item 用贴纸叫法表里的 id；背包没有就 chat 温柔说明）。
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
