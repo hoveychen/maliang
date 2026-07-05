@@ -7,11 +7,11 @@ extends SceneTree
 ## 注意：--write-movie 须带窗跑（headless 段错误）。
 
 const SPECS: Array[String] = [
-	"res://assets/sdf_props/walking_hut.json",
-	"res://assets/sdf_props/six_leg_chest.json",
-	"res://assets/sdf_props/hop_mailbox.json",
-	"res://assets/sdf_props/fly_lantern.json",
-	"res://assets/sdf_props/sign_scout.json",
+	"res://assets/sdf_props/nodding_flower.json",
+	"res://assets/sdf_props/pinwheel.json",
+	"res://assets/sdf_props/paper_note.json",
+	"res://assets/sdf_props/crayon.json",
+	"res://assets/sdf_props/village_sign.json",
 ]
 
 func _initialize() -> void:
@@ -40,16 +40,16 @@ func _initialize() -> void:
 	floor_mesh.material_override = BendMat.make(Color("#9fce84"))
 	world.add_child(floor_mesh)
 
-	var x := -8.0
+	var x := -5.2
 	for path in SPECS:
 		var prop := SdfProp.from_json_file(path)
 		prop.position = Vector3(x, 0, 0)
 		world.add_child(prop)
 		prop.enable_wander(1.0, hash(path))
-		x += 4.0
+		x += 2.6
 
 	var cam := Camera3D.new()
-	cam.position = Vector3(0, 3.2, 9.5)
-	cam.rotation_degrees = Vector3(-12, 0, 0)
+	cam.position = Vector3(0, 1.7, 6.0)
+	cam.rotation_degrees = Vector3(-9, 0, 0)
 	world.add_child(cam)
 	cam.make_current()
