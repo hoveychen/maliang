@@ -44,6 +44,7 @@ var page_idx := -1
 var _page: Control = null          ## 当前页容器（翻页时旧页被收走）
 var _book: PanelContainer
 var _voice: AudioStreamPlayer
+var game_audio: GameAudio
 var _flipping := false
 var _story_auto_t := 0.0           ## story 页自动翻页倒计时（旁白结束后）
 
@@ -73,6 +74,10 @@ func _ready() -> void:
 	_setup_book()
 	_voice = AudioStreamPlayer.new()
 	add_child(_voice)
+	game_audio = GameAudio.new()
+	game_audio.name = "GameAudio"
+	add_child(game_audio)
+	game_audio.start_bgm([GameAudio.BGM_STEPS[0]]) # 旁白为主，音乐只垫底
 	api = Api.new()
 	api.name = "Api"
 	add_child(api)
@@ -139,7 +144,9 @@ func _setup_skip() -> void:
 	skip.offset_left = -140.0
 	skip.offset_top = 16.0
 	skip.offset_bottom = 56.0
-	skip.pressed.connect(_finish)
+	skip.pressed.connect(func() -> void:
+		game_audio.play_sfx("click")
+		_finish())
 	add_child(skip)
 
 # ── 翻页与页面渲染 ─────────────────────────────────────────────────────────
@@ -156,6 +163,7 @@ func _next_page() -> void:
 ## 书页翻转：旧页横向压扁（绕左脊）→ 新页展开。
 func _flip_to(next_page: Control) -> void:
 	_flipping = true
+	game_audio.play_sfx("page")
 	var old := _page
 	_page = next_page
 	if old != null:
@@ -240,6 +248,7 @@ func _on_option(p: Dictionary, opt: Dictionary, btn: Button) -> void:
 	if _flipping:
 		return
 	answers[String(p["field"])] = String(opt["value"])
+	game_audio.play_sfx("select")
 	_play(String(opt.get("voice", "")))
 	# 选中反馈：弹一下再翻页
 	btn.pivot_offset = btn.size * 0.5
@@ -300,6 +309,7 @@ func _intro_start() -> void:
 	if _intro_recording:
 		return
 	_voice.stop() # 别和旁白抢
+	game_audio.play_sfx("mic_on")
 	_intro_recording = true
 	_intro_pcm = PackedByteArray()
 	_intro_status.text = "🔴"
@@ -312,6 +322,7 @@ func _intro_stop() -> void:
 	if not _intro_recording:
 		return
 	_intro_recording = false
+	game_audio.play_sfx("mic_off")
 	_drain_intro()
 	mic.stop()
 	_intro_status.text = "⏳"
@@ -368,11 +379,13 @@ func _intro_retry() -> void:
 		_next_page()
 		return
 	_intro_status.text = "🎤"
+	game_audio.play_sfx("oops")
 	_play("ob_intro_retry")
 
 func _on_intro_confirm(yes: bool) -> void:
 	_intro_confirm.visible = false
 	if yes:
+		game_audio.play_sfx("confirm")
 		answers["name"] = String(_pending.get("name", ""))
 		answers["nickname"] = String(_pending.get("nickname", "小朋友"))
 		answers["intro"] = String(_pending.get("transcript", ""))
@@ -471,11 +484,13 @@ func _generate_avatar() -> void:
 	_gen_status.text = "✨"
 	_gen_img.texture = _prefetch_tex
 	_gen_img.visible = true
+	game_audio.play_sfx("reveal")
 	_play("ob_confirm")
 	_gen_confirm.visible = true
 
 func _on_gen_confirm(yes: bool) -> void:
 	if yes:
+		game_audio.play_sfx("confirm")
 		answers["sprite_asset"] = _prefetch_hash
 		_next_page()
 		return
@@ -493,6 +508,8 @@ func _on_page_shown(p: Dictionary) -> void:
 		_start_avatar_prefetch() # 答案已齐：说话确认的同时后台生形象（生图 ~1min 重叠掉）
 
 func _process(delta: float) -> void:
+	# 旁白/录音时压低 BGM，让位给人声
+	game_audio.set_ducked(_voice.playing or _intro_recording)
 	if _intro_recording:
 		_drain_intro() # 录音时持续排空采集缓冲（端侧喂插件/服务端攒整段）
 	if _story_auto_t > 0.0 and not _flipping:

@@ -33,6 +33,7 @@ UNIT_TESTS=(
   test_behavior_executor
   test_fairy_voice
   test_voice_vad
+  test_game_audio
 )
 fails=0
 

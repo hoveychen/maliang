@@ -1,0 +1,11 @@
+Music Loop Variations ("mellow, yet upbeat" BGM loops)
+
+Author:  obscure music
+Source:  https://opengameart.org/content/music-loop-variations
+License: CC0 (Creative Commons Zero, Public Domain)
+         http://creativecommons.org/publicdomain/zero/1.0/
+
+Files bgm_step1/2/3.wav are the "good" variations level1-step1/2/3 from
+the original loops.zip, resampled 44.1kHz -> 32kHz stereo 16-bit PCM.
+Each is a seamless 9.6s loop at 100 BPM; steps are designed to be
+chained/alternated for variety.
