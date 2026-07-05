@@ -33,12 +33,16 @@ var _delivering := false
 var _deliver_id := ""
 var _deliver_msg := ""
 
-func setup(target: Dictionary, script: Dictionary, resolver := Callable(), deliverer := Callable()) -> void:
+# 地点解析：location_name → 世界坐标（world.gd 的 POI 名/别名模糊匹配，找不到 Vector2.INF）
+var _loc_resolver := Callable()
+
+func setup(target: Dictionary, script: Dictionary, resolver := Callable(), deliverer := Callable(), loc_resolver := Callable()) -> void:
 	_target = target
 	_commands = script.get("commands", [])
 	_loop = bool(script.get("loop", false))
 	_resolver = resolver
 	_deliverer = deliverer
+	_loc_resolver = loc_resolver
 	_idx = 0
 	_state = "idle" if not _commands.is_empty() else "done"
 
@@ -69,6 +73,9 @@ func _start(cmd: Dictionary) -> void:
 	match type:
 		"move_to":
 			_move_to = _resolve_target(params)
+			if _move_to == Vector2.INF:
+				_advance() ## 地点/角色都解析不到 → 跳过（不再假装位移糊弄）
+				return
 			_begin_move()
 		"wander":
 			var radius := float(params.get("radius", 5.0))
@@ -93,15 +100,23 @@ func _start(cmd: Dictionary) -> void:
 		_:
 			_advance() ## say / emote / face 等暂跳过（动作由 UI 层处理）
 
-## move_to 目标解析：优先显式坐标；location_name 暂无法解析时给一个可见的示意位移。
+## move_to 目标解析：显式坐标 > 角色名（去某人身边）> 地点名（POI 模糊匹配）。解析不到返回 INF。
 func _resolve_target(params: Dictionary) -> Vector2:
 	if params.has("target") and params["target"] is Array and (params["target"] as Array).size() >= 2:
 		var t: Array = params["target"]
 		return WorldGrid.wrap_pos(Vector2(float(t[0]), float(t[1])))
 	if params.has("tile_x") and params.has("tile_y"):
 		return WorldGrid.wrap_pos(Vector2(float(params["tile_x"]), float(params["tile_y"])) * WorldGrid.TILE_SIZE)
-	# TODO(M2-real): location_name → 世界坐标（需把世界角色/地点清单喂给意图 LLM）
-	return WorldGrid.wrap_pos(_target["logical"] + Vector2(24.0, 0.0))
+	var char_name := String(params.get("character_name", ""))
+	if not char_name.is_empty() and _resolver.is_valid():
+		var p: Vector2 = _resolver.call(char_name)
+		if p != Vector2.INF:
+			_arrive_override = DELIVER_ARRIVE # 对方自身占格，走到旁边即算到
+		return p
+	var loc := String(params.get("location_name", ""))
+	if not loc.is_empty() and _loc_resolver.is_valid():
+		return _loc_resolver.call(loc)
+	return Vector2.INF
 
 ## 进入 move 状态：规划 waypoint 队列；无路（目标不可达/已在原格）回退直线滑动。
 func _begin_move() -> void:

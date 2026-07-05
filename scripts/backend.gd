@@ -42,6 +42,10 @@ func send_voice_transcript(world_id: String, character_id: String, transcript: S
 func send_create_character(world_id: String, intent_text: String) -> void:
 	_send({ "type": "create_character_request", "worldId": world_id, "intentText": intent_text, "byFairy": true })
 
+## 上报世界地点名清单（POI 名，连上后一次）：意图 LLM 用来归一「去某地」的地名。
+func send_world_info(world_id: String, locations: Array) -> void:
+	_send({ "type": "world_info", "worldId": world_id, "locations": locations })
+
 func _send(obj: Dictionary) -> void:
 	if _open:
 		_ws.send_text(JSON.stringify(obj))

@@ -74,6 +74,7 @@ export async function respondToTranscript(
     recentHistory: character.chatHistory.slice(-RECENT_TURNS), // 这轮之前的近 N 轮
     memory: character.memory,
     worldCharacters: roster,
+    locations: store.getLocations(worldId),
   });
 
   // 语音回复不再过文字审核（Boss 2026-06-18 决策：多一次 LLM 调用拖慢对话、伤体验）。

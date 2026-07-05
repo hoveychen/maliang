@@ -21,7 +21,7 @@ const FALLBACK_VISUAL = 'a cute small round animal friend with a happy smiling f
 
 /** 每个能力喂给意图 LLM 的说明（能力名=一句用途 + params 形状）。 */
 const ABILITY_DESC: Record<string, string> = {
-  move_to: 'move_to=去某个地方或某个角色身边，params:{"location_name":"地点名"} 或 {"character_name":"角色名"}',
+  move_to: 'move_to=去某个地方或某个角色身边，params:{"location_name":"地点名"} 或 {"character_name":"角色名"}（小朋友说「过来/到我这来」时 character_name 填"玩家"）',
   follow: 'follow=跟着一个人一起走，params:{"target_name":"玩家"}（跟着小朋友）或 {"target_name":"角色名"}',
   stop_follow: 'stop_follow=停止跟随，params:{}',
   do_action: 'do_action=做一个动作，params:{"action":"wave|jump|spin|nod"}（挥手/跳/转圈/点头）',
@@ -85,10 +85,13 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     const rosterLine = ctx.worldCharacters && ctx.worldCharacters.length > 0
       ? `\n世界里的其他角色：${ctx.worldCharacters.map((c) => c.name).join('、')}。指令里出现角色名时必须用这些名字（口音/识别不准时对应到最像的一个）。`
       : '';
+    const locationLine = ctx.locations && ctx.locations.length > 0
+      ? `\n世界里的地点：${ctx.locations.join('、')}。move_to 的 location_name 优先归一到这些名字（说「有风车的地方」就填「风车」）。`
+      : '';
     const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。
 小朋友对你说了一句话，判断这是「闲聊」还是「让你（或别的角色）做一件会做的事」。
 会做的事(abilities)：
-${abilityLines}${rosterLine}${memoryLine}
+${abilityLines}${rosterLine}${locationLine}${memoryLine}
 严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跟我来」），performer 填那个角色的名字，replyText 仍由你来说（如「我帮你叫小蓝啦！」）；让你自己做就省略 performer。

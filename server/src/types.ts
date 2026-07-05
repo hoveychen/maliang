@@ -85,6 +85,8 @@ export interface IntentContext {
   memory?: string[]; // 角色长期记忆要点（自我累积，跨对话保留）
   /** 世界里的其他角色花名册（不含自己/小神仙）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
   worldCharacters?: { id: string; name: string }[];
+  /** 世界地点名清单（客户端 world_info 上报的 POI 名）：move_to 的 location_name 优先归一到这些名字。 */
+  locations?: string[];
 }
 
 /** 对话后让角色「自己决定记什么」的上下文（extractMemory 用）。 */
