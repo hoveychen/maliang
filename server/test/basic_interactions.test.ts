@@ -226,3 +226,12 @@ test('world_info：客户端上报地点名 → 存 store → 进意图 prompt',
   await llm.routeIntent('去池塘', { ...CTX, locations: ['池塘', '大山'] });
   assert.ok(captured[0]![0]!.content.includes('池塘'), '地点名应进 prompt');
 });
+
+test('routeIntent prompt：点名指派必须带指令 + 带话用 deliver_message（真机联调修复回归锚）', async () => {
+  const captured: ChatMessage[][] = [];
+  const llm = new OpenRouterLLMAdapter(fakeClient('{"kind":"chat","replyText":"好"}', captured), 'm');
+  await llm.routeIntent('你好', CTX);
+  const system = captured[0]![0]!.content;
+  assert.ok(system.includes('指令绝不能省'), '点名指派需明示 behaviorScript 照常输出');
+  assert.ok(system.includes('不要用 move_to——光走过去话就丢了'), '带话需明示用 deliver_message');
+});
