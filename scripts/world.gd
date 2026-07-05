@@ -50,6 +50,11 @@ var selected: PaperCharacter = null
 var ear_icon: Sprite3D
 var _dragging := false
 var _press_pos := Vector2.ZERO
+# 暗黑式按住跟随：指针按在空地上即走，按住期间节流重下发指针下地面为移动目标
+const HOLD_FOLLOW_INTERVAL := 0.12
+var _hold_follow := false
+var _hold_pos := Vector2.ZERO
+var _hold_timer := 0.0
 # 点击落点标记（黄色圆片，淡出）
 const TAP_MARKER_LIFE := 0.8
 var _tap_marker: MeshInstance3D = null
@@ -505,6 +510,7 @@ func _physics_process(delta: float) -> void:
 	# 方向键直接驱动玩家（桌面调试；与点击移动同一 Mover 规则）
 	var input := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	if input != Vector2.ZERO and not player.is_empty():
+		_hold_follow = false # 手动操控优先，退出按住跟随
 		_cancel_player_move() # 手动操控优先，替换点击移动指令
 		var moved := Mover.attempt(player["logical"], input * PLAYER_SPEED * delta, PLAYER_SPAN, PLAYER_ID)
 		if moved != player["logical"]:
@@ -513,6 +519,7 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_drain_tts_stream()
+	_step_hold_follow(delta)
 	_step_executors(delta)
 	_check_approach()
 	_update_fairy(delta)
@@ -615,26 +622,36 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_target_dist = clampf(_target_dist + 3.0, ZOOM_MIN, ZOOM_MAX)
 			return
-	# 鼠标：按下记录，移动判定为拖拽平移，松开若未拖拽则拾取
+	# 鼠标：按在空地即走（暗黑式），按住拖动持续跟随；按在角色上仍走松开拾取
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			_dragging = false
 			_press_pos = event.position
+			_try_begin_hold_follow(event.position)
+		elif _hold_follow:
+			_end_hold_follow(event.position)
 		elif not _dragging:
 			_tap_pick(event.position)
 		return
 	if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		if _hold_follow:
+			_hold_pos = event.position
 		if event.position.distance_to(_press_pos) > 6.0:
-			_dragging = true # 相机跟随玩家，拖拽不再平移；仅防误触发拾取
+			_dragging = true # 防误触发拾取；按住空地的移动由 hold_follow 承担
 		return
-	# 触屏：拖动不平移（跟随相机），点触拾取
+	# 触屏：与鼠标同一套按住跟随/拾取判定
 	if event is InputEventScreenDrag:
 		_dragging = true
+		if _hold_follow:
+			_hold_pos = event.position
 		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			_dragging = false
 			_press_pos = event.position
+			_try_begin_hold_follow(event.position)
+		elif _hold_follow:
+			_end_hold_follow(event.position)
 		elif not _dragging:
 			_tap_pick(event.position)
 		return
@@ -674,6 +691,46 @@ func _cancel_player_move() -> void:
 	if _player_executor != null:
 		_player_executor.cancel()
 		_player_executor = null
+
+## 暗黑式按住跟随：仅当按点落在空地（非 NPC/非玩家）时进入，立即下发首个目标。
+func _try_begin_hold_follow(screen_pos: Vector2) -> void:
+	if _hold_follow or player.is_empty():
+		return
+	if _pick_npc(screen_pos) != null or _pick_player(screen_pos):
+		return
+	if _pick_ground(screen_pos) == Vector2.INF:
+		return
+	if selected != null:
+		_exit_interaction()
+	_clear_approach()
+	_hold_follow = true
+	_hold_pos = screen_pos
+	_hold_timer = 0.0
+	_steer_hold_follow()
+
+func _end_hold_follow(screen_pos: Vector2) -> void:
+	_hold_pos = screen_pos
+	_steer_hold_follow() # 停在松开处
+	_hold_follow = false
+
+## 按住期间每 HOLD_FOLLOW_INTERVAL 秒把指针下地面重下发为移动目标（新指令替换旧指令）。
+func _step_hold_follow(delta: float) -> void:
+	if not _hold_follow:
+		return
+	_hold_timer += delta
+	if _hold_timer < HOLD_FOLLOW_INTERVAL:
+		return
+	_hold_timer = 0.0
+	_steer_hold_follow()
+
+func _steer_hold_follow() -> void:
+	if player.is_empty():
+		return
+	var ground := _pick_ground(_hold_pos)
+	if ground == Vector2.INF:
+		return
+	_show_tap_marker(ground)
+	_move_player_to(ground)
 
 ## 屏幕点 → 弯曲地表交点的逻辑坐标；无交点返回 Vector2.INF。
 ## 地表 y = tile 台阶高度 - 弯曲下沉（与 _place_on_bent_ground 同公式）；
