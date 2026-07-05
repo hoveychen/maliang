@@ -7,6 +7,7 @@ import type {
   MemoryExtractionContext,
 } from '../types.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
+import { fallbackSdfPropSpec, validateSdfPropSpec, type SdfPropSpec } from '../sdf_prop.ts';
 
 const DESIGNER_SYSTEM = `你是幼儿园游戏「maliang」的角色设计师。根据小朋友的口头想法，设计一个可爱、儿童友好的角色。
 严格只输出 JSON，无 markdown 代码块、无多余文字，格式：
@@ -17,6 +18,23 @@ const DESIGNER_SYSTEM = `你是幼儿园游戏「maliang」的角色设计师。
 - 绝不包含暴力、恐怖、武器、成人内容。`;
 
 const FALLBACK_VISUAL = 'a cute small round animal friend with a happy smiling face';
+
+// SDF 可动物件设计师：~15 行 JSON 描述一只由基本体融合而成、会动的物件/建筑。
+// schema 与客户端 scripts/sdf_spec.gd 对应；产物经 validateSdfPropSpec 校验，坏了走兜底。
+const SDF_PROP_SYSTEM = `你是幼儿园游戏「maliang」的物件设计师。小朋友描述一个会动的物件/小建筑（比如"会走路的小房子""蹦蹦跳跳的邮筒"），你用若干基本形状拼出它。引擎会把形状无缝融合成一个圆润整体，并自动生成腿/翅膀/绳子和动画。
+严格只输出 JSON，无 markdown、无多余文字。schema：
+{"name":"英文snake_case","palette":["#rrggbb",… 2-4个],"blend":0.2~0.35,"outline":0.04,
+ "parts":[{"shape":"sphere|capsule|cone|box","pos":[x,y,z],"color":调色板索引,
+   球:"r"; 胶囊:"r","len"; 圆头锥:"r1","r2","h"; 盒:"size":[宽,高,深]; 可选 "rot":[度,度,度]、细小件 "blend":0.05~0.12、头部件 "group":"head"}],
+ "locomotion":{"type":"walker|hopper|flyer","legs":2|4|6,"leg_r":腿粗,"hip_h":髋高,"stance":[左右半距,前后半距],"hop_h":跳高,"rate":频率,"hover_h":悬浮高,"wing_len":翅长,"speed":移速},
+ "ropes":[{"pos":[挂点xyz],"segments":3~4,"r":粗,"len":每段长,"color":索引}] 0-2条}
+规则：
+- y 向上、单位米，物件总高 0.8~3；身体件 2~6 个就够，引擎融合后自然圆润。
+- walker 的 hip_h 与身体底部齐平；hopper/flyer 不长腿。
+- ropes 做尾巴/幌子/灯穗等会甩动的部分。
+- 明快温暖的配色；绝不包含暴力、恐怖、武器、成人内容。
+示例（会走路的小屋）：
+{"name":"walking_hut","palette":["#b1543f","#f4ead4","#e8b04b"],"blend":0.3,"outline":0.045,"parts":[{"shape":"box","pos":[0,1.3,0],"size":[1.7,1.2,1.5],"color":1},{"shape":"cone","pos":[0,2.35,0],"r1":1.05,"r2":0.18,"h":0.55,"color":0}],"locomotion":{"type":"walker","legs":4,"leg_r":0.12,"hip_h":0.78,"stance":[0.6,0.5],"speed":0.7},"ropes":[{"pos":[0,2.05,-0.85],"segments":4,"r":0.09,"len":0.26,"color":2}]}`;
 
 function stripFences(s: string): string {
   return s.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/i, '').trim();
@@ -62,6 +80,23 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
       scale: 1.0,
       abilities: ['move_to', 'deliver_message'], // 系统预设能力，固定（不取 LLM 的flavor）
     };
+  }
+
+  async designSdfProp(intentText: string): Promise<SdfPropSpec> {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: SDF_PROP_SYSTEM },
+      { role: 'user', content: `小朋友说：「${intentText}」。请设计这个会动的物件。` },
+    ];
+    const content = await this.#client.chatText(this.#model, messages, { jsonObject: true });
+    let raw: unknown = null;
+    try {
+      raw = JSON.parse(stripFences(content));
+    } catch {
+      raw = null;
+    }
+    const checked = validateSdfPropSpec(raw);
+    if (!checked.ok) return fallbackSdfPropSpec('mystery_hopper');
+    return checked.spec;
   }
 
   async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
