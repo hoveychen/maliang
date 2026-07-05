@@ -27,9 +27,12 @@ func _init() -> void:
 
 	var w := _probe(img, TerrainMap.T_WATER, Autotile.C_NW, Autotile.V_FULL, 16.0, 16.0)
 	fails += _check("bed body (R=1,B=2/8)", 1 if (w.r > 0.95 and _btype(w) == TerrainMap.T_WATER) else 0, 1)
-	# 湖床整 cell 主体、无描边（岸线由草侧崖缘+岸壁+水面泡沫表达）
+	fails += _check("full water no foam", 1 if w.g < 0.05 else 0, 1)
+	# 水 cell 的 R/B/A 全 cell 都是湖床主体；G 只在贴岸带出泡沫（水面 mesh 采样用）
 	var wedge := _probe(img, TerrainMap.T_WATER, Autotile.C_NW, Autotile.V_EDGE_H, 16.0, TerrainAtlas.MARGIN + 1.5)
-	fails += _check("bed full no rim", 1 if (wedge.r > 0.95 and wedge.g < 0.05) else 0, 1)
+	fails += _check("bed body under foam band", 1 if (wedge.r > 0.95 and wedge.g > 0.9) else 0, 1)
+	var wmid := _probe(img, TerrainMap.T_WATER, Autotile.C_NW, Autotile.V_EDGE_H, 16.0, 24.0)
+	fails += _check("foam fades off shore", 1 if wmid.g < 0.05 else 0, 1)
 
 	# OUTER 变体：NW 角外缘应是草，内里是路
 	var oc := _probe(img, TerrainMap.T_PATH, Autotile.C_NW, Autotile.V_OUTER, 1.0, 1.0)

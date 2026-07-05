@@ -150,6 +150,7 @@ static func _make_ground_mat() -> ShaderMaterial:
 static func _make_water_mat() -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = load("res://shaders/water_surface.gdshader")
+	m.set_shader_parameter("control_tex", TerrainAtlas.texture())
 	m.set_shader_parameter("water_tex", WATER_TEX)
 	m.set_shader_parameter("water_mean", WATER_MEAN)
 	m.set_shader_parameter("shallow_color", TerrainAtlas.WATER_SHALLOW)
@@ -375,21 +376,26 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 	return mesh
 
 ## 构建（或取缓存）一个 wrapped 区块的水面 ArrayMesh；区块内没有水返回 null。
-## 每个水 tile 一个 2m quad，水位 = 岸沿 - WATER_DIP；顶点色按共享该角点的
-## 四个 tile 计算：R = 水 tile 深度均值/MAX_DEPTH（浅→深平滑渐变），
-## G = 角点贴岸（四邻中有非水）= 1 → shader 的岸边泡沫带。UV2 同地面（逻辑米坐标）。
+## 每个水 tile 与地面同构切 4 个角 quad，水位 = 岸沿 - WATER_DIP：
+## - UV → atlas 水 cell（角变体 = 水-水邻接掩码）：G 通道是沿岸圆角泡沫带，
+##   子 tile 精度——窄溪也只在贴岸处起沫，不会整条变白
+## - 顶点色 R = 深度归一(depth/MAX_DEPTH，角点四邻水 tile 均值，双线性到子角点)
+## - UV2 同地面（逻辑米坐标，波纹滚动锚定环面）
 func _water_mesh(wrapped: Vector2i) -> ArrayMesh:
 	if _water_meshes.has(wrapped):
 		return _water_meshes[wrapped]
 	var verts := PackedVector3Array()
 	var norms := PackedVector3Array()
+	var uvs := PackedVector2Array()
 	var uv2s := PackedVector2Array()
 	var cols := PackedColorArray()
 	var idx := PackedInt32Array()
 	var base_tile := wrapped * CHUNK_TILES
 	var half := CHUNK_WORLD * 0.5
 	var ts := WorldGrid.TILE_SIZE
+	var half_tile := ts * 0.5
 	var loff := Vector2(wrapped) * CHUNK_WORLD + Vector2(half, half)
+	var is_water := func(q: Vector2i) -> bool: return TerrainMap.tile_type(q) == TerrainMap.T_WATER
 	for j in range(CHUNK_TILES):
 		for i in range(CHUNK_TILES):
 			var t := base_tile + Vector2i(i, j)
@@ -398,15 +404,23 @@ func _water_mesh(wrapped: Vector2i) -> ArrayMesh:
 			var y := float(TerrainMap.tile_height(t)) * TerrainMap.STEP_HEIGHT - WATER_DIP
 			var x0 := -half + float(i) * ts
 			var z0 := -half + float(j) * ts
-			var b := verts.size()
-			# 顶点序 NW/NE/SE/SW（俯视顺时针 = 正面朝上）
-			var corner_off: Array[Vector2i] = [Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1)]
-			for co in corner_off:
-				verts.append(Vector3(x0 + float(co.x) * ts, y, z0 + float(co.y) * ts))
-				norms.append(Vector3.UP)
-				uv2s.append(loff + Vector2(x0 + float(co.x) * ts, z0 + float(co.y) * ts))
-				cols.append(_water_vertex_color(t + co))
-			idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
+			var corners := Autotile.corners_from_mask(Autotile.mask_of(t, is_water))
+			# tile 四角点的深度色，子角 quad 顶点按 (u,v) 双线性取值
+			var c00 := _water_node_color(t + Vector2i(0, 0))
+			var c10 := _water_node_color(t + Vector2i(1, 0))
+			var c01 := _water_node_color(t + Vector2i(0, 1))
+			var c11 := _water_node_color(t + Vector2i(1, 1))
+			for c in range(4):
+				var cx := x0 + (half_tile if (c == Autotile.C_NE or c == Autotile.C_SE) else 0.0)
+				var cz := z0 + (half_tile if (c == Autotile.C_SW or c == Autotile.C_SE) else 0.0)
+				var r := TerrainAtlas.uv_rect(TerrainMap.T_WATER, c, corners[c], 0)
+				var b := verts.size()
+				_emit_quad(verts, norms, uvs, uv2s, idx, cx, cz, y, half_tile, r, loff)
+				for k in range(4):
+					var v := verts[b + k]
+					var u := (v.x - x0) / ts
+					var w := (v.z - z0) / ts
+					cols.append(c00.lerp(c10, u).lerp(c01.lerp(c11, u), w))
 	if verts.is_empty():
 		_water_meshes[wrapped] = null
 		return null
@@ -414,6 +428,7 @@ func _water_mesh(wrapped: Vector2i) -> ArrayMesh:
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
 	arrays[Mesh.ARRAY_COLOR] = cols
 	arrays[Mesh.ARRAY_INDEX] = idx
@@ -424,20 +439,18 @@ func _water_mesh(wrapped: Vector2i) -> ArrayMesh:
 
 ## 网格角点 node（tile 角点的整格索引）→ 水面顶点色。
 ## 共享该角点的四个 tile：node 的西北四邻 (node.x-1..node.x)×(node.y-1..node.y)。
-static func _water_vertex_color(node: Vector2i) -> Color:
+## R = 水 tile 深度均值 / MAX_DEPTH（岸角点只有部分邻居是水 → 天然偏浅）。
+static func _water_node_color(node: Vector2i) -> Color:
 	var depth_sum := 0.0
 	var water_n := 0
-	var shore := 0.0
 	for dz in range(-1, 1):
 		for dx in range(-1, 1):
 			var q := node + Vector2i(dx, dz)
 			if TerrainMap.tile_type(q) == TerrainMap.T_WATER:
 				depth_sum += float(TerrainMap.tile_depth(q))
 				water_n += 1
-			else:
-				shore = 1.0
 	var depth01 := (depth_sum / float(water_n)) / float(TerrainMap.MAX_DEPTH) if water_n > 0 else 0.0
-	return Color(depth01, shore, 0.0)
+	return Color(depth01, 0.0, 0.0)
 
 ## 水平角 quad：NW/NE/SE/SW 顶点序，从上往下看顺时针（Godot 正面绕序）。
 ## UV2 = 逻辑世界米坐标（局部坐标 + loff）。

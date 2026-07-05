@@ -67,8 +67,10 @@ func _tick() -> void:
 		var wa := wmesh.surface_get_arrays(0)
 		var wv: PackedVector3Array = wa[Mesh.ARRAY_VERTEX]
 		var wc: PackedColorArray = wa[Mesh.ARRAY_COLOR]
+		var wuv: PackedVector2Array = wa[Mesh.ARRAY_TEX_UV]
 		var wuv2: PackedVector2Array = wa[Mesh.ARRAY_TEX_UV2]
-		_check("水面 mesh 带 UV2 与顶点色", wc.size() == wv.size() and wuv2.size() == wv.size(), true)
+		_check("水面 mesh 带 UV(泡沫掩码)/UV2/顶点色",
+			wc.size() == wv.size() and wuv.size() == wv.size() and wuv2.size() == wv.size(), true)
 		var level_ok := true
 		for v in wv:
 			if not is_equal_approx(v.y, -ChunkManager.WATER_DIP):
@@ -76,15 +78,21 @@ func _tick() -> void:
 		_check("水位 = 岸沿 - WATER_DIP（高度 0 水域）", level_ok, true)
 		var max_depth01 := 0.0
 		var min_depth01 := 1e9
-		var has_shore := false
 		for c in wc:
 			max_depth01 = maxf(max_depth01, c.r)
 			min_depth01 = minf(min_depth01, c.r)
-			if c.g > 0.99:
-				has_shore = true
 		_check("深水核心顶点色 R=1（深度渐变到满）", is_equal_approx(max_depth01, 1.0), true)
 		_check("浅水边缘顶点色 R<1（有深浅对比）", min_depth01 < 0.9, true)
-		_check("岸线掩码 G=1 存在（泡沫带）", has_shore, true)
+		# 泡沫掩码在 atlas：贴岸角变体 cell 有 G 带、全水 cell 无（窄溪不整条变白的关键）
+		var img := TerrainAtlas.build_image()
+		var edge_uv := TerrainAtlas.uv_rect(TerrainMap.T_WATER, Autotile.C_NW, Autotile.V_EDGE_H, 0)
+		var edge_g := img.get_pixel(int(edge_uv.position.x * TerrainAtlas.W + 16.0),
+			int(edge_uv.position.y * TerrainAtlas.H + TerrainAtlas.MARGIN)).g
+		var full_uv := TerrainAtlas.uv_rect(TerrainMap.T_WATER, Autotile.C_NW, Autotile.V_FULL, 0)
+		var full_g := img.get_pixel(int(full_uv.position.x * TerrainAtlas.W + 16.0),
+			int(full_uv.position.y * TerrainAtlas.H + 16.0)).g
+		_check("贴岸 cell 有泡沫带 (G>0.9)", edge_g > 0.9, true)
+		_check("全水 cell 无泡沫 (G=0)", full_g < 0.05, true)
 
 	# 水面材质共享且是 water_surface shader
 	var wmat: ShaderMaterial = cm._water_mat
