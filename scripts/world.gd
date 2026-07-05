@@ -105,6 +105,7 @@ var active_task: Dictionary = {}   ## 进行中委托（空=无），见 _set_ac
 var inventory: Dictionary = {}     ## 贴纸背包 id→数量
 var task_chip: Label               ## 右上角委托提示（🎯目标 ⇒ 奖励）
 var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
+var _pending_give: Dictionary = {} ## give 转赠途中 { "item": 贴纸id, "npc": 受赠者字典 }
 ## 贴纸 id→emoji（与 server/src/types.ts STICKERS 对齐）
 const STICKER_GLYPHS := { "flower": "🌸", "apple": "🍎", "star": "⭐", "shell": "🐚",
 	"ladybug": "🐞", "candy": "🍬", "clover": "🍀", "gem": "💎" }
@@ -586,6 +587,7 @@ func _process(delta: float) -> void:
 	_drain_tts_stream()
 	_step_hold_follow(delta)
 	_step_task(delta)
+	_check_give()
 	_step_executors(delta)
 	_check_approach()
 	_update_fairy(delta)
@@ -1407,6 +1409,12 @@ func _on_character_response(data: Dictionary) -> void:
 		_set_active_task(data["task"]) # 新发起的委托（或进行中的重申）→ 提示 chip
 	var script: Variant = data.get("behaviorScript", null)
 	if typeof(script) == TYPE_DICTIONARY:
+		# give 是玩家执行的（亲自走过去送贴纸），拦下不进 NPC 执行器
+		var gv := _extract_give(script)
+		if not gv.is_empty():
+			_start_give(String(gv.get("item", "")), String(gv.get("character_name", "")))
+			script = null
+	if typeof(script) == TYPE_DICTIONARY:
 		# 点名指派（performerId）：不隔空遥控——正在对话的角色跑腿到执行者旁把指令带到，
 		# 对方点头应答才开始做（见 _relay_command）；没有说话者在场才直接下发。
 		var performer := _find_npc_by_id(String(data.get("performerId", "")))
@@ -1776,6 +1784,93 @@ func _step_task(delta: float) -> void:
 					and WorldGrid.shortest_delta(player["logical"], lp).length() <= VISIT_DONE_DIST:
 				backend.send_task_event(world_id, "visit_done", { "locationName": active_task.get("locationName", "") })
 				_task_check_t = 3.0
+
+# ── give：把贴纸送给 NPC（小朋友的角色亲自走过去交接）──────────────────────
+
+## 语音指令 give 落地：受赠者在旁直接交接；不在旁退出当前对话走过去（同点空地语义）。
+func _start_give(item_id: String, char_name: String) -> void:
+	if int(inventory.get(item_id, 0)) <= 0:
+		return # 背包没有：prompt 已让角色温柔说明，这里兜底不动作
+	var node := _find_npc_by_name(char_name)
+	if node == null:
+		return
+	var d := _find_npc_dict(node)
+	if d.is_empty() or d.get("is_fairy", false) or player.is_empty():
+		return
+	_pending_give = { "item": item_id, "npc": d }
+	if WorldGrid.shortest_delta(player["logical"], d["logical"]).length() <= APPROACH_ARRIVE + 0.6:
+		_finish_give()
+		return
+	if selected != null and selected != node:
+		_exit_interaction() # 要走去找别人：先退出眼前的对话（同点空地）
+	_clear_approach()
+	_halt_npc(d) # 受赠者停下等着收礼，别追着人跑
+	_move_player_to(d["logical"], APPROACH_ARRIVE)
+
+## 每帧检查：走到受赠者旁交接；走不到（被围/换了目标）放弃。
+func _check_give() -> void:
+	if _pending_give.is_empty() or _player_executor == null or not _player_executor.is_done():
+		return
+	var d: Dictionary = _pending_give.get("npc", {})
+	if not is_instance_valid(d.get("node")):
+		_pending_give = {}
+		return
+	if WorldGrid.shortest_delta(player["logical"], d["logical"]).length() <= APPROACH_ARRIVE + 0.6:
+		_finish_give()
+	else:
+		_pending_give = {}
+		_resume_stopped_npc()
+
+## 交接：上报服务端记账（扣背包+写受赠记忆+gift 委托顺带完成），本地飞贴纸+对方点头演出。
+func _finish_give() -> void:
+	var d: Dictionary = _pending_give.get("npc", {})
+	var item := String(_pending_give.get("item", ""))
+	_pending_give = {}
+	if d.is_empty() or not is_instance_valid(d.get("node")):
+		return
+	backend.send_give_item(world_id, String(d.get("id", "")), item)
+	inventory[item] = maxi(0, int(inventory.get(item, 0)) - 1) # 先行扣减，give_result 以服务端为准
+	_spawn_gift_fly(item, d)
+	d["paper_action"] = "nod" # 收礼点头应答
+	d["paper_action_t"] = 0.0
+	if not _stopped.is_empty() and _stopped == d and selected == null:
+		_resume_stopped_npc()
+
+## 贴纸 emoji 从玩家头顶飞到受赠者头顶，停一拍消失。
+func _spawn_gift_fly(item_id: String, d: Dictionary) -> void:
+	var l := Label3D.new()
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.pixel_size = 0.02
+	l.outline_size = 12
+	l.font_size = 84
+	l.text = _sticker_glyph(item_id)
+	add_child(l)
+	var pnode := player["node"] as Node3D
+	var nnode := d["node"] as Node3D
+	l.global_position = pnode.global_position + Vector3(0.0, 2.2, 0.0)
+	var tw := create_tween()
+	tw.tween_property(l, "global_position",
+		nnode.global_position + Vector3(0.0, _char_top(d["node"]) + 1.0, 0.0), 0.6) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(0.5)
+	tw.tween_callback(l.queue_free)
+
+func _find_npc_by_name(char_name: String) -> PaperCharacter:
+	var q := char_name.strip_edges()
+	if q.is_empty():
+		return null
+	for n in npcs:
+		var nm := (n["node"] as PaperCharacter).char_name
+		if nm == q or nm.contains(q) or q.contains(nm):
+			return n["node"]
+	return null
+
+## 行为脚本里的 give 指令（若有）：give 由玩家执行，不进 NPC 执行器。
+func _extract_give(script: Dictionary) -> Dictionary:
+	for c in (script.get("commands", []) as Array):
+		if String((c as Dictionary).get("type", "")) == "give":
+			return (c as Dictionary).get("params", {})
+	return {}
 
 ## deliver 委托：小朋友亲自走到目标角色旁开始对话 = 话带到了。
 func _check_deliver_task(npc: PaperCharacter) -> void:
