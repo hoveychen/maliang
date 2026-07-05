@@ -629,6 +629,32 @@ func _update_paper_motion(n: Dictionary, node: PaperCharacter, lean: float, delt
 	node.rotation = Vector3(-lean * cos(fry), fry, sway)
 	# 待机呼吸微卷用慢相位（走动时让位给飘动）；飘动幅度随走路强度
 	node.set_paper_motion(WALK_FLUTTER * w, IDLE_CURL * (1.0 - w) * sin(phase * 0.22))
+	_update_action_anim(n, node, delta)
+
+## 指令动作演出（do_action 契约键 paper_action，见 BehaviorExecutor.ACTION_DUR）：
+## 挥手=左右摇纸 / 跳=双跳 / 转圈=绕竖轴一整圈（中途侧身纸边）/ 点头=前后倾。
+## 叠加在正常姿态之上，sin(k*PI) 包络起收平滑，结束自动清键。
+func _update_action_anim(n: Dictionary, node: PaperCharacter, delta: float) -> void:
+	var action := String(n.get("paper_action", ""))
+	if action.is_empty():
+		return
+	var t := float(n.get("paper_action_t", 0.0)) + delta
+	var dur := float(BehaviorExecutor.ACTION_DUR.get(action, 1.2))
+	if t >= dur:
+		n.erase("paper_action")
+		n.erase("paper_action_t")
+		return
+	n["paper_action_t"] = t
+	var k := t / dur
+	match action:
+		"wave":
+			node.rotation.z += deg_to_rad(16.0) * sin(t * TAU * 2.2) * sin(k * PI)
+		"jump":
+			node.position.y += absf(sin(k * PI * 2.0)) * 1.4 # 两小跳
+		"spin":
+			node.rotation.y += TAU * smoothstep(0.0, 1.0, k) # 一整圈，中途露纸边
+		"nod":
+			node.rotation.x += deg_to_rad(12.0) * sin(t * TAU * 1.6) * sin(k * PI)
 
 ## 把节点放到「弯曲后」的地表位置。与 world_bend.gdshader 同一公式：
 ## 世界空间、以原点（玩家）为中心的水平距离平方下沉（shadow pass 一致，见着色器注释）。

@@ -181,6 +181,22 @@ func _init() -> void:
 	ex10.step(dt)
 	fails += _check("unknown location skipped", ex10.is_done(), true)
 	fails += _check("unknown location no move", d10["logical"], l_start)
+
+	# do_action：写 paper_action 契约键（world 动画层演出），阻塞动作时长后完成
+	var d11 := { "logical": l_start, "id": "actor" }
+	var ex11 := BehaviorExecutor.new()
+	ex11.setup(d11, { "commands": [ { "type": "do_action", "params": { "action": "jump" } } ] })
+	ex11.step(dt)
+	fails += _check("do_action sets key", String(d11.get("paper_action", "")), "jump")
+	fails += _check("do_action blocks", ex11.is_done(), false)
+	for i in range(80): # jump 时长 1.0s + 余量
+		ex11.step(dt)
+	fails += _check("do_action done after duration", ex11.is_done(), true)
+	var d12 := { "logical": l_start, "id": "actor2" }
+	var ex12 := BehaviorExecutor.new()
+	ex12.setup(d12, { "commands": [ { "type": "do_action", "params": { "action": "backflip" } } ] })
+	ex12.step(dt)
+	fails += _check("unknown action falls back to wave", String(d12.get("paper_action", "")), "wave")
 	OccupancyMap.clear()
 
 	if fails == 0:
