@@ -805,11 +805,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			_tap_pick(event.position)
 		return
 
-## 第二指落下：接管为相机手势，取消进行中的按住跟随，且抬指不得触发拾取。
+## 第二指落下：接管为相机手势——取消按住跟随和第一指已下发的走路指令，抬指不得触发拾取。
 func _begin_gesture() -> void:
 	_gesturing = true
 	_hold_follow = false
 	_dragging = true
+	_cancel_player_move()
 	_gest_reset_t = 0.0 # 手势进行中不倒计时，全部抬起才开始
 
 ## 双指拖动增量：两指间距变化 → 距离倍率（张开=拉近）；中点位移 → 环绕(横)+俯仰(纵)。

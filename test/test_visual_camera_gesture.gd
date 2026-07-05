@@ -58,6 +58,7 @@ func _press_one_finger_then_second() -> void:
 	_send_touch(1, sp + Vector2(200.0, 0.0), true)
 	_check("second finger begins gesture", scene.get("_gesturing"), true)
 	_check("gesture cancels hold follow", scene.get("_hold_follow"), false)
+	_check("gesture cancels pending player move", scene.get("_player_executor") == null, true)
 
 ## 捏合张开（两指间距 200→400px）：距离倍率应减半（拉近）。
 func _pinch_out() -> void:
