@@ -108,8 +108,14 @@ var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _pending_give: Dictionary = {} ## give 转赠途中 { "item": 贴纸id, "npc": 受赠者字典 }
 var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
 var album_button: Button           ## 左下角收集册按钮（📖）
-var album_panel: PanelContainer    ## 收集册面板：贴纸图标网格+数量角标
+var album_panel: PanelContainer    ## 收集册面板：贴纸/物品分页（tab 切换）
 var _album_cells: Dictionary = {}  ## 贴纸 id → { "glyph": Label, "count": Label }
+# 物品系统：语音造物的物件可摆可收，收集册物品页列出收进背包的（服务端权威，state 同步）
+var world_props: Dictionary = {}   ## 语音物件 id → { "spec", "state"(placed/bagged), "tile"(Array|null) }
+var _album_tab_buttons: Dictionary = {} ## "stickers"/"items" → Button（tab 高亮切换）
+var _album_pages: Dictionary = {}  ## "stickers"/"items" → Control（分页容器）
+var _items_grid: GridContainer     ## 物品页网格（bagged 物件动态重建）
+var _items_empty: Label            ## 物品页空态提示
 ## 收集册展示顺序（与 STICKER_GLYPHS 同集）
 const STICKER_ORDER := ["flower", "apple", "star", "shell", "ladybug", "candy", "clover", "gem"]
 ## 贴纸 id→emoji（与 server/src/types.ts STICKERS 对齐）
@@ -530,6 +536,18 @@ func _setup_hud() -> void:
 	album_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH # 内容撑开时仍以屏幕中心为锚
 	album_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	album_panel.visible = false
+	# 分页：顶部两个大 tab（🌸贴纸 / 🎁物品），下面按 tab 切换显示对应网格
+	var tabs := HBoxContainer.new()
+	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
+	tabs.add_theme_constant_override("separation", 24)
+	for tab in [["stickers", "🌸 贴纸"], ["items", "🎁 物品"]]:
+		var b := Button.new()
+		b.text = String(tab[1])
+		b.toggle_mode = true
+		b.add_theme_font_size_override("font_size", 30)
+		b.pressed.connect(_set_album_tab.bind(String(tab[0])))
+		tabs.add_child(b)
+		_album_tab_buttons[tab[0]] = b
 	var grid := GridContainer.new()
 	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 28)
@@ -548,12 +566,32 @@ func _setup_hud() -> void:
 		cell.add_child(count)
 		grid.add_child(cell)
 		_album_cells[id] = { "glyph": glyph, "count": count }
+	# 物品页：收进背包的语音物件（动态重建），空态给一句提示
+	var items_page := VBoxContainer.new()
+	items_page.alignment = BoxContainer.ALIGNMENT_CENTER
+	_items_grid = GridContainer.new()
+	_items_grid.columns = 4
+	_items_grid.add_theme_constant_override("h_separation", 28)
+	_items_grid.add_theme_constant_override("v_separation", 16)
+	_items_empty = Label.new()
+	_items_empty.text = "还没有收起来的物品"
+	_items_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_label(_items_empty, 24)
+	items_page.add_child(_items_grid)
+	items_page.add_child(_items_empty)
+	_album_pages = { "stickers": grid, "items": items_page }
+	var pages := VBoxContainer.new()
+	pages.add_theme_constant_override("separation", 20)
+	pages.add_child(tabs)
+	pages.add_child(grid)
+	pages.add_child(items_page)
 	var margin := MarginContainer.new()
 	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
 		margin.add_theme_constant_override(side, 28)
-	margin.add_child(grid)
+	margin.add_child(pages)
 	album_panel.add_child(margin)
 	layer.add_child(album_panel)
+	_set_album_tab("stickers")
 
 	# 进行中委托的提示 chip（右上角，emoji 为主：🎯目标 ⇒ 奖励贴纸）
 	task_chip = Label.new()
@@ -1239,11 +1277,14 @@ func _bootstrap() -> void:
 	var chars: Array = world.get("characters", [])
 	for c in chars:
 		await _spawn_server_character(c as Dictionary, Vector2.INF)
-	# 语音生成的物件：按持久化的落位 tile 原位恢复（从未落位的跳过）
+	# 语音生成的物件：全部记入 world_props（物品页要列 bagged 的），
+	# 只有 placed 且有落位 tile 的才进世界（从未落位的跳过，bagged 的留在背包）
 	for p in world.get("props", []):
 		var pd: Dictionary = p
+		var state := String(pd.get("state", "placed")) # 旧服务端无 state 字段：视为已摆放
 		var tile: Variant = pd.get("tile", null)
-		if tile is Array and (tile as Array).size() >= 2:
+		world_props[String(pd.get("id", ""))] = { "spec": pd.get("spec", {}), "state": state, "tile": tile }
+		if state == "placed" and tile is Array and (tile as Array).size() >= 2:
 			var t := Vector2i(int(tile[0]), int(tile[1]))
 			chunk_manager.add_dynamic_prop(pd.get("spec", {}), t, float(hash(pd.get("id", "")) % 360), _prop_wander(pd.get("spec", {})))
 	# 玩家搬到小神仙旁边降生，相机跟着玩家过去
@@ -1337,6 +1378,7 @@ func _on_prop_created(prop: Dictionary) -> void:
 		banner.text = "这里放不下啦，换个地方试试"
 		banner.visible = true
 		return
+	world_props[String(prop.get("id", ""))] = { "spec": spec, "state": "placed", "tile": [placed.x, placed.y] }
 	backend.send_prop_place(world_id, String(prop.get("id", "")), placed)
 	game_audio.play_sfx("fanfare")
 	banner.text = "变出来啦！"
@@ -1904,12 +1946,46 @@ func _toggle_album() -> void:
 	if album_panel.visible:
 		_refresh_album()
 
+## 分页切换：tab 高亮 + 只显示当前页。
+func _set_album_tab(tab: String) -> void:
+	for key in _album_tab_buttons:
+		(_album_tab_buttons[key] as Button).button_pressed = (key == tab)
+		(_album_pages[key] as Control).visible = (key == tab)
+
 func _refresh_album() -> void:
 	for id in _album_cells:
 		var cell: Dictionary = _album_cells[id]
 		var n := int(inventory.get(id, 0))
 		(cell["glyph"] as Label).modulate = Color.WHITE if n > 0 else Color(0.28, 0.28, 0.34)
 		(cell["count"] as Label).text = ("x%d" % n) if n > 0 else ""
+	_refresh_items_page()
+
+## 物品页：重建 bagged 物件网格（🎁+物件名）。物件不多，全量重建最简单。
+func _refresh_items_page() -> void:
+	if _items_grid == null:
+		return
+	for c in _items_grid.get_children():
+		c.queue_free()
+	var bagged := []
+	for pid in world_props:
+		if String(world_props[pid].get("state", "")) == "bagged":
+			bagged.append(pid)
+	_items_empty.visible = bagged.is_empty()
+	for pid in bagged:
+		var spec: Dictionary = world_props[pid].get("spec", {})
+		var cell := VBoxContainer.new()
+		cell.alignment = BoxContainer.ALIGNMENT_CENTER
+		var glyph := Label.new()
+		glyph.text = "🎁"
+		glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		glyph.add_theme_font_size_override("font_size", 56)
+		var name_label := Label.new()
+		name_label.text = String(spec.get("name", "小玩意"))
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_style_label(name_label, 20)
+		cell.add_child(glyph)
+		cell.add_child(name_label)
+		_items_grid.add_child(cell)
 
 ## bring/visit 的完成判定（节流轮询）：deliver 在 _enter_interaction 里判，gift 在 give 交接里判。
 func _step_task(delta: float) -> void:
