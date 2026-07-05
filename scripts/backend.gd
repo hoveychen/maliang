@@ -13,6 +13,7 @@ signal failed(reason: String)
 signal world_state(data: Dictionary)
 signal task_complete(data: Dictionary)
 signal give_result(data: Dictionary)
+signal praise_tts(asset: String)
 ## 出站消息观测（连接未开也发射）：headless 测试/调试用，正常逻辑不要依赖它
 signal sent(msg: Dictionary)
 
@@ -100,5 +101,7 @@ func _dispatch(data: Dictionary) -> void:
 			task_complete.emit(data)
 		"give_result":
 			give_result.emit(data)
+		"praise_tts":
+			praise_tts.emit(String(data.get("ttsAsset", "")))
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))

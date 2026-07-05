@@ -180,3 +180,46 @@ test('mock routeIntent：送贴纸→give 指令、问帮忙→offerTask', async
   const offer = await llm.routeIntent('有什么要帮忙的吗', ctx);
   assert.equal(offer.offerTask, true);
 });
+
+test('得奖语音：praiseLine/thanksLine 用中文贴纸名（emoji 念不出来）', async () => {
+  const { praiseLine, thanksLine } = await import('../src/tasks.ts');
+  const base = { id: 't', npcId: 'g', npcName: '小绿', rewardId: 'star' } as const;
+  assert.ok(praiseLine({ ...base, type: 'deliver', targetName: '小蓝' }).includes('星星'));
+  assert.ok(praiseLine({ ...base, type: 'bring', targetName: '小蓝' }).includes('小蓝'));
+  assert.ok(praiseLine({ ...base, type: 'visit', locationName: '池塘' }).includes('池塘'));
+  const gift = praiseLine({ ...base, type: 'gift', itemId: 'flower' });
+  assert.ok(gift.includes('花') && gift.includes('星星'), '送礼表扬应含礼物名与奖励名');
+  assert.ok(thanksLine('candy').includes('糖果'));
+  for (const line of [gift, thanksLine('candy')]) {
+    assert.ok(!/[\u{1F300}-\u{1FAFF}⭐]/u.test(line), 'TTS 台词不应含 emoji');
+  }
+});
+
+test('WS 得奖语音：task_event 完成→praise_tts；普通转赠→致谢；gift 委托不双发', async () => {
+  const store = seedWorld();
+  store.addSticker('w1', 'flower', 3);
+  const sent: Record<string, unknown>[] = [];
+  const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
+  const rest = [createMockAdapters(), store, new RateLimiter(100, 100), 'c1', newVoiceSession()] as const;
+
+  // 委托完成 → task_complete 之外还推 praise_tts，音频已入资产库
+  store.setActiveTask('w1', {
+    id: 't1', type: 'deliver', npcId: 'green', npcName: '小绿', targetName: '小蓝', message: 'hi', rewardId: 'gem',
+  });
+  await handleWsMessage(socket, JSON.stringify({ type: 'task_event', worldId: 'w1', kind: 'deliver_done', targetName: '小蓝' }), ...rest);
+  await new Promise((r) => setTimeout(r, 10)); // praise 后台合成
+  const praise = sent.filter((m) => m['type'] === 'praise_tts');
+  assert.equal(praise.length, 1, '完成应推一条表扬语音');
+  assert.ok(store.getAsset(String(praise[0]!['ttsAsset'])), '表扬音频应入资产库');
+
+  // 普通转赠（无 gift 委托）→ 受赠者致谢一条
+  await handleWsMessage(socket, JSON.stringify({ type: 'give_item', worldId: 'w1', toCharacterId: 'blue', itemId: 'flower' }), ...rest);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(sent.filter((m) => m['type'] === 'praise_tts').length, 2, '转赠应推一条致谢语音');
+
+  // gift 委托经转赠完成 → 只发表扬（含致谢措辞），不再另发致谢
+  store.setActiveTask('w1', { id: 't2', type: 'gift', npcId: 'blue', npcName: '小蓝', itemId: 'flower', rewardId: 'candy' });
+  await handleWsMessage(socket, JSON.stringify({ type: 'give_item', worldId: 'w1', toCharacterId: 'blue', itemId: 'flower' }), ...rest);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(sent.filter((m) => m['type'] === 'praise_tts').length, 3, 'gift 委托完成只多一条（不双发）');
+});

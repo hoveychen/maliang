@@ -2,7 +2,7 @@
 // 委托由服务端确定性生成（目标/奖励/判定条件都定死），LLM 只负责用角色口吻把请求说出来
 // （见 openrouter_llm.routeIntent 的 offerTask）；完成判定是客户端上报的确定性事件，不靠 LLM 猜。
 import { randomUUID } from 'node:crypto';
-import { STICKERS, type ActiveTask, type TaskType } from './types.ts';
+import { STICKERS, stickerName, type ActiveTask, type TaskType } from './types.ts';
 import type { WorldStore } from './persistence.ts';
 
 /** deliver 委托的带话内容池（判定不依赖文本，纯演出）。 */
@@ -71,6 +71,26 @@ export function describeTask(task: ActiveTask): string {
     case 'gift':
       return `请小朋友送你一个贴纸(${task.itemId})`;
   }
+}
+
+/** 完成时委托人的口头表扬（TTS 用中文贴纸名，emoji 念不出来）。 */
+export function praiseLine(task: ActiveTask): string {
+  const reward = stickerName(task.rewardId);
+  switch (task.type) {
+    case 'deliver':
+      return `太棒啦！话带到了！这个${reward}贴纸送给你！`;
+    case 'bring':
+      return `谢谢你把${task.targetName}带来啦！送你一个${reward}贴纸！`;
+    case 'visit':
+      return `你真的去过${task.locationName}啦！送你一个${reward}贴纸！`;
+    case 'gift':
+      return `哇，谢谢你的${stickerName(task.itemId ?? '')}！这个${reward}贴纸送给你！`;
+  }
+}
+
+/** 转赠（非委托）时受赠者的口头致谢。 */
+export function thanksLine(itemId: string): string {
+  return `哇，谢谢你的${stickerName(itemId)}！我好喜欢！`;
 }
 
 /** 客户端上报的完成事件。 */

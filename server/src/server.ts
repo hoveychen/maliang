@@ -10,8 +10,8 @@ import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
-import { stickerGlyph, type Character, type VoiceResponse } from './types.ts';
-import { completeTaskOnEvent } from './tasks.ts';
+import { stickerGlyph, type ActiveTask, type Character, type VoiceResponse } from './types.ts';
+import { completeTaskOnEvent, praiseLine, thanksLine } from './tasks.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -185,6 +185,33 @@ export function newVoiceSession(): VoiceSession {
   return { active: false, worldId: '', characterId: '', asr: null, gate: null };
 }
 
+/** 得奖语音表扬：委托人音色念表扬词，合成好推 praise_tts（尽力而为，失败不影响主流程）。 */
+async function pushPraiseTts(
+  socket: { send: (data: string) => void },
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  worldId: string,
+  task: ActiveTask,
+): Promise<void> {
+  const npc = store.getCharacter(worldId, task.npcId);
+  await pushLineTts(socket, adapters, store, praiseLine(task), npc?.voiceId ?? 'cn-child-default');
+}
+
+async function pushLineTts(
+  socket: { send: (data: string) => void },
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  text: string,
+  voiceId: string,
+): Promise<void> {
+  try {
+    const audio = await adapters.tts.synthesize(text, voiceId);
+    socket.send(JSON.stringify({ type: 'praise_tts', ttsAsset: store.putAsset(audio) }));
+  } catch (err) {
+    console.warn(`表扬/致谢 TTS 合成失败（不影响主流程）：${String(err)}`);
+  }
+}
+
 export async function handleWsMessage(
   socket: { send: (data: string) => void },
   raw: string,
@@ -254,6 +281,7 @@ export async function handleWsMessage(
         rewardGlyph: stickerGlyph(done.rewardId),
         inventory: store.getInventory(worldId),
       }));
+      void pushPraiseTts(socket, adapters, store, worldId, done); // 委托人音色的语音表扬（后台合成，不卡庆祝）
     }
     return; // 不匹配静默忽略（迟到/重复上报无副作用）
   }
@@ -281,6 +309,9 @@ export async function handleWsMessage(
           rewardGlyph: stickerGlyph(done.rewardId),
           inventory: store.getInventory(worldId),
         }));
+        void pushPraiseTts(socket, adapters, store, worldId, done); // 委托达成：表扬已含致谢，不再另发
+      } else if (npc) {
+        void pushLineTts(socket, adapters, store, thanksLine(itemId), npc.voiceId); // 普通转赠：受赠者致谢
       }
     }
     socket.send(JSON.stringify({ type: 'give_result', ok, itemId, inventory: store.getInventory(worldId) }));

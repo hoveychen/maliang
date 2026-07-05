@@ -61,12 +61,15 @@ func _tick() -> void:
 			_check("deliver_done sent on meeting target", String(ev.get("kind", "")), "deliver_done")
 			scene.call("_exit_interaction")
 		8:
-			# task_complete：清 chip、进背包、委托人跳跃庆祝
+			# task_complete：清 chip、进背包、委托人跳跃庆祝、小仙子欢呼（预制台词）
+			var fv := scene.get("fairy_voice") as FairyVoice
+			_check("fairy has reward cheer lines", fv.can_play("reward"), true)
 			scene.call("_on_task_complete", { "task": _task("deliver"), "rewardId": "star",
 				"rewardGlyph": "⭐", "inventory": { "flower": 2, "star": 1 } })
 			_check("chip cleared on complete", (scene.get("task_chip") as Label).visible, false)
 			_check("reward in inventory", int((scene.get("inventory") as Dictionary).get("star", 0)), 1)
 			_check("quest giver celebrates (jump)", String(green.get("paper_action", "")), "jump")
+			_check("fairy cheers on reward", fv.is_playing(), true)
 		12:
 			# bring 判定：目标与委托人相邻（直接把小蓝挪到小绿旁）
 			scene.call("_set_active_task", _task("bring", { "targetName": "小蓝" }))

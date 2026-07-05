@@ -39,6 +39,12 @@ export function stickerGlyph(id: string): string {
   return STICKERS.find((s) => s.id === id)?.glyph ?? '⭐';
 }
 
+/** 贴纸 id → 中文叫法（表扬/致谢台词用，emoji 进 TTS 念不出来）。 */
+export function stickerName(id: string): string {
+  for (const [cn, sid] of Object.entries(STICKER_NAMES)) if (sid === id) return cn;
+  return '贴纸';
+}
+
 /** 贴纸的中文叫法 → id（意图 prompt 词汇表与 mock 解析共用；小朋友说「把花送给小蓝」）。 */
 export const STICKER_NAMES: Record<string, string> = {
   花: 'flower',

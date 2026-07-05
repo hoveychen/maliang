@@ -1187,6 +1187,7 @@ func _setup_backend() -> void:
 	backend.world_state.connect(_on_world_state)
 	backend.task_complete.connect(_on_task_complete)
 	backend.give_result.connect(_on_give_result)
+	backend.praise_tts.connect(_on_praise_tts)
 	backend.tts_chunk.connect(_on_tts_chunk)
 	# 残余积压由 _drain_tts_stream 排空；generator 不会自己停，标记后播完主动 stop
 	# （否则 _tts_player.playing 永真 → 开放麦永久闭麦、小仙子永久闭嘴）
@@ -1801,7 +1802,13 @@ func _on_give_result(data: Dictionary) -> void:
 	inventory = data.get("inventory", inventory)
 	_refresh_album()
 
-## 庆祝演出：委托人跳跃+头顶 🎉 爆点，奖励贴纸从屏幕中心飞进左下角收集册按钮。
+## 得奖语音表扬（委托人音色，服务端后台合成推来）：正在出声就不打断——表扬是锦上添花。
+func _on_praise_tts(asset: String) -> void:
+	if asset.is_empty() or _tts_player.playing:
+		return
+	_play_tts(asset)
+
+## 庆祝演出：委托人跳跃+头顶 🎉 爆点+小仙子欢呼（预制台词），奖励贴纸飞进左下角收集册按钮。
 func _celebrate_reward(glyph: String, task: Dictionary) -> void:
 	var npc := _find_npc_by_id(String(task.get("npcId", "")))
 	if npc != null:
@@ -1810,6 +1817,8 @@ func _celebrate_reward(glyph: String, task: Dictionary) -> void:
 			d["paper_action"] = "jump"
 			d["paper_action_t"] = 0.0
 		_spawn_burst(npc)
+	if fairy_voice != null:
+		fairy_voice.try_play("reward") # 身边的小仙子先欢呼，1~2 秒后委托人的表扬语音跟上
 	if game_audio != null:
 		game_audio.play_sfx("enter")
 	_fly_reward_to_album(glyph)
