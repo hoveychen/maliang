@@ -21,6 +21,40 @@ export interface BehaviorScript {
  * 存量角色 abilities 里可能只有旧的两项，意图 prompt 按「基础集 ∪ 角色自带」取并集，免数据迁移。 */
 export const BASE_ABILITIES = ['move_to', 'follow', 'stop_follow', 'do_action', 'chat_with', 'deliver_message'];
 
+// ── 奖赏系统：贴纸收集册 + NPC 委托 ────────────────────────────────────────
+
+/** 贴纸目录：委托奖励的收集品（去文字化，大 emoji 图标）。id 稳定入存档，glyph 供客户端展示。 */
+export const STICKERS: readonly { id: string; glyph: string }[] = [
+  { id: 'flower', glyph: '🌸' },
+  { id: 'apple', glyph: '🍎' },
+  { id: 'star', glyph: '⭐' },
+  { id: 'shell', glyph: '🐚' },
+  { id: 'ladybug', glyph: '🐞' },
+  { id: 'candy', glyph: '🍬' },
+  { id: 'clover', glyph: '🍀' },
+  { id: 'gem', glyph: '💎' },
+];
+
+export function stickerGlyph(id: string): string {
+  return STICKERS.find((s) => s.id === id)?.glyph ?? '⭐';
+}
+
+/** 委托类型：完成判定全部是客户端确定性事件（送达回调/相邻/到点/交接），不靠 LLM 猜。 */
+export type TaskType = 'deliver' | 'bring' | 'visit' | 'gift';
+
+/** 进行中的委托。同一时刻至多一个（幼儿单任务心智，完成判定也无歧义）。 */
+export interface ActiveTask {
+  id: string;
+  type: TaskType;
+  npcId: string; // 委托人（完成后由它庆祝/表扬）
+  npcName: string;
+  targetName?: string; // deliver/bring：对象角色名
+  locationName?: string; // visit：地点名（客户端 POI 判定）
+  itemId?: string; // gift：要送给委托人的贴纸 id
+  message?: string; // deliver：要带的话
+  rewardId: string; // 完成奖励的贴纸 id
+}
+
 /** LLM 从玩家意图产出的角色设定（落地前）。 */
 export interface CharacterSpec {
   name: string;
