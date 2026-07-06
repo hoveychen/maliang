@@ -47,9 +47,17 @@ func _tick() -> void:
 			# world_state 同步：背包+进行中委托 → chip 可见、收集册亮起
 			scene.call("_on_world_state", { "inventory": { "flower": 2 },
 				"activeTask": _task("deliver", { "targetName": "小蓝", "message": "hi" }) })
-			var chip := scene.get("task_chip") as Label
+			var chip := scene.get("task_chip") as HBoxContainer
 			_check("task chip visible", chip.visible, true)
-			_check("task chip shows goal+reward", chip.text.contains("小蓝") and chip.text.contains("⭐"), true)
+			var chip_text := ""
+			var chip_icons := 0
+			for c in chip.get_children():
+				if c is Label:
+					chip_text += (c as Label).text
+				elif c is TextureRect:
+					chip_icons += 1
+			_check("task chip shows goal", chip_text.contains("小蓝"), true)
+			_check("task chip shows target+reward icons", chip_icons >= 2, true)
 			_check("inventory synced", int((scene.get("inventory") as Dictionary).get("flower", 0)), 2)
 			scene.call("_toggle_album")
 			_check("album opens", (scene.get("album_panel") as PanelContainer).visible, true)
@@ -66,7 +74,7 @@ func _tick() -> void:
 			_check("fairy has reward cheer lines", fv.can_play("reward"), true)
 			scene.call("_on_task_complete", { "task": _task("deliver"), "rewardId": "star",
 				"rewardGlyph": "⭐", "inventory": { "flower": 2, "star": 1 } })
-			_check("chip cleared on complete", (scene.get("task_chip") as Label).visible, false)
+			_check("chip cleared on complete", (scene.get("task_chip") as HBoxContainer).visible, false)
 			_check("reward in inventory", int((scene.get("inventory") as Dictionary).get("star", 0)), 1)
 			_check("quest giver celebrates (jump)", String(green.get("paper_action", "")), "jump")
 			_check("fairy cheers on reward", fv.is_playing(), true)
