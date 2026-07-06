@@ -66,7 +66,7 @@ class MaliangAsrPlugin(godot: Godot) : GodotPlugin(godot) {
                             tokens = "$MODEL_DIR/tokens.txt",
                             numThreads = 2,
                             provider = "cpu",
-                            modelType = "zipformer",
+                            modelType = "zipformer2",
                         ),
                         decodingMethod = "greedy_search",
                     ),
