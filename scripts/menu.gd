@@ -1,9 +1,11 @@
 extends Control
-## 主菜单：3 岁小朋友友好——不依赖文字，超大按钮 + 小仙子飘动。
-## 开始 → 童话书 onboarding；继续 → 直接进世界（有档案时才显示）。图标为 AIGC 贴纸（UiAssets）。
+## 主菜单：3 岁小朋友友好——零文字零选择，全屏任点即进（press-anywhere）。
+## 按档案分流：无档案 → 童话书 onboarding；有档案 → 直接进世界。
+## 唯一提示是中央脉动的大箭头贴纸；重新捏角色的入口藏在游戏内设置里，菜单不摆第二个选项。
 
 
 var _fairy: TextureRect
+var _hint: TextureRect
 var _t := 0.0
 var _fairy_base_y := 0.0
 var game_audio: GameAudio
@@ -13,7 +15,7 @@ func _ready() -> void:
 	_setup_background()
 	_setup_fairy()
 	_setup_title()
-	_setup_buttons()
+	_setup_tap_entry()
 	game_audio = GameAudio.new()
 	game_audio.name = "GameAudio"
 	add_child(game_audio)
@@ -57,50 +59,32 @@ func _setup_title() -> void:
 	title.add_theme_constant_override("outline_size", 16)
 	add_child(title)
 
-func _setup_buttons() -> void:
-	var start := _big_button("出发！", Color(1.0, 0.72, 0.35), "ic_next")
-	start.set_anchors_preset(Control.PRESET_CENTER)
-	start.offset_left = -220.0
-	start.offset_right = 220.0
-	start.offset_top = 60.0
-	start.offset_bottom = 170.0
-	start.pressed.connect(_on_start)
-	add_child(start)
+func _setup_tap_entry() -> void:
+	# 全屏透明按钮：点哪里都触发（乱拍也能进），键盘任意键同效（_unhandled_input）
+	var tap := Button.new()
+	tap.flat = true
+	tap.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	tap.add_theme_stylebox_override("hover", StyleBoxEmpty.new())
+	tap.add_theme_stylebox_override("pressed", StyleBoxEmpty.new())
+	tap.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	tap.set_anchors_preset(Control.PRESET_FULL_RECT)
+	tap.pressed.connect(_on_tap)
+	add_child(tap)
 
-	if PlayerProfile.exists():
-		var cont := _big_button("继续玩", Color(0.62, 0.85, 0.62), "ic_book_open")
-		cont.set_anchors_preset(Control.PRESET_CENTER)
-		cont.offset_left = -220.0
-		cont.offset_right = 220.0
-		cont.offset_top = 200.0
-		cont.offset_bottom = 300.0
-		cont.pressed.connect(_on_continue)
-		add_child(cont)
+	# 中央脉动大箭头：不识字也懂的唯一提示（缩放呼吸见 _process）
+	_hint = UiAssets.icon_rect("ic_next", 180.0)
+	_hint.set_anchors_preset(Control.PRESET_CENTER)
+	_hint.offset_left = -90.0
+	_hint.offset_right = 90.0
+	_hint.offset_top = 40.0
+	_hint.offset_bottom = 220.0
+	_hint.pivot_offset = Vector2(90.0, 90.0)
+	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE # 别挡全屏按钮
+	add_child(_hint)
 
-## 儿童友好的大按钮：超大字号 + 圆角撞色底 + AIGC 贴纸图标。
-func _big_button(text: String, color: Color, icon_name := "") -> Button:
-	var b := Button.new()
-	b.text = text
-	if not icon_name.is_empty():
-		b.icon = UiAssets.tex(icon_name)
-		b.add_theme_constant_override("icon_max_width", 64)
-		b.add_theme_constant_override("h_separation", 16)
-	b.add_theme_font_size_override("font_size", 52)
-	b.add_theme_color_override("font_color", Color.WHITE)
-	b.add_theme_color_override("font_outline_color", color.darkened(0.4))
-	b.add_theme_constant_override("outline_size", 8)
-	var style := StyleBoxFlat.new()
-	style.bg_color = color
-	style.set_corner_radius_all(40)
-	style.set_content_margin_all(18.0)
-	b.add_theme_stylebox_override("normal", style)
-	var hover := style.duplicate() as StyleBoxFlat
-	hover.bg_color = color.lightened(0.15)
-	b.add_theme_stylebox_override("hover", hover)
-	var pressed := style.duplicate() as StyleBoxFlat
-	pressed.bg_color = color.darkened(0.15)
-	b.add_theme_stylebox_override("pressed", pressed)
-	return b
+## 入口分流：有档案直接进世界，没档案先走童话书 onboarding。
+static func target_scene() -> String:
+	return "res://main.tscn" if PlayerProfile.exists() else "res://onboarding.tscn"
 
 func _process(delta: float) -> void:
 	# 小仙子轻轻上下飘
@@ -109,12 +93,18 @@ func _process(delta: float) -> void:
 		var off := sin(_t * 1.6) * 12.0
 		_fairy.offset_top = _fairy_base_y + off
 		_fairy.offset_bottom = _fairy_base_y + 178.0 + off
+	if _hint != null:
+		# 箭头缩放呼吸脉动，招呼小朋友来拍
+		var s := 1.0 + sin(_t * 2.4) * 0.08
+		_hint.scale = Vector2(s, s)
 
-func _on_start() -> void:
-	_go_to("res://onboarding.tscn")
+func _unhandled_input(event: InputEvent) -> void:
+	# press-any-key：键盘任意键也能进（桌面端）
+	if event is InputEventKey and event.is_pressed() and not event.is_echo():
+		_on_tap()
 
-func _on_continue() -> void:
-	_go_to("res://main.tscn")
+func _on_tap() -> void:
+	_go_to(target_scene())
 
 ## 点按音效放完再切场景（本节点一切走音就断了）
 func _go_to(scene_path: String) -> void:
