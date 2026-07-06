@@ -108,8 +108,19 @@ var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _pending_give: Dictionary = {} ## give 转赠途中 { "item": 贴纸id, "npc": 受赠者字典 }
 var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
 var album_button: Button           ## 左下角收集册按钮（📖）
-var album_panel: PanelContainer    ## 收集册面板：贴纸图标网格+数量角标
+var album_panel: PanelContainer    ## 收集册面板：贴纸/物品分页（tab 切换）
 var _album_cells: Dictionary = {}  ## 贴纸 id → { "glyph": Label, "count": Label }
+# 物品系统：语音造物的物件可摆可收，收集册物品页列出收进背包的（服务端权威，state 同步）
+var world_props: Dictionary = {}   ## 语音物件 id → { "spec", "state"(placed/bagged), "tile"(Array|null) }
+var _album_tab_buttons: Dictionary = {} ## "stickers"/"items" → Button（tab 高亮切换）
+var _album_pages: Dictionary = {}  ## "stickers"/"items" → Control（分页容器）
+var _items_grid: GridContainer     ## 物品页网格（bagged 物件动态重建）
+var _items_empty: Label            ## 物品页空态提示
+const PROP_LONG_PRESS := 0.6       ## 长按拾起阈值（秒），期间手指基本不动
+const PROP_DRAG_LIFT := 1.0        ## 拖拽中物件抬离地面的高度（「拎起来了」）
+var _prop_press_id := ""           ## 按下时指下的语音物件 id（长按候选，滑动/抬指取消）
+var _prop_press_t := 0.0           ## 长按累计秒
+var _prop_drag: Dictionary = {}    ## 拖拽中 { id, spec_data, yaw, wander, node, screen, tile, origin }
 ## 收集册展示顺序（与 STICKER_GLYPHS 同集）
 const STICKER_ORDER := ["flower", "apple", "star", "shell", "ladybug", "candy", "clover", "gem"]
 ## 贴纸 id→emoji（与 server/src/types.ts STICKERS 对齐）
@@ -530,6 +541,18 @@ func _setup_hud() -> void:
 	album_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH # 内容撑开时仍以屏幕中心为锚
 	album_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	album_panel.visible = false
+	# 分页：顶部两个大 tab（🌸贴纸 / 🎁物品），下面按 tab 切换显示对应网格
+	var tabs := HBoxContainer.new()
+	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
+	tabs.add_theme_constant_override("separation", 24)
+	for tab in [["stickers", "🌸 贴纸"], ["items", "🎁 物品"]]:
+		var b := Button.new()
+		b.text = String(tab[1])
+		b.toggle_mode = true
+		b.add_theme_font_size_override("font_size", 30)
+		b.pressed.connect(_set_album_tab.bind(String(tab[0])))
+		tabs.add_child(b)
+		_album_tab_buttons[tab[0]] = b
 	var grid := GridContainer.new()
 	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 28)
@@ -548,12 +571,32 @@ func _setup_hud() -> void:
 		cell.add_child(count)
 		grid.add_child(cell)
 		_album_cells[id] = { "glyph": glyph, "count": count }
+	# 物品页：收进背包的语音物件（动态重建），空态给一句提示
+	var items_page := VBoxContainer.new()
+	items_page.alignment = BoxContainer.ALIGNMENT_CENTER
+	_items_grid = GridContainer.new()
+	_items_grid.columns = 4
+	_items_grid.add_theme_constant_override("h_separation", 28)
+	_items_grid.add_theme_constant_override("v_separation", 16)
+	_items_empty = Label.new()
+	_items_empty.text = "还没有收起来的物品"
+	_items_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_label(_items_empty, 24)
+	items_page.add_child(_items_grid)
+	items_page.add_child(_items_empty)
+	_album_pages = { "stickers": grid, "items": items_page }
+	var pages := VBoxContainer.new()
+	pages.add_theme_constant_override("separation", 20)
+	pages.add_child(tabs)
+	pages.add_child(grid)
+	pages.add_child(items_page)
 	var margin := MarginContainer.new()
 	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
 		margin.add_theme_constant_override(side, 28)
-	margin.add_child(grid)
+	margin.add_child(pages)
 	album_panel.add_child(margin)
 	layer.add_child(album_panel)
+	_set_album_tab("stickers")
 
 	# 进行中委托的提示 chip（右上角，emoji 为主：🎯目标 ⇒ 奖励贴纸）
 	task_chip = Label.new()
@@ -635,6 +678,8 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	_drain_tts_stream()
 	_step_hold_follow(delta)
+	_step_prop_press(delta)
+	_step_prop_drag()
 	_step_task(delta)
 	_check_give()
 	_step_executors(delta)
@@ -844,6 +889,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if _gesturing:
 		return
+	# 拖拽摆放物件中：本指事件全归拖拽（跟指吸附/松手落地），不走跟随/拾取
+	if not _prop_drag.is_empty():
+		if event is InputEventMouseMotion or event is InputEventScreenDrag:
+			_prop_drag["screen"] = event.position
+		elif (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed) \
+				or (event is InputEventScreenTouch and not event.pressed):
+			_end_prop_drag(event.position)
+		return
 	# 缩放（滚轮）
 	if event is InputEventMouseButton and event.pressed and _locked == null:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -858,10 +911,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_dragging = false
 			_press_pos = event.position
 			_try_begin_hold_follow(event.position)
-		elif _hold_follow:
-			_end_hold_follow(event.position)
-		elif not _dragging:
-			_tap_pick(event.position)
+			_begin_prop_press(event.position)
+		else:
+			_prop_press_id = "" # 抬指：长按候选作废
+			if _hold_follow:
+				_end_hold_follow(event.position)
+			elif not _dragging:
+				_tap_pick(event.position)
 		return
 	if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 		if _hold_follow:
@@ -880,10 +936,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_dragging = false
 			_press_pos = event.position
 			_try_begin_hold_follow(event.position)
-		elif _hold_follow:
-			_end_hold_follow(event.position)
-		elif not _dragging:
-			_tap_pick(event.position)
+			_begin_prop_press(event.position)
+		else:
+			_prop_press_id = "" # 抬指：长按候选作废
+			if _hold_follow:
+				_end_hold_follow(event.position)
+			elif not _dragging:
+				_tap_pick(event.position)
 		return
 
 ## 第二指落下：接管为相机手势——取消按住跟随和第一指已下发的走路指令，抬指不得触发拾取。
@@ -891,6 +950,8 @@ func _begin_gesture() -> void:
 	_gesturing = true
 	_hold_follow = false
 	_dragging = true
+	_prop_press_id = "" # 长按候选作废；拖拽中的物件弹回原位
+	_cancel_prop_drag()
 	_cancel_player_move()
 	_gest_reset_t = 0.0 # 手势进行中不倒计时，全部抬起才开始
 
@@ -1239,13 +1300,7 @@ func _bootstrap() -> void:
 	var chars: Array = world.get("characters", [])
 	for c in chars:
 		await _spawn_server_character(c as Dictionary, Vector2.INF)
-	# 语音生成的物件：按持久化的落位 tile 原位恢复（从未落位的跳过）
-	for p in world.get("props", []):
-		var pd: Dictionary = p
-		var tile: Variant = pd.get("tile", null)
-		if tile is Array and (tile as Array).size() >= 2:
-			var t := Vector2i(int(tile[0]), int(tile[1]))
-			chunk_manager.add_dynamic_prop(pd.get("spec", {}), t, float(hash(pd.get("id", "")) % 360), _prop_wander(pd.get("spec", {})))
+	_restore_world_props(world.get("props", []))
 	# 玩家搬到小神仙旁边降生，相机跟着玩家过去
 	var fairy := _find_fairy()
 	if not fairy.is_empty():
@@ -1332,11 +1387,12 @@ func _on_prop_created(prop: Dictionary) -> void:
 	var spec: Dictionary = prop.get("spec", {})
 	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
 	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
-	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec))
+	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec), String(prop.get("id", "")))
 	if placed.x < 0:
 		banner.text = "这里放不下啦，换个地方试试"
 		banner.visible = true
 		return
+	world_props[String(prop.get("id", ""))] = { "spec": spec, "state": "placed", "tile": [placed.x, placed.y] }
 	backend.send_prop_place(world_id, String(prop.get("id", "")), placed)
 	game_audio.play_sfx("fanfare")
 	banner.text = "变出来啦！"
@@ -1351,6 +1407,168 @@ func _on_prop_failed(_reason: String) -> void:
 func _prop_wander(spec: Dictionary) -> float:
 	var loco: Dictionary = spec.get("locomotion", {})
 	return 1.2 if String(loco.get("type", "none")) != "none" else 0.0
+
+# ── 物品摆放：长按拾起 + 拖拽 tile 吸附 + 松手落地/收纳（服务端状态机同步） ──────
+
+## 服务端 props → world_props 登记；placed 且有 tile 的落进世界（重载/重启恢复）。
+## 旧服务端无 state 字段：视为已摆放。bagged 的留在收集册物品页，不进世界。
+func _restore_world_props(props: Array) -> void:
+	for p in props:
+		var pd: Dictionary = p
+		var state := String(pd.get("state", "placed"))
+		var tile: Variant = pd.get("tile", null)
+		world_props[String(pd.get("id", ""))] = { "spec": pd.get("spec", {}), "state": state, "tile": tile }
+		if state == "placed" and tile is Array and (tile as Array).size() >= 2:
+			var t := Vector2i(int(tile[0]), int(tile[1]))
+			chunk_manager.add_dynamic_prop(pd.get("spec", {}), t, float(hash(pd.get("id", "")) % 360), _prop_wander(pd.get("spec", {})), String(pd.get("id", "")))
+
+## 按下时记录指下的语音物件（长按候选）。按在 NPC/玩家上的交互优先，不算物件。
+func _begin_prop_press(screen_pos: Vector2) -> void:
+	_prop_press_id = ""
+	_prop_press_t = 0.0
+	if not _prop_drag.is_empty() or _pick_npc(screen_pos) != null or _pick_player(screen_pos):
+		return
+	var ground := _pick_ground(screen_pos)
+	if ground == Vector2.INF:
+		return
+	_prop_press_id = chunk_manager.dynamic_prop_at(WorldGrid.to_tile(ground))
+
+## 长按累计：手指滑走（变成拖屏/跟随）即取消；到阈值把物件拎起来。
+func _step_prop_press(delta: float) -> void:
+	if _prop_press_id.is_empty() or not _prop_drag.is_empty():
+		return
+	if _dragging:
+		_prop_press_id = ""
+		return
+	_prop_press_t += delta
+	if _prop_press_t >= PROP_LONG_PRESS:
+		_begin_prop_drag()
+
+## 拾起：物件从世界摘出（占地已释放），节点归世界层跟手指走。
+func _begin_prop_drag() -> void:
+	var picked: Dictionary = chunk_manager.pickup_dynamic_prop(_prop_press_id)
+	_prop_press_id = ""
+	if picked.is_empty():
+		return
+	_hold_follow = false # 拾起接管本次按压，不再按住跟随
+	_cancel_player_move()
+	var node: Node3D = picked.get("node") if is_instance_valid(picked.get("node")) else null
+	if node == null: # 区块刚重刷节点被清：造个替身继续拖
+		node = SdfProp.from_spec(picked.get("spec_data", {}))
+		if node == null:
+			return
+		add_child(node)
+	else:
+		node.reparent(self)
+	(node as SdfProp).enable_wander(0.0) # 拖拽中钉住，不让它自己走
+	picked["node"] = node
+	picked["origin"] = picked["tile"]
+	picked["screen"] = _press_pos
+	_prop_drag = picked
+	if game_audio != null:
+		game_audio.play_sfx("enter")
+
+## 拖拽跟指（每帧）：指下地面 tile 吸附，抬高一点表示拎着；tile 记下来松手用。
+func _step_prop_drag() -> void:
+	if _prop_drag.is_empty():
+		return
+	var node: Node3D = _prop_drag["node"]
+	if not is_instance_valid(node):
+		_prop_drag = {}
+		return
+	var ground := _pick_ground(_prop_drag.get("screen", _press_pos))
+	if ground == Vector2.INF:
+		return
+	var tile := WorldGrid.to_tile(ground)
+	_prop_drag["tile"] = tile
+	var center := Vector2((float(tile.x) + 0.5) * WorldGrid.TILE_SIZE, (float(tile.y) + 0.5) * WorldGrid.TILE_SIZE)
+	var d := WorldGrid.shortest_delta(focus_logical, center)
+	var ty := float(TerrainMap.tile_height(tile)) * TerrainMap.STEP_HEIGHT
+	_place_on_bent_ground(node, Vector3(d.x, ty + PROP_DRAG_LIFT, d.y))
+
+## 松手：拖到收集册按钮上=收纳；指下 tile 有位=落地挪位；没位=弹回原处。
+func _end_prop_drag(screen_pos: Vector2) -> void:
+	if _prop_drag.is_empty():
+		return
+	var drag := _prop_drag
+	_prop_drag = {}
+	if album_button.get_global_rect().has_point(screen_pos):
+		_store_dragged_prop(drag)
+		return
+	_drop_prop(drag, drag.get("tile", drag["origin"]), true)
+
+## 手势接管/异常中断：物件弹回原位（不发 prop_move——位置没变）。
+func _cancel_prop_drag() -> void:
+	if _prop_drag.is_empty():
+		return
+	var drag := _prop_drag
+	_prop_drag = {}
+	_drop_prop(drag, drag["origin"], false)
+
+## 落地共用：目标 tile 精确摆放 → 失败弹回原位（放宽搜索兜底，原位可能被角色压住）
+## → 还不行就收进背包（物件绝不凭空消失）。摆放成功按需同步服务端。
+func _drop_prop(drag: Dictionary, target: Vector2i, notify: bool) -> void:
+	var id := String(drag.get("id", ""))
+	var spec: Dictionary = drag.get("spec_data", {})
+	var yaw := float(drag.get("yaw", 0.0))
+	var wander := float(drag.get("wander", 0.0))
+	var placed := chunk_manager.add_dynamic_prop(spec, target, yaw, wander, id, 0)
+	if placed.x < 0 and target != drag["origin"]:
+		placed = chunk_manager.add_dynamic_prop(spec, drag["origin"], yaw, wander, id, 0)
+		if notify:
+			banner.text = "这里放不下啦"
+			banner.visible = true
+	if placed.x < 0:
+		placed = chunk_manager.add_dynamic_prop(spec, drag["origin"], yaw, wander, id, 3)
+	var node: Node3D = drag["node"]
+	if is_instance_valid(node):
+		node.queue_free() # add_dynamic_prop 重新生成了正式节点，拖拽中的退场
+	if placed.x < 0: # 连原位附近都塞不下（极端）：收进背包兜底
+		_store_dragged_prop(drag)
+		return
+	if world_props.has(id):
+		world_props[id]["tile"] = [placed.x, placed.y]
+	if notify and online and placed != Vector2i(drag["origin"]):
+		backend.send_prop_move(world_id, id, placed)
+
+## 收纳：物件从世界消失进收集册物品页，同步服务端状态机。
+func _store_dragged_prop(drag: Dictionary) -> void:
+	var id := String(drag.get("id", ""))
+	var node: Node3D = drag["node"]
+	if is_instance_valid(node):
+		node.queue_free()
+	if world_props.has(id):
+		world_props[id]["state"] = "bagged"
+		world_props[id]["tile"] = null
+	if online:
+		backend.send_prop_store(world_id, id)
+	banner.text = "收进册子啦！"
+	banner.visible = true
+	_pulse_album_button()
+	if game_audio != null:
+		game_audio.play_sfx("fanfare")
+
+## 物品页点一下：物件摆回玩家身旁（就近找位），同步服务端。
+func _take_prop_out(pid: String) -> void:
+	var wp: Dictionary = world_props.get(pid, {})
+	if wp.is_empty() or String(wp.get("state", "")) != "bagged":
+		return
+	var spec: Dictionary = wp.get("spec", {})
+	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
+	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
+	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec), pid, 3)
+	if placed.x < 0:
+		banner.text = "这里放不下啦，换个地方试试"
+		banner.visible = true
+		return
+	wp["state"] = "placed"
+	wp["tile"] = [placed.x, placed.y]
+	if online:
+		backend.send_prop_take(world_id, pid, placed)
+	if album_panel.visible:
+		_toggle_album() # 收起面板看物件落地
+	banner.text = "摆出来啦！"
+	banner.visible = true
 
 ## 小神仙造角色（在线）。
 func _request_create(intent: String) -> void:
@@ -1904,12 +2122,47 @@ func _toggle_album() -> void:
 	if album_panel.visible:
 		_refresh_album()
 
+## 分页切换：tab 高亮 + 只显示当前页。
+func _set_album_tab(tab: String) -> void:
+	for key in _album_tab_buttons:
+		(_album_tab_buttons[key] as Button).button_pressed = (key == tab)
+		(_album_pages[key] as Control).visible = (key == tab)
+
 func _refresh_album() -> void:
 	for id in _album_cells:
 		var cell: Dictionary = _album_cells[id]
 		var n := int(inventory.get(id, 0))
 		(cell["glyph"] as Label).modulate = Color.WHITE if n > 0 else Color(0.28, 0.28, 0.34)
 		(cell["count"] as Label).text = ("x%d" % n) if n > 0 else ""
+	_refresh_items_page()
+
+## 物品页：重建 bagged 物件网格（🎁+物件名）。物件不多，全量重建最简单。
+func _refresh_items_page() -> void:
+	if _items_grid == null:
+		return
+	for c in _items_grid.get_children():
+		c.queue_free()
+	var bagged := []
+	for pid in world_props:
+		if String(world_props[pid].get("state", "")) == "bagged":
+			bagged.append(pid)
+	_items_empty.visible = bagged.is_empty()
+	for pid in bagged:
+		var spec: Dictionary = world_props[pid].get("spec", {})
+		var cell := VBoxContainer.new()
+		cell.alignment = BoxContainer.ALIGNMENT_CENTER
+		var glyph := Button.new() # 点一下摆回玩家身旁
+		glyph.text = "🎁"
+		glyph.flat = true
+		glyph.add_theme_font_size_override("font_size", 56)
+		glyph.pressed.connect(_take_prop_out.bind(String(pid)))
+		var name_label := Label.new()
+		name_label.text = String(spec.get("name", "小玩意"))
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_style_label(name_label, 20)
+		cell.add_child(glyph)
+		cell.add_child(name_label)
+		_items_grid.add_child(cell)
 
 ## bring/visit 的完成判定（节流轮询）：deliver 在 _enter_interaction 里判，gift 在 give 交接里判。
 func _step_task(delta: float) -> void:

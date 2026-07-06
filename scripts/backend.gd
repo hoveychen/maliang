@@ -72,6 +72,16 @@ func send_give_item(world_id: String, to_character_id: String, item_id: String) 
 func send_prop_place(world_id: String, prop_id: String, tile: Vector2i) -> void:
 	_send({ "type": "prop_place", "worldId": world_id, "propId": prop_id, "tileX": tile.x, "tileY": tile.y })
 
+## 物品摆放/背包（占地校验在客户端 OccupancyMap，服务端只记状态机+持久化）。
+func send_prop_store(world_id: String, prop_id: String) -> void:
+	_send({ "type": "prop_store", "worldId": world_id, "propId": prop_id })
+
+func send_prop_take(world_id: String, prop_id: String, tile: Vector2i) -> void:
+	_send({ "type": "prop_take", "worldId": world_id, "propId": prop_id, "tileX": tile.x, "tileY": tile.y })
+
+func send_prop_move(world_id: String, prop_id: String, tile: Vector2i) -> void:
+	_send({ "type": "prop_move", "worldId": world_id, "propId": prop_id, "tileX": tile.x, "tileY": tile.y })
+
 func _send(obj: Dictionary) -> void:
 	sent.emit(obj)
 	if _open:
