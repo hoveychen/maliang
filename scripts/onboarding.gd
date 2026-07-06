@@ -8,14 +8,14 @@ extends Control
 const VOICE_DIR := "res://assets/voice/onboarding"
 const FLIP_TIME := 0.35
 
-## 问题选项 value 直接入档案；icon 为超大演出图标（Android 需真机验 emoji 渲染，见 P8）。
+## 问题选项 value 直接入档案；art/icon 为 assets/ui 的 AIGC 素材名（UiAssets，替代 emoji）。
 const PAGES := [
-	{ "id": "story_1", "kind": "story", "icons": "🌲🌷🌈", "voice": "ob_story_1" },
-	{ "id": "story_2", "kind": "story", "icons": "🧚🖌️✨", "voice": "ob_story_2", "fairy": true },
-	{ "id": "story_3", "kind": "story", "icons": "🚪🌟🎈", "voice": "ob_story_3" },
+	{ "id": "story_1", "kind": "story", "art": "story_forest", "voice": "ob_story_1" },
+	{ "id": "story_2", "kind": "story", "art": "story_fairy_glade", "voice": "ob_story_2", "fairy": true },
+	{ "id": "story_3", "kind": "story", "art": "story_door", "voice": "ob_story_3" },
 	{ "id": "q_gender", "kind": "question", "field": "gender", "voice": "ob_q_gender", "options": [
-		{ "icon": "👦", "value": "boy", "voice": "ob_opt_boy" },
-		{ "icon": "👧", "value": "girl", "voice": "ob_opt_girl" },
+		{ "icon": "opt_boy", "value": "boy", "voice": "ob_opt_boy" },
+		{ "icon": "opt_girl", "value": "girl", "voice": "ob_opt_girl" },
 	] },
 	{ "id": "q_color", "kind": "question", "field": "color", "voice": "ob_q_color", "options": [
 		{ "icon": "", "value": "红色", "voice": "ob_opt_red", "color": Color(0.94, 0.35, 0.35) },
@@ -24,16 +24,16 @@ const PAGES := [
 		{ "icon": "", "value": "绿色", "voice": "ob_opt_green", "color": Color(0.42, 0.82, 0.45) },
 	] },
 	{ "id": "q_likes", "kind": "question", "field": "likes", "voice": "ob_q_likes", "options": [
-		{ "icon": "🐰", "value": "小兔子", "voice": "ob_opt_rabbit" },
-		{ "icon": "🐱", "value": "小猫", "voice": "ob_opt_cat" },
-		{ "icon": "🐶", "value": "小狗", "voice": "ob_opt_dog" },
-		{ "icon": "🦖", "value": "小恐龙", "voice": "ob_opt_dino" },
+		{ "icon": "opt_rabbit", "value": "小兔子", "voice": "ob_opt_rabbit" },
+		{ "icon": "opt_cat", "value": "小猫", "voice": "ob_opt_cat" },
+		{ "icon": "opt_dog", "value": "小狗", "voice": "ob_opt_dog" },
+		{ "icon": "opt_dino", "value": "小恐龙", "voice": "ob_opt_dino" },
 	] },
 	{ "id": "q_interest", "kind": "question", "field": "interest", "voice": "ob_q_interest", "options": [
-		{ "icon": "🎨", "value": "画画", "voice": "ob_opt_draw" },
-		{ "icon": "⚽", "value": "踢球", "voice": "ob_opt_ball" },
-		{ "icon": "🎵", "value": "唱歌", "voice": "ob_opt_sing" },
-		{ "icon": "📚", "value": "听故事", "voice": "ob_opt_story" },
+		{ "icon": "opt_paint", "value": "画画", "voice": "ob_opt_draw" },
+		{ "icon": "opt_ball", "value": "踢球", "voice": "ob_opt_ball" },
+		{ "icon": "opt_music", "value": "唱歌", "voice": "ob_opt_sing" },
+		{ "icon": "opt_book", "value": "听故事", "voice": "ob_opt_story" },
 	] },
 	{ "id": "intro", "kind": "intro", "voice": "ob_intro_ask" },
 	{ "id": "generate", "kind": "generate", "voice": "ob_generating" },
@@ -55,14 +55,14 @@ var mic: MicRecorder
 var _intro_recording := false
 var _intro_pcm := PackedByteArray()
 var _intro_tries := 0
-var _intro_status: Label = null    ## 🎤/🔴/⏳ 状态演出
+var _intro_status: TextureRect = null ## 录音状态演出（ic_mic/ic_mic_rec/ic_wait/em_happy）
 var _intro_confirm: Control = null ## ✓/✗ 确认行
 var _pending := {}                 ## 待确认 {name, nickname, transcript}
 var _asr_local: Object = null      ## 端侧 ASR（Android MaliangAsr），null=服务端识别
 var _local_session := false
 
 # 形象生成（generate 页）：intro 页起预取，✓采用 / ↻重生成
-var _gen_status: Label = null
+var _gen_status: TextureRect = null
 var _gen_img: TextureRect = null
 var _gen_confirm: Control = null
 var _prefetch_state := ""          ## "" | pending | done | failed
@@ -106,25 +106,24 @@ func _exit_tree() -> void:
 			_asr_local.disconnect("final_result", _on_local_final)
 
 func _setup_background() -> void:
+	# 水彩天空插画铺满（AIGC bg_onboarding，替代渐变）
 	var bg := TextureRect.new()
-	var grad := Gradient.new()
-	grad.colors = PackedColorArray([Color(0.55, 0.72, 0.92), Color(0.92, 0.88, 0.78)])
-	var tex := GradientTexture2D.new()
-	tex.gradient = grad
-	tex.fill_from = Vector2(0.0, 0.0)
-	tex.fill_to = Vector2(0.0, 1.0)
-	bg.texture = tex
+	bg.texture = UiAssets.tex("bg_onboarding")
+	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
 func _setup_book() -> void:
+	# 真·童话书：摊开的精装书照片级纹理（AIGC book_open_bg），
+	# 内容边距对准两页纸面区域（皮质封面边框留在外侧）。
 	_book = PanelContainer.new()
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(1.0, 0.98, 0.92) # 米色书页
-	style.set_corner_radius_all(28)
-	style.set_content_margin_all(28.0)
-	style.shadow_color = Color(0.2, 0.25, 0.3, 0.35)
-	style.shadow_size = 18
+	var style := StyleBoxTexture.new()
+	style.texture = UiAssets.tex("book_open_bg")
+	style.content_margin_left = 84.0
+	style.content_margin_right = 84.0
+	style.content_margin_top = 56.0
+	style.content_margin_bottom = 68.0
 	_book.add_theme_stylebox_override("panel", style)
 	_book.set_anchors_preset(Control.PRESET_CENTER)
 	_book.offset_left = -520.0
@@ -192,32 +191,36 @@ func _build_page(p: Dictionary) -> Control:
 	return box
 
 func _build_story(box: VBoxContainer, p: Dictionary) -> void:
+	# 绘本插画铺满跨页舞台；fairy 页在插画光斑中央叠小仙子立绘
+	var stage := Control.new()
+	stage.custom_minimum_size = Vector2(800.0, 390.0)
+	stage.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var art := TextureRect.new()
+	art.texture = UiAssets.tex(String(p.get("art", "story_forest")))
+	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	art.clip_contents = true
+	art.set_anchors_preset(Control.PRESET_FULL_RECT)
+	stage.add_child(art)
 	if p.get("fairy", false):
 		var img := TextureRect.new()
 		img.texture = load("res://assets/fairy.png")
 		img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		img.custom_minimum_size = Vector2(300.0, 205.0)
-		img.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		box.add_child(img)
-	var icons := Label.new()
-	icons.text = String(p.get("icons", "✨"))
-	icons.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icons.add_theme_font_size_override("font_size", 120 if not p.get("fairy", false) else 72)
-	box.add_child(icons)
-	var hint := Button.new()
-	hint.text = "▶"
-	hint.add_theme_font_size_override("font_size", 44)
-	hint.flat = true
+		img.set_anchors_preset(Control.PRESET_CENTER)
+		img.offset_left = -140.0
+		img.offset_right = 140.0
+		img.offset_top = -96.0
+		img.offset_bottom = 96.0
+		stage.add_child(img)
+	box.add_child(stage)
+	var hint := UiAssets.icon_button("ic_next", 72.0)
 	hint.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	hint.pressed.connect(_next_page)
 	box.add_child(hint)
 
 func _build_question(box: VBoxContainer, p: Dictionary) -> void:
-	var q := Label.new()
-	q.text = "❓"
-	q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	q.add_theme_font_size_override("font_size", 64)
+	var q := UiAssets.icon_rect("ic_question", 88.0)
 	box.add_child(q)
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -227,15 +230,19 @@ func _build_question(box: VBoxContainer, p: Dictionary) -> void:
 		row.add_child(_option_button(p, opt as Dictionary))
 	box.add_child(row)
 
-## 图标大按钮：emoji 或纯色圆角块（颜色题用色块，不依赖 emoji 渲染）。
+## 图标大按钮：AIGC 贴纸图标 或 纯色圆角块（颜色题用色块，天然不依赖图片）。
 func _option_button(p: Dictionary, opt: Dictionary) -> Button:
 	var b := Button.new()
 	b.custom_minimum_size = Vector2(170.0, 170.0)
-	b.text = String(opt.get("icon", ""))
-	b.add_theme_font_size_override("font_size", 96)
+	var icon_name := String(opt.get("icon", ""))
+	if not icon_name.is_empty():
+		b.icon = UiAssets.tex(icon_name)
+		b.expand_icon = true
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var style := StyleBoxFlat.new()
 	style.bg_color = opt.get("color", Color(0.96, 0.93, 0.85))
 	style.set_corner_radius_all(32)
+	style.set_content_margin_all(14.0)
 	b.add_theme_stylebox_override("normal", style)
 	var hover := style.duplicate() as StyleBoxFlat
 	hover.bg_color = (style.bg_color as Color).lightened(0.12)
@@ -261,10 +268,7 @@ func _on_option(p: Dictionary, opt: Dictionary, btn: Button) -> void:
 ## ASR 自我介绍：按住大话筒说话 → 转写 → 提取名字 → TTS 复述确认（✓/✗），多轮重问。
 func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
 	_intro_tries = 0
-	_intro_status = Label.new()
-	_intro_status.text = "🎤"
-	_intro_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_intro_status.add_theme_font_size_override("font_size", 110)
+	_intro_status = UiAssets.icon_rect("ic_mic", 150.0)
 	box.add_child(_intro_status)
 
 	var hold := Button.new()
@@ -289,18 +293,9 @@ func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
 	(_intro_confirm as HBoxContainer).alignment = BoxContainer.ALIGNMENT_CENTER
 	(_intro_confirm as HBoxContainer).add_theme_constant_override("separation", 40)
 	_intro_confirm.visible = false
-	for spec in [["✓", Color(0.45, 0.8, 0.45), true], ["✗", Color(0.9, 0.5, 0.45), false]]:
-		var b := Button.new()
-		b.text = String(spec[0])
-		b.custom_minimum_size = Vector2(130.0, 110.0)
-		b.add_theme_font_size_override("font_size", 64)
-		var s := StyleBoxFlat.new()
-		s.bg_color = spec[1]
-		s.set_corner_radius_all(30)
-		b.add_theme_stylebox_override("normal", s)
-		b.add_theme_stylebox_override("hover", s)
-		b.add_theme_stylebox_override("pressed", s)
-		b.pressed.connect(_on_intro_confirm.bind(bool(spec[2])))
+	for spec in [["ic_yes", true], ["ic_no", false]]:
+		var b := UiAssets.icon_button(String(spec[0]), 116.0)
+		b.pressed.connect(_on_intro_confirm.bind(bool(spec[1])))
 		(_intro_confirm as HBoxContainer).add_child(b)
 	box.add_child(_intro_confirm)
 	_intro_confirm.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -312,7 +307,7 @@ func _intro_start() -> void:
 	game_audio.play_sfx("mic_on")
 	_intro_recording = true
 	_intro_pcm = PackedByteArray()
-	_intro_status.text = "🔴"
+	_intro_status.texture = UiAssets.tex("ic_mic_rec")
 	mic.start()
 	_local_session = _asr_local != null and _asr_local.isReady()
 	if _local_session:
@@ -325,7 +320,7 @@ func _intro_stop() -> void:
 	game_audio.play_sfx("mic_off")
 	_drain_intro()
 	mic.stop()
-	_intro_status.text = "⏳"
+	_intro_status.texture = UiAssets.tex("ic_wait")
 	if _local_session:
 		_asr_local.stopSession() # final_result 信号回来后 _on_local_final
 	else:
@@ -365,7 +360,7 @@ func _submit_intro(transcript: String, pcm: PackedByteArray) -> void:
 		"nickname": String(res.get("nickname", name)),
 		"transcript": String(res.get("transcript", transcript)),
 	}
-	_intro_status.text = "😊"
+	_intro_status.texture = UiAssets.tex("em_happy")
 	var audio := await api.fetch_audio(String(res.get("confirmTtsAsset", "")))
 	_play_pcm(audio["bytes"] as PackedByteArray, int(audio["rate"]))
 	_intro_confirm.visible = true
@@ -378,7 +373,7 @@ func _intro_retry() -> void:
 		answers["nickname"] = "小朋友"
 		_next_page()
 		return
-	_intro_status.text = "🎤"
+	_intro_status.texture = UiAssets.tex("ic_mic")
 	game_audio.play_sfx("oops")
 	_play("ob_intro_retry")
 
@@ -409,10 +404,7 @@ func _play_pcm(bytes: PackedByteArray, rate: int) -> void:
 ## 形象生成确认：答案拼描述 → 生图（intro 页起就预取，生图 ~1min 与说话时间重叠）
 ## → 展示 → ✓采用 / ↻再变一次。离线/失败直接放行（占位形象进世界，不卡小朋友）。
 func _build_generate(box: VBoxContainer, _p: Dictionary) -> void:
-	_gen_status = Label.new()
-	_gen_status.text = "🪄✨"
-	_gen_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_gen_status.add_theme_font_size_override("font_size", 110)
+	_gen_status = UiAssets.icon_rect("ic_wand", 150.0)
 	box.add_child(_gen_status)
 
 	_gen_img = TextureRect.new()
@@ -427,18 +419,9 @@ func _build_generate(box: VBoxContainer, _p: Dictionary) -> void:
 	(_gen_confirm as HBoxContainer).alignment = BoxContainer.ALIGNMENT_CENTER
 	(_gen_confirm as HBoxContainer).add_theme_constant_override("separation", 40)
 	_gen_confirm.visible = false
-	for spec in [["✓", Color(0.45, 0.8, 0.45), true], ["↻", Color(0.95, 0.75, 0.4), false]]:
-		var b := Button.new()
-		b.text = String(spec[0])
-		b.custom_minimum_size = Vector2(130.0, 110.0)
-		b.add_theme_font_size_override("font_size", 64)
-		var s := StyleBoxFlat.new()
-		s.bg_color = spec[1]
-		s.set_corner_radius_all(30)
-		b.add_theme_stylebox_override("normal", s)
-		b.add_theme_stylebox_override("hover", s)
-		b.add_theme_stylebox_override("pressed", s)
-		b.pressed.connect(_on_gen_confirm.bind(bool(spec[2])))
+	for spec in [["ic_yes", true], ["ic_retry", false]]:
+		var b := UiAssets.icon_button(String(spec[0]), 116.0)
+		b.pressed.connect(_on_gen_confirm.bind(bool(spec[1])))
 		(_gen_confirm as HBoxContainer).add_child(b)
 	box.add_child(_gen_confirm)
 	_gen_confirm.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -472,7 +455,7 @@ func _start_avatar_prefetch() -> void:
 func _generate_avatar() -> void:
 	_gen_confirm.visible = false
 	_gen_img.visible = false
-	_gen_status.text = "🪄✨"
+	_gen_status.texture = UiAssets.tex("ic_wand")
 	_start_avatar_prefetch()
 	while _prefetch_state == "pending" or _flipping:
 		await get_tree().process_frame
@@ -481,7 +464,7 @@ func _generate_avatar() -> void:
 	if _prefetch_state != "done":
 		_next_page()
 		return
-	_gen_status.text = "✨"
+	_gen_status.texture = UiAssets.tex("ic_sparkle")
 	_gen_img.texture = _prefetch_tex
 	_gen_img.visible = true
 	game_audio.play_sfx("reveal")
