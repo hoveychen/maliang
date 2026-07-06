@@ -21,6 +21,7 @@
     { "id": "ic_retry", "kind": "sticker", "targetSize": 256, "prompt": "a round sky-blue badge with a white circular refresh arrow" },
     { "id": "ic_question", "kind": "sticker", "targetSize": 256, "prompt": "a big friendly orange question mark with a small sparkle, rounded and chubby" },
     { "id": "ic_book_open", "kind": "sticker", "targetSize": 256, "prompt": "an open storybook with cream pages and a few golden sparkles rising from it" },
+    { "id": "ic_gear", "kind": "sticker", "targetSize": 256, "prompt": "a chunky rounded silver-blue gear cogwheel, glossy and toy-like, friendly" },
     { "id": "st_flower", "kind": "sticker", "targetSize": 256, "prompt": "a pink cherry blossom flower with five petals" },
     { "id": "st_apple", "kind": "sticker", "targetSize": 256, "prompt": "a shiny red apple with a green leaf" },
     { "id": "st_star", "kind": "sticker", "targetSize": 256, "prompt": "a shiny golden five-pointed star with a happy sparkle" },
