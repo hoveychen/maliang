@@ -112,8 +112,9 @@ var album_panel: PanelContainer    ## 收集册面板：贴纸/物品分页（ta
 var _album_cells: Dictionary = {}  ## 贴纸 id → { "glyph": TextureRect, "count": Label }
 # 物品系统：语音造物的物件可摆可收，收集册物品页列出收进背包的（服务端权威，state 同步）
 var world_props: Dictionary = {}   ## 语音物件 id → { "spec", "state"(placed/bagged), "tile"(Array|null) }
-var _album_tab_buttons: Dictionary = {} ## "stickers"/"items" → Button（tab 高亮切换）
-var _album_pages: Dictionary = {}  ## "stickers"/"items" → Control（分页容器）
+var _album_tab_buttons: Dictionary = {} ## "stickers"/"items"/"settings" → Button（tab 高亮切换）
+var _album_pages: Dictionary = {}  ## "stickers"/"items"/"settings" → Control（分页容器）
+var _reroll_confirm: HBoxContainer ## 设置页"重新捏角色"的 ✓/✗ 确认行（防小手误触）
 var _items_grid: GridContainer     ## 物品页网格（bagged 物件动态重建）
 var _items_empty: Label            ## 物品页空态提示
 const PROP_LONG_PRESS := 0.6       ## 长按拾起阈值（秒），期间手指基本不动
@@ -547,6 +548,15 @@ func _setup_hud() -> void:
 		b.pressed.connect(_set_album_tab.bind(String(tab[0])))
 		tabs.add_child(b)
 		_album_tab_buttons[tab[0]] = b
+	# 设置入口：小齿轮藏在 tab 行末尾（家长向，主菜单单入口化后重新捏角色走这里）
+	var settings_tab := Button.new()
+	settings_tab.icon = UiAssets.tex("ic_gear")
+	settings_tab.add_theme_constant_override("icon_max_width", 28)
+	settings_tab.toggle_mode = true
+	settings_tab.flat = true
+	settings_tab.pressed.connect(_set_album_tab.bind("settings"))
+	tabs.add_child(settings_tab)
+	_album_tab_buttons["settings"] = settings_tab
 	var grid := GridContainer.new()
 	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 28)
@@ -575,12 +585,36 @@ func _setup_hud() -> void:
 	_style_label(_items_empty, 24)
 	items_page.add_child(_items_grid)
 	items_page.add_child(_items_empty)
-	_album_pages = { "stickers": grid, "items": items_page }
+	# 设置页：重新捏角色（回童话书重新自我介绍；onboarding 合并保存档案，贴纸/物品不丢）
+	var settings_page := VBoxContainer.new()
+	settings_page.alignment = BoxContainer.ALIGNMENT_CENTER
+	settings_page.add_theme_constant_override("separation", 16)
+	var reroll := Button.new()
+	reroll.text = "重新捏角色"
+	reroll.icon = UiAssets.tex("ic_retry")
+	reroll.add_theme_constant_override("icon_max_width", 36)
+	reroll.add_theme_font_size_override("font_size", 26)
+	reroll.pressed.connect(_on_reroll_pressed)
+	settings_page.add_child(reroll)
+	_reroll_confirm = HBoxContainer.new()
+	_reroll_confirm.alignment = BoxContainer.ALIGNMENT_CENTER
+	_reroll_confirm.add_theme_constant_override("separation", 24)
+	_reroll_confirm.add_child(UiAssets.icon_rect("ic_question", 56.0))
+	var reroll_yes := UiAssets.icon_button("ic_yes", 72.0)
+	reroll_yes.pressed.connect(_on_reroll_yes)
+	_reroll_confirm.add_child(reroll_yes)
+	var reroll_no := UiAssets.icon_button("ic_no", 72.0)
+	reroll_no.pressed.connect(_on_reroll_no)
+	_reroll_confirm.add_child(reroll_no)
+	_reroll_confirm.visible = false
+	settings_page.add_child(_reroll_confirm)
+	_album_pages = { "stickers": grid, "items": items_page, "settings": settings_page }
 	var pages := VBoxContainer.new()
 	pages.add_theme_constant_override("separation", 20)
 	pages.add_child(tabs)
 	pages.add_child(grid)
 	pages.add_child(items_page)
+	pages.add_child(settings_page)
 	var margin := MarginContainer.new()
 	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
 		margin.add_theme_constant_override(side, 28)
@@ -2118,11 +2152,23 @@ func _toggle_album() -> void:
 	if album_panel.visible:
 		_refresh_album()
 
-## 分页切换：tab 高亮 + 只显示当前页。
+## 分页切换：tab 高亮 + 只显示当前页；离开设置页时收起确认行。
 func _set_album_tab(tab: String) -> void:
 	for key in _album_tab_buttons:
 		(_album_tab_buttons[key] as Button).button_pressed = (key == tab)
 		(_album_pages[key] as Control).visible = (key == tab)
+	if _reroll_confirm != null and tab != "settings":
+		_reroll_confirm.visible = false
+
+## 设置页：重新捏角色——先 ？✓✗ 确认一遍防小手误触，确认后回童话书 onboarding。
+func _on_reroll_pressed() -> void:
+	_reroll_confirm.visible = true
+
+func _on_reroll_yes() -> void:
+	get_tree().change_scene_to_file("res://onboarding.tscn")
+
+func _on_reroll_no() -> void:
+	_reroll_confirm.visible = false
 
 func _refresh_album() -> void:
 	for id in _album_cells:
