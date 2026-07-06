@@ -1,0 +1,16 @@
+{
+  "name": "bush_puff",
+  "palette": ["#57b243", "#71ca58", "#e64f3d"],
+  "blend": 0.35,
+  "outline": 0.0,
+  "color_k": 0.45,
+  "parts": [
+    {"shape": "sphere", "pos": [0, 0.55, 0], "r": 0.62, "color": 0},
+    {"shape": "sphere", "pos": [0.5, 0.45, 0.15], "r": 0.45, "color": 0},
+    {"shape": "sphere", "pos": [-0.45, 0.5, -0.1], "r": 0.45, "color": 0},
+    {"shape": "sphere", "pos": [0.05, 0.95, 0], "r": 0.4, "color": 1},
+    {"shape": "sphere", "pos": [0.55, 0.75, 0.3], "r": 0.09, "color": 2, "blend": 0.04}
+  ],
+  "locomotion": {"type": "none"},
+  "ropes": []
+}
