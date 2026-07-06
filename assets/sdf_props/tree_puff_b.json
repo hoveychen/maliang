@@ -1,0 +1,17 @@
+{
+  "name": "tree_puff_b",
+  "palette": ["#96604a", "#5cb544", "#74cc58"],
+  "blend": 0.5,
+  "outline": 0.0,
+  "color_k": 0.6,
+  "parts": [
+    {"shape": "cone", "pos": [0, 1.15, 0], "r1": 0.45, "r2": 0.3, "h": 2.3, "color": 0, "blend": 0.15},
+    {"shape": "sphere", "pos": [0, 3.2, 0], "r": 1.5, "color": 1},
+    {"shape": "sphere", "pos": [0.95, 3.0, 0.5], "r": 1.05, "color": 1},
+    {"shape": "sphere", "pos": [-0.9, 3.1, -0.45], "r": 1.05, "color": 1},
+    {"shape": "sphere", "pos": [0, 4.7, 0], "r": 1.15, "color": 1},
+    {"shape": "sphere", "pos": [0.05, 5.4, 0], "r": 0.85, "color": 2}
+  ],
+  "locomotion": {"type": "none"},
+  "ropes": []
+}

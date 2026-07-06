@@ -13,6 +13,8 @@ uniform float normal_depth : hint_range(-2.0, 2.0) = 0.0;
 uniform float roughness : hint_range(0.0, 1.0) = 0.95;
 uniform vec2 uv_scale = vec2(1.0);
 uniform float curvature = 0.018;
+// 顶点色混合开关（SdfStaticBaker 烘焙网格用：颜色在顶点色里；默认 0 不影响存量材质）
+uniform float vertex_color_mix : hint_range(0.0, 1.0) = 0.0;
 
 void vertex() {
 	VERTEX.y -= curvature * dot(VERTEX.xz, VERTEX.xz);
@@ -20,7 +22,7 @@ void vertex() {
 
 void fragment() {
 	vec2 uv = UV * uv_scale;
-	ALBEDO = albedo * texture(albedo_tex, uv).rgb;
+	ALBEDO = albedo * texture(albedo_tex, uv).rgb * mix(vec3(1.0), COLOR.rgb, vertex_color_mix);
 	ROUGHNESS = roughness;
 	NORMAL_MAP = texture(normal_tex, uv).rgb;
 	NORMAL_MAP_DEPTH = normal_depth;

@@ -37,6 +37,7 @@ UNIT_TESTS=(
   test_fairy_voice
   test_voice_vad
   test_game_audio
+  test_sdf_static_baker
 )
 fails=0
 

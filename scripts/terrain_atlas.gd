@@ -36,19 +36,20 @@ const MARGIN := 3.0
 const R_OUT := 24.0     ## 凸圆角近乎整个半 tile —— 动森式大圆角，斜向边界不出阶梯感
 const R_IN := MARGIN    ## 凹角草圆必须 = MARGIN 才与相邻 cell 的直边草条连续（更大会出豁口）
 const RIM := 3.0
+const RIM_CLIFF := 5.0  ## 崖缘亮草包边宽度：比路描边宽一档，俯视时草皮垂沿可读（Pokopia 式）
 const R_OUT_CLIFF := 10.0  ## 悬崖凸角用小圆角：大圆角会在崖角剥出一大片土唇
 const R_OUT_WALL := 6.0    ## 崖壁棱角 bevel 更小：墙面转角只要一条窄棱
 const FOAM_FULL := 4.0     ## 泡沫带：距岸线 ≤4px(~12cm) 全白
 const FOAM_FADE := 10.0    ## 泡沫带：至 10px(~31cm) 渐隐到 0
 
-## 调色板（terrain_ground.gdshader 的 tint/rim uniform；动森感：亮草绿 + 沙土路 + 湖蓝）
-const GRASS_TINT := Color(0.545, 0.78, 0.47)
-const PATH_TINT := Color(0.87, 0.77, 0.55)
-const PATH_RIM := Color(0.95, 0.885, 0.68)
-const BED_TINT := Color(0.76, 0.69, 0.55)    ## 湖床沙底（透过水色看到）
-const CLIFF_LIP_TINT := Color(0.66, 0.55, 0.38)   ## 崖顶土唇
-const CLIFF_RIM_GRASS := Color(0.44, 0.63, 0.37)  ## 崖缘深色草
-const WALL_TINT := Color(0.60, 0.49, 0.35)   ## 崖壁
+## 调色板（terrain_ground.gdshader 的 tint/rim uniform；Pokopia 感：黄绿亮草 + 暖沙崖壁 + 湖蓝）
+const GRASS_TINT := Color(0.57, 0.80, 0.40)
+const PATH_TINT := Color(0.91, 0.81, 0.58)
+const PATH_RIM := Color(0.97, 0.92, 0.74)
+const BED_TINT := Color(0.82, 0.74, 0.57)    ## 湖床沙底（透过水色看到）
+const CLIFF_LIP_TINT := Color(0.83, 0.68, 0.46)   ## 崖顶沙唇（与崖壁同族、略深）
+const CLIFF_RIM_GRASS := Color(0.63, 0.86, 0.42)  ## 崖缘亮草包边（比草地亮一档，Pokopia 式草皮垂沿）
+const WALL_TINT := Color(0.80, 0.65, 0.44)   ## 崖壁暖沙
 ## 水面 shader 调色（water_surface.gdshader）
 const WATER_SHALLOW := Color(0.42, 0.72, 0.88)
 const WATER_DEEP := Color(0.13, 0.35, 0.62)
@@ -151,9 +152,9 @@ static func _cliff_fn(corner: int, variant: int) -> Callable:
 		var d := _signed_dist(cx, cy, variant, R_OUT_CLIFF)
 		var b := float(CLIFF_RIM) / 8.0
 		if d < 0.0:
-			return Color(1.0, 0.0, b, 0.5)  # 崖唇（土色主体，平光）
-		if d < RIM:
-			return Color(0.0, 1.0, b, 0.5)  # 深色草缘（rim 色查表）
+			return Color(1.0, 0.0, b, 0.5)  # 崖唇（沙色主体，平光）
+		if d < RIM_CLIFF:
+			return Color(0.0, 1.0, b, 0.5)  # 亮草包边（rim 色查表）
 		return _grass_ctl(x, y, LUM_GRASS_MID, b)
 
 ## 崖壁 cell：域内 = 岩壁主体（地层带明暗），无邻墙一侧出凹缝暗边（d<0）
@@ -209,12 +210,12 @@ static func _speckle_lum(x: float, y: float) -> float:
 		return 1.05
 	return 1.0
 
-## 崖壁主体明暗：横向地层带 + 零星亮点。
+## 崖壁主体明暗：沉积岩式宽层理（层带更宽、对比更柔，暖沙色下的 Pokopia 观感）+ 零星亮点。
 static func _wall_lum(x: float, y: float) -> float:
-	var band := fmod(y + sin(x * 0.5) * 1.2, 11.0) < 2.5
-	var lum := 0.86 if band else 1.0
+	var band := fmod(y + sin(x * 0.4) * 1.5, 14.0) < 5.0
+	var lum := 0.90 if band else 1.0
 	if _hash2(int(x), int(y)) % 19 == 0:
-		lum = 1.08
+		lum = 1.07
 	return lum
 
 static func _hash2(x: int, y: int) -> int:
