@@ -229,14 +229,14 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 		var sp_anchor: Vector2i = sp["tile"] - wrapped * CHUNK_TILES
 		if sp_anchor.x < 0 or sp_anchor.x >= CHUNK_TILES or sp_anchor.y < 0 or sp_anchor.y >= CHUNK_TILES:
 			continue
-		_spawn_sdf_on_tile(deco, wrapped, sp, sp_anchor)
+		_spawn_sdf_on_tile(deco, wrapped, sp, sp_anchor, false)
 
 	# 语音生成的动态物件：落位 tile 归属本区块的，重刷时原位重生成（search 0 钉死）。
 	for dp in _dynamic_props:
 		var dp_anchor: Vector2i = dp["tile"] - wrapped * CHUNK_TILES
 		if dp_anchor.x < 0 or dp_anchor.x >= CHUNK_TILES or dp_anchor.y < 0 or dp_anchor.y >= CHUNK_TILES:
 			continue
-		_spawn_sdf_on_tile(deco, wrapped, dp, dp_anchor)
+		_spawn_sdf_on_tile(deco, wrapped, dp, dp_anchor, false)
 
 	# 分区散布：逐 tile 确定性判定。草丛不占位（可穿行的纯点缀），其余占 1×1。
 	for j in range(CHUNK_TILES):
@@ -251,7 +251,7 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 			if kind == DECO_TUFT:
 				_spawn(deco, TUFT_SCENES[posmod(hk, TUFT_SCENES.size())], pos, 1.5 + float(posmod(hk, 3)) * 0.3, float(posmod(hk, 360)))
 				continue
-			if not OccupancyMap.prop_area_ok(gt, 1, 1):
+			if not OccupancyMap.prop_area_ok(gt, 1, 1, false, false):
 				continue
 			_claim(wrapped, gt, 1, 1)
 			match kind:
@@ -593,7 +593,8 @@ func _spawn_on_tile(parent: Node3D, wrapped: Vector2i, scene: PackedScene, ancho
 	for r in range(search + 1):
 		for ti in _ring(anchor, r):
 			var origin: Vector2i = wrapped * CHUNK_TILES + ti - Vector2i(reserve, reserve)
-			if not OccupancyMap.prop_area_ok(origin, span, span, allow_path):
+			# 确定性重摆不查角色层：角色站占地里不该吞地标（见 prop_area_ok 注释）
+			if not OccupancyMap.prop_area_ok(origin, span, span, allow_path, false):
 				continue
 			_claim(wrapped, origin, span, span)
 			_spawn(parent, scene, _tile_local(ti, wrapped), scale_f, yaw_deg)
@@ -660,7 +661,7 @@ func pickup_dynamic_prop(id: String) -> Dictionary:
 
 ## entry 支持两种 spec 来源："spec"=res:// JSON 路径（手工锚点表）或 "spec_data"=已解析字典
 ## （语音生成）。返回实际落位的全局 tile；找不到空位/坏 spec 返回 (-1,-1)。
-func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, anchor: Vector2i) -> Vector2i:
+func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, anchor: Vector2i, check_chars := true) -> Vector2i:
 	var reserve := int(entry.get("reserve", 0))
 	var search := int(entry.get("search", 0))
 	var span := reserve * 2 + 1
@@ -669,7 +670,8 @@ func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, an
 			if ti.x < 0 or ti.x >= CHUNK_TILES or ti.y < 0 or ti.y >= CHUNK_TILES:
 				continue # 螺旋越出本区块的候选跳过（占地/归属都按本区块记）
 			var origin: Vector2i = wrapped * CHUNK_TILES + ti - Vector2i(reserve, reserve)
-			if not OccupancyMap.prop_area_ok(origin, span, span):
+			# 重刷路径 check_chars=false（钉死原位重生成）；语音造物首次落位保持查角色
+			if not OccupancyMap.prop_area_ok(origin, span, span, false, check_chars):
 				continue
 			var prop: SdfProp
 			if entry.has("spec_data"):

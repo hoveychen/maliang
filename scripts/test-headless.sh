@@ -73,6 +73,7 @@ run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
 run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
 run_test test_visual_props         --fixed-fps 10 --quit-after 120
 run_test test_visual_settings      --fixed-fps 10 --quit-after 80
+run_test test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
 
 echo
 if [ "$fails" -eq 0 ]; then
