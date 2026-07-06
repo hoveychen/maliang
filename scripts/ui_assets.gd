@@ -56,8 +56,6 @@ static func bubble_sprite(name: String, height_m: float) -> Sprite3D:
 	s.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	s.shaded = false
 	s.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-	s.render_priority = 10
-	s.no_depth_test = true
 	if s.texture != null:
 		s.pixel_size = height_m / float(s.texture.get_height())
 	s.visible = false

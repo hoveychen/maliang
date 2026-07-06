@@ -129,13 +129,13 @@ func _test_think_bubble() -> void:
 	_check("think bubble visible while thinking", bubble.visible, true)
 	_check("think bubble has dots", bubble.text.length() >= 1, true)
 
-## 模拟回复到达：思考清除、情绪 emoji 弹出（缩放从小到大）。
+## 模拟回复到达：思考清除、情绪贴纸弹出（缩放从小到大）。
 func _test_emotion_pop() -> void:
 	scene.call("_on_character_response",
 		{ "transcript": "你好", "replyText": "你好呀！", "emotion": "happy" })
 	_check("response clears thinking", (scene.get("thinking_label") as Label).visible, false)
-	var emo := scene.get("emotion_bubble") as Label3D
-	_check("emotion shows emoji", emo.text, "😊")
+	var emo := scene.get("emotion_bubble") as Sprite3D
+	_check("emotion shows happy sticker", emo.texture == UiAssets.emotion_tex("happy"), true)
 	_check("emotion visible", emo.visible, true)
 	_check("emotion pop starts small", emo.scale.x < 1.0, true)
 

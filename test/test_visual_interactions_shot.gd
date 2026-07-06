@@ -92,4 +92,4 @@ func _inject(target: Dictionary, script: Dictionary) -> void:
 	# QA 取景：藏掉转写/横幅/情绪提示，只看角色演出本身
 	(scene.get("heard_label") as Label).visible = false
 	(scene.get("banner") as Label).visible = false
-	(scene.get("emotion_bubble") as Label3D).visible = false
+	(scene.get("emotion_bubble") as Sprite3D).visible = false

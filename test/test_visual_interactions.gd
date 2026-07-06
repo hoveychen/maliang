@@ -86,7 +86,7 @@ func _tick() -> void:
 		chat_started = frame
 	elif chat_started > 0 and frame == chat_started + 20:
 		_check("chat keeps partner (in_chat)", yellow.get("in_chat", false), true)
-		_check("chat bubble visible", (scene.get("_npc_chat_bubble") as Label3D).visible, true)
+		_check("chat bubble visible", (scene.get("_npc_chat_bubble") as Sprite3D).visible, true)
 		# 阈值同传话：送达半径 2.6 + 对方被叫停前追踪节流窗口内的闲逛漂移余量
 		_check("chatters adjacent (d=%.1f)" % _dist(green, yellow), _dist(green, yellow) <= 4.5, true)
 		var dx := WorldGrid.shortest_delta(green["logical"], yellow["logical"]).x
@@ -94,7 +94,7 @@ func _tick() -> void:
 		_check("yellow faces green", float(yellow.get("paper_face", -1.0)), 0.0 if dx <= 0.0 else PI)
 	elif chat_started > 0 and frame == chat_started + 75:
 		_check("chat ends (key cleared)", green.has("chat_with"), false)
-		_check("chat bubble hidden after end", (scene.get("_npc_chat_bubble") as Label3D).visible, false)
+		_check("chat bubble hidden after end", (scene.get("_npc_chat_bubble") as Sprite3D).visible, false)
 		_check("partner released (in_chat cleared)", yellow.get("in_chat", false), false)
 		_check("partner resumes wander", scene.call("_has_executor_for", yellow), true)
 
