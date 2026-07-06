@@ -551,7 +551,7 @@ func _setup_hud() -> void:
 	# 设置入口：小齿轮藏在 tab 行末尾（家长向，主菜单单入口化后重新捏角色走这里）
 	var settings_tab := Button.new()
 	settings_tab.icon = UiAssets.tex("ic_gear")
-	settings_tab.add_theme_constant_override("icon_max_width", 28)
+	settings_tab.add_theme_constant_override("icon_max_width", 36)
 	settings_tab.toggle_mode = true
 	settings_tab.flat = true
 	settings_tab.pressed.connect(_set_album_tab.bind("settings"))
