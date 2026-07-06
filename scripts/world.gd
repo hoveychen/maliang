@@ -529,6 +529,7 @@ func _setup_hud() -> void:
 	album_button.offset_right = 100.0
 	album_button.offset_bottom = -16.0
 	album_button.pressed.connect(_toggle_album)
+	UiAssets.style_card_button(album_button, 28.0)
 	layer.add_child(album_button)
 
 	album_panel = PanelContainer.new()
@@ -536,6 +537,7 @@ func _setup_hud() -> void:
 	album_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH # 内容撑开时仍以屏幕中心为锚
 	album_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	album_panel.visible = false
+	album_panel.add_theme_stylebox_override("panel", UiAssets.card_style())
 	# 分页：顶部两个大 tab（贴纸/物品，AIGC 图标+短字），下面按 tab 切换显示对应网格
 	var tabs := HBoxContainer.new()
 	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -547,6 +549,7 @@ func _setup_hud() -> void:
 		b.add_theme_constant_override("icon_max_width", 36)
 		b.toggle_mode = true
 		b.add_theme_font_size_override("font_size", 30)
+		UiAssets.style_card_button(b)
 		b.pressed.connect(_set_album_tab.bind(String(tab[0])))
 		tabs.add_child(b)
 		_album_tab_buttons[tab[0]] = b
@@ -556,6 +559,7 @@ func _setup_hud() -> void:
 	settings_tab.add_theme_constant_override("icon_max_width", 36)
 	settings_tab.toggle_mode = true
 	settings_tab.flat = true
+	UiAssets.style_card_button(settings_tab)
 	settings_tab.pressed.connect(_set_album_tab.bind("settings"))
 	tabs.add_child(settings_tab)
 	_album_tab_buttons["settings"] = settings_tab
@@ -569,7 +573,7 @@ func _setup_hud() -> void:
 		var glyph := UiAssets.icon_rect(String(UiAssets.STICKER_ICONS.get(id, "st_star")), 64.0)
 		var count := Label.new()
 		count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_style_label(count, 22)
+		_style_card_label(count, 22)
 		cell.add_child(glyph)
 		cell.add_child(count)
 		grid.add_child(cell)
@@ -584,7 +588,7 @@ func _setup_hud() -> void:
 	_items_empty = Label.new()
 	_items_empty.text = "还没有收起来的物品"
 	_items_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_style_label(_items_empty, 24)
+	_style_card_label(_items_empty, 24)
 	items_page.add_child(_items_grid)
 	items_page.add_child(_items_empty)
 	# 设置页：重新捏角色（回童话书重新自我介绍；onboarding 合并保存档案，贴纸/物品不丢）
@@ -596,6 +600,7 @@ func _setup_hud() -> void:
 	reroll.icon = UiAssets.tex("ic_retry")
 	reroll.add_theme_constant_override("icon_max_width", 36)
 	reroll.add_theme_font_size_override("font_size", 26)
+	UiAssets.style_card_button(reroll)
 	reroll.pressed.connect(_on_reroll_pressed)
 	settings_page.add_child(reroll)
 	_reroll_confirm = HBoxContainer.new()
@@ -679,6 +684,11 @@ func _style_label(l: Label, size: int) -> void:
 	l.add_theme_color_override("font_color", Color.WHITE)
 	l.add_theme_color_override("font_outline_color", Color.BLACK)
 	l.add_theme_constant_override("outline_size", 6)
+
+## 奶油卡片内的文字：暖棕、无黑描边（描边是叠在 3D 世界上的文字用的）。
+func _style_card_label(l: Label, size: int) -> void:
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", UiAssets.CARD_TEXT)
 
 func _physics_process(delta: float) -> void:
 	# 方向键直接驱动玩家（桌面调试；与点击移动同一 Mover 规则）

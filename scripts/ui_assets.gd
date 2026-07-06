@@ -49,6 +49,41 @@ static func icon_button(name: String, side: float) -> Button:
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	return b
 
+## —— Pokopia 式奶油卡片风（HUD 统一）：奶油白圆角 + 暖沙描边 + 柔和投影 ——
+const CARD_BG := Color(1.0, 0.976, 0.93)        ## 奶油白底
+const CARD_BORDER := Color(0.92, 0.85, 0.70)    ## 暖沙描边
+const CARD_TEXT := Color(0.42, 0.30, 0.18)      ## 暖棕文字（奶油底上可读）
+const CARD_ACCENT := Color(1.0, 0.89, 0.62)     ## 选中/按下的暖黄
+
+static func card_style(radius := 26.0, alpha := 0.97) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(CARD_BG.r, CARD_BG.g, CARD_BG.b, alpha)
+	s.set_corner_radius_all(int(radius))
+	s.set_border_width_all(3)
+	s.border_color = CARD_BORDER
+	s.shadow_color = Color(0.35, 0.24, 0.10, 0.28)
+	s.shadow_size = 12
+	s.shadow_offset = Vector2(0.0, 5.0)
+	return s
+
+## 把按钮统一成奶油圆角卡片（normal/hover 奶油白、按下/选中暖黄；toggle 复用 pressed）。
+static func style_card_button(b: Button, radius := 20.0) -> void:
+	var normal := card_style(radius, 0.95)
+	normal.shadow_size = 6
+	normal.shadow_offset = Vector2(0.0, 3.0)
+	var hover: StyleBoxFlat = normal.duplicate()
+	hover.bg_color = Color(1.0, 0.95, 0.85, 0.97)
+	var pressed: StyleBoxFlat = normal.duplicate()
+	pressed.bg_color = CARD_ACCENT
+	pressed.border_color = Color(0.87, 0.72, 0.45)
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", pressed)
+	b.add_theme_stylebox_override("hover_pressed", pressed)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	for state in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		b.add_theme_color_override(state, CARD_TEXT)
+
 ## 头顶气泡 Sprite3D（billboard，替代 Label3D emoji）：height_m 为渲染高度（米）。
 static func bubble_sprite(name: String, height_m: float) -> Sprite3D:
 	var s := Sprite3D.new()
