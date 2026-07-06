@@ -107,7 +107,10 @@ static func free_rect(origin: Vector2i, w: int, h: int) -> void:
 ## 物件可放置判定（摆放器/未来编辑器共用）：
 ## w×h tile 内 无水、（除非 allow_path）无路、高度与原点一致（不跨崖悬空）、
 ## 无已有物件占用、无角色站位（不许把物件扣在角色头上）。
-static func prop_area_ok(tile_origin: Vector2i, w_tiles: int, h_tiles: int, allow_path := false) -> bool:
+## check_chars=false 供区块**确定性重摆**（LANDMARKS/散布/SDF 表按固定锚点重建）：
+## 角色是暂态，站在占地里不该吞掉本就存在的地标——否则玩家走近风车丘触发重刷，
+## 风车消失、散布石补位（修复前实测）。运行时新摆放（语音造物/拖拽）保持默认查角色。
+static func prop_area_ok(tile_origin: Vector2i, w_tiles: int, h_tiles: int, allow_path := false, check_chars := true) -> bool:
 	var h0 := TerrainMap.tile_height(tile_origin)
 	for dz in range(h_tiles):
 		for dx in range(w_tiles):
@@ -118,5 +121,6 @@ static func prop_area_ok(tile_origin: Vector2i, w_tiles: int, h_tiles: int, allo
 			if TerrainMap.tile_height(t) != h0:
 				return false
 	var origin := tile_to_cell(tile_origin)
-	return is_free_rect(origin, w_tiles * 2, h_tiles * 2) \
-		and char_area_free(origin, w_tiles * 2, h_tiles * 2)
+	if not is_free_rect(origin, w_tiles * 2, h_tiles * 2):
+		return false
+	return not check_chars or char_area_free(origin, w_tiles * 2, h_tiles * 2)
