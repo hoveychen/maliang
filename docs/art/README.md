@@ -10,3 +10,14 @@
 | 改造前 | 改造后 |
 |---|---|
 | ![before](2026-07-02-restyle-before.jpg) | ![after](2026-07-02-restyle-after.jpg) |
+
+## 2026-07-06 · Pokopia 画风改造（prd/pokopia-restyle）
+
+四层皮换装：暖阳光照+泛白粉彩天空 → 崖壁暖沙分层+崖缘亮草包边 →
+SDF 烘焙棉花糖树冠（顶点吸附+软混顶点色，构建期烘焙 baked/*.res）→
+HUD 奶油白圆角卡片。地形/玩法逻辑零改动。全程分步对比见
+`screenshots/pokopia_restyle/`（before / p1-light / p2-terrain / p3-trees / p4-hud / p5-*）。
+
+| 改造前 | 改造后 |
+|---|---|
+| ![before](2026-07-06-pokopia-before.jpg) | ![after](2026-07-06-pokopia-after.jpg) |
