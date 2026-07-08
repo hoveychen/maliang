@@ -4,7 +4,8 @@ FROM node:23-slim
 
 WORKDIR /app
 # curl/bzip2/ca-certificates：容器启动时拉取本地语音模型（fetch-voice-models.sh）
-RUN apt-get update && apt-get install -y --no-install-recommends curl bzip2 ca-certificates \
+# ffmpeg：idle 动画 mp4 抽帧成 sprite-sheet 图集（sprite_sheet.ts）
+RUN apt-get update && apt-get install -y --no-install-recommends curl bzip2 ca-certificates ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 
