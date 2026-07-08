@@ -220,3 +220,13 @@ export interface MemoryItem {
   aboutCharacter?: string;
   ts: number;
 }
+
+/**
+ * extractMemory 的产出：LLM 只决定「记什么内容 + 归哪类」。
+ * 归属玩家(aboutPlayer)与时间(ts)由调用方(accumulateMemory)按当前会话补齐——
+ * 抽取器不知道当前是哪个玩家，也不读墙上时钟。本期主要产关于玩家的记忆，NPC↔NPC 预留。
+ */
+export interface ExtractedMemory {
+  text: string;
+  kind: MemoryKind;
+}

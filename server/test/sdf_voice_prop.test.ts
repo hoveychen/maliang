@@ -28,7 +28,7 @@ test('respondToTranscript: 造物意图摘出 propRequest', async () => {
   const { store, fairyId, close } = await seededStore();
   try {
     const adapters = createMockAdapters();
-    const r = await respondToTranscript('default', fairyId, '帮我变一朵会点头的小花', adapters, store);
+    const r = await respondToTranscript('default', fairyId, '', '帮我变一朵会点头的小花', adapters, store);
     assert.equal(r.propRequest, '帮我变一朵会点头的小花');
     assert.equal(r.behaviorScript, undefined); // 摘空后不下发
     assert.ok(r.replyText.length > 0);
@@ -45,7 +45,7 @@ test('respondToTranscript: 无 create_prop 能力不触发造物', async () => {
     const fairy = store.getCharacter('default', fairyId)!;
     const plain = { ...fairy, id: 'npc-1', isFairy: false, abilities: ['move_to'] };
     store.addCharacter(plain);
-    const r = await respondToTranscript('default', 'npc-1', '帮我变一朵小花', adapters, store);
+    const r = await respondToTranscript('default', 'npc-1', '', '帮我变一朵小花', adapters, store);
     assert.equal(r.propRequest, undefined);
   } finally {
     await close();

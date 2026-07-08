@@ -1,13 +1,16 @@
 import type { LLMAdapter } from './types.ts';
 import {
   BASE_ABILITIES,
+  MEMORY_KINDS,
   STICKER_NAMES,
   stickerGlyph,
   type BehaviorScript,
   type CharacterSpec,
+  type ExtractedMemory,
   type IntentContext,
   type IntentResult,
   type MemoryExtractionContext,
+  type MemoryKind,
 } from '../types.ts';
 import { describeTask } from '../tasks.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
@@ -197,14 +200,21 @@ ${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLi
     return result;
   }
 
-  async extractMemory(ctx: MemoryExtractionContext): Promise<string[]> {
+  async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
     const known = ctx.existingMemory.length > 0 ? ctx.existingMemory.join('；') : '（暂无）';
     const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。你刚和小朋友说了一轮话。
-从这轮里挑出「值得你长期记住」的、关于小朋友或你们关系的要点（名字、喜好、约定、发生的事）。
-- 0~3 条，每条一句简短中文、第三人称（如「小朋友叫朵朵」「小朋友喜欢恐龙」）。
+从这轮里挑出「值得你长期记住」的、关于小朋友或你们关系的要点，并给每条分类。
+分类 kind（五选一）：
+- identity=名字/身份（「小朋友叫朵朵」）
+- preference=喜好/讨厌（「小朋友喜欢恐龙」）
+- promise=约定/承诺（「答应明天一起搭积木」）
+- event=发生过的事（「今天一起去了河边」）
+- relation=关系/情感（「把我当成好朋友」）
+要求：
+- 0~3 条，每条 text 一句简短中文、第三人称；kind 用上面的英文枚举之一。
 - 只记新的、重要的；闲聊寒暄不必记；没有值得记的就空数组。
 - 不要重复已知记忆：${known}。
-严格只输出 JSON 对象：{"memories":["小朋友叫朵朵"]}，没有就 {"memories":[]}。`;
+严格只输出 JSON 对象：{"memories":[{"text":"小朋友叫朵朵","kind":"identity"}]}，没有就 {"memories":[]}。`;
     const content = await this.#client.chatText(
       this.#model,
       [
@@ -217,8 +227,19 @@ ${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLi
       const raw = JSON.parse(stripFences(content)) as { memories?: unknown };
       if (Array.isArray(raw.memories)) {
         return raw.memories
-          .filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
-          .map((m) => m.trim())
+          .map((m): ExtractedMemory | null => {
+            // 兼容旧格式（纯字符串）与新格式（{text,kind}）：坏 kind 归 event，宁可保守不丢内容。
+            if (typeof m === 'string' && m.trim()) return { text: m.trim(), kind: 'event' };
+            if (m && typeof m === 'object') {
+              const text = typeof (m as { text?: unknown }).text === 'string' ? (m as { text: string }).text.trim() : '';
+              if (!text) return null;
+              const k = (m as { kind?: unknown }).kind;
+              const kind: MemoryKind = MEMORY_KINDS.includes(k as MemoryKind) ? (k as MemoryKind) : 'event';
+              return { text, kind };
+            }
+            return null;
+          })
+          .filter((m): m is ExtractedMemory => m !== null)
           .slice(0, 3);
       }
     } catch {

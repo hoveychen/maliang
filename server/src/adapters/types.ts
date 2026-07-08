@@ -1,5 +1,6 @@
 import type {
   CharacterSpec,
+  ExtractedMemory,
   IntentContext,
   IntentResult,
   MemoryExtractionContext,
@@ -23,8 +24,8 @@ export interface LLMAdapter {
   /** 按小朋友的描述设计一只 SDF 可动物件/建筑（走路小屋、蹦蹦邮筒…），产物必须过 validateSdfPropSpec。 */
   designSdfProp(intentText: string): Promise<SdfPropSpec>;
   routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult>;
-  /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条简短中文，去重后由 voice 落地）。 */
-  extractMemory(ctx: MemoryExtractionContext): Promise<string[]>;
+  /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条，各带分类 kind；去重、归属玩家由 voice 落地）。 */
+  extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]>;
   /** onboarding 自我介绍：从小朋友的转写里提取名字与称呼（提取不到均返回空串）。 */
   extractProfile(transcript: string): Promise<{ name: string; nickname: string }>;
   respond(prompt: string): Promise<string>;

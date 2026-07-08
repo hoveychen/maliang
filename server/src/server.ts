@@ -438,6 +438,7 @@ export async function handleWsMessage(
         {
           worldId: msg.worldId ?? '',
           characterId: msg.characterId ?? '',
+          playerId: session.playerId,
           audio: { bytes: audioBytes, mime: msg.format ?? 'audio/wav' },
         },
         adapters,
@@ -451,6 +452,7 @@ export async function handleWsMessage(
       void accumulateMemory(
         msg.worldId ?? '',
         msg.characterId ?? '',
+        session.playerId,
         response.transcript,
         response.replyText,
         adapters,
@@ -486,6 +488,7 @@ export async function handleWsMessage(
       const response = await respondToTranscript(
         msg.worldId ?? '',
         msg.characterId ?? '',
+        session.playerId,
         transcript,
         adapters,
         store,
@@ -498,6 +501,7 @@ export async function handleWsMessage(
       void accumulateMemory(
         msg.worldId ?? '',
         msg.characterId ?? '',
+        session.playerId,
         response.transcript,
         response.replyText,
         adapters,
@@ -547,7 +551,7 @@ export async function handleWsMessage(
       socket.send(JSON.stringify({ type: 'voice_failed', reason: '没有进行中的录音会话' }));
       return;
     }
-    const { worldId, characterId, asr } = session;
+    const { worldId, characterId, playerId, asr } = session;
     session.active = false;
     session.asr = null;
     try {
@@ -557,12 +561,12 @@ export async function handleWsMessage(
         onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
         onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
       };
-      const response = await respondToTranscript(worldId, characterId, transcript, adapters, store, ttsHooks);
+      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks);
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
         void createPropAsync(socket, worldId, response.propRequest, adapters, store);
       }
-      void accumulateMemory(worldId, characterId, response.transcript, response.replyText, adapters, store).catch(() => {});
+      void accumulateMemory(worldId, characterId, playerId, response.transcript, response.replyText, adapters, store).catch(() => {});
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {

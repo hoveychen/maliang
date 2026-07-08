@@ -3,6 +3,7 @@ import {
   BASE_ABILITIES,
   STICKER_NAMES,
   type CharacterSpec,
+  type ExtractedMemory,
   type IntentContext,
   type IntentResult,
   type MemoryExtractionContext,
@@ -167,14 +168,14 @@ export function createMockAdapters(): ServiceAdapters {
         }
         return { kind: 'chat', replyText: `（mock 回应）你说的是「${transcript}」对吗？`, emotion: 'happy' };
       },
-      async extractMemory(ctx: MemoryExtractionContext): Promise<string[]> {
-        // mock：确定性地从「我叫X」「我喜欢X」抽要点，去重后返回（真实接 LLM 自由判断）
-        const facts: string[] = [];
+      async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
+        // mock：确定性地从「我叫X」「我喜欢X」抽要点并分类，去重后返回（真实接 LLM 自由判断）
+        const facts: ExtractedMemory[] = [];
         const nameM = /我叫([^\s，。!！?？]{1,8})/.exec(ctx.transcript);
-        if (nameM) facts.push(`小朋友叫${nameM[1]}`);
+        if (nameM) facts.push({ text: `小朋友叫${nameM[1]}`, kind: 'identity' });
         const likeM = /我喜欢([^\s，。!！?？]{1,12})/.exec(ctx.transcript);
-        if (likeM) facts.push(`小朋友喜欢${likeM[1]}`);
-        return facts.filter((f) => !ctx.existingMemory.includes(f));
+        if (likeM) facts.push({ text: `小朋友喜欢${likeM[1]}`, kind: 'preference' });
+        return facts.filter((f) => !ctx.existingMemory.includes(f.text));
       },
       async extractProfile(transcript: string): Promise<{ name: string; nickname: string }> {
         // mock：确定性从「我叫X / 我是X」提取；真实接 LLM 自由理解（含称呼、小名）

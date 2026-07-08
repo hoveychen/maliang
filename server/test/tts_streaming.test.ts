@@ -43,7 +43,7 @@ test('respondToTranscript 流式：response 先行（带 ttsStreaming/ttsMime）
   const adapters = { ...createMockAdapters(), tts: streamingTts() };
   const events: string[] = [];
   let endHash = '';
-  const r = await respondToTranscript('w1', 'c1', '你好', adapters, store, {
+  const r = await respondToTranscript('w1', 'c1', '', '你好', adapters, store, {
     onResponse: (resp) => events.push(`response:streaming=${resp.ttsStreaming}:mime=${resp.ttsMime}`),
     onChunk: (pcm) => events.push(`chunk:${pcm.length}`),
     onEnd: (hash) => { endHash = hash; events.push('end'); },
@@ -70,7 +70,7 @@ test('respondToTranscript 流式：未出声即失败 → 静默回落整段路�
   };
   const adapters = { ...createMockAdapters(), tts };
   let hookCalls = 0;
-  const r = await respondToTranscript('w1', 'c1', '你好', adapters, store, {
+  const r = await respondToTranscript('w1', 'c1', '', '你好', adapters, store, {
     onResponse: () => hookCalls++,
     onChunk: () => hookCalls++,
     onEnd: () => hookCalls++,
