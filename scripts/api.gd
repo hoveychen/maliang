@@ -75,6 +75,24 @@ func fetch_texture(asset_hash: String) -> Texture2D:
 		return null
 	return ImageTexture.create_from_image(img)
 
+## 轮询立绘 idle 动画状态。返回 { status, animAsset?, meta? }；
+## status: none(未触发)/pending(生成中)/ready(带 animAsset 图集 hash + meta)/failed。
+func fetch_sprite_anim(sprite_hash: String) -> Dictionary:
+	if sprite_hash.is_empty():
+		return { "status": "none" }
+	var http := HTTPRequest.new()
+	add_child(http)
+	var err := http.request(base + "/sprite-anim/" + sprite_hash)
+	if err != OK:
+		http.queue_free()
+		return { "status": "none" }
+	var res: Array = await http.request_completed
+	http.queue_free()
+	if int(res[1]) != 200:
+		return { "status": "none" }
+	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
+	return data if typeof(data) == TYPE_DICTIONARY else { "status": "none" }
+
 ## 拉取音频资源 hash → { "bytes": PackedByteArray, "rate": int }。
 ## 采样率从 content-type 解析（audio/L16;rate=24000 —— local Kokoro 24k / 讯飞 16k），缺失回落 16k。
 func fetch_audio(asset_hash: String) -> Dictionary:
