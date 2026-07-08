@@ -55,6 +55,7 @@ const ABILITY_DESC: Record<string, string> = {
   deliver_message: 'deliver_message=给某个角色带一句话，params:{"to":"角色名","message":"要带的话"}',
   give: 'give=小朋友把自己的贴纸送给某个角色（小朋友亲自走过去送），params:{"character_name":"角色名","item":"贴纸id"}',
   create_prop: 'create_prop=变出/造一个物件或小建筑（小花/风车/纸/小房子…），params:{"description":"物件的中文描述，尽量保留小朋友的原话细节"}',
+  create_character: 'create_character=按小朋友的想法变出一个新的活伙伴/小动物/小人（小猫/小恐龙/小精灵/小朋友…），params:{"description":"新伙伴的中文描述，尽量保留小朋友的原话细节：长什么样、什么颜色、叫什么名字、什么性格"}',
 };
 
 function stripFences(s: string): string {
@@ -142,6 +143,12 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     const abilityLines = abilities.map((a) => `- ${ABILITY_DESC[a] ?? a}`).join('\n');
     const vocab = Object.entries(STICKER_NAMES).map(([cn, id]) => `${cn}${stickerGlyph(id)}=${id}`).join('、');
 
+    // 造角色规则只对有该能力的角色（小仙子）出现，免得普通村民误以为自己能造。
+    // 依赖角色能力（稳定），放进 staticSystem 前缀不影响 prompt cache。
+    const createLine = abilities.includes('create_character')
+      ? `\n- 小朋友想要一个「新的活伙伴」（小动物/小人/小精灵，如「我想要一只小猫」「变个小恐龙陪我」）→ kind=command，behaviorScript 一条 {"type":"create_character","params":{"description":"新伙伴的样子/颜色/名字/性格，尽量保留原话"}}；replyText 用你的口吻应下（如「好呀，我这就变出来！」）。要的是没生命的物件/植物/建筑才用 create_prop，别混。`
+      : '';
+
     // ── 静态前缀（跨轮字节稳定，命中 prompt cache）：角色卡 + 能力 + 贴纸词汇 + 输出格式与规则 ──
     const staticSystem = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。
 小朋友对你说了一句话，判断这是「闲聊」还是「让你（或别的角色）做一件会做的事」。
@@ -153,7 +160,7 @@ ${abilityLines}
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - 小朋友说「告诉X…」「帮我跟X说…」是带话：用 deliver_message（to=X，message=要带的话），不要用 move_to——光走过去话就丢了。
 - follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。
-- 小朋友说要把贴纸送给谁（如「把花送给小蓝」）→ kind=command，behaviorScript 里一条 {"type":"give","params":{"character_name":"小蓝","item":"flower"}}（item 用贴纸叫法表里的 id；背包没有就 chat 温柔说明）。
+- 小朋友说要把贴纸送给谁（如「把花送给小蓝」）→ kind=command，behaviorScript 里一条 {"type":"give","params":{"character_name":"小蓝","item":"flower"}}（item 用贴纸叫法表里的 id；背包没有就 chat 温柔说明）。${createLine}
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
 - 绝不包含暴力、恐怖、成人内容。`;
