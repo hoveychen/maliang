@@ -4,7 +4,7 @@ extends SceneTree
 ## 地点名与「玩家」解析。离线 demo 世界（小蓝/小绿/小黄），注入 _on_character_response
 ## 模拟服务端指令下发，与真实链路同路。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 10 \
-##       --quit-after 340 --script res://test/test_visual_interactions.gd
+##       --quit-after 420 --script res://test/test_visual_interactions.gd
 
 const DT := 0.1
 
@@ -18,9 +18,21 @@ var chat_started := 0
 var relay_done := 0
 
 func _initialize() -> void:
+	# TEST_SEED 固定全局 RNG（NPC 漫游/相位都吃它）：偶发失败可用同种子确定性复跑
+	var s := OS.get_environment("TEST_SEED")
+	if not s.is_empty():
+		seed(int(s))
 	scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	process_frame.connect(_tick)
+
+## 冻结全部 NPC 漫游 + 把角色摆到固定相对位：走位类断言只考走位本身。
+## 旁观随机游走曾偶发让到达阈值超限(d=11.8)或传话完成过快抢在断言帧前（同 rewards 病灶）。
+func _freeze_and_place(d: Dictionary, anchor: Dictionary, off: Vector2) -> void:
+	for ex in (scene.get("_executors") as Array):
+		(ex as BehaviorExecutor).cancel()
+	d["logical"] = WorldGrid.wrap_pos((anchor["logical"] as Vector2) + off)
+	OccupancyMap.char_register(String(d.get("id", "")), d["logical"], 2)
 
 func _tick() -> void:
 	if scene == null:
@@ -56,11 +68,14 @@ func _tick() -> void:
 		200:
 			_check("do_action key cleared after duration", green.has("paper_action"), false)
 		205:
+			_freeze_and_place(yellow, green, Vector2(8.0, 0.0)) # 小黄定点等着，只考小绿走位
 			_inject(green, { "commands": [{ "type": "chat_with", "params": { "character_name": "小黄" } }], "loop": false })
 		310:
 			_check("chat happened", chat_started > 0, true)
 		312:
-			# 点名指派传话链路：设玩家正与小绿对话，点名小蓝跳——小绿应跑腿传话，小蓝收到才动
+			# 点名指派传话链路：设玩家正与小绿对话，点名小蓝跳——小绿应跑腿传话，小蓝收到才动。
+			# 小蓝固定摆到 10 单位外：距离太近曾让传话在 f316 断言前就完成（假阳"被遥控"）
+			_freeze_and_place(blue, green, Vector2(10.0, 0.0))
 			scene.set("selected", green["node"])
 			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false })
 		316:
