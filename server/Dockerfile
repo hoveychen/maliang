@@ -1,6 +1,9 @@
 # maliang 后端 —— Node 原生 TS 执行（类型剥离），无需编译。
 # muvee 构建上下文 = 仓库根；本 Dockerfile 路径 server/Dockerfile。
-FROM node:23-slim
+# Node 26：node:sqlite（持久化 P1）在 22.5 起为实验特性、早期需 --experimental-sqlite，
+# 26 起稳定内置、无需标志（本地 dev 即 26.4）；CMD 用裸 `node` 不带标志，故基线锁 26。
+# sherpa-onnx-node 为 N-API 预编译（ABI 跨 major 稳定），已实测在 26 加载正常。
+FROM node:26-slim
 
 WORKDIR /app
 # curl/bzip2/ca-certificates：容器启动时拉取本地语音模型（fetch-voice-models.sh）
