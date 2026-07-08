@@ -17,7 +17,7 @@ func _tick() -> void:
 		8:
 			(scene.get("album_button") as Button).emit_signal("pressed")
 		24:
-			((scene.get("_album_tab_buttons") as Dictionary)["settings"] as Button).emit_signal("pressed")
+			scene.call("_open_app", "settings")
 		40:
 			var page := (scene.get("_album_pages") as Dictionary)["settings"] as Control
 			(page.get_child(0) as Button).emit_signal("pressed")

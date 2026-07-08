@@ -33,16 +33,15 @@ func _tick() -> void:
 		1:
 			root.size = Vector2i(1280, 720)
 		5:
-			# 打开收集册：齿轮设置 tab 存在，默认在贴纸页
+			# 打开手机：设置 app 存在，默认停在主屏（各 app 页面都收着）
 			(scene.get("album_button") as Button).emit_signal("pressed")
-			var tabs := scene.get("_album_tab_buttons") as Dictionary
-			_check("album open", (scene.get("album_panel") as Control).visible, true)
-			_check("settings tab present", tabs.has("settings"), true)
-			_check("settings page hidden on stickers tab",
+			_check("phone open", (scene.get("album_panel") as Control).visible, true)
+			_check("settings app present", (scene.get("_album_pages") as Dictionary).has("settings"), true)
+			_check("settings page hidden on home",
 				((scene.get("_album_pages") as Dictionary)["settings"] as Control).visible, false)
 		10:
-			# 切到设置页：重新捏角色按钮可见，确认行还收着
-			((scene.get("_album_tab_buttons") as Dictionary)["settings"] as Button).emit_signal("pressed")
+			# 打开设置 app：重新捏角色按钮可见，确认行还收着
+			scene.call("_open_app", "settings")
 			var page := (scene.get("_album_pages") as Dictionary)["settings"] as Control
 			_check("settings page visible", page.visible, true)
 			_check("reroll button present", _reroll_button().text, "重新捏角色")
