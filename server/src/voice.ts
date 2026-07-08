@@ -74,19 +74,21 @@ export async function respondToTranscript(
   const activeTask = store.getActiveTask(worldId) ?? undefined;
   const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, store) ?? undefined;
 
-  // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），注入给意图 LLM。
-  const memoryLines = store.getMemories(characterId, playerId).map((m) => m.text);
+  // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），带 kind 注入（分组）。
+  const memories = store.getMemories(characterId, playerId).map((m) => ({ text: m.text, kind: m.kind }));
   const intent = await adapters.llm.routeIntent(transcript, {
     characterName: character.name,
     personality: character.personality,
     abilities: character.abilities,
-    recentHistory: character.chatHistory.slice(-RECENT_TURNS), // 这轮之前的近 N 轮
-    memory: memoryLines,
+    recentHistory: store.getRecentTurns(characterId, playerId, RECENT_TURNS), // 这轮之前的近 N 轮（按玩家）
+    memory: memories,
     worldCharacters: roster,
     locations: store.getLocations(worldId),
     activeTask,
     taskCandidate,
     inventory: store.getInventory(worldId),
+    // 稳定缓存键：绑 world×角色×玩家，做 OpenRouter sticky routing 命中 prompt cache（同一对话连续命中）。
+    cacheKey: `${worldId}:${characterId}:${playerId}`,
   });
 
   // 语音回复不再过文字审核（Boss 2026-06-18 决策：多一次 LLM 调用拖慢对话、伤体验）。
@@ -149,7 +151,7 @@ export async function respondToTranscript(
         onChunk: hooks.onChunk,
       });
       hooks.onEnd(store.putAsset(full));
-      finishTurn(store, character, transcript, replyText);
+      finishTurn(store, character, playerId, transcript, replyText);
       return response;
     } catch (err) {
       if (responded) throw err; // 已出声，只能向上失败（客户端有 voice_failed/超时兜底）
@@ -161,7 +163,7 @@ export async function respondToTranscript(
 
   const tts = await adapters.tts.synthesize(replyText, character.voiceId);
   response.ttsAsset = store.putAsset(tts);
-  finishTurn(store, character, transcript, replyText);
+  finishTurn(store, character, playerId, transcript, replyText);
   return response;
 }
 
@@ -178,12 +180,18 @@ function findByName(
   );
 }
 
-/** 回合收尾：更新对话历史并持久化（chatHistory/behaviorScript 变更）。 */
-function finishTurn(store: WorldStore, character: Character, transcript: string, replyText: string): void {
-  character.chatHistory.push({ role: 'child', text: transcript, ts: 0 });
-  character.chatHistory.push({ role: 'npc', text: replyText, ts: 0 });
-  // 注意：长期记忆抽取（extractMemory，含一次 LLM 调用）已移出回复关键路径，
-  // 由 WS 处理器在回复发出后后台调用 accumulateMemory。
+/** 回合收尾：把这轮对话写入 chat_turns（按玩家），并持久化角色状态（behaviorScript 变更）。 */
+function finishTurn(
+  store: WorldStore,
+  character: Character,
+  playerId: string,
+  transcript: string,
+  replyText: string,
+): void {
+  store.addChatTurn(character.id, playerId, 'child', transcript, 0);
+  store.addChatTurn(character.id, playerId, 'npc', replyText, 0);
+  // 注意：长期记忆抽取（extractMemory）已移出回复关键路径，改由会话结束（Visit flush）批量做。
+  // 这里仍需 saveCharacter：指令即时生效路径可能改了 character.behaviorScript/state。
   store.saveCharacter(character);
 }
 
@@ -213,6 +221,7 @@ export async function flushMemory(
     personality: character.personality,
     turns,
     existingMemory: existing.map((m) => m.text),
+    cacheKey: `${worldId}:${characterId}:${playerId}`,
   });
   for (const item of remembered) {
     const text = item.text.trim();

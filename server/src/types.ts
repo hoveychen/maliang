@@ -136,7 +136,8 @@ export interface IntentContext {
   personality: string;
   abilities: string[];
   recentHistory?: ChatTurn[]; // 近 N 轮对话，给角色上下文让回应连贯
-  memory?: string[]; // 角色长期记忆要点（自我累积，跨对话保留）
+  /** 角色对当前玩家的长期记忆（带分类，注入时按 kind 分组）。 */
+  memory?: { text: string; kind: MemoryKind }[];
   /** 世界里的其他角色花名册（不含自己/小神仙）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
   worldCharacters?: { id: string; name: string }[];
   /** 世界地点名清单（客户端 world_info 上报的 POI 名）：move_to 的 location_name 优先归一到这些名字。 */
@@ -147,6 +148,8 @@ export interface IntentContext {
   taskCandidate?: ActiveTask;
   /** 玩家的贴纸背包（id→数量）：give 的词汇依据；空背包时对送贴纸请求温柔说明还没有。 */
   inventory?: Record<string, number>;
+  /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing，命中 prompt cache。 */
+  cacheKey?: string;
 }
 
 /** 会话（Visit）结束时让角色「自己决定记什么」的上下文（extractMemory 用）。 */
@@ -156,6 +159,8 @@ export interface MemoryExtractionContext {
   /** 本次会话（Visit）里与该角色的整段对话增量（多轮），会话结束批量抽一次。 */
   turns: { child: string; npc: string }[];
   existingMemory: string[]; // 已记住的，用于去重/避免重复记
+  /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing。 */
+  cacheKey?: string;
 }
 
 /** voice_input 编排的返回（推给客户端 character_response）。 */

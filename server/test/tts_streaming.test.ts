@@ -53,7 +53,7 @@ test('respondToTranscript 流式：response 先行（带 ttsStreaming/ttsMime）
   assert.equal(r.ttsAsset, '', '流式时 response 不带 ttsAsset');
   const stored = store.getAsset(endHash);
   assert.deepEqual(Array.from(stored!.bytes), [1, 2, 3, 4], 'tts_end 资产是完整音频');
-  assert.equal(store.getCharacter('w1', 'c1')!.chatHistory.length, 2, '对话历史只记一轮');
+  assert.equal(store.getRecentTurns('c1', '', 10).length, 2, '对话历史只记一轮（写入 chat_turns）');
 });
 
 test('respondToTranscript 流式：未出声即失败 → 静默回落整段路径（response 未重复发）', async () => {

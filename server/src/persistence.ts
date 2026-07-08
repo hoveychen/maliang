@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, Character, MemoryItem, Player, Visit, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Visit, WorldProp } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 
 export interface World {
@@ -43,6 +43,7 @@ export class WorldStore {
     if (this.#dir !== null) {
       this.#migrateFromJson();
       this.#migrateLegacyMemories();
+      this.#migrateLegacyChatHistory();
       this.#loadAssets();
     }
   }
@@ -88,6 +89,15 @@ export class WorldStore {
         ended_at INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_visits_world_player ON visits(world_id, player_id);
+      CREATE TABLE IF NOT EXISTS chat_turns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        text TEXT NOT NULL,
+        ts INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_chat_char_player ON chat_turns(character_id, player_id, id);
     `);
   }
 
@@ -383,6 +393,54 @@ export class WorldStore {
       aboutCharacter: r.about_character_id ?? undefined,
       ts: r.ts,
     }));
+  }
+
+  // ── 对话历史 chat_turns（P5：从 Character.chatHistory[] 拆独立表，按 (NPC,玩家) 分页/裁剪）──────
+
+  /** 单角色×单玩家保留的对话轮上限（child/npc 各算一条）；超出裁剪最旧。 */
+  static readonly CHAT_TURN_CAP = 40;
+
+  /** 旧存量 Character.chatHistory[] → chat_turns（player_id='' 未绑定历史）。幂等：搬完清空。 */
+  #migrateLegacyChatHistory(): void {
+    const rows = this.#db.prepare('SELECT data FROM characters').all() as { data: string }[];
+    for (const row of rows) {
+      const c = JSON.parse(row.data) as Character;
+      if (!Array.isArray(c.chatHistory) || c.chatHistory.length === 0) continue;
+      for (const t of c.chatHistory) {
+        if (t && (t.role === 'child' || t.role === 'npc') && typeof t.text === 'string') {
+          this.addChatTurn(c.id, '', t.role, t.text, typeof t.ts === 'number' ? t.ts : 0);
+        }
+      }
+      c.chatHistory = []; // 清空，避免重复迁移（幂等）
+      this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?').run(JSON.stringify(c), c.id);
+    }
+  }
+
+  /** 追加一轮对话；写后按 (NPC,玩家) 裁剪到 CHAT_TURN_CAP（挤出最旧）。 */
+  addChatTurn(characterId: string, playerId: string, role: ChatTurn['role'], text: string, ts = 0): void {
+    this.#db
+      .prepare('INSERT INTO chat_turns (character_id, player_id, role, text, ts) VALUES (?, ?, ?, ?, ?)')
+      .run(characterId, playerId, role, text, ts);
+    // 裁剪：删掉超出 CAP 的最旧行（按 id 递增即时间序）。抽完记忆的旧 turn 无需保留连贯上下文。
+    this.#db
+      .prepare(
+        'DELETE FROM chat_turns WHERE character_id = ? AND player_id = ? AND id NOT IN ' +
+          '(SELECT id FROM chat_turns WHERE character_id = ? AND player_id = ? ORDER BY id DESC LIMIT ?)',
+      )
+      .run(characterId, playerId, characterId, playerId, WorldStore.CHAT_TURN_CAP);
+  }
+
+  /** 取某 NPC×某玩家最近 limit 轮对话（含 player_id='' 未绑定历史），按时间正序（最旧在前）。 */
+  getRecentTurns(characterId: string, playerId: string, limit: number): ChatTurn[] {
+    const rows = this.#db
+      .prepare(
+        "SELECT role, text, ts FROM chat_turns WHERE character_id = ? AND player_id IN (?, '') " +
+          'ORDER BY id DESC LIMIT ?',
+      )
+      .all(characterId, playerId, limit) as { role: string; text: string; ts: number }[];
+    return rows
+      .map((r) => ({ role: r.role as ChatTurn['role'], text: r.text, ts: r.ts }))
+      .reverse(); // DESC 取近 N 条后翻回正序
   }
 
   // ── 会话 Visit（进世界→离开为一段，作会话结束批量抽记忆的边界；见 types.Visit）──────
