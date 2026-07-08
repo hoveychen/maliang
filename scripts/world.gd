@@ -716,20 +716,59 @@ func _physics_process(delta: float) -> void:
 			player["logical"] = moved
 			OccupancyMap.char_register(PLAYER_ID, moved, PLAYER_SPAN)
 
+## _process 分段计时（平板 fps<10 二阶段：真机脚本逻辑 162ms/帧，热点分布只能实测）。
+## 累计各段 usec，debug 构建每 ~2s 往 stdout（安卓即 logcat godot tag）吐一行降序分布。
+var _prof := {}
+var _prof_t := 0.0
+var _prof_frames := 0
+
+func _prof_lap(prev: int, key: String) -> int:
+	var now := Time.get_ticks_usec()
+	_prof[key] = int(_prof.get(key, 0)) + (now - prev)
+	return now
+
+func _prof_flush(delta: float) -> void:
+	_prof_t += delta
+	_prof_frames += 1
+	if _prof_t < 2.0:
+		return
+	var keys := _prof.keys()
+	keys.sort_custom(func(a, b): return _prof[a] > _prof[b])
+	var total := 0
+	for k in keys:
+		total += _prof[k]
+	var n := maxi(_prof_frames, 1)
+	var line := "PERF %.1fms/f:" % (float(total) / 1000.0 / n)
+	for k in keys.slice(0, 8):
+		line += " %s=%.1f" % [k, float(_prof[k]) / 1000.0 / n]
+	print(line)
+	_prof.clear()
+	_prof_t = 0.0
+	_prof_frames = 0
+
 func _process(delta: float) -> void:
+	var tp := Time.get_ticks_usec()
 	_drain_tts_stream()
+	tp = _prof_lap(tp, "tts")
 	_step_hold_follow(delta)
 	_step_prop_press(delta)
 	_step_prop_drag()
+	tp = _prof_lap(tp, "hold/prop")
 	_step_task(delta)
 	_check_give()
+	tp = _prof_lap(tp, "task/give")
 	_step_executors(delta)
+	tp = _prof_lap(tp, "executors")
 	_check_approach()
+	tp = _prof_lap(tp, "approach")
 	_update_fairy(delta)
+	tp = _prof_lap(tp, "fairy")
 	_step_voice(delta)
+	tp = _prof_lap(tp, "voice")
 	# 语音链路占用时压低 BGM，给人声让路（与开放麦闭麦判定同一组信号）
 	game_audio.set_ducked(_recording or thinking_label.visible or _tts_player.playing \
 			or (fairy_voice != null and fairy_voice.is_playing()))
+	tp = _prof_lap(tp, "duck")
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
 	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)
@@ -762,15 +801,23 @@ func _process(delta: float) -> void:
 	_env.fog_depth_begin = FOG_DEPTH_BEGIN + _cur_focus_y
 	_env.fog_depth_end = FOG_DEPTH_END + _cur_focus_y
 	_update_camera()
+	tp = _prof_lap(tp, "cam")
 	chunk_manager.update(focus_logical)
+	tp = _prof_lap(tp, "chunk")
 	_reposition_npcs(delta)
+	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
 	_update_ear()
+	tp = _prof_lap(tp, "tap/ear")
 	_update_think_bubble(delta)
 	_update_emotion_bubble(delta)
 	_update_npc_chats(delta)
 	_update_speak_anim(delta)
+	tp = _prof_lap(tp, "bubbles")
 	_update_hud()
+	tp = _prof_lap(tp, "hud")
+	if perf_label != null:
+		_prof_flush(delta)
 
 func _step_executors(delta: float) -> void:
 	for ex in _executors:
