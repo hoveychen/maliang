@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ActiveTask, Character, WorldProp } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
@@ -17,61 +18,96 @@ export interface World {
 
 /**
  * 世界状态 + 生成的 sprite 资源存储。
- * 传 dataDir → 持久化到磁盘（worlds.json + assets/ + assets.json 清单）；
- * 不传 → 纯内存（测试用）。后续可换 muvee dataset / DB。
+ * 传 dataDir → 持久化到 SQLite（<dataDir>/world.db，assets/ + assets.json 清单沿用文件寻址）；
+ * 不传 → 内存 SQLite（`:memory:`，测试用）。
+ *
+ * 存储布局（P1：只换介质，对外 API 与返回结构不变）：
+ *   worlds(id, inventory JSON, active_task JSON|null)
+ *   characters(id PK, world_id, data JSON)   ← Character 整对象存一行（memory/chatHistory 暂 JSON 内嵌，表拆分留 P3/P5）
+ *   props(id PK, world_id, data JSON)
+ * saveCharacter 从「全量重写 worlds.json」变为「UPDATE 一行」，根治 chatHistory 膨胀拖慢落盘。
+ * 首启若存在旧 worlds.json 且库为空 → 一次性迁移后把 worlds.json 改名 .migrated 备份。
  */
 export class WorldStore {
   readonly #dir: string | null;
-  readonly #worlds = new Map<string, World>();
+  readonly #db: DatabaseSync;
   readonly #assets = new Map<string, ImageBlob>();
   // 世界地点名清单（POI，客户端 world_info 上报）：纯内存，客户端每次连上重发，不持久化
   readonly #locations = new Map<string, string[]>();
 
   constructor(dataDir?: string) {
     this.#dir = dataDir ?? null;
-    if (this.#dir !== null) this.#load();
+    if (this.#dir !== null) mkdirSync(this.#dir, { recursive: true });
+    this.#db = new DatabaseSync(this.#dir !== null ? join(this.#dir, 'world.db') : ':memory:');
+    this.#initSchema();
+    if (this.#dir !== null) {
+      this.#migrateFromJson();
+      this.#loadAssets();
+    }
+  }
+
+  #initSchema(): void {
+    this.#db.exec(`
+      CREATE TABLE IF NOT EXISTS worlds (
+        id TEXT PRIMARY KEY,
+        inventory TEXT NOT NULL DEFAULT '{}',
+        active_task TEXT
+      );
+      CREATE TABLE IF NOT EXISTS characters (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_characters_world ON characters(world_id);
+      CREATE TABLE IF NOT EXISTS props (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_props_world ON props(world_id);
+    `);
   }
 
   #assetsDir(): string {
     return join(this.#dir as string, 'assets');
   }
 
-  #load(): void {
+  /** 一次性迁移旧 worlds.json → SQLite（库为空且旧文件存在时）。迁移后旧文件改名 .migrated 备份。 */
+  #migrateFromJson(): void {
     const wf = join(this.#dir as string, 'worlds.json');
-    if (existsSync(wf)) {
-      const data = JSON.parse(readFileSync(wf, 'utf8')) as {
-        worlds: Array<{ id: string; characters: Character[]; inventory?: Record<string, number>; activeTask?: ActiveTask | null; props?: Array<Omit<WorldProp, 'state'> & { state?: WorldProp['state'] }> }>;
-      };
-      for (const w of data.worlds) {
-        const map = new Map<string, Character>();
-        for (const c of w.characters) map.set(c.id, c);
-        // 旧存档没有背包/委托/物件字段：给默认值，向后兼容（物件缺 state 视为已摆放）
-        const props = new Map<string, WorldProp>();
-        for (const p of w.props ?? []) props.set(p.id, { ...p, state: p.state ?? 'placed' });
-        this.#worlds.set(w.id, { id: w.id, characters: map, inventory: w.inventory ?? {}, activeTask: w.activeTask ?? null, props });
-      }
+    if (!existsSync(wf)) return;
+    const already = (this.#db.prepare('SELECT COUNT(*) AS c FROM worlds').get() as { c: number }).c;
+    if (already > 0) return; // 已迁移过（库非空），不重复导入
+    const data = JSON.parse(readFileSync(wf, 'utf8')) as {
+      worlds: Array<{
+        id: string;
+        characters: Character[];
+        inventory?: Record<string, number>;
+        activeTask?: ActiveTask | null;
+        props?: Array<Omit<WorldProp, 'state'> & { state?: WorldProp['state'] }>;
+      }>;
+    };
+    for (const w of data.worlds ?? []) {
+      this.#db
+        .prepare('INSERT INTO worlds (id, inventory, active_task) VALUES (?, ?, ?)')
+        .run(w.id, JSON.stringify(w.inventory ?? {}), w.activeTask ? JSON.stringify(w.activeTask) : null);
+      const insChar = this.#db.prepare('INSERT INTO characters (id, world_id, data) VALUES (?, ?, ?)');
+      for (const c of w.characters ?? []) insChar.run(c.id, w.id, JSON.stringify(c));
+      const insProp = this.#db.prepare('INSERT INTO props (id, world_id, data) VALUES (?, ?, ?)');
+      // 旧存档物件缺 state 视为已摆放（沿用旧 #load 兼容）
+      for (const p of w.props ?? []) insProp.run(p.id, w.id, JSON.stringify({ ...p, state: p.state ?? 'placed' }));
     }
-    const mf = join(this.#dir as string, 'assets.json');
-    if (existsSync(mf)) {
-      const mimes = JSON.parse(readFileSync(mf, 'utf8')) as Record<string, string>;
-      for (const hash of Object.keys(mimes)) {
-        const p = join(this.#assetsDir(), hash);
-        if (existsSync(p)) this.#assets.set(hash, { bytes: new Uint8Array(readFileSync(p)), mime: mimes[hash]! });
-      }
-    }
+    renameSync(wf, `${wf}.migrated`);
   }
 
-  #persistWorlds(): void {
-    if (this.#dir === null) return;
-    mkdirSync(this.#dir, { recursive: true });
-    const worlds = [...this.#worlds.values()].map((w) => ({
-      id: w.id,
-      characters: [...w.characters.values()],
-      inventory: w.inventory,
-      activeTask: w.activeTask,
-      props: [...w.props.values()],
-    }));
-    writeFileSync(join(this.#dir, 'worlds.json'), JSON.stringify({ worlds }, null, 2));
+  #loadAssets(): void {
+    const mf = join(this.#dir as string, 'assets.json');
+    if (!existsSync(mf)) return;
+    const mimes = JSON.parse(readFileSync(mf, 'utf8')) as Record<string, string>;
+    for (const hash of Object.keys(mimes)) {
+      const p = join(this.#assetsDir(), hash);
+      if (existsSync(p)) this.#assets.set(hash, { bytes: new Uint8Array(readFileSync(p)), mime: mimes[hash]! });
+    }
   }
 
   #persistAssetIndex(): void {
@@ -82,78 +118,112 @@ export class WorldStore {
   }
 
   createWorld(id: string = randomUUID()): World {
-    const world: World = { id, characters: new Map(), inventory: {}, activeTask: null, props: new Map() };
-    this.#worlds.set(id, world);
-    this.#persistWorlds();
-    return world;
+    this.#db
+      .prepare('INSERT OR IGNORE INTO worlds (id, inventory, active_task) VALUES (?, ?, ?)')
+      .run(id, '{}', null);
+    return { id, characters: new Map(), inventory: {}, activeTask: null, props: new Map() };
   }
 
   getWorld(id: string): World | undefined {
-    return this.#worlds.get(id);
+    const row = this.#db.prepare('SELECT id, inventory, active_task FROM worlds WHERE id = ?').get(id) as
+      | { id: string; inventory: string; active_task: string | null }
+      | undefined;
+    if (!row) return undefined;
+    const characters = new Map<string, Character>();
+    for (const c of this.listCharacters(id)) characters.set(c.id, c);
+    const props = new Map<string, WorldProp>();
+    for (const p of this.listProps(id)) props.set(p.id, p);
+    return {
+      id: row.id,
+      characters,
+      inventory: JSON.parse(row.inventory) as Record<string, number>,
+      activeTask: row.active_task ? (JSON.parse(row.active_task) as ActiveTask) : null,
+      props,
+    };
+  }
+
+  #worldExists(id: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM worlds WHERE id = ?').get(id) !== undefined;
   }
 
   addCharacter(character: Character): void {
-    const world = this.#worlds.get(character.worldId);
-    if (!world) throw new Error(`world not found: ${character.worldId}`);
-    world.characters.set(character.id, character);
-    this.#persistWorlds();
+    if (!this.#worldExists(character.worldId)) throw new Error(`world not found: ${character.worldId}`);
+    this.saveCharacter(character);
   }
 
-  /** 角色状态变更后持久化（如 chatHistory/behaviorScript 更新）。 */
+  /** 角色状态变更后持久化（如 chatHistory/behaviorScript 更新）。整对象 UPSERT 一行。 */
   saveCharacter(character: Character): void {
-    const world = this.#worlds.get(character.worldId);
-    if (world) world.characters.set(character.id, character);
-    this.#persistWorlds();
+    this.#db
+      .prepare(
+        'INSERT INTO characters (id, world_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
+      )
+      .run(character.id, character.worldId, JSON.stringify(character));
   }
 
   /** 语音生成的 SDF 物件：新增（tile 待客户端落位回报）。 */
   addProp(worldId: string, prop: WorldProp): void {
-    const world = this.#worlds.get(worldId);
-    if (!world) throw new Error(`world not found: ${worldId}`);
-    world.props.set(prop.id, prop);
-    this.#persistWorlds();
+    if (!this.#worldExists(worldId)) throw new Error(`world not found: ${worldId}`);
+    this.#saveProp(worldId, prop);
+  }
+
+  #getProp(worldId: string, propId: string): WorldProp | undefined {
+    const row = this.#db.prepare('SELECT data FROM props WHERE id = ? AND world_id = ?').get(propId, worldId) as
+      | { data: string }
+      | undefined;
+    return row ? (JSON.parse(row.data) as WorldProp) : undefined;
+  }
+
+  #saveProp(worldId: string, prop: WorldProp): void {
+    this.#db
+      .prepare(
+        'INSERT INTO props (id, world_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
+      )
+      .run(prop.id, worldId, JSON.stringify(prop));
   }
 
   /** 客户端落位回报：记下物件的 tile，重载世界时按此恢复。 */
   setPropTile(worldId: string, propId: string, tile: [number, number]): boolean {
-    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    const prop = this.#getProp(worldId, propId);
     if (!prop) return false;
     prop.tile = tile;
-    this.#persistWorlds();
+    this.#saveProp(worldId, prop);
     return true;
   }
 
   /** 收纳：已摆物件收进收集册物品页（tile 清空）。不存在或已在背包 → false 不动账。 */
   storeProp(worldId: string, propId: string): boolean {
-    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    const prop = this.#getProp(worldId, propId);
     if (!prop || prop.state !== 'placed') return false;
     prop.state = 'bagged';
     prop.tile = null;
-    this.#persistWorlds();
+    this.#saveProp(worldId, prop);
     return true;
   }
 
   /** 摆出：背包物件放回世界指定 tile（客户端已过占地校验）。不存在或不在背包 → false。 */
   takeProp(worldId: string, propId: string, tile: [number, number]): boolean {
-    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    const prop = this.#getProp(worldId, propId);
     if (!prop || prop.state !== 'bagged') return false;
     prop.state = 'placed';
     prop.tile = tile;
-    this.#persistWorlds();
+    this.#saveProp(worldId, prop);
     return true;
   }
 
   /** 挪位：已摆物件换 tile（长按拖拽后回报）。不存在或在背包 → false。 */
   movePropTile(worldId: string, propId: string, tile: [number, number]): boolean {
-    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    const prop = this.#getProp(worldId, propId);
     if (!prop || prop.state !== 'placed') return false;
     prop.tile = tile;
-    this.#persistWorlds();
+    this.#saveProp(worldId, prop);
     return true;
   }
 
   listProps(worldId: string): WorldProp[] {
-    return [...(this.#worlds.get(worldId)?.props.values() ?? [])];
+    const rows = this.#db.prepare('SELECT data FROM props WHERE world_id = ?').all(worldId) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as WorldProp);
   }
 
   /** 客户端上报的世界地点名（喂给意图 LLM 让「去某地」说的是真实地名）。 */
@@ -167,45 +237,61 @@ export class WorldStore {
 
   // ── 奖赏系统：玩家贴纸背包 + 进行中委托 ──────────────────────────────────
 
+  #getInventoryRow(worldId: string): Record<string, number> | undefined {
+    const row = this.#db.prepare('SELECT inventory FROM worlds WHERE id = ?').get(worldId) as
+      | { inventory: string }
+      | undefined;
+    return row ? (JSON.parse(row.inventory) as Record<string, number>) : undefined;
+  }
+
+  #setInventory(worldId: string, inv: Record<string, number>): void {
+    this.#db.prepare('UPDATE worlds SET inventory = ? WHERE id = ?').run(JSON.stringify(inv), worldId);
+  }
+
   getInventory(worldId: string): Record<string, number> {
-    return this.#worlds.get(worldId)?.inventory ?? {};
+    return this.#getInventoryRow(worldId) ?? {};
   }
 
   /** 发贴纸（委托奖励）。 */
   addSticker(worldId: string, stickerId: string, n = 1): void {
-    const world = this.#worlds.get(worldId);
-    if (!world) return;
-    world.inventory[stickerId] = (world.inventory[stickerId] ?? 0) + n;
-    this.#persistWorlds();
+    const inv = this.#getInventoryRow(worldId);
+    if (!inv) return;
+    inv[stickerId] = (inv[stickerId] ?? 0) + n;
+    this.#setInventory(worldId, inv);
   }
 
   /** 扣贴纸（转赠/gift 委托）。不够扣返回 false 且不动账。 */
   removeSticker(worldId: string, stickerId: string, n = 1): boolean {
-    const world = this.#worlds.get(worldId);
-    if (!world || (world.inventory[stickerId] ?? 0) < n) return false;
-    world.inventory[stickerId] = (world.inventory[stickerId] ?? 0) - n;
-    if (world.inventory[stickerId] === 0) delete world.inventory[stickerId];
-    this.#persistWorlds();
+    const inv = this.#getInventoryRow(worldId);
+    if (!inv || (inv[stickerId] ?? 0) < n) return false;
+    inv[stickerId] = (inv[stickerId] ?? 0) - n;
+    if (inv[stickerId] === 0) delete inv[stickerId];
+    this.#setInventory(worldId, inv);
     return true;
   }
 
   getActiveTask(worldId: string): ActiveTask | null {
-    return this.#worlds.get(worldId)?.activeTask ?? null;
+    const row = this.#db.prepare('SELECT active_task FROM worlds WHERE id = ?').get(worldId) as
+      | { active_task: string | null }
+      | undefined;
+    return row && row.active_task ? (JSON.parse(row.active_task) as ActiveTask) : null;
   }
 
   setActiveTask(worldId: string, task: ActiveTask | null): void {
-    const world = this.#worlds.get(worldId);
-    if (!world) return;
-    world.activeTask = task;
-    this.#persistWorlds();
+    if (!this.#worldExists(worldId)) return;
+    this.#db.prepare('UPDATE worlds SET active_task = ? WHERE id = ?').run(task ? JSON.stringify(task) : null, worldId);
   }
 
   listCharacters(worldId: string): Character[] {
-    return [...(this.#worlds.get(worldId)?.characters.values() ?? [])];
+    const rows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(worldId) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as Character);
   }
 
   getCharacter(worldId: string, characterId: string): Character | undefined {
-    return this.#worlds.get(worldId)?.characters.get(characterId);
+    const row = this.#db
+      .prepare('SELECT data FROM characters WHERE id = ? AND world_id = ?')
+      .get(characterId, worldId) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as Character) : undefined;
   }
 
   /** 存入资源，返回内容寻址 hash。 */
