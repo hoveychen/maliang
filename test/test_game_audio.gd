@@ -29,6 +29,10 @@ func _run(ga: GameAudio) -> void:
 		_fails += _check("sfx 文件存在 %s" % key, ResourceLoader.exists(GameAudio.SFX[key]), true)
 	for path in GameAudio.BGM_STEPS:
 		_fails += _check("bgm 文件存在 %s" % path, ResourceLoader.exists(path), true)
+		# BGM 必须真开 Forward loop，否则播完一遍就静音（导入 edit/loop_mode 须为 2=Forward，
+		# 不是 1=Disabled——早先三段就栽在这个错值上，播 9.6s 即停）
+		var s := load(path) as AudioStreamWAV
+		_fails += _check("bgm loop=Forward %s" % path, s.loop_mode, AudioStreamWAV.LOOP_FORWARD)
 
 	# bus 幂等：_ready 已建 Music/SFX，重复 ensure 不再加
 	_fails += _check("Music bus 存在", AudioServer.get_bus_index("Music") != -1, true)
@@ -45,17 +49,16 @@ func _run(ga: GameAudio) -> void:
 	ga._advance(GameAudio.SFX_GAP + 0.01)
 	_fails += _check("冷却过后可再播", ga.play_sfx("click"), true)
 
-	# BGM：三段轮换——一个 section 后换到下一段并开始交叉淡化
+	# 保留能力：喂多条 step 时按 section 轮换并交叉淡化（生产只用单条，这里用同一文件×2 覆盖机制）
 	# 用 0.05s 小步长模拟真实帧推进；一次塞大 delta 会在同帧内完成整个淡化
-	ga.start_bgm()
+	var two: Array = [GameAudio.BGM_STEPS[0], GameAudio.BGM_STEPS[0]]
+	ga.start_bgm(two)
 	_fails += _check("开播在第 0 段", ga.step_index, 0)
 	_sim(ga, GameAudio.SECTION_SECS + 0.1)
 	_fails += _check("section 到点换段", ga.step_index, 1)
 	_fails += _check("交叉淡化进行中", ga._fade_left > 0.0, true)
 	_sim(ga, GameAudio.CROSSFADE_SECS + 0.1)
 	_fails += _check("淡化结束", ga._fade_left, 0.0)
-	_sim(ga, GameAudio.SECTION_SECS)
-	_fails += _check("继续轮换到第 2 段", ga.step_index, 2)
 	_sim(ga, GameAudio.SECTION_SECS)
 	_fails += _check("轮换回第 0 段", ga.step_index, 0)
 

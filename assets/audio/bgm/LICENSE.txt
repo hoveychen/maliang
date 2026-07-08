@@ -1,11 +1,16 @@
-Music Loop Variations ("mellow, yet upbeat" BGM loops)
+Children's Game Music 2 - Adventure (background loop)
 
-Author:  obscure music
-Source:  https://opengameart.org/content/music-loop-variations
+Author:  heartade
+Source:  https://opengameart.org/content/childrens-game-music-2-adventure
 License: CC0 (Creative Commons Zero, Public Domain)
          http://creativecommons.org/publicdomain/zero/1.0/
 
-Files bgm_step1/2/3.wav are the "good" variations level1-step1/2/3 from
-the original loops.zip, resampled 44.1kHz -> 32kHz stereo 16-bit PCM.
-Each is a seamless 9.6s loop at 100 BPM; steps are designed to be
-chained/alternated for variety.
+File bgm_main.wav is the "Adventure" track from the "Children's Game Music"
+series (source children_soundtrack_2.wav, 44.1kHz float stereo), resampled to
+32kHz stereo 16-bit PCM with leading/trailing silence trimmed to ~68.5s for a
+tight seamless loop.
+
+Previously this folder shipped bgm_step1/2/3.wav ("Music Loop Variations" by
+"obscure music", also CC0, https://opengameart.org/content/music-loop-variations).
+Those three 9.6s intensity layers were replaced by this single continuous track:
+cycling the short layers every ~19s sounded choppy and never settled.
