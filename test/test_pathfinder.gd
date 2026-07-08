@@ -125,6 +125,40 @@ func _init() -> void:
 	var b4 := Pathfinder.find_path(ba, bb, 2, "", false)
 	fails += _check("non-budgeted unaffected", b4.size() > 0, true)
 
+	# --- 异步快照 OccSnapshot：等价性 + 隔离性（P1 异步寻路地基）---
+	# 等价性：带占用的世界上，find_path(snap) 与同一时刻纯静态 find_path 逐点相同
+	# （snap 是活图的精确副本，同一世界快照上 A* 必走出同一条路）
+	OccupancyMap.clear()
+	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(Vector2i(10, 60)), 2, 14)  # 竖墙
+	var ea := TerrainMap.tile_center(Vector2i(8, 63))
+	var eb := TerrainMap.tile_center(Vector2i(12, 63))
+	var snap_eq := OccupancyMap.snapshot()
+	var raw_live := Pathfinder.find_path(ea, eb, 2, "", false)
+	var raw_snap := Pathfinder.find_path(ea, eb, 2, "", false, 4000, false, snap_eq)
+	fails += _check("snap equiv raw path", raw_snap == raw_live, true)
+	var sm_live := Pathfinder.find_path(ea, eb)
+	var sm_snap := Pathfinder.find_path(ea, eb, 2, "", true, 4000, false, snap_eq)
+	fails += _check("snap equiv smoothed path", sm_snap == sm_live, true)
+
+	# 隔离性：拍快照后改活占用图，快照结果冻结不变；活查询才看得到改动。
+	# 这是「worker 拿快照跑寻路、主线程同时在写占用图」不产生数据竞争的地基证明。
+	OccupancyMap.clear()
+	var ia := TerrainMap.tile_center(Vector2i(2, 68))
+	var ib := TerrainMap.tile_center(Vector2i(10, 68))
+	var snap_iso := OccupancyMap.snapshot()          # 空旷时拍下
+	var iso_before := Pathfinder.find_path(ia, ib, 2, "", false, 4000, false, snap_iso)
+	fails += _check("iso snap path before", iso_before.size() > 0, true)
+	# 事后在活图上竖一道挡直线的墙（物件层）
+	OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(Vector2i(6, 67)), 2, 4)
+	var iso_after := Pathfinder.find_path(ia, ib, 2, "", false, 4000, false, snap_iso)
+	var iso_live := Pathfinder.find_path(ia, ib, 2, "", false)
+	fails += _check("iso snap frozen vs live occ mutation", iso_after == iso_before, true)
+	fails += _check("iso live sees wall, diverges from snap", iso_live != iso_after, true)
+	# 角色层同样隔离：事后登记一个挡路角色，快照不受影响
+	OccupancyMap.char_register("blocker", TerrainMap.tile_center(Vector2i(6, 68)), 4)
+	var iso_char := Pathfinder.find_path(ia, ib, 2, "", false, 4000, false, snap_iso)
+	fails += _check("iso snap frozen vs late char_register", iso_char == iso_before, true)
+
 	if fails == 0:
 		print("pathfinder tests PASS")
 	else:

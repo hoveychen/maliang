@@ -961,6 +961,13 @@ func _process(delta: float) -> void:
 		_prof_frame_end()
 		_prof_flush(delta)
 
+## 世界卸载/退出：把所有执行器的在途异步寻路任务收干净，防 WorkerThreadPool 在
+## 引擎关停时销毁在途任务残留的绑定 Callable 崩溃（真机退出/回测退出 exit 134）。
+func _exit_tree() -> void:
+	for ex in _executors:
+		ex.cancel()  # 把各自在途寻路任务转孤儿
+	BehaviorExecutor.flush_all_blocking()  # 阻塞收完（关停允许阻塞）
+
 func _step_executors(delta: float) -> void:
 	for ex in _executors:
 		ex.step(delta)

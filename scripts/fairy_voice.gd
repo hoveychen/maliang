@@ -15,6 +15,7 @@ var _play_until := 0.0          ## 当前台词按时长应结束的时刻——
                                 ## （headless 回测）下 playing 永不落假，用它兜底
 var _t := 0.0
 var _player: AudioStreamPlayer
+var _wav_cache: Dictionary = {}  ## wav 路径 -> AudioStream，避免 load_threaded_get 重复取 + 重播复用
 
 func _ready() -> void:
 	_player = AudioStreamPlayer.new()
@@ -26,6 +27,9 @@ func _ready() -> void:
 	var data: Variant = JSON.parse_string(f.get_as_text())
 	if typeof(data) == TYPE_DICTIONARY:
 		_lines = data.get("lines", [])
+	# 台词 WAV 后台预加载：触发时（飞近地标等）不再同步 load 卡帧
+	for l in _lines:
+		ResourceLoader.load_threaded_request("%s/%s.wav" % [VOICE_DIR, String(l["id"])])
 
 func _process(delta: float) -> void:
 	_t += delta
@@ -47,7 +51,16 @@ func try_play(trigger: String) -> bool:
 	if pool.is_empty():
 		return false
 	var line: Dictionary = pool[randi() % pool.size()]
-	var stream: AudioStream = load("%s/%s.wav" % [VOICE_DIR, String(line["id"])])
+	var wav_path := "%s/%s.wav" % [VOICE_DIR, String(line["id"])]
+	var stream: AudioStream = _wav_cache.get(wav_path)
+	if stream == null:
+		# 后台预加载已就绪则直接取；否则同步兜底（首次触发早于预加载完成的极少数）
+		if ResourceLoader.load_threaded_get_status(wav_path) == ResourceLoader.THREAD_LOAD_LOADED:
+			stream = ResourceLoader.load_threaded_get(wav_path)
+		else:
+			stream = load(wav_path)
+		if stream != null:
+			_wav_cache[wav_path] = stream
 	if stream == null:
 		push_warning("fairy 台词音频缺失: %s" % line["id"])
 		return false

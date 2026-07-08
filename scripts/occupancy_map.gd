@@ -24,6 +24,13 @@ static func clear() -> void:
 	_chars = {}
 	_char_rects = {}
 
+## 拍一份不可变快照交给 worker 线程跑寻路（见 OccSnapshot）。主线程调用，
+## 仅两次 duplicate（_occ 22500 字节 + _chars 小字典），微秒级；worker 从此
+## 只读快照、不碰主线程仍在 char_register 写的活 _occ/_chars，无数据竞争。
+static func snapshot() -> OccSnapshot:
+	_ensure()
+	return OccSnapshot.new(_occ.duplicate(), _chars.duplicate())
+
 static func _idx(c: Vector2i) -> int:
 	return posmod(c.y, CELLS) * CELLS + posmod(c.x, CELLS)
 
