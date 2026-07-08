@@ -78,6 +78,18 @@ func _tick() -> void:
 			_freeze_and_place(blue, green, Vector2(10.0, 0.0))
 			scene.set("selected", green["node"])
 			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false })
+		315:
+			# 收听 HUD：选中角色时耳徽章须浮在头顶之上（绝不盖脸），且底部声波条出现。
+			# 旧实现耳朵 1.92m 中心锚点只抬 +0.5，底边压进头顶 0.46m——此断言曾红。
+			var g := green["node"] as PaperCharacter
+			var ear := scene.get("ear_icon") as Sprite3D
+			_check("ear visible on select", ear.visible, true)
+			var char_top_world := g.global_position.y + float(scene.call("_char_top", g))
+			var ear_h := ear.pixel_size * float(ear.texture.get_height()) * ear.scale.y
+			var ear_bottom := ear.global_position.y - ear_h * 0.5
+			_check("ear badge clears head (bottom %.2f >= top %.2f)" % [ear_bottom, char_top_world], ear_bottom >= char_top_world - 0.05, true)
+			var vw: Variant = scene.get("voice_wave")
+			_check("voice wave shown on select", vw != null and (vw as Control).visible, true)
 		316:
 			_check("performer not remote-controlled", blue.has("paper_action"), false)
 			_check("speaker runs errand", scene.call("_has_executor_for", green), true)

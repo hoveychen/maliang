@@ -19,6 +19,13 @@ const UNMUTE_GRACE := 0.3         ## 闭麦（思考/TTS）结束后的静默恢
 const PLAYER_ID := "player"
 const PLAYER_SPAN := 2            ## 玩家占地（半格数），与 NPC 一致
 const APPROACH_ARRIVE := 2.6      ## 跑向 NPC 的到达半径：对象自身占格，走到旁边即算到（同送信）
+const EAR_HEIGHT_M := 0.8         ## 收听耳徽章渲染高度（米）：归一化尺寸，小仙子也不会被盖脸
+const EAR_GAP_M := 0.35           ## 耳徽章底边离头顶的固定间距（米）：脉动只向上长，底边永不压头
+const EAR_PULSE := 0.12           ## 耳徽章随音量的轻微脉动系数（主音量反馈已移到底部声波条）
+const WAVE_BARS := 9              ## 底部声波条柱子数
+const WAVE_MIN_H := 10.0          ## 声波柱静息高度（像素）
+const WAVE_MAX_H := 44.0          ## 声波柱满音量高度（像素）
+const WAVE_BASE := 16.0           ## 柱底离胶囊底边的内边距（像素）
 const FAIRY_HEIGHT := 1.5         ## 小仙子立绘世界高度（头部大小的随从，时之笛式）
 const FAIRY_HOVER := 2.4          ## 小仙子悬浮基准高度（米，脚底离地）
 const FOG_DEPTH_BEGIN := 40.0     ## 深度雾起点（焦点在平地时；随 _cur_focus_y 整体补偿）
@@ -65,6 +72,9 @@ var npcs: Array = []              ## [{ node:PaperCharacter, logical:Vector2 }]
 var player: Dictionary = {}       ## 玩家角色 { node, logical, id, span }；不进 npcs（拾取/对话只对 NPC）
 var selected: PaperCharacter = null
 var ear_icon: Sprite3D
+var voice_wave: Control            ## 底部收听声波条（近身对话期间随音量跳动，见 _update_voice_wave）
+var _wave_bars: Array = []         ## voice_wave 里的一排 ColorRect 柱子
+var _wave_t := 0.0
 var _dragging := false
 var _press_pos := Vector2.ZERO
 # 暗黑式按住跟随：指针按在空地上即走，按住期间节流重下发指针下地面为移动目标
@@ -525,7 +535,8 @@ func _setup_ear() -> void:
 	ear_icon = Sprite3D.new()
 	ear_icon.texture = ear_tex
 	ear_icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	ear_icon.pixel_size = 0.02
+	# 归一化到固定世界高度（同 bubble_sprite 做法）：不再写死 0.02，小体型角色也不会被盖脸
+	ear_icon.pixel_size = EAR_HEIGHT_M / float(ear_tex.get_height()) if ear_tex != null else 0.008
 	ear_icon.shaded = false
 	ear_icon.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	ear_icon.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
@@ -564,6 +575,50 @@ func _setup_hud() -> void:
 	_style_label(banner, 28)
 	banner.visible = false
 	layer.add_child(banner)
+
+	# 收听声波条：近身对话期间浮在横幅上方——奶油圆角胶囊底 + 一排珊瑚色柱子随音量跳动，
+	# 给不识字的小朋友一个又大又清楚的「现在在听你说话」提示（音量脉动从耳朵搬来这里）。
+	var bar_w := 14.0
+	var gap := 9.0
+	var pill_w := float(WAVE_BARS) * bar_w + float(WAVE_BARS - 1) * gap + 36.0
+	voice_wave = Control.new()
+	voice_wave.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	voice_wave.offset_left = -pill_w * 0.5
+	voice_wave.offset_right = pill_w * 0.5
+	voice_wave.offset_top = -172.0
+	voice_wave.offset_bottom = -100.0
+	voice_wave.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	voice_wave.visible = false
+	layer.add_child(voice_wave)
+	# 奶油圆角胶囊背景：在明亮草地上给柱子一个高对比底，读作一枚「收听中」小徽标
+	var pill := Panel.new()
+	pill.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(UiAssets.CARD_BG.r, UiAssets.CARD_BG.g, UiAssets.CARD_BG.b, 0.85)
+	sb.set_corner_radius_all(36)
+	sb.border_color = UiAssets.CARD_BORDER
+	sb.set_border_width_all(3)
+	sb.shadow_color = Color(0.35, 0.24, 0.10, 0.25)
+	sb.shadow_size = 6
+	pill.add_theme_stylebox_override("panel", sb)
+	voice_wave.add_child(pill)
+	for i in WAVE_BARS:
+		var bar := ColorRect.new()
+		bar.color = Color(0.96, 0.5, 0.36) # 珊瑚色：在奶油胶囊上高对比、暖而不刺眼
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		# 锚在胶囊底部中心：x 相对中心错开排列，底边对齐、只向上长
+		bar.anchor_left = 0.5
+		bar.anchor_right = 0.5
+		bar.anchor_top = 1.0
+		bar.anchor_bottom = 1.0
+		var xoff := (float(i) - float(WAVE_BARS - 1) * 0.5) * (bar_w + gap)
+		bar.offset_left = xoff - bar_w * 0.5
+		bar.offset_right = xoff + bar_w * 0.5
+		bar.offset_bottom = -WAVE_BASE # 抬离胶囊底边留内边距
+		bar.offset_top = -WAVE_BASE - WAVE_MIN_H
+		voice_wave.add_child(bar)
+		_wave_bars.append(bar)
 
 	# 贴纸收集册：左下角大按钮（AIGC 摊开书图标）+ 居中弹出图标网格（去文字化，数量角标）
 	album_button = Button.new()
@@ -907,6 +962,7 @@ func _process(delta: float) -> void:
 	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
 	_update_ear()
+	_update_voice_wave(delta)
 	tp = _prof_lap(tp, "tap/ear")
 	_update_think_bubble(delta)
 	_update_emotion_bubble(delta)
@@ -1023,13 +1079,34 @@ func _place_on_bent_ground(node: Node3D, base_world: Vector3) -> void:
 func _update_ear() -> void:
 	if selected != null and is_instance_valid(selected):
 		ear_icon.visible = true
-		# 听到声音时耳朵放大脉动：告诉孩子「它听到我说话了」（开放麦唯一的聆听反馈）
-		var pulse := 1.0 + (_vad.level if _vad != null else 0.0) * 0.6
+		# 听到声音时耳徽章轻微脉动（主音量反馈已在底部声波条）；脉动只放大不下沉——
+		# 底边固定钉在头顶上方 EAR_GAP_M 处，靠「中心 = 头顶 + 间距 + 半高」实现，永不盖脸。
+		var pulse := 1.0 + (_vad.level if _vad != null else 0.0) * EAR_PULSE
 		ear_icon.scale = ear_icon.scale.lerp(Vector3.ONE * pulse, 0.5)
-		ear_icon.global_position = selected.global_position + Vector3(0.0, _char_top(selected) + 0.5, 0.0)
+		var half := EAR_HEIGHT_M * ear_icon.scale.y * 0.5
+		ear_icon.global_position = selected.global_position + Vector3(0.0, _char_top(selected) + EAR_GAP_M + half, 0.0)
 	else:
 		ear_icon.visible = false
 		ear_icon.scale = Vector3.ONE
+
+## 底部收听声波条：选中角色时显示，各柱子相位错开随音量拔高；
+## 无输入时轻微待机呼吸（让孩子看出「一直在听」），有声时随 _vad.level 跳动。
+func _update_voice_wave(delta: float) -> void:
+	var active := selected != null and is_instance_valid(selected)
+	if voice_wave.visible != active:
+		voice_wave.visible = active
+	if not active:
+		return
+	_wave_t += delta
+	var lvl := (_vad.level if _vad != null else 0.0)
+	# 整体幅度随音量抬升（静息也留 0.25 让波条一直在滚动，孩子看出「一直在听」）；
+	# 每根柱子相位错开 → 一条左右流动的声波，音量越大越高越满。
+	var base := 0.25 + lvl * 0.75
+	for i in _wave_bars.size():
+		var bar := _wave_bars[i] as ColorRect
+		var shape := 0.5 + 0.5 * sin(_wave_t * 7.0 + float(i) * 0.8)
+		var amp := base * (0.4 + 0.6 * shape)
+		bar.offset_top = -(WAVE_BASE + WAVE_MIN_H + amp * (WAVE_MAX_H - WAVE_MIN_H))
 
 ## 角色立绘顶端相对节点原点（脚底）的高度——头顶挂饰（耳朵/气泡）按此定位，小仙子等小体型不悬空。
 func _char_top(npc: PaperCharacter) -> float:
