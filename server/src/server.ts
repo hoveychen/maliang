@@ -92,6 +92,28 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { id: fairy.id, spriteAsset: hash, regenerated: true };
   });
 
+  // 管理端点：按存量 visualDescription 重生成任意角色立绘（清理旧 prompt 时代
+  // 朝向随机的存量素材用，见 tools/regen_old_sprites.mjs）。走完整管线（含朝向兜底）。
+  // 生图烧钱且会改小朋友认得的角色形象，必须配 MALIANG_ADMIN_TOKEN 才开放。
+  app.post<{ Params: { id: string; cid: string } }>(
+    '/worlds/:id/characters/:cid/regen-sprite',
+    async (req, reply) => {
+      const token = process.env.MALIANG_ADMIN_TOKEN;
+      if (!token || req.headers['x-admin-token'] !== token) {
+        return reply.code(403).send({ error: 'admin token required' });
+      }
+      const char = store.getCharacter(req.params.id, req.params.cid);
+      if (!char) return reply.code(404).send({ error: 'character not found' });
+      const desc = char.appearance.visualDescription.trim();
+      if (desc.length === 0) return reply.code(400).send({ error: 'character has no visualDescription' });
+      const prev = char.appearance.spriteAsset;
+      const hash = await generateSprite(adapters, desc, store);
+      char.appearance.spriteAsset = hash;
+      store.saveCharacter(char);
+      return { id: char.id, name: char.name, prev, spriteAsset: hash };
+    },
+  );
+
   // onboarding 玩家形象：描述（由问题答案拼装）→ 生图 → 资产 hash。不建角色——
   // 玩家档案在设备端，资产内容寻址共享。描述过文字审核（防客户端篡改）。
   app.post<{ Body: { visualDescription?: string } | null }>('/player-sprite', async (req, reply) => {
