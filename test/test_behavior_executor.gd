@@ -261,6 +261,63 @@ func _init() -> void:
 	fails += _check("relay unknown performer not fired", relayed2.is_empty(), true)
 	OccupancyMap.clear()
 
+	# --- 异步寻路机制（P2）：派发/直线兜底/完成回填/孤儿回收 ---
+	# 断言用真实等待（_drain_orphans/_wait_plan 内含 OS.delay_msec），不依赖循环快慢——
+	# 合成紧循环里主线程微秒级空转会跑赢 worker 的毫秒级 A*，必须给 worker 真实墙上时间。
+	_drain_orphans()  # 先排干上文各用例遗留的在途任务，隔离本段
+	fails += _check("orphans drained before async block", BehaviorExecutor._orphans.is_empty(), true)
+
+	# 派发 + 直线兜底：首帧 step 末尾 _begin_move 派发 worker 任务；此刻尚无 waypoint，
+	# 走直线兜底（_direct=true），且任务在途（_plan_task!=-1）——主线程没被 A* 阻塞
+	OccupancyMap.clear()
+	var az := TerrainMap.tile_center(Vector2i(2, 68))
+	var bz := TerrainMap.tile_center(Vector2i(12, 68))
+	OccupancyMap.char_register("aw", az, 2)
+	var da := { "logical": az, "id": "aw" }
+	var exa := BehaviorExecutor.new()
+	exa.setup(da, { "commands": [ { "type": "move_to", "params": { "target": [bz.x, bz.y] } } ] })
+	exa.step(dt)
+	fails += _check("async task dispatched on first step", exa._plan_task != -1, true)
+	fails += _check("direct fallback before path arrives", exa._direct, true)
+	# 只泵 _poll_plan（不移动，避免直线兜底先抵达）等 worker 完成回填 waypoint
+	_wait_plan(exa)
+	fails += _check("async task completed", exa._plan_task, -1)
+	fails += _check("waypoints filled from worker", exa._waypoints.size() > 0 and not exa._direct, true)
+	# 再泵到抵达：异步算出的路径照样把 NPC 送到目标
+	for i in range(3000):
+		if exa.is_done():
+			break
+		exa.step(dt)
+	fails += _check("async move arrived", WorldGrid.shortest_delta(da["logical"], bz).length() <= 1.2, true)
+
+	# 单飞：任务在途时再调 _plan_path 不叠新任务（同一 task id）
+	OccupancyMap.clear()
+	OccupancyMap.char_register("aw", az, 2)
+	var db := { "logical": az, "id": "aw" }
+	var exb := BehaviorExecutor.new()
+	exb.setup(db, { "commands": [ { "type": "move_to", "params": { "target": [bz.x, bz.y] } } ] })
+	exb.step(dt) # 派发
+	var tid: int = exb._plan_task
+	exb._plan_path() # 在途重复调用
+	fails += _check("single-flight: no stacked task", exb._plan_task, tid)
+	exb.cancel()
+
+	# 孤儿回收：在途取消 → 任务转孤儿、_plan_task 归 -1 → 集中回收后清空（不泄漏）
+	OccupancyMap.clear()
+	OccupancyMap.char_register("aw", az, 2)
+	var dc := { "logical": az, "id": "aw" }
+	var exc := BehaviorExecutor.new()
+	exc.setup(dc, { "commands": [ { "type": "move_to", "params": { "target": [bz.x, bz.y] } } ] })
+	exc.step(dt) # 派发
+	fails += _check("task in flight before cancel", exc._plan_task != -1, true)
+	exc.cancel()
+	fails += _check("cancel clears own task slot", exc._plan_task, -1)
+	fails += _check("cancelled task became orphan", BehaviorExecutor._orphans.size() >= 1, true)
+	_drain_orphans()
+	fails += _check("orphan reaped, no leak", BehaviorExecutor._orphans.is_empty(), true)
+	OccupancyMap.clear()
+	_drain_orphans()  # 收尾：任何遗留任务全部回收，避免引擎关停时销毁在途 Callable 崩溃
+
 	if fails == 0:
 		print("behavior_executor tests PASS")
 	else:
@@ -272,3 +329,20 @@ func _check(name: String, got: Variant, want: Variant) -> int:
 		return 0
 	printerr("  FAIL %s: got %s want %s" % [name, str(got), str(want)])
 	return 1
+
+## 等一个执行器的在途寻路任务完成回填（只泵 _poll_plan，不移动角色）。
+## 用 OS.delay_msec 给 worker 真实墙上时间——不靠循环次数猜时序。
+func _wait_plan(ex: BehaviorExecutor) -> void:
+	for i in range(2000): # 上限 ~2s 兜底防挂
+		ex._poll_plan()
+		if ex._plan_task == -1:
+			return
+		OS.delay_msec(1)
+
+## 排干所有孤儿在途任务（同样给 worker 真实时间），收尾防泄漏 + 防关停崩溃。
+func _drain_orphans() -> void:
+	for i in range(2000):
+		BehaviorExecutor._reap_orphans()
+		if BehaviorExecutor._orphans.is_empty():
+			return
+		OS.delay_msec(1)
