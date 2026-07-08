@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { ServiceAdapters } from './adapters/types.ts';
+import type { ImageBlob, ServiceAdapters } from './adapters/types.ts';
+import { flipHorizontal } from './adapters/chroma_cutout.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, CharacterSpec, CreateCharacterInput, GenStage } from './types.ts';
 
@@ -40,8 +41,40 @@ function buildCharacter(
   };
 }
 
+/** 生图 + 抠图（两条管线共用的前半段）。 */
+async function generateCut(adapters: ServiceAdapters, visualDescription: string): Promise<ImageBlob> {
+  const raw = await adapters.image.generateSprite(visualDescription);
+  return adapters.cutout.removeBackground(raw);
+}
+
 /**
- * 为已存在角色（如小神仙）生成一张 sprite：image → cutout → 存储，返回 assetHash。
+ * 朝向兜底：游戏端约定「原图=朝右」（world.gd 水平镜像做朝左），但生图模型对
+ * prompt 里 "facing right" 的服从没有硬保证（线上曾出过整批朝左/正面的存量）。
+ * 检测到朝左 → 水平翻转即合规；正面 → 翻转无意义（左右对称），重试一次生图，
+ * 仍不合规就保守用第一张（正面只是螃蟹步，不至于倒走）；unknown（检测故障）放行。
+ */
+async function ensureFacingRight(
+  adapters: ServiceAdapters,
+  visualDescription: string,
+  cut: ImageBlob,
+): Promise<ImageBlob> {
+  const facing = await adapters.orientation.detectFacing(cut);
+  if (facing === 'left') return flipHorizontal(cut);
+  if (facing !== 'front') return cut;
+  let retry: ImageBlob;
+  try {
+    retry = await generateCut(adapters, visualDescription);
+  } catch {
+    return cut; // 重试失败不阻塞：第一张已过审，直接用
+  }
+  const facing2 = await adapters.orientation.detectFacing(retry);
+  if (facing2 === 'left') return flipHorizontal(retry);
+  if (facing2 === 'right') return retry;
+  return cut;
+}
+
+/**
+ * 为已存在角色（如小神仙）生成一张 sprite：image → cutout → 朝向兜底 → 存储，返回 assetHash。
  * 与 createCharacter 的造角色管线不同——这里不新建角色、不跑文字审核（描述是固定的）。
  */
 export async function generateSprite(
@@ -49,9 +82,9 @@ export async function generateSprite(
   visualDescription: string,
   store: WorldStore,
 ): Promise<string> {
-  const raw = await adapters.image.generateSprite(visualDescription);
-  const cut = await adapters.cutout.removeBackground(raw);
-  return store.putAsset(cut);
+  const cut = await generateCut(adapters, visualDescription);
+  const upright = await ensureFacingRight(adapters, visualDescription, cut);
+  return store.putAsset(upright);
 }
 
 /**
@@ -79,10 +112,12 @@ export async function createCharacter(
 
   onProgress('cutout');
   const cut = await adapters.cutout.removeBackground(raw);
+  // 朝向兜底归在 cutout 阶段内（不加新 GenStage，客户端进度文案零改动）
+  const upright = await ensureFacingRight(adapters, spec.visualDescription, cut);
 
   // 图片不再单独审核：生图模型自带安全门（见 docs）。文字审核仍保留。
   onProgress('persist');
-  const assetHash = store.putAsset(cut);
+  const assetHash = store.putAsset(upright);
   const character = buildCharacter(spec, input, assetHash);
   store.addCharacter(character);
   return character;
