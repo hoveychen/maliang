@@ -15,12 +15,30 @@ const DIRS: Array[Vector2i] = [
 	Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1),
 ]
 
+## 单帧寻路预算（budgeted=true 的调用方共享）：目标不可达时 A* 必烧满 max_iter
+## （可达区域大于预算），单次 ~100-300ms（平板小核实测）；多个 NPC 同帧寻路失败
+## 叠加曾冲到单帧 1.3s（FSPIKE 取证）。预算耗尽的调用直接返回空——调用方按
+## 「无路」回退直线滑动，下一帧再排队。角色行为寻路走预算；玩家点地寻路不走
+## （手感优先，且单次点击只有一次寻路）。
+const PLAN_BUDGET := 2
+static var _budget_frame := -1
+static var _budget_used := 0
+
 ## 从逻辑坐标 from_pos 寻路到 to_pos（米）。返回 waypoint 序列（半格中心的逻辑坐标，
 ## 不含起点格，含终点格）；无路/已在原格返回空数组（调用方回退直线滑动）。
 ## 目标格不可通行时（如目标是角色/物件所在），螺旋搜索最近可通行格替代；
 ## exclude_id = 寻路者自己的角色 id（角色层排除自己）；
-## simplify=false 保留逐格路径（测试用），true 时做 string-pulling 视线拉直。
-static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id := "", simplify := true, max_iter := 8000) -> PackedVector2Array:
+## simplify=false 保留逐格路径（测试用），true 时做 string-pulling 视线拉直；
+## budgeted=true 受单帧预算约束（见 PLAN_BUDGET 注释）。
+static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id := "", simplify := true, max_iter := 4000, budgeted := false) -> PackedVector2Array:
+	if budgeted:
+		var f := Engine.get_process_frames()
+		if f != _budget_frame:
+			_budget_frame = f
+			_budget_used = 0
+		if _budget_used >= PLAN_BUDGET:
+			return PackedVector2Array()
+		_budget_used += 1
 	var start := OccupancyMap.to_cell(from_pos)
 	var goal := _resolve_goal(to_pos, span, exclude_id)
 	if goal == Vector2i(-1, -1) or _wrap(start) == goal:

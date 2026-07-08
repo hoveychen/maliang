@@ -110,6 +110,20 @@ func _init() -> void:
 	fails += _check("south climb found", s_climb.size() > 0, true)
 	fails += _check("south climb executable", _executable(s_base, s_climb), true)
 
+	# 单帧寻路预算（budgeted=true）：同帧超出 PLAN_BUDGET 次直接返回空；
+	# 非预算调用（默认，玩家点地/本测试其余用例）不受影响
+	OccupancyMap.clear()
+	var ba := TerrainMap.tile_center(Vector2i(2, 68))
+	var bb := TerrainMap.tile_center(Vector2i(10, 68))
+	var b1 := Pathfinder.find_path(ba, bb, 2, "", false, 4000, true)
+	var b2 := Pathfinder.find_path(ba, bb, 2, "", false, 4000, true)
+	var b3 := Pathfinder.find_path(ba, bb, 2, "", false, 4000, true)
+	fails += _check("budget 1st ok", b1.size() > 0, true)
+	fails += _check("budget 2nd ok", b2.size() > 0, true)
+	fails += _check("budget 3rd rejected same frame", b3.size(), 0)
+	var b4 := Pathfinder.find_path(ba, bb, 2, "", false)
+	fails += _check("non-budgeted unaffected", b4.size() > 0, true)
+
 	if fails == 0:
 		print("pathfinder tests PASS")
 	else:
