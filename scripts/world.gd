@@ -186,6 +186,9 @@ func _ready() -> void:
 	_setup_fairy_offline()
 	_setup_ear()
 	_setup_hud()
+	# 哨兵对：括住整棵树的 _process 跨度（见 ProcProf 注释）
+	add_child(ProcProf.Sentinel.make(true))
+	add_child(ProcProf.Sentinel.make(false))
 	_setup_backend()
 	api = Api.new()
 	api.name = "Api"
@@ -211,12 +214,10 @@ func _setup_environment() -> void:
 	light.rotation_degrees = Vector3(-55.0, -40.0, 0.0)
 	light.light_color = Color(1.0, 0.96, 0.86) # 暖阳（Pokopia 式午后柔光）
 	light.light_energy = 1.25
-	# 弯曲已改为世界空间位移（world_bend.gdshader）：相机/shadow pass 几何一致，可开阴影。
-	# 单 split 正交 + 短距离：Android 平板便宜；雾在 ~95 淡出，阴影只需覆盖近处。
-	light.shadow_enabled = true
-	light.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-	light.directional_shadow_max_distance = 90.0
-	light.shadow_blur = 1.5
+	# 实时阴影不开：老移动 GPU（Mali-G76 实测）定向阴影一开整帧 ~2.5 倍开销
+	# （7↔18fps），且与投影几何量、软/硬过滤、阴影图尺寸都无关——是阴影管线本身的代价。
+	# 影子锚定感由 BlobShadow 脚下暗斑承担（角色/可动物件），布景平光贴合 Pokopia 风。
+	light.shadow_enabled = false
 	add_child(light)
 
 	var we := WorldEnvironment.new()
@@ -346,6 +347,7 @@ func _apply_player_sprite() -> void:
 	node.pixel_size = 5.0 / float(tex.get_height())
 	node.offset = Vector2(0.0, float(tex.get_height()) / 2.0)
 	node.modulate = Color.WHITE
+	BlobShadow.attach(node, clampf(float(tex.get_width()) * node.pixel_size * 0.38, 0.4, 1.4))
 
 ## 离线模式的小仙子随从（在线时 _bootstrap 会清掉、换成服务端小神仙）。
 ## 悬浮飞行：不登记占用图、不走寻路，由 _update_fairy 驱动跟随玩家。
@@ -355,6 +357,7 @@ func _setup_fairy_offline() -> void:
 	add_child(node)
 	node.setup(tex, Color.WHITE, "小神仙")
 	node.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
+	BlobShadow.detach(node) # 悬浮飞行不落地，脚下暗斑穿帮
 	var spawn := WorldGrid.wrap_pos(player["logical"] + Vector2(3.0, 2.0))
 	npcs.append({ "node": node, "logical": spawn, "id": "fairy_local", "is_fairy": true, "hover": FAIRY_HOVER })
 	fairy_voice = FairyVoice.new()
@@ -732,14 +735,19 @@ func _prof_flush(delta: float) -> void:
 	_prof_frames += 1
 	if _prof_t < 2.0:
 		return
+	var total := 0
+	for k in _prof:
+		total += _prof[k]
+	_prof.merge(ProcProf.take())  # 其他脚本的账本（allproc/sdfprop/ws…）并入展示，不计入 world 合计
 	var keys := _prof.keys()
 	keys.sort_custom(func(a, b): return _prof[a] > _prof[b])
-	var total := 0
-	for k in keys:
-		total += _prof[k]
 	var n := maxi(_prof_frames, 1)
-	var line := "PERF %.1fms/f:" % (float(total) / 1000.0 / n)
-	for k in keys.slice(0, 8):
+	# eng = 引擎口径 TIME_PROCESS（整个 process 步，含所有节点 _process 与可能的交换链等待），
+	# 与分段合计的差 = world._process 之外的时间，用于判断热点归属
+	var line := "PERF %.1fms/f eng=%.1f nodes=%d:" % [float(total) / 1000.0 / n,
+			Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+			int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))]
+	for k in keys.slice(0, 10):
 		line += " %s=%.1f" % [k, float(_prof[k]) / 1000.0 / n]
 	print(line)
 	_prof.clear()
@@ -1443,11 +1451,13 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 	if is_fairy:
 		# 小仙子随从：头部大小（时之笛式），无论真图/占位都按 FAIRY_HEIGHT 归一
 		npc.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
+		BlobShadow.detach(npc) # 悬浮飞行不落地，脚下暗斑穿帮
 	elif real:
 		# 生成图分辨率高，按高度归一化到约 6 单位，脚底对齐原点
 		var h := float(tex.get_height())
 		npc.pixel_size = 6.0 / h
 		npc.offset = Vector2(0.0, h / 2.0)
+		BlobShadow.attach(npc, clampf(float(tex.get_width()) * npc.pixel_size * 0.38, 0.4, 1.4))
 	var logical := at_logical
 	if logical == Vector2.INF:
 		# 小世界：忽略后端旧坐标(原 1000×1000 的 tile 500)，统一放到村庄中心(chunk2 = world 中心)

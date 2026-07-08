@@ -88,6 +88,11 @@ func _send(obj: Dictionary) -> void:
 		_ws.send_text(JSON.stringify(obj))
 
 func _process(_delta: float) -> void:
+	var t0 := Time.get_ticks_usec()
+	_poll_ws()
+	ProcProf.add("ws", Time.get_ticks_usec() - t0)
+
+func _poll_ws() -> void:
 	_ws.poll()
 	var st := _ws.get_ready_state()
 	if st == WebSocketPeer.STATE_OPEN:

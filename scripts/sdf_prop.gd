@@ -81,6 +81,10 @@ func _setup(cfg: Dictionary) -> void:
 
 	animator = SdfAnimator.new(self)
 	push_uniforms()
+	# 脚下伪影（替代实时阴影，见 BlobShadow 注释）：半径取静止包围盒水平尺寸；
+	# SdfProp 节点未被 CPU 预弯（弯曲在自己 shader 里），blob 走 bend=true 档
+	var aabb := SdfMath.rest_aabb(prims)
+	BlobShadow.attach(self, clampf(maxf(aabb.size.x, aabb.size.z) * 0.4, 0.4, 2.2), true)
 
 ## 把当前基本体姿态打包进两个 pass 的 uniform（动画每帧调用）。
 func push_uniforms() -> void:
@@ -141,6 +145,8 @@ func _wander_step(delta: float) -> void:
 func _process(delta: float) -> void:
 	if animator == null:
 		return
+	var t0 := Time.get_ticks_usec()
 	_wander_step(delta)
 	animator.advance(delta)
 	push_uniforms()
+	ProcProf.add("sdfprop", Time.get_ticks_usec() - t0)

@@ -59,6 +59,8 @@ func setup(tex: Texture2D, color: Color, cname: String) -> void:
 	pixel_size = PLACEHOLDER_HEIGHT / h
 	offset = Vector2(0.0, h / 2.0)
 	texture = tex
+	# 脚下伪影（替代实时阴影，见 BlobShadow 注释）；换贴图重设尺寸时同步重挂
+	BlobShadow.attach(self, clampf(float(tex.get_width()) * pixel_size * 0.38, 0.4, 1.4))
 
 ## 纸片演出参数（world.gd 每帧驱动）：走路飘动幅度 / 待机呼吸卷曲，单位米。
 func set_paper_motion(flutter_amp: float, curl: float) -> void:
