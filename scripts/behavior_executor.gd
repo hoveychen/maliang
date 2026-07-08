@@ -103,10 +103,23 @@ func _start(cmd: Dictionary) -> void:
 				return
 			_begin_move()
 		"wander":
+			# 目标预检：随机点落在占用格/水面就换一个（几次哈希查询）。不预检时
+			# 落进房子/树丛/水里的目标会烧一次注定失败的全预算 A*（真机 ~300ms），
+			# 十来个村民各自每几秒 wander 一次 = 「原地间歇掉帧」的持续来源。
 			var radius := float(params.get("radius", 5.0))
-			var off := Vector2(randf() * 2.0 - 1.0, randf() * 2.0 - 1.0) * radius
-			_move_to = WorldGrid.wrap_pos(_target["logical"] + off)
-			_begin_move()
+			var picked := Vector2.INF
+			for _try in range(6):
+				var off := Vector2(randf() * 2.0 - 1.0, randf() * 2.0 - 1.0) * radius
+				var cand := WorldGrid.wrap_pos(_target["logical"] + off)
+				if TerrainMap.tile_type(WorldGrid.to_tile(cand)) != TerrainMap.T_WATER \
+						and Pathfinder.cell_free(OccupancyMap.to_cell(cand), _span(), _char_id()):
+					picked = cand
+					break
+			if picked == Vector2.INF:
+				_advance() # 周围全被占：这轮不逛，直接下一条指令
+			else:
+				_move_to = picked
+				_begin_move()
 		"wait":
 			_wait_t = float(params.get("duration", 1.0))
 			_state = "wait"
@@ -200,8 +213,10 @@ func _begin_move() -> void:
 	_plan_path()
 
 func _plan_path() -> void:
-	# budgeted=true：角色行为寻路受单帧预算约束（多 NPC 同帧寻路失败叠加曾单帧 1.3s）
-	_waypoints = Pathfinder.find_path(_target["logical"], _move_to, _span(), _char_id(), true, 4000, true)
+	# budgeted=true：角色行为寻路受单帧预算约束（多 NPC 同帧寻路失败叠加曾单帧 1.3s）；
+	# 搜索上限 1500：NPC 走位都是近程（wander 半径 7m/跟随/送信到人旁），
+	# 全图长搜索只服务「目标不可达」的病态用例——早认输走直线滑动，观感一致
+	_waypoints = Pathfinder.find_path(_target["logical"], _move_to, _span(), _char_id(), true, 1500, true)
 	_wp_i = 0
 	_direct = _waypoints.is_empty()
 
