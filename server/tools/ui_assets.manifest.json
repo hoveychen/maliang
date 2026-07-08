@@ -13,6 +13,7 @@
     { "id": "opt_book", "kind": "sticker", "targetSize": 320, "prompt": "a small stack of three colorful storybooks with a star" },
     { "id": "ic_mic", "kind": "sticker", "targetSize": 256, "prompt": "a cute rounded silver and coral retro singing microphone" },
     { "id": "ic_mic_rec", "kind": "sticker", "targetSize": 256, "prompt": "a cute rounded retro microphone glowing warm red with small sound waves around it" },
+    { "id": "hud_listen", "kind": "sticker", "targetSize": 640, "prompt": "a wide horizontal rounded pill-shaped HUD banner plaque for a toddler game, a soft flat cream panel with a chunky rounded warm coral border, a tiny cute microphone with small curved sound-wave arcs on the far left end and a few small golden stars on the far right end, the entire center left completely empty as a flat blank cream panel, glossy toy-like, symmetrical" },
     { "id": "ic_wait", "kind": "sticker", "targetSize": 256, "prompt": "a cute golden hourglass with magical sparkles floating around" },
     { "id": "ic_wand", "kind": "sticker", "targetSize": 256, "prompt": "a magic wand with a golden star tip trailing sparkles" },
     { "id": "ic_next", "kind": "sticker", "targetSize": 256, "prompt": "a chunky rounded golden arrow pointing right, glossy" },
