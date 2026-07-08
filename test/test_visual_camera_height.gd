@@ -76,6 +76,17 @@ func _check_player_band(label: String) -> void:
 	var sp := cam.unproject_position(wp)
 	var vy := sp.y / float(root.size.y)
 	_check("%s: 玩家投影在画面中央带 (vy=%.2f)" % [label, vy], vy >= 0.25 and vy <= 0.85, true)
+	_check_player_screen_height(label, node, cam)
+
+## god view 下玩家立绘投影高度应占屏幕高约 1/7（带 [1/8, 1/6]）。
+## 立绘绕脚底有固定倾角（SPRITE_LEAN_FACTOR），用节点局部脚底→头顶两点投影距离量实际观感高度。
+## 占位小兽高 PLACEHOLDER_HEIGHT=3.2；生成形象 5 单位另有透明留白，观感相近。
+func _check_player_screen_height(label: String, node: Node3D, cam: Camera3D) -> void:
+	var foot := cam.unproject_position(node.to_global(Vector3.ZERO))
+	var head := cam.unproject_position(node.to_global(Vector3(0.0, PaperCharacter.PLACEHOLDER_HEIGHT, 0.0)))
+	var frac := foot.distance_to(head) / float(root.size.y)
+	_check("%s: 玩家占屏高 ~1/7 (frac=%.3f=1/%.1f)" % [label, frac, 1.0 / frac],
+		frac >= 1.0 / 8.0 and frac <= 1.0 / 6.0, true)
 
 func _check(name: String, got: Variant, want: Variant) -> void:
 	if got == want:
