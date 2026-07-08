@@ -8,7 +8,7 @@ const PLAYER_SPEED := 8.0         ## 方向键直接驱动玩家的速度（与 
 const GOD_PITCH_DEG := 47.0       ## 默认跟随视角：地平线落屏幕 ~4/5 高度（约 20% 天空）
 const LOCK_PITCH_DEG := 30.0      ## lock 跟随：明显放平（3/4 平视，地平线 ~3/4、约 25% 天空）
 const SPRITE_LEAN_FACTOR := 0.55  ## 角色固定倾角 = (90-相机角)*该系数（站立感+面向相机折中）
-const GOD_DIST := 36.0
+const GOD_DIST := 23.0            ## 玩家占屏高 ~1/7（占位形象 3.2 单位实测 1/6.9；36 时仅 1/11 太远）
 const LOCK_DIST := 20.0
 const ZOOM_MIN := 16.0
 const ZOOM_MAX := 64.0
