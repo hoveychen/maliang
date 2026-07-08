@@ -128,6 +128,16 @@ func _ready() -> void:
 			slot["skinned"] = false
 			_slots.append(slot)
 
+## 首屏是否铺完：所有槽位都 skin 过一轮（loading 过场据此判定世界可揭开）。
+## update() 每帧铺最近未铺的一块，~9 帧内全 true；槽位数 == 3×3 面世界，恒定。
+func all_skinned() -> bool:
+	if _slots.is_empty():
+		return false # _ready 尚未建槽，未就绪
+	for s in _slots:
+		if not s["skinned"]:
+			return false
+	return true
+
 ## 恒等索引：wrapped → 槽位（_ready 的创建顺序 x*边长+z）。
 func _slot_of(wrapped: Vector2i) -> Dictionary:
 	return _slots[wrapped.x * CHUNKS_PER_SIDE + wrapped.y]

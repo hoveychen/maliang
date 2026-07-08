@@ -522,8 +522,9 @@ func _finish() -> void:
 		profile[k] = answers[k]
 	profile["created_at"] = Time.get_datetime_string_from_system()
 	PlayerProfile.save_profile(profile)
-	# 收尾欢呼后翻进世界
+	# 收尾欢呼后翻进世界（经加载过场遮住首屏铺设与网络角色弹入）
 	var dur := _play("ob_done")
 	if dur > 0.0:
 		await get_tree().create_timer(dur + 0.3).timeout
-	get_tree().change_scene_to_file("res://main.tscn")
+	Loading.next_scene = "res://main.tscn"
+	get_tree().change_scene_to_file("res://loading.tscn")
