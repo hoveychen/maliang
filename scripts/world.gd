@@ -128,8 +128,35 @@ var album_panel: PanelContainer    ## 收集册面板：贴纸/物品分页（ta
 var _album_cells: Dictionary = {}  ## 贴纸 id → { "glyph": TextureRect, "count": Label }
 # 物品系统：语音造物的物件可摆可收，收集册物品页列出收进背包的（服务端权威，state 同步）
 var world_props: Dictionary = {}   ## 语音物件 id → { "spec", "state"(placed/bagged), "tile"(Array|null) }
-var _album_tab_buttons: Dictionary = {} ## "stickers"/"items"/"settings" → Button（tab 高亮切换）
-var _album_pages: Dictionary = {}  ## "stickers"/"items"/"settings" → Control（分页容器）
+var _album_tab_buttons: Dictionary = {} ## 兼容保留（旧 tab 机制已被手机 app 网格取代，暂空）
+var _album_pages: Dictionary = {}  ## "stickers"/"items"/"settings" → Control（app 页面，挂进手机屏幕）
+# —— 手机 HUD：左下角手机菜单，点开在 HUD 里弹「手机壳 + iPhone 式屏幕」——
+# 通用换壳管线：手机皮肤 id → 启动器图标/手机壳资产；以后小朋友解锁新手机只需加一项并切
+# _phone_skin，资产缺失时回退程序化占位（先搭结构、AIGC 出图后落盘替换）。默认小仙子专属。
+const PHONE_SKINS := {
+	"fairy": { "launcher": "ic_phone_fairy", "shell": "phone_shell_fairy" },
+}
+var _phone_skin := "fairy"          ## 当前手机皮肤 id
+## 屏幕上的 app（前三格实装，其余留白）：[id, 短名, 图标资产]。图标资产缺失回退现有贴纸占位。
+const PHONE_APPS := [
+	["stickers", "贴纸", "app_stickers"],
+	["items", "物品", "app_items"],
+	["settings", "设置", "app_settings"],
+]
+## app 图标占位：AIGC 专属图标未落盘前，先借现有风格一致的贴纸/图标顶上。
+const PHONE_APP_FALLBACK := { "stickers": "st_flower", "items": "ic_gift", "settings": "ic_gear" }
+const PHONE_GRID_SLOTS := 16        ## 4x4
+var _phone_screen: Control          ## 屏幕内容区（banner + 主页网格 + app 视图）
+var _phone_home: Control            ## 主页：4x4 app 网格
+var _phone_app_view: Control        ## 打开某个 app 后的视图（顶部返回条 + 页面宿主）
+var _phone_app_host: Control        ## app 页面挂载点（复用 _album_pages 的页面）
+var _phone_app_title: Label         ## 打开的 app 标题
+var _phone_clock: Label             ## banner 时钟（实时）
+var _phone_playtime: Label          ## banner 已游玩时间（本次进入世界起算）
+var _phone_flowers: Label           ## banner 小红花数（代笔占位，见 _red_flower_count）
+var _phone_open_app := ""           ## 当前打开的 app id（空=停在主页）
+var _play_start_ms := 0             ## 本次进入世界的起始 ticks_msec（算已游玩时间）
+var _phone_ui_t := 0.0              ## banner 刷新节流计时
 var _reroll_confirm: HBoxContainer ## 设置页"重新捏角色"的 ✓/✗ 确认行（防小手误触）
 var _avatar_btn: Button            ## 设置页"换形象"按钮（生成中禁用防连点）
 var _avatar_preview: VBoxContainer ## 换形象预览区（新形象图 + ✓/✗），平时隐藏
@@ -630,18 +657,15 @@ func _setup_hud() -> void:
 		voice_wave.add_child(bar)
 		_wave_bars.append(bar)
 
-	# 贴纸收集册：左下角大按钮（AIGC 摊开书图标）+ 居中弹出图标网格（去文字化，数量角标）
+	# 左下角手机菜单：一台竖屏手机（比旧书本按钮更大更好点），点开在 HUD 里弹手机壳+屏幕。
 	album_button = Button.new()
-	album_button.icon = UiAssets.tex("ic_book_open")
-	album_button.expand_icon = true
-	album_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	album_button.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	album_button.offset_left = 16.0
-	album_button.offset_top = -96.0
-	album_button.offset_right = 100.0
-	album_button.offset_bottom = -16.0
+	album_button.offset_left = 20.0
+	album_button.offset_top = -168.0
+	album_button.offset_right = 128.0
+	album_button.offset_bottom = -20.0
 	album_button.pressed.connect(_toggle_album)
-	UiAssets.style_card_button(album_button, 28.0)
+	_style_phone_launcher(album_button)
 	layer.add_child(album_button)
 
 	album_panel = PanelContainer.new()
@@ -831,6 +855,62 @@ func _style_label(l: Label, size: int) -> void:
 func _style_card_label(l: Label, size: int) -> void:
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", UiAssets.CARD_TEXT)
+
+## 左下角手机启动器外观：有当前皮肤的 AIGC 手机图标就用图标（透明底），否则程序化画一台
+## 竖屏手机占位（深色圆角机身 + 奶油屏幕 + home 点），等专属图标落盘后自动切图。换皮可重复调。
+func _style_phone_launcher(b: Button) -> void:
+	for c in b.get_children():
+		c.queue_free()
+	var skin: Dictionary = PHONE_SKINS.get(_phone_skin, {})
+	var art := UiAssets.tex(String(skin.get("launcher", "")))
+	if art != null:
+		b.icon = art
+		b.expand_icon = true
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.flat = true
+		for st in ["normal", "hover", "pressed", "focus"]:
+			b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+		return
+	# —— 程序化占位手机（AIGC 手机图标落盘前顶上）——
+	b.icon = null
+	var body := StyleBoxFlat.new()
+	body.bg_color = Color(0.16, 0.16, 0.20)
+	body.set_corner_radius_all(24)
+	body.set_border_width_all(3)
+	body.border_color = Color(0.32, 0.32, 0.40)
+	body.shadow_color = Color(0.20, 0.14, 0.06, 0.35)
+	body.shadow_size = 10
+	body.shadow_offset = Vector2(0.0, 5.0)
+	var hover: StyleBoxFlat = body.duplicate()
+	hover.bg_color = Color(0.22, 0.22, 0.27)
+	b.add_theme_stylebox_override("normal", body)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", hover)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var screen := Panel.new()  # 屏幕（奶油底）
+	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	screen.offset_left = 11.0
+	screen.offset_top = 13.0
+	screen.offset_right = -11.0
+	screen.offset_bottom = -22.0
+	var ss := StyleBoxFlat.new()
+	ss.bg_color = UiAssets.CARD_BG
+	ss.set_corner_radius_all(10)
+	screen.add_theme_stylebox_override("panel", ss)
+	b.add_child(screen)
+	var home := Panel.new()  # home 键小圆点（下巴处）
+	home.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	home.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	home.offset_left = -7.0
+	home.offset_right = 7.0
+	home.offset_top = -18.0
+	home.offset_bottom = -4.0
+	var hs := StyleBoxFlat.new()
+	hs.bg_color = Color(0.40, 0.40, 0.48)
+	hs.set_corner_radius_all(8)
+	home.add_theme_stylebox_override("panel", hs)
+	b.add_child(home)
 
 func _physics_process(delta: float) -> void:
 	# 方向键直接驱动玩家（桌面调试；与点击移动同一 Mover 规则）
