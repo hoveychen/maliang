@@ -303,6 +303,31 @@ export async function createPropAsync(
   }
 }
 
+/** create_character 异步落地：造角色管线（spec→审核→生图→抠图→持久化），gen_progress 逐阶段推、
+ *  完成 gen_complete、失败 gen_failed。与 create_character_request 复用同一实现；语音触发时不自带 gate
+ *  （语音回合已在上层限流，与 createPropAsync 一致）。 */
+export async function createCharacterAsync(
+  socket: { send: (data: string) => void },
+  worldId: string,
+  description: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+): Promise<void> {
+  const requestId = randomUUID();
+  try {
+    const character = await createCharacter(
+      { worldId, intentText: description, byFairy: true },
+      adapters,
+      store,
+      (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
+    );
+    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character }));
+  } catch (err) {
+    const reason = err instanceof ModerationError ? err.message : String(err);
+    socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
+  }
+}
+
 export async function handleWsMessage(
   socket: { send: (data: string) => void },
   raw: string,
@@ -413,25 +438,13 @@ export async function handleWsMessage(
   }
 
   if (msg.type === 'create_character_request') {
-    const requestId = randomUUID();
     const gate = limiter.tryAcquire(connKey, Date.now());
     if (!gate.ok) {
-      socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason: gate.reason }));
+      socket.send(JSON.stringify({ type: 'gen_failed', requestId: randomUUID(), reason: gate.reason }));
       return;
     }
-    const input = {
-      worldId: msg.worldId ?? '',
-      intentText: msg.intentText ?? '',
-      byFairy: msg.byFairy ?? true,
-    };
     try {
-      const character = await createCharacter(input, adapters, store, (stage) => {
-        socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage }));
-      });
-      socket.send(JSON.stringify({ type: 'gen_complete', requestId, character }));
-    } catch (err) {
-      const reason = err instanceof ModerationError ? err.message : String(err);
-      socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
+      await createCharacterAsync(socket, msg.worldId ?? '', msg.intentText ?? '', adapters, store);
     } finally {
       gate.release();
     }
@@ -458,6 +471,9 @@ export async function handleWsMessage(
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
         void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store);
+      }
+      if (response.characterRequest) {
+        void createCharacterAsync(socket, msg.worldId ?? '', response.characterRequest, adapters, store);
       }
       // 长期记忆后台累积：在回复发出后再做，不阻塞对话；失败/超时只影响这次记忆。
       void accumulateMemory(
@@ -506,6 +522,9 @@ export async function handleWsMessage(
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
         void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store);
+      }
+      if (response.characterRequest) {
+        void createCharacterAsync(socket, msg.worldId ?? '', response.characterRequest, adapters, store);
       }
       void accumulateMemory(
         msg.worldId ?? '',
@@ -573,6 +592,9 @@ export async function handleWsMessage(
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
         void createPropAsync(socket, worldId, response.propRequest, adapters, store);
+      }
+      if (response.characterRequest) {
+        void createCharacterAsync(socket, worldId, response.characterRequest, adapters, store);
       }
       void accumulateMemory(worldId, characterId, response.transcript, response.replyText, adapters, store).catch(() => {});
     } catch (err) {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildServer, createPropAsync, handleWsMessage, newVoiceSession } from '../src/server.ts';
+import { buildServer, createPropAsync, createCharacterAsync, handleWsMessage, newVoiceSession } from '../src/server.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { respondToTranscript } from '../src/voice.ts';
@@ -100,6 +100,51 @@ test('createPropAsync: 设计→校验→持久化→推送 / 审核拦截', asy
     await createPropAsync(sock2, 'default', '一把恐怖的枪', adapters, store);
     assert.equal(sock2.sent[0].type, 'prop_failed');
     assert.equal(store.listProps('default').length, 1); // 没多存
+  } finally {
+    await close();
+  }
+});
+
+// 异步造角色：gen_progress 逐阶段 + gen_complete 入库；违禁词 → gen_failed 且不入库
+test('createCharacterAsync: 造角色管线→gen_complete 入库 / 审核拦截', async () => {
+  const { store, close } = await seededStore();
+  try {
+    const adapters = createMockAdapters();
+    const before = store.listCharacters('default').length;
+    const sock = fakeSocket();
+    await createCharacterAsync(sock, 'default', '一只会飞的小猫', adapters, store);
+    const types = sock.sent.map((m) => m.type);
+    assert.ok(types.includes('gen_progress')); // 逐阶段推进
+    const done = sock.sent.find((m) => m.type === 'gen_complete');
+    assert.ok(done, 'should emit gen_complete');
+    const character = done!.character as { id: string; isFairy: boolean };
+    assert.equal(character.isFairy, false); // 造出来的是普通角色，不是又一个小仙子
+    assert.equal(store.listCharacters('default').length, before + 1); // 入库
+
+    // 审核拦截走 gen_failed：造角色审的是 spec（mock designCharacter 会把输入洗成安全 spec，
+    // 无法靠脏输入触发），故直接覆写 moderateText 强制拒绝，验证 catch→gen_failed 且不入库。
+    const blocking = { ...adapters, moderation: { moderateText: async () => ({ allowed: false, reason: 'x' }) } };
+    const sock2 = fakeSocket();
+    await createCharacterAsync(sock2, 'default', '一只小狗', blocking, store);
+    assert.equal(sock2.sent.at(-1)!.type, 'gen_failed'); // 审核拦截
+    assert.equal(store.listCharacters('default').length, before + 1); // 没多存
+  } finally {
+    await close();
+  }
+});
+
+// 端到端：对小仙子说「想要一只小猫」→ 语音回合摘出 characterRequest → 异步造角色 gen_complete
+test('语音造角色端到端：respondToTranscript 摘出 → createCharacterAsync 落地', async () => {
+  const { store, fairyId, close } = await seededStore();
+  try {
+    const adapters = createMockAdapters();
+    const before = store.listCharacters('default').length;
+    const r = await respondToTranscript('default', fairyId, '我想要一只小恐龙', adapters, store);
+    assert.ok(r.characterRequest, '应摘出 characterRequest');
+    const sock = fakeSocket();
+    await createCharacterAsync(sock, 'default', r.characterRequest!, adapters, store);
+    assert.ok(sock.sent.some((m) => m.type === 'gen_complete'));
+    assert.equal(store.listCharacters('default').length, before + 1);
   } finally {
     await close();
   }
