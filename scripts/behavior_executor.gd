@@ -272,6 +272,15 @@ static func _reap_orphans() -> void:
 			still.append(t)
 	_orphans = still
 
+## 关停时阻塞排干所有孤儿任务。WorkerThreadPool 在引擎关停时会销毁任务残留的
+## 绑定 Callable（引用 GDScript 对象/快照），若此刻任务仍在途会崩（真机退出/回测
+## 退出 exit 134）。关停允许阻塞，故直接 wait_for_task_completion 逐个收完。
+## 调用方（world._exit_tree）须先 cancel 所有存活执行器把其在途任务转孤儿。
+static func flush_all_blocking() -> void:
+	for t in _orphans:
+		WorkerThreadPool.wait_for_task_completion(t)
+	_orphans.clear()
+
 ## 重寻路间隔：上次规划失败（无路/预算拒绝）时退避拉长——目标不可达时 A* 必烧满
 ## 预算（真机单次 ~100-300ms），按 0.5s 节拍全图重搜就是「原地间歇掉帧」的凶手。
 func _replan_interval() -> float:
