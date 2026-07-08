@@ -29,8 +29,10 @@ static var _budget_used := 0
 ## 目标格不可通行时（如目标是角色/物件所在），螺旋搜索最近可通行格替代；
 ## exclude_id = 寻路者自己的角色 id（角色层排除自己）；
 ## simplify=false 保留逐格路径（测试用），true 时做 string-pulling 视线拉直；
-## budgeted=true 受单帧预算约束（见 PLAN_BUDGET 注释）。
-static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id := "", simplify := true, max_iter := 4000, budgeted := false) -> PackedVector2Array:
+## budgeted=true 受单帧预算约束（见 PLAN_BUDGET 注释）；
+## snap!=null 时占用查询走该不可变快照（OccSnapshot）而非活 OccupancyMap——
+## 供 worker 线程离主线程跑寻路（TerrainMap 运行时不可变，仍直读）；主线程调用传 null。
+static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id := "", simplify := true, max_iter := 4000, budgeted := false, snap: OccSnapshot = null) -> PackedVector2Array:
 	if budgeted:
 		var f := Engine.get_process_frames()
 		if f != _budget_frame:
@@ -40,7 +42,7 @@ static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id 
 			return PackedVector2Array()
 		_budget_used += 1
 	var start := OccupancyMap.to_cell(from_pos)
-	var goal := _resolve_goal(to_pos, span, exclude_id)
+	var goal := _resolve_goal(to_pos, span, exclude_id, snap)
 	if goal == Vector2i(-1, -1) or _wrap(start) == goal:
 		return PackedVector2Array()
 
@@ -58,7 +60,7 @@ static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id 
 		iter += 1
 		var cur_i: int = _heap_pop(open)[2]
 		if cur_i == goal_i:
-			return _reconstruct(came, cur_i, start_i, from_pos, span, exclude_id, simplify)
+			return _reconstruct(came, cur_i, start_i, from_pos, span, exclude_id, simplify, snap)
 		if closed.has(cur_i):
 			continue
 		closed[cur_i] = true
@@ -66,12 +68,12 @@ static func find_path(from_pos: Vector2, to_pos: Vector2, span := 2, exclude_id 
 		for dir in DIRS:
 			var nxt := _wrap(cur + dir)
 			var nxt_i := _idx(nxt)
-			if closed.has(nxt_i) or not _step_ok(cur, nxt, span, exclude_id):
+			if closed.has(nxt_i) or not _step_ok(cur, nxt, span, exclude_id, snap):
 				continue
 			if dir.x != 0 and dir.y != 0:
 				# 防穿角：对角步要求两正交邻居也可通行
-				if not _step_ok(cur, _wrap(cur + Vector2i(dir.x, 0)), span, exclude_id) \
-						or not _step_ok(cur, _wrap(cur + Vector2i(0, dir.y)), span, exclude_id):
+				if not _step_ok(cur, _wrap(cur + Vector2i(dir.x, 0)), span, exclude_id, snap) \
+						or not _step_ok(cur, _wrap(cur + Vector2i(0, dir.y)), span, exclude_id, snap):
 					continue
 			var cost := DIAGONAL if (dir.x != 0 and dir.y != 0) else STRAIGHT
 			var ng: int = g[cur_i] + cost
@@ -89,18 +91,21 @@ static func cell_center(c: Vector2i) -> Vector2:
 	return Vector2((float(w.x) + 0.5) * OccupancyMap.CELL_SIZE, (float(w.y) + 0.5) * OccupancyMap.CELL_SIZE)
 
 ## 单步通行判定（from 半格 → 相邻 to 半格），规则与 Mover._passable 逐条对应。
-static func step_ok(from_c: Vector2i, to_c: Vector2i, span := 2, exclude_id := "") -> bool:
-	return _step_ok(_wrap(from_c), _wrap(to_c), span, exclude_id)
+static func step_ok(from_c: Vector2i, to_c: Vector2i, span := 2, exclude_id := "", snap: OccSnapshot = null) -> bool:
+	return _step_ok(_wrap(from_c), _wrap(to_c), span, exclude_id, snap)
 
 ## 站位判定：角色中心在半格 c 中心时 footprint 是否全空闲（物件层+角色层，
-## exclude_id 排除自己；不含地形，地形在 step_ok）。
-static func cell_free(c: Vector2i, span := 2, exclude_id := "") -> bool:
+## exclude_id 排除自己；不含地形，地形在 step_ok）。snap!=null 时走快照。
+static func cell_free(c: Vector2i, span := 2, exclude_id := "", snap: OccSnapshot = null) -> bool:
 	var origin := OccupancyMap.footprint_origin(cell_center(c), span)
+	if snap != null:
+		return snap.is_free_rect(origin, span, span) \
+			and snap.char_area_free(origin, span, span, exclude_id)
 	return OccupancyMap.is_free_rect(origin, span, span) \
 		and OccupancyMap.char_area_free(origin, span, span, exclude_id)
 
-static func _step_ok(from_c: Vector2i, to_c: Vector2i, span: int, exclude_id: String) -> bool:
-	if not cell_free(to_c, span, exclude_id):
+static func _step_ok(from_c: Vector2i, to_c: Vector2i, span: int, exclude_id: String, snap: OccSnapshot) -> bool:
+	if not cell_free(to_c, span, exclude_id, snap):
 		return false
 	var ft := WorldGrid.to_tile(cell_center(from_c))
 	var tt := WorldGrid.to_tile(cell_center(to_c))
@@ -108,9 +113,9 @@ static func _step_ok(from_c: Vector2i, to_c: Vector2i, span: int, exclude_id: St
 
 ## 目标格可通行则原样返回；否则螺旋（chebyshev 环 r=1..8）找离 to_pos 最近的
 ## 可通行格；全无返回 (-1,-1)。
-static func _resolve_goal(to_pos: Vector2, span: int, exclude_id: String) -> Vector2i:
+static func _resolve_goal(to_pos: Vector2, span: int, exclude_id: String, snap: OccSnapshot) -> Vector2i:
 	var goal := _wrap(OccupancyMap.to_cell(to_pos))
-	if cell_free(goal, span, exclude_id):
+	if cell_free(goal, span, exclude_id, snap):
 		return goal
 	for r in range(1, 9):
 		var best := Vector2i(-1, -1)
@@ -120,7 +125,7 @@ static func _resolve_goal(to_pos: Vector2, span: int, exclude_id: String) -> Vec
 				if maxi(absi(dx), absi(dz)) != r:
 					continue
 				var c := _wrap(goal + Vector2i(dx, dz))
-				if not cell_free(c, span, exclude_id):
+				if not cell_free(c, span, exclude_id, snap):
 					continue
 				var d := WorldGrid.shortest_delta(to_pos, cell_center(c)).length_squared()
 				if d < best_d:
@@ -138,14 +143,14 @@ static func _heuristic(a: Vector2i, b: Vector2i) -> int:
 	dz = mini(dz, OccupancyMap.CELLS - dz)
 	return DIAGONAL * mini(dx, dz) + STRAIGHT * absi(dx - dz)
 
-static func _reconstruct(came: Dictionary, goal_i: int, start_i: int, from_pos: Vector2, span: int, exclude_id: String, simplify: bool) -> PackedVector2Array:
+static func _reconstruct(came: Dictionary, goal_i: int, start_i: int, from_pos: Vector2, span: int, exclude_id: String, simplify: bool, snap: OccSnapshot) -> PackedVector2Array:
 	var pts := PackedVector2Array()
 	var cur := goal_i
 	while cur != start_i:
 		pts.append(cell_center(_from_idx(cur)))
 		cur = came[cur]
 	pts.reverse()
-	return _smooth(from_pos, pts, span, exclude_id) if simplify else pts
+	return _smooth(from_pos, pts, span, exclude_id, snap) if simplify else pts
 
 ## string-pulling 视线拉直：从锚点起贪心跳到最远的可通视 waypoint，
 ## 把 8 向楼梯折线拉成平滑直线段（也顺带缩短路长）。
@@ -154,7 +159,7 @@ static func _reconstruct(came: Dictionary, goal_i: int, start_i: int, from_pos: 
 ## 窗口内拉直观感一致（远处折线晚几步拉平），成本变 O(k×窗口)。
 const SMOOTH_LOOKAHEAD := 8
 
-static func _smooth(from_pos: Vector2, pts: PackedVector2Array, span: int, exclude_id: String) -> PackedVector2Array:
+static func _smooth(from_pos: Vector2, pts: PackedVector2Array, span: int, exclude_id: String, snap: OccSnapshot) -> PackedVector2Array:
 	var out := PackedVector2Array()
 	var anchor := WorldGrid.wrap_pos(from_pos)
 	var i := 0
@@ -162,7 +167,7 @@ static func _smooth(from_pos: Vector2, pts: PackedVector2Array, span: int, exclu
 		var best := i
 		var j := mini(pts.size() - 1, i + SMOOTH_LOOKAHEAD)
 		while j > i:
-			if _segment_ok(anchor, pts[j], span, exclude_id):
+			if _segment_ok(anchor, pts[j], span, exclude_id, snap):
 				best = j
 				break
 			j -= 1
@@ -173,7 +178,7 @@ static func _smooth(from_pos: Vector2, pts: PackedVector2Array, span: int, exclu
 
 ## 线段通视判定：沿 a→b 每 0.1m 采样，逐点复刻 Mover._passable
 ## （footprint 双层占用 + 跨 tile can_step），保证运行时微步照样走得通。
-static func _segment_ok(a: Vector2, b: Vector2, span: int, exclude_id: String) -> bool:
+static func _segment_ok(a: Vector2, b: Vector2, span: int, exclude_id: String, snap: OccSnapshot) -> bool:
 	var d := WorldGrid.shortest_delta(a, b)
 	var dist := d.length()
 	if dist < 0.001:
@@ -187,8 +192,10 @@ static func _segment_ok(a: Vector2, b: Vector2, span: int, exclude_id: String) -
 		if ft != tt and not TerrainMap.can_step(ft, tt):
 			return false
 		var origin := OccupancyMap.footprint_origin(p, span)
-		if not OccupancyMap.is_free_rect(origin, span, span) \
-				or not OccupancyMap.char_area_free(origin, span, span, exclude_id):
+		var free := snap.is_free_rect(origin, span, span) and snap.char_area_free(origin, span, span, exclude_id) \
+			if snap != null \
+			else OccupancyMap.is_free_rect(origin, span, span) and OccupancyMap.char_area_free(origin, span, span, exclude_id)
+		if not free:
 			return false
 		prev = p
 	return true
