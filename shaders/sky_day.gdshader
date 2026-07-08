@@ -13,7 +13,11 @@ uniform float horizon_y = -0.55;   // 视觉地平线的 EYEDIR.y（世界下弯
 uniform float zenith_y = 0.35;     // 渐变到天顶色的 EYEDIR.y
 uniform sampler2D cloud_tex : hint_default_black, filter_linear_mipmap, repeat_enable; // 无缝 FBM 噪声
 uniform float cloud_scale = 0.9;   // 云 uv 缩放（穹顶投影）
-uniform vec2 wind = vec2(0.006, 0.0015); // 云漂移速度（uv/秒），非零 = 动态
+uniform vec2 wind = vec2(0.006, 0.0015); // 云漂移速度（uv/秒），非零 = 动态（world 按它积分 cloud_offset）
+// 云漂移相位：由 world 每 ~0.25s 步进（wind × 累计时间）。不要在本 shader 里用 TIME——
+// sky shader 一沾 TIME，radiance 环境贴图就逐帧重烘（多出整条渲染 pass），
+// 老 Mali 驱动上 pass 切换/同步开销极大；CPU 节流步进视觉无感且 radiance 只按需重烘。
+uniform vec2 cloud_offset = vec2(0.0);
 uniform float cloud_coverage = 0.52; // 噪声高于此值成云（调低云更多）
 uniform float cloud_softness = 0.18; // 云边过渡宽度（卡通软边）
 uniform vec3 cloud_color : source_color = vec3(1.0, 1.0, 1.0);
@@ -40,7 +44,7 @@ void sky() {
 	col = mix(col, sun_color, smoothstep(1.0 - sun_disc_size, 1.0 - sun_disc_size * 0.45, sun_amt));
 
 	// 卡通云：穹顶投影（分母 y+1.35 无奇点，负 y 带照样有云），无缝噪声 + 风漂移
-	vec2 uv = EYEDIR.xz * cloud_scale / (y + 1.35) + TIME * wind;
+	vec2 uv = EYEDIR.xz * cloud_scale / (y + 1.35) + cloud_offset;
 	float n = texture(cloud_tex, uv).r;
 	float cl = smoothstep(cloud_coverage, cloud_coverage + cloud_softness, n);
 	cl *= smoothstep(horizon_y, horizon_y + 0.22, y); // 近地平线的云融进雾带

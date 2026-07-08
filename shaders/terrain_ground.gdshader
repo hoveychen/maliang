@@ -24,6 +24,9 @@ uniform vec3 path_rim : source_color = vec3(0.95, 0.885, 0.68);
 uniform vec3 cliff_rim : source_color = vec3(0.44, 0.63, 0.37);
 uniform float tile_period = 10.0;      // 贴图平铺周期（米）；须整除环面跨度 150
 uniform float detail_strength = 0.8;
+// 低配档（AdaptiveQuality T2）：路/崖壁不采第二张细节贴图改平色 tint，
+// 每像素省 1~2 次采样；草地细节保留（占屏大头，是水彩质感的主体）。
+uniform bool low_detail = false;
 uniform float roughness : hint_range(0.0, 1.0) = 0.95;
 uniform float curvature = 0.0015;
 
@@ -41,7 +44,8 @@ void fragment() {
 	vec2 wuv = UV2 / tile_period;
 	vec3 base = grass_tint * detail(grass_tex, wuv, grass_mean);
 	vec3 body_tint = ty == 1 ? path_tint : (ty == 2 ? bed_tint : (ty == 3 ? lip_tint : wall_tint));
-	vec3 body_det = ty == 4 ? detail(stone_tex, wuv, stone_mean) : detail(dirt_tex, wuv, dirt_mean);
+	vec3 body_det = low_detail ? vec3(1.0)
+			: (ty == 4 ? detail(stone_tex, wuv, stone_mean) : detail(dirt_tex, wuv, dirt_mean));
 	vec3 col = mix(base, body_tint * body_det, ctl.r);
 	col = mix(col, ty == 1 ? path_rim : cliff_rim, ctl.g);
 	col *= ctl.a * 2.0;

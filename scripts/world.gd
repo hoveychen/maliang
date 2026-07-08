@@ -189,10 +189,12 @@ func _ready() -> void:
 	# 哨兵对：括住整棵树的 _process 跨度（见 ProcProf 注释）
 	add_child(ProcProf.Sentinel.make(true))
 	add_child(ProcProf.Sentinel.make(false))
-	# 移动端 3D 降采样：关阴影后下一堵墙是像素填充率（真机全分辨率 10fps、1/4 像素 18fps），
-	# 0.7 双线性放大对水彩软风格几乎无损；HUD/UI 走 canvas 仍是原生分辨率
+	# 移动端 T1 默认档：3D 降采样 0.7（像素填充率是关阴影后的第二堵墙；HUD/UI 走
+	# canvas 仍原生分辨率），随后 AdaptiveQuality 按实测帧时自动升/降档并持久化
 	if OS.has_feature("mobile"):
 		get_viewport().scaling_3d_scale = 0.7
+		if not FileAccess.file_exists("user://perf_sweep"):  # 扫频诊断时不许换档搅数据
+			add_child(AdaptiveQuality.make(self, chunk_manager))
 	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
 	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
 		add_child(PerfSweep.make(self, _env))
@@ -253,6 +255,22 @@ func _setup_environment() -> void:
 ## 白天动态天空：渐变 + 卡通云漂移 + 太阳光晕（shaders/sky_day.gdshader）。
 ## ambient 走纯色源不依赖天空 radiance，radiance 取最小档 + 仅材质变更时重烘
 ## （REALTIME 档强制 256 且逐帧重烘，安卓平板不划算；本世界高粗糙度+关高光，反射用不上）。
+## 云漂移相位步进（0.25s 一步，视觉无感）：sky shader 不用 TIME（会触发 radiance
+## 逐帧重烘，见 sky_day.gdshader 头注释），由这里按材质 wind 参数积分 cloud_offset
+## ——wind 从材质读而非常量，QA 用 WIND_X 放大风速的截帧脚本仍然生效。
+const SKY_STEP := 0.25
+var _sky_step_t := 0.0
+var _sky_offset := Vector2.ZERO
+
+func _step_sky(delta: float) -> void:
+	_sky_step_t += delta
+	if _sky_step_t < SKY_STEP:
+		return
+	var m := _env.sky.sky_material as ShaderMaterial
+	_sky_offset += (m.get_shader_parameter("wind") as Vector2) * _sky_step_t
+	m.set_shader_parameter("cloud_offset", _sky_offset)
+	_sky_step_t = 0.0
+
 func _make_day_sky() -> Sky:
 	var noise := FastNoiseLite.new()
 	noise.seed = 7
@@ -815,6 +833,7 @@ func _process(delta: float) -> void:
 	# （RENDER_RADIUS 110 > 最高补偿后的可见地面半径 ~103，不会露出 chunk 边缘）
 	_env.fog_depth_begin = FOG_DEPTH_BEGIN + _cur_focus_y
 	_env.fog_depth_end = FOG_DEPTH_END + _cur_focus_y
+	_step_sky(delta)
 	_update_camera()
 	tp = _prof_lap(tp, "cam")
 	chunk_manager.update(focus_logical)

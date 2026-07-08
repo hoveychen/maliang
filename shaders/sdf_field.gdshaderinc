@@ -21,6 +21,11 @@ uniform float blend_k = 0.25;       // 全局融合半径
 uniform float color_k = 0.18;       // 颜色软混合宽度
 uniform float curvature = 0.0015;   // world-bend 曲率（与 BendMat.CURVATURE 一致）
 
+// 吸附迭代数：每次迭代 = 5 次全基本体场求值（sdf_all + 四面体梯度），是可动物件
+// 顶点着色器的成本主轴（真机隐藏 7 个物件 100ms→24.8ms）。桌面 4 保精度，
+// 移动端 2 已收敛（SdfProp 按平台设置；描边壳精度无所谓给 1）。
+uniform int snap_iters = 4;
+
 const float BOX_ROUND_FRAC = 0.2;
 const float TUCK_START = 0.03;  // 顶点静止点埋入联合体超过此深度开始收皮
 const float TUCK_FULL = 0.08;   // 埋入到此深度完全收到皮下
@@ -97,7 +102,7 @@ vec3 sdf_snap(vec3 shell_pos, float iso_offset, out vec3 out_normal) {
 	float bury = smoothstep(TUCK_START, TUCK_FULL, -d0);
 	float iso = mix(iso_offset, TUCK_ISO, bury);
 	vec3 p = shell_pos;
-	for (int it = 0; it < 4; it++) {
+	for (int it = 0; it < snap_iters; it++) {
 		float d = sdf_all(p) - iso;
 		vec3 g = sdf_grad(p);
 		float gl = max(length(g), 1e-5);
