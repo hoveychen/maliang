@@ -52,6 +52,36 @@ test('respondToTranscript: 无 create_prop 能力不触发造物', async () => {
   }
 });
 
+// 「我想要一只小猫」对小神仙说 → create_character 被摘出为 characterRequest，脚本不下发客户端
+test('respondToTranscript: 造角色意图摘出 characterRequest', async () => {
+  const { store, fairyId, close } = await seededStore();
+  try {
+    const adapters = createMockAdapters();
+    const r = await respondToTranscript('default', fairyId, '我想要一只会飞的小猫', adapters, store);
+    assert.equal(r.characterRequest, '我想要一只会飞的小猫');
+    assert.equal(r.propRequest, undefined); // 造角色不误判成造物
+    assert.equal(r.behaviorScript, undefined); // 摘空后不下发
+    assert.ok(r.replyText.length > 0);
+  } finally {
+    await close();
+  }
+});
+
+// 没有 create_character 能力的普通角色说同样的话 → 不触发造角色
+test('respondToTranscript: 无 create_character 能力不触发造角色', async () => {
+  const { store, fairyId, close } = await seededStore();
+  try {
+    const adapters = createMockAdapters();
+    const fairy = store.getCharacter('default', fairyId)!;
+    const plain = { ...fairy, id: 'npc-2', isFairy: false, abilities: ['move_to'] };
+    store.addCharacter(plain);
+    const r = await respondToTranscript('default', 'npc-2', '我想要一只小猫', adapters, store);
+    assert.equal(r.characterRequest, undefined);
+  } finally {
+    await close();
+  }
+});
+
 // 异步造物：prop_created 推送 + 入库；违禁词 → prop_failed 且不入库
 test('createPropAsync: 设计→校验→持久化→推送 / 审核拦截', async () => {
   const { store, close } = await seededStore();

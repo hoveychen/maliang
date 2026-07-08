@@ -105,6 +105,13 @@ export async function respondToTranscript(
       if (desc) response.propRequest = desc;
       intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'create_prop');
     }
+    // create_character 同理：不是客户端执行器能力，摘走交给 WS 层异步造角色（gen_complete 推送）。仅小仙子会发。
+    const charCmd = intent.behaviorScript.commands.find((c) => c.type === 'create_character');
+    if (charCmd) {
+      const desc = String(charCmd.params?.description ?? '').trim();
+      if (desc) response.characterRequest = desc;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'create_character');
+    }
     if (intent.behaviorScript.commands.length > 0) {
       response.behaviorScript = intent.behaviorScript;
       // 执行者：小朋友点名让别的角色做（「小蓝跟我来」）→ 脚本挂到那个角色；缺省挂正在对话的角色

@@ -82,6 +82,23 @@ export function createMockAdapters(): ServiceAdapters {
         // 点名让别的角色执行：转写里出现花名册角色名 → performer（真实实现由 LLM 判断语气）
         const named = (ctx.worldCharacters ?? []).find((c) => transcript.includes(c.name));
         const performerName = named?.name;
+        // 造角色意图（仅拥有 create_character 能力的角色，如小神仙）：想要一个新的活伙伴。
+        // 放在 create_prop 前：生物类关键词优先归造角色，避免「变一只小猫」被当造物。
+        if (
+          ctx.abilities.includes('create_character')
+          && /(想要|变|造|来|给我|做)/.test(transcript)
+          && /(一只|新伙伴|新朋友|小猫|小狗|小恐龙|小龙|小鸟|小兔|小熊|小精灵|小伙伴|小动物)/.test(transcript)
+        ) {
+          return {
+            kind: 'command',
+            replyText: '好呀，我这就变出来！',
+            behaviorScript: {
+              commands: [{ type: 'create_character', params: { description: transcript } }],
+              loop: false,
+            },
+            emotion: 'happy',
+          };
+        }
         // 造物意图（仅拥有 create_prop 能力的角色，如小神仙）：「变/造/做 一个X」
         if (ctx.abilities.includes('create_prop') && /(变出|变一|造一|做一个|做个)/.test(transcript)) {
           return {
