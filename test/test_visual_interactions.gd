@@ -78,6 +78,14 @@ func _tick() -> void:
 			_freeze_and_place(blue, green, Vector2(10.0, 0.0))
 			scene.set("selected", green["node"])
 			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false })
+		315:
+			# 收听 HUD 重设计：头顶耳朵已删除（不再有 ear_icon 盖脸）；选中角色时底部 AIGC
+			# 边框 HUD（hud_listen）显示，声波柱嵌在边框内板。
+			_check("ear_icon removed (no head sprite)", scene.get("ear_icon"), null)
+			var vw := scene.get("voice_wave") as Control
+			_check("listen HUD shown on select", vw.visible, true)
+			var frame := vw.get_child(0) as TextureRect
+			_check("HUD frame texture present", frame != null and frame.texture != null, true)
 		316:
 			_check("performer not remote-controlled", blue.has("paper_action"), false)
 			_check("speaker runs errand", scene.call("_has_executor_for", green), true)

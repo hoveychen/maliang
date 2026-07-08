@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ctu2amejbovl"
-path="res://.godot/imported/ear.svg-46efd8589270e33a04e5dd6b1ae76ea8.ctex"
+uid="uid://dwibhg7j26u2x"
+path="res://.godot/imported/hud_listen.png-7a8c2c8a14ae61e16d491796702ccc76.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ear.svg"
-dest_files=["res://.godot/imported/ear.svg-46efd8589270e33a04e5dd6b1ae76ea8.ctex"]
+source_file="res://assets/ui/hud_listen.png"
+dest_files=["res://.godot/imported/hud_listen.png-7a8c2c8a14ae61e16d491796702ccc76.ctex"]
 
 [params]
 
@@ -38,6 +38,3 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=1.0
-editor/scale_with_editor_scale=false
-editor/convert_colors_with_editor_theme=false
