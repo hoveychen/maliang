@@ -33,6 +33,10 @@ export interface SpriteSheetOptions {
   cutout?: CutoutAdapter;
   /** 丢弃末帧（首尾闭合时末帧≈首帧，丢掉避免循环回跳定格一拍），默认 true。 */
   dropLastFrame?: boolean;
+  /** 输出编码 WebP（默认 true，比 PNG 小 ~6.6x，带 alpha，Godot 原生可读）。false 出 PNG。 */
+  webp?: boolean;
+  /** WebP 有损质量 0-100，默认 90（q90 带 alpha 实测与 PNG 肉眼无差）。 */
+  webpQuality?: number;
 }
 
 /** ffmpeg 按 fps 抽帧 + 缩放到 cellH（宽取 -2 保持比例且偶数）。 */
@@ -148,5 +152,23 @@ export async function videoToSpriteSheet(
   const keyed = await Promise.all(frames.map((f) => cutout.removeBackground(f)));
   // 抠绿后两侧透明，裁到并集内容盒再打包 —— 图集去掉大片空白，省移动端显存。
   const cropped = unionCropFrames(keyed);
-  return packAtlas(cropped, fps);
+  const packed = packAtlas(cropped, fps);
+  if (opts.webp === false) return packed;
+  // PNG→WebP：q90 带 alpha 实测与 PNG 肉眼无差，体积 ~1/6.6。Godot Image.load_webp 原生可读。
+  const atlas = await encodeWebp(packed.atlas, opts.webpQuality ?? 90);
+  return { atlas, meta: packed.meta };
+}
+
+/** PNG 图集 → WebP（cwebp，保 alpha）。cwebp 由 Dockerfile 的 webp 包提供。 */
+export async function encodeWebp(png: ImageBlob, quality = 90): Promise<ImageBlob> {
+  const dir = await mkdtemp(join(tmpdir(), 'mlwebp-'));
+  try {
+    const inP = join(dir, 'a.png');
+    const outP = join(dir, 'a.webp');
+    await writeFile(inP, Buffer.from(png.bytes));
+    await execFileP('cwebp', ['-quiet', '-q', String(quality), '-alpha_q', '100', inP, '-o', outP]);
+    return { bytes: new Uint8Array(await readFile(outP)), mime: 'image/webp' };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }

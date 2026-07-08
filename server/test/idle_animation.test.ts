@@ -130,6 +130,17 @@ test('POST /admin/sprite-anim/:hash: token 门禁 + 上传图集绑定到立绘 
     assert.ok(store.getAsset(animAsset), '图集资产入库');
     const poll = await app.inject({ method: 'GET', url: '/sprite-anim/spriteX' });
     assert.deepEqual(poll.json(), { status: 'ready', animAsset, meta: META });
+
+    // 上传 WebP(magic bytes)→ 资产 mime 应识别为 image/webp(按 magic,不硬编码 png)
+    const webpMagic = Buffer.concat([
+      Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), Buffer.from([1, 2, 3, 4]),
+    ]);
+    const w = await app.inject({
+      method: 'POST', url: '/admin/sprite-anim/spriteW',
+      payload: { animPngBase64: webpMagic.toString('base64'), meta: META },
+      headers: { 'x-admin-token': 'sesame' },
+    });
+    assert.equal(store.getAsset(w.json().animAsset as string)?.mime, 'image/webp', 'WebP 应识别为 image/webp');
   } finally {
     delete process.env.MALIANG_ADMIN_TOKEN;
     await app.close();

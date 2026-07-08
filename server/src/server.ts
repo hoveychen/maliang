@@ -20,6 +20,17 @@ export interface ServerDeps {
   store?: WorldStore;
 }
 
+/** 按 magic bytes 识别图片 mime（上传的图集可能是 PNG 或 WebP）。 */
+function sniffImageMime(b: Uint8Array): string {
+  if (b[0] === 0x89 && b[1] === 0x50) return 'image/png';
+  if (
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50
+  ) return 'image/webp';
+  if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
+  return 'image/png';
+}
+
 /** 在世界中央种一个小神仙（默认能造角色）。 */
 function seedFairy(worldId: string): Character {
   return {
@@ -204,10 +215,8 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       meta.fps > 0 && meta.cellW > 0 && meta.cellH > 0 &&
       meta.frameCount <= meta.cols * meta.rows;
     if (!ok) return reply.code(400).send({ error: 'invalid meta' });
-    const animAsset = store.putAsset({
-      bytes: Uint8Array.from(Buffer.from(b64, 'base64')),
-      mime: 'image/png',
-    });
+    const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
+    const animAsset = store.putAsset({ bytes, mime: sniffImageMime(bytes) });
     store.setSpriteAnimReady(req.params.hash, animAsset, meta);
     return { spriteHash: req.params.hash, animAsset, meta, status: 'ready' };
   });
