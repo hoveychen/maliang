@@ -39,6 +39,7 @@ UNIT_TESTS=(
   test_game_audio
   test_sdf_static_baker
   test_paper_idle
+  test_webp_load
 )
 fails=0
 
