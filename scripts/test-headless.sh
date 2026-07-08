@@ -43,6 +43,7 @@ UNIT_TESTS=(
   test_backend_player_id
   test_webp_load
   test_dialog_camera
+  test_phone_menu
 )
 fails=0
 

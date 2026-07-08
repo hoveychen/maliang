@@ -139,8 +139,34 @@ var album_panel: PanelContainer    ## 收集册面板：贴纸/物品分页（ta
 var _album_cells: Dictionary = {}  ## 贴纸 id → { "glyph": TextureRect, "count": Label }
 # 物品系统：语音造物的物件可摆可收，收集册物品页列出收进背包的（服务端权威，state 同步）
 var world_props: Dictionary = {}   ## 语音物件 id → { "spec", "state"(placed/bagged), "tile"(Array|null) }
-var _album_tab_buttons: Dictionary = {} ## "stickers"/"items"/"settings" → Button（tab 高亮切换）
-var _album_pages: Dictionary = {}  ## "stickers"/"items"/"settings" → Control（分页容器）
+var _album_pages: Dictionary = {}  ## "stickers"/"items"/"settings" → Control（app 页面，挂进手机屏幕）
+# —— 手机 HUD：左下角手机菜单，点开在 HUD 里弹「手机壳 + iPhone 式屏幕」——
+# 通用换壳管线：手机皮肤 id → 启动器图标/手机壳资产；以后小朋友解锁新手机只需加一项并切
+# _phone_skin，资产缺失时回退程序化占位（先搭结构、AIGC 出图后落盘替换）。默认小仙子专属。
+const PHONE_SKINS := {
+	"fairy": { "launcher": "ic_phone_fairy", "shell": "phone_shell_fairy" },
+}
+var _phone_skin := "fairy"          ## 当前手机皮肤 id
+## 屏幕上的 app（前三格实装，其余留白）：[id, 短名, 图标资产]。图标资产缺失回退现有贴纸占位。
+const PHONE_APPS := [
+	["stickers", "贴纸", "app_stickers"],
+	["items", "物品", "app_items"],
+	["settings", "设置", "app_settings"],
+]
+## app 图标占位：AIGC 专属图标未落盘前，先借现有风格一致的贴纸/图标顶上。
+const PHONE_APP_FALLBACK := { "stickers": "st_flower", "items": "ic_gift", "settings": "ic_gear" }
+const PHONE_GRID_SLOTS := 16        ## 4x4
+var _phone_screen: Control          ## 屏幕内容区（banner + 主页网格 + app 视图）
+var _phone_home: Control            ## 主页：4x4 app 网格
+var _phone_app_view: Control        ## 打开某个 app 后的视图（顶部返回条 + 页面宿主）
+var _phone_app_host: Control        ## app 页面挂载点（复用 _album_pages 的页面）
+var _phone_app_title: Label         ## 打开的 app 标题
+var _phone_clock: Label             ## banner 时钟（实时）
+var _phone_playtime: Label          ## banner 已游玩时间（本次进入世界起算）
+var _phone_flowers: Label           ## banner 小红花数（代笔占位，见 _red_flower_count）
+var _phone_open_app := ""           ## 当前打开的 app id（空=停在主页）
+var _play_start_ms := 0             ## 本次进入世界的起始 ticks_msec（算已游玩时间）
+var _phone_ui_t := 0.0              ## banner 刷新节流计时
 var _reroll_confirm: HBoxContainer ## 设置页"重新捏角色"的 ✓/✗ 确认行（防小手误触）
 var _avatar_btn: Button            ## 设置页"换形象"按钮（生成中禁用防连点）
 var _avatar_preview: VBoxContainer ## 换形象预览区（新形象图 + ✓/✗），平时隐藏
@@ -648,6 +674,7 @@ func _setup_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_hud_layer = layer
+	_play_start_ms = Time.get_ticks_msec() # 已游玩时间从进入世界起算（手机 banner 用）
 
 	coord_label = Label.new()
 	coord_label.position = Vector2(16.0, 12.0)
@@ -717,51 +744,105 @@ func _setup_hud() -> void:
 		voice_wave.add_child(bar)
 		_wave_bars.append(bar)
 
-	# 贴纸收集册：左下角大按钮（AIGC 摊开书图标）+ 居中弹出图标网格（去文字化，数量角标）
+	# 左下角手机菜单：一台竖屏手机（比旧书本按钮更大更好点），点开在 HUD 里弹手机壳+屏幕。
 	album_button = Button.new()
-	album_button.icon = UiAssets.tex("ic_book_open")
-	album_button.expand_icon = true
-	album_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	album_button.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	album_button.offset_left = 16.0
-	album_button.offset_top = -96.0
-	album_button.offset_right = 100.0
-	album_button.offset_bottom = -16.0
+	album_button.offset_left = 20.0
+	album_button.offset_top = -168.0
+	album_button.offset_right = 128.0
+	album_button.offset_bottom = -20.0
 	album_button.pressed.connect(_toggle_album)
-	UiAssets.style_card_button(album_button, 28.0)
+	_style_phone_launcher(album_button)
 	layer.add_child(album_button)
 
+	# ── 手机机身：竖屏，居中；有 AIGC 手机壳资产用图，否则程序化深色圆角机身占位 ──
 	album_panel = PanelContainer.new()
 	album_panel.set_anchors_preset(Control.PRESET_CENTER)
-	album_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH # 内容撑开时仍以屏幕中心为锚
+	album_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	album_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	album_panel.custom_minimum_size = Vector2(360.0, 660.0)
 	album_panel.visible = false
-	album_panel.add_theme_stylebox_override("panel", UiAssets.card_style())
-	# 分页：顶部两个大 tab（贴纸/物品，AIGC 图标+短字），下面按 tab 切换显示对应网格
-	var tabs := HBoxContainer.new()
-	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
-	tabs.add_theme_constant_override("separation", 24)
-	for tab in [["stickers", "贴纸", "st_flower"], ["items", "物品", "ic_gift"]]:
-		var b := Button.new()
-		b.text = String(tab[1])
-		b.icon = UiAssets.tex(String(tab[2]))
-		b.add_theme_constant_override("icon_max_width", 36)
-		b.toggle_mode = true
-		b.add_theme_font_size_override("font_size", 30)
-		UiAssets.style_card_button(b)
-		b.pressed.connect(_set_album_tab.bind(String(tab[0])))
-		tabs.add_child(b)
-		_album_tab_buttons[tab[0]] = b
-	# 设置入口：小齿轮藏在 tab 行末尾（家长向，主菜单单入口化后重新捏角色走这里）
-	var settings_tab := Button.new()
-	settings_tab.icon = UiAssets.tex("ic_gear")
-	settings_tab.add_theme_constant_override("icon_max_width", 36)
-	settings_tab.toggle_mode = true
-	settings_tab.flat = true
-	UiAssets.style_card_button(settings_tab)
-	settings_tab.pressed.connect(_set_album_tab.bind("settings"))
-	tabs.add_child(settings_tab)
-	_album_tab_buttons["settings"] = settings_tab
+	_apply_phone_shell(album_panel)
+	# 机身内边距（听筒/下巴 bezel）：屏幕嵌在中间
+	var bezel := MarginContainer.new()
+	bezel.add_theme_constant_override("margin_left", 18)
+	bezel.add_theme_constant_override("margin_right", 18)
+	bezel.add_theme_constant_override("margin_top", 30)
+	bezel.add_theme_constant_override("margin_bottom", 34)
+	album_panel.add_child(bezel)
+	# 屏幕：奶油圆角铺满 bezel 内区
+	var screen := PanelContainer.new()
+	var screen_style := UiAssets.card_style(22.0, 1.0)
+	screen_style.shadow_size = 0
+	screen.add_theme_stylebox_override("panel", screen_style)
+	bezel.add_child(screen)
+	_phone_screen = screen
+	var screen_pad := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		screen_pad.add_theme_constant_override(side, 16)
+	screen.add_child(screen_pad)
+	var screen_vbox := VBoxContainer.new()
+	screen_vbox.add_theme_constant_override("separation", 12)
+	screen_pad.add_child(screen_vbox)
+	# —— 顶部 banner（iPhone 状态栏式）：时钟 · 已玩时长 · 小红花（P3 填活值）——
+	var banner_bar := HBoxContainer.new()
+	banner_bar.add_theme_constant_override("separation", 10)
+	_phone_clock = Label.new()
+	_style_card_label(_phone_clock, 22)
+	banner_bar.add_child(_phone_clock)
+	_phone_playtime = Label.new()
+	_style_card_label(_phone_playtime, 20)
+	_phone_playtime.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_phone_playtime.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	banner_bar.add_child(_phone_playtime)
+	banner_bar.add_child(UiAssets.icon_rect("st_flower", 26.0)) # 小红花图标（代笔占位读数见下）
+	_phone_flowers = Label.new()
+	_style_card_label(_phone_flowers, 22)
+	banner_bar.add_child(_phone_flowers)
+	screen_vbox.add_child(banner_bar)
+	screen_vbox.add_child(HSeparator.new())
+	# —— 主屏：4x4 app 网格（前 N 格实装 app，其余留白）——
+	_phone_home = VBoxContainer.new()
+	_phone_home.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	screen_vbox.add_child(_phone_home)
+	var app_grid := GridContainer.new()
+	app_grid.columns = 4
+	app_grid.add_theme_constant_override("h_separation", 14)
+	app_grid.add_theme_constant_override("v_separation", 18)
+	app_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_phone_home.add_child(app_grid)
+	for i in PHONE_GRID_SLOTS:
+		if i < PHONE_APPS.size():
+			app_grid.add_child(_make_app_icon(PHONE_APPS[i]))
+		else:
+			app_grid.add_child(_make_blank_slot())
+	# —— 打开某个 app 后的视图：顶部返回条 + 页面宿主（页面即原贴纸/物品/设置面板）——
+	_phone_app_view = VBoxContainer.new()
+	_phone_app_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_phone_app_view.add_theme_constant_override("separation", 12)
+	_phone_app_view.visible = false
+	screen_vbox.add_child(_phone_app_view)
+	var app_bar := HBoxContainer.new()
+	app_bar.add_theme_constant_override("separation", 10)
+	var back_btn := Button.new()
+	back_btn.text = "返回主屏"
+	back_btn.add_theme_font_size_override("font_size", 22)
+	UiAssets.style_card_button(back_btn)
+	back_btn.pressed.connect(_close_phone_app)
+	app_bar.add_child(back_btn)
+	_phone_app_title = Label.new()
+	_style_card_label(_phone_app_title, 26)
+	_phone_app_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_phone_app_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	app_bar.add_child(_phone_app_title)
+	var app_bar_spacer := Control.new() # 让标题视觉居中（右侧留一块与返回键等宽的空）
+	app_bar_spacer.custom_minimum_size = Vector2(96.0, 0.0)
+	app_bar.add_child(app_bar_spacer)
+	_phone_app_view.add_child(app_bar)
+	_phone_app_host = VBoxContainer.new()
+	_phone_app_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_phone_app_view.add_child(_phone_app_host)
+	# ── 三个 app 的页面（内容沿用原贴纸/物品/设置，_refresh_album 等仍适用）──
 	var grid := GridContainer.new()
 	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 28)
@@ -845,19 +926,13 @@ func _setup_hud() -> void:
 	_avatar_preview.visible = false
 	settings_page.add_child(_avatar_preview)
 	_album_pages = { "stickers": grid, "items": items_page, "settings": settings_page }
-	var pages := VBoxContainer.new()
-	pages.add_theme_constant_override("separation", 20)
-	pages.add_child(tabs)
-	pages.add_child(grid)
-	pages.add_child(items_page)
-	pages.add_child(settings_page)
-	var margin := MarginContainer.new()
-	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		margin.add_theme_constant_override(side, 28)
-	margin.add_child(pages)
-	album_panel.add_child(margin)
+	for pid in _album_pages:
+		var pg := _album_pages[pid] as Control
+		pg.visible = false
+		_phone_app_host.add_child(pg)
 	layer.add_child(album_panel)
-	_set_album_tab("stickers")
+	_close_phone_app() # 初始停在主屏
+	_update_phone_banner()
 
 	# 进行中委托的提示 chip（右上角，图标为主：目标 ⇒ 奖励贴纸，_update_task_chip 重建）
 	task_chip = HBoxContainer.new()
@@ -918,6 +993,196 @@ func _style_label(l: Label, size: int) -> void:
 func _style_card_label(l: Label, size: int) -> void:
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", UiAssets.CARD_TEXT)
+
+## 左下角手机启动器外观：有当前皮肤的 AIGC 手机图标就用图标（透明底），否则程序化画一台
+## 竖屏手机占位（深色圆角机身 + 奶油屏幕 + home 点），等专属图标落盘后自动切图。换皮可重复调。
+func _style_phone_launcher(b: Button) -> void:
+	for c in b.get_children():
+		c.queue_free()
+	var skin: Dictionary = PHONE_SKINS.get(_phone_skin, {})
+	var art := UiAssets.tex(String(skin.get("launcher", "")))
+	if art != null:
+		b.icon = art
+		b.expand_icon = true
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.flat = true
+		for st in ["normal", "hover", "pressed", "focus"]:
+			b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+		return
+	# —— 程序化占位手机（AIGC 手机图标落盘前顶上）——
+	b.icon = null
+	var body := StyleBoxFlat.new()
+	body.bg_color = Color(0.16, 0.16, 0.20)
+	body.set_corner_radius_all(24)
+	body.set_border_width_all(3)
+	body.border_color = Color(0.32, 0.32, 0.40)
+	body.shadow_color = Color(0.20, 0.14, 0.06, 0.35)
+	body.shadow_size = 10
+	body.shadow_offset = Vector2(0.0, 5.0)
+	var hover: StyleBoxFlat = body.duplicate()
+	hover.bg_color = Color(0.22, 0.22, 0.27)
+	b.add_theme_stylebox_override("normal", body)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", hover)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var screen := Panel.new()  # 屏幕（奶油底）
+	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	screen.offset_left = 11.0
+	screen.offset_top = 13.0
+	screen.offset_right = -11.0
+	screen.offset_bottom = -22.0
+	var ss := StyleBoxFlat.new()
+	ss.bg_color = UiAssets.CARD_BG
+	ss.set_corner_radius_all(10)
+	screen.add_theme_stylebox_override("panel", ss)
+	b.add_child(screen)
+	var home := Panel.new()  # home 键小圆点（下巴处）
+	home.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	home.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	home.offset_left = -7.0
+	home.offset_right = 7.0
+	home.offset_top = -18.0
+	home.offset_bottom = -4.0
+	var hs := StyleBoxFlat.new()
+	hs.bg_color = Color(0.40, 0.40, 0.48)
+	hs.set_corner_radius_all(8)
+	home.add_theme_stylebox_override("panel", hs)
+	b.add_child(home)
+
+## 手机壳外观：有当前皮肤的 AIGC 手机壳资产用 9-patch 贴图铺满机身，否则程序化深色圆角机身占位。
+func _apply_phone_shell(panel: PanelContainer) -> void:
+	var skin: Dictionary = PHONE_SKINS.get(_phone_skin, {})
+	var art := UiAssets.tex(String(skin.get("shell", "")))
+	if art != null:
+		var sbt := StyleBoxTexture.new()
+		sbt.texture = art
+		panel.add_theme_stylebox_override("panel", sbt)
+		return
+	var body := StyleBoxFlat.new()
+	body.bg_color = Color(0.15, 0.15, 0.19)
+	body.set_corner_radius_all(46)
+	body.set_border_width_all(4)
+	body.border_color = Color(0.30, 0.30, 0.38)
+	body.shadow_color = Color(0.10, 0.07, 0.03, 0.45)
+	body.shadow_size = 22
+	body.shadow_offset = Vector2(0.0, 10.0)
+	panel.add_theme_stylebox_override("panel", body)
+
+## 一个 app 图标格：iOS 圆角小卡 + 图标 + 下方短名。app=[id, 短名, 图标资产]，资产缺失回退占位。
+func _make_app_icon(app: Array) -> Control:
+	var id := String(app[0])
+	var tex := UiAssets.tex(String(app[2]))
+	if tex == null:
+		tex = UiAssets.tex(String(PHONE_APP_FALLBACK.get(id, "st_star")))
+	var box := VBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 4)
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(66.0, 66.0)
+	btn.icon = tex
+	btn.expand_icon = true
+	btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	btn.add_theme_constant_override("icon_max_width", 46)
+	var st := UiAssets.card_style(16.0, 1.0)
+	st.shadow_size = 3
+	st.shadow_offset = Vector2(0.0, 2.0)
+	btn.add_theme_stylebox_override("normal", st)
+	var stp: StyleBoxFlat = st.duplicate()
+	stp.bg_color = UiAssets.CARD_ACCENT
+	btn.add_theme_stylebox_override("hover", stp)
+	btn.add_theme_stylebox_override("pressed", stp)
+	btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	btn.pressed.connect(_open_app.bind(id))
+	box.add_child(btn)
+	var cap := Label.new()
+	cap.text = String(app[1])
+	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_card_label(cap, 18)
+	box.add_child(cap)
+	return box
+
+## 空格子（留白占位）：极淡的奶油圆角框，保持 4x4 网格形状但明确是「还没有 app」。
+func _make_blank_slot() -> Control:
+	var box := VBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 4)
+	var tile := Panel.new()
+	tile.custom_minimum_size = Vector2(66.0, 66.0)
+	tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var st := StyleBoxFlat.new()
+	st.bg_color = Color(UiAssets.CARD_BG.r, UiAssets.CARD_BG.g, UiAssets.CARD_BG.b, 0.28)
+	st.set_corner_radius_all(16)
+	st.set_border_width_all(2)
+	st.border_color = Color(UiAssets.CARD_BORDER.r, UiAssets.CARD_BORDER.g, UiAssets.CARD_BORDER.b, 0.45)
+	tile.add_theme_stylebox_override("panel", st)
+	box.add_child(tile)
+	var cap := Label.new() # 空 caption 与 app 图标等高对齐
+	_style_card_label(cap, 18)
+	box.add_child(cap)
+	return box
+
+## 打开一个 app：主屏隐藏、app 视图显示，只显示该页并刷新。
+func _open_app(id: String) -> void:
+	if not _album_pages.has(id):
+		return
+	_phone_open_app = id
+	_phone_home.visible = false
+	_phone_app_view.visible = true
+	for pid in _album_pages:
+		(_album_pages[pid] as Control).visible = (pid == id)
+	for entry in PHONE_APPS:
+		if String(entry[0]) == id:
+			_phone_app_title.text = String(entry[1])
+	if id == "stickers" or id == "items":
+		_refresh_album()
+
+## 返回主屏：收起 app 视图与设置页的确认/预览子部件。
+func _close_phone_app() -> void:
+	_phone_open_app = ""
+	if _phone_app_view != null:
+		_phone_app_view.visible = false
+	if _phone_home != null:
+		_phone_home.visible = true
+	if _reroll_confirm != null:
+		_reroll_confirm.visible = false
+	if _avatar_preview != null:
+		_avatar_preview.visible = false
+		_avatar_hash = ""
+
+## 手机开着时每秒刷新一次 banner（时钟走字、已玩时长累加）；关着不做事，零开销。
+func _step_phone_ui(delta: float) -> void:
+	if album_panel == null or not album_panel.visible:
+		return
+	_phone_ui_t -= delta
+	if _phone_ui_t > 0.0:
+		return
+	_phone_ui_t = 1.0
+	_update_phone_banner()
+
+## 手机 banner：时钟（实时）+ 已玩时长（本次进入世界起算）+ 小红花数（代笔占位）。
+func _update_phone_banner() -> void:
+	if _phone_clock == null:
+		return
+	var t := Time.get_time_dict_from_system()
+	_phone_clock.text = "%02d:%02d" % [int(t.get("hour", 0)), int(t.get("minute", 0))]
+	var secs := 0
+	if _play_start_ms > 0:
+		secs = int((Time.get_ticks_msec() - _play_start_ms) / 1000)
+	_phone_playtime.text = _fmt_playtime(secs)
+	_phone_flowers.text = "x%d" % _red_flower_count()
+
+## 已玩秒数 → "已玩 M:SS"（抽成纯函数便于回测换算）。
+func _fmt_playtime(secs: int) -> String:
+	return "已玩 %d:%02d" % [secs / 60, secs % 60]
+
+## 小红花数：代笔占位——真实小红花系统未接入前，先用已收集贴纸总数当占位读数。
+## TODO(小红花): 接入真实小红花来源后替换本函数。
+func _red_flower_count() -> int:
+	var n := 0
+	for id in inventory:
+		n += int(inventory[id])
+	return n
 
 func _physics_process(delta: float) -> void:
 	# 方向键直接驱动玩家（桌面调试；与点击移动同一 Mover 规则）
@@ -1020,6 +1285,8 @@ func _process(delta: float) -> void:
 			or (fairy_voice != null and fairy_voice.is_playing()))
 	tp = _prof_lap(tp, "duck")
 	_step_hop(delta)  # 进对话时玩家跳向站位（在焦点/摆位之前推进，相机随之贴合）
+	_step_phone_ui(delta)
+	tp = _prof_lap(tp, "phoneui")
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
 	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)
@@ -2568,18 +2835,9 @@ func _pulse_album_button() -> void:
 func _toggle_album() -> void:
 	album_panel.visible = not album_panel.visible
 	if album_panel.visible:
+		_close_phone_app() # 每次打开手机都回到主屏
 		_refresh_album()
-
-## 分页切换：tab 高亮 + 只显示当前页；离开设置页时收起确认行。
-func _set_album_tab(tab: String) -> void:
-	for key in _album_tab_buttons:
-		(_album_tab_buttons[key] as Button).button_pressed = (key == tab)
-		(_album_pages[key] as Control).visible = (key == tab)
-	if _reroll_confirm != null and tab != "settings":
-		_reroll_confirm.visible = false
-	if _avatar_preview != null and tab != "settings":
-		_avatar_preview.visible = false
-		_avatar_hash = ""
+		_update_phone_banner()
 
 ## 设置页：重新捏角色——先 ？✓✗ 确认一遍防小手误触，确认后回童话书 onboarding。
 func _on_reroll_pressed() -> void:

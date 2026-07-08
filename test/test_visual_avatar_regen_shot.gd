@@ -20,7 +20,7 @@ func _tick() -> void:
 		8:
 			(scene.get("album_button") as Button).emit_signal("pressed")
 		16:
-			((scene.get("_album_tab_buttons") as Dictionary)["settings"] as Button).emit_signal("pressed")
+			scene.call("_open_app", "settings")
 		28:
 			(scene.get("_avatar_btn") as Button).emit_signal("pressed") # 假 API：观察禁用态
 		40:

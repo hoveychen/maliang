@@ -52,7 +52,7 @@ func _tick() -> void:
 			print("[qa] f150 收纳 state=", (scene.get("world_props") as Dictionary).get("p1", {}).get("state"))
 		175:
 			scene.call("_toggle_album")
-			scene.call("_set_album_tab", "items") # 收集册物品页
+			scene.call("_open_app", "items") # 手机物品 app
 		205:
 			scene.call("_take_prop_out", "p1")
 			print("[qa] f205 摆出 tile=", (scene.get("world_props") as Dictionary).get("p1", {}).get("tile"))
