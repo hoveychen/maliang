@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, Character, Player, WorldProp } from './types.ts';
+import type { ActiveTask, Character, MemoryItem, Player, WorldProp } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 
 export interface World {
@@ -42,6 +42,7 @@ export class WorldStore {
     this.#initSchema();
     if (this.#dir !== null) {
       this.#migrateFromJson();
+      this.#migrateLegacyMemories();
       this.#loadAssets();
     }
   }
@@ -69,6 +70,16 @@ export class WorldStore {
         data TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_props_world ON props(world_id);
+      CREATE TABLE IF NOT EXISTS memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_character_id TEXT NOT NULL,
+        about_player_id TEXT NOT NULL,
+        about_character_id TEXT,
+        text TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        ts INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_mem_owner_player ON memories(owner_character_id, about_player_id);
     `);
   }
 
@@ -315,6 +326,55 @@ export class WorldStore {
   listPlayers(): Player[] {
     const rows = this.#db.prepare('SELECT data FROM players').all() as { data: string }[];
     return rows.map((r) => JSON.parse(r.data) as Player);
+  }
+
+  // ── 长期记忆（P3：结构化，按 owner NPC × aboutPlayer 维度；见 types.MemoryItem）──────
+
+  /** 旧存量 Character.memory[] → memories 表（aboutPlayer='' 未绑定历史）。幂等：搬完清空 memory[]。 */
+  #migrateLegacyMemories(): void {
+    const rows = this.#db.prepare('SELECT data FROM characters').all() as { data: string }[];
+    for (const row of rows) {
+      const c = JSON.parse(row.data) as Character;
+      if (!Array.isArray(c.memory) || c.memory.length === 0) continue;
+      for (const text of c.memory) {
+        if (typeof text === 'string' && text.trim()) {
+          this.addMemory(c.id, { text: text.trim(), kind: 'event', aboutPlayer: '', ts: 0 });
+        }
+      }
+      c.memory = []; // 清空，避免重复迁移（幂等）
+      this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?').run(JSON.stringify(c), c.id);
+    }
+  }
+
+  /** 追加一条长期记忆。 */
+  addMemory(ownerCharacterId: string, item: MemoryItem): void {
+    this.#db
+      .prepare(
+        'INSERT INTO memories (owner_character_id, about_player_id, about_character_id, text, kind, ts) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run(ownerCharacterId, item.aboutPlayer, item.aboutCharacter ?? null, item.text, item.kind, item.ts);
+  }
+
+  /** 取某 NPC 关于某玩家的记忆（含 aboutPlayer='' 的未绑定历史记忆），按插入顺序。 */
+  getMemories(ownerCharacterId: string, aboutPlayerId: string): MemoryItem[] {
+    const rows = this.#db
+      .prepare(
+        "SELECT about_player_id, about_character_id, text, kind, ts FROM memories WHERE owner_character_id = ? AND about_player_id IN (?, '') ORDER BY id",
+      )
+      .all(ownerCharacterId, aboutPlayerId) as {
+      about_player_id: string;
+      about_character_id: string | null;
+      text: string;
+      kind: string;
+      ts: number;
+    }[];
+    return rows.map((r) => ({
+      text: r.text,
+      kind: r.kind as MemoryItem['kind'],
+      aboutPlayer: r.about_player_id,
+      aboutCharacter: r.about_character_id ?? undefined,
+      ts: r.ts,
+    }));
   }
 
   /** 存入资源，返回内容寻址 hash。 */

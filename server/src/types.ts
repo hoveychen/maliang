@@ -202,3 +202,21 @@ export interface Player {
   spriteAsset: string; // 形象资产 hash（内容寻址，服务端已有）
   createdAt: string; // ISO 时间；由前端 profile 带上，服务端不取墙上时钟
 }
+
+/** 记忆分类型（对齐 extractMemory 抽取口径：名字/喜好/约定/发生的事/关系）。 */
+export type MemoryKind = 'identity' | 'preference' | 'promise' | 'event' | 'relation';
+
+export const MEMORY_KINDS: readonly MemoryKind[] = ['identity', 'preference', 'promise', 'event', 'relation'];
+
+/**
+ * 一条结构化长期记忆（P3：取代 Character.memory: string[]，落 memories 独立表）。
+ * 维度 = 「哪个 NPC(owner) 对哪个玩家(aboutPlayer)」的记忆；aboutCharacter 预留 NPC↔NPC（本期主要空）。
+ * 旧存量 memory[] 迁移时 aboutPlayer='' 表示「未绑定玩家的历史记忆」，注入时与当前玩家的记忆一起取。
+ */
+export interface MemoryItem {
+  text: string;
+  kind: MemoryKind;
+  aboutPlayer: string;
+  aboutCharacter?: string;
+  ts: number;
+}
