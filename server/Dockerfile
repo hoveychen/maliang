@@ -11,7 +11,8 @@ WORKDIR /app
 # webp：图集 PNG→WebP 编码（cwebp，体积 ~1/6.6，带 alpha）
 RUN apt-get update && apt-get install -y --no-install-recommends curl bzip2 ca-certificates ffmpeg webp \
   && rm -rf /var/lib/apt/lists/*
-RUN corepack enable
+# node:26-slim 起不再内置 corepack（Node 25+ 已从发行版剥离），需显式装一次再启用。
+RUN npm install -g corepack@latest && corepack enable
 
 # 先装依赖（利用缓存）。运行时只需 prod 依赖（fastify/pngjs/jpeg-js/sherpa-onnx-node）；
 # typescript/@types 仅类型检查用，运行时 node 原生剥离类型，不需要。
