@@ -7,6 +7,7 @@ import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
 import { triggerIdleAnimation } from './idle_animation.ts';
+import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
@@ -182,6 +183,33 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   app.get<{ Params: { hash: string } }>('/sprite-anim/:hash', async (req) => {
     const rec = store.getSpriteAnim(req.params.hash);
     return rec ?? { status: 'none' };
+  });
+
+  // 管理端点：直接上传一张预生成的 idle 图集并绑定到某立绘 hash（不重新跑生成管线）。
+  // 用于把线下已确认好的动画上线（如仙子），或用同一张立绘复用现成动画——避免烧钱重生成、
+  // 且静态形象完全不变。烧钱/改小朋友所见——必须配 MALIANG_ADMIN_TOKEN。
+  app.post<{
+    Params: { hash: string };
+    Body: { animPngBase64?: string; meta?: SpriteSheetMeta } | null;
+  }>('/admin/sprite-anim/:hash', { bodyLimit: 16 * 1024 * 1024 }, async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const b64 = req.body?.animPngBase64;
+    const meta = req.body?.meta;
+    if (!b64 || !meta) return reply.code(400).send({ error: 'animPngBase64 and meta required' });
+    const ok =
+      meta.cols > 0 && meta.rows > 0 && meta.frameCount > 0 &&
+      meta.fps > 0 && meta.cellW > 0 && meta.cellH > 0 &&
+      meta.frameCount <= meta.cols * meta.rows;
+    if (!ok) return reply.code(400).send({ error: 'invalid meta' });
+    const animAsset = store.putAsset({
+      bytes: Uint8Array.from(Buffer.from(b64, 'base64')),
+      mime: 'image/png',
+    });
+    store.setSpriteAnimReady(req.params.hash, animAsset, meta);
+    return { spriteHash: req.params.hash, animAsset, meta, status: 'ready' };
   });
 
   // 昂贵操作限流：每连接 N/分钟 + 全局并发上限（防刷付费 API）

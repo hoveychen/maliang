@@ -26,7 +26,8 @@ export interface SpriteSheetMeta {
 export interface SpriteSheetOptions {
   /** 抽帧帧率，默认 8（idle 平缓，够顺又省帧）。 */
   fps?: number;
-  /** 每帧缩放到的高度（px），默认 256（游戏小角色够用，控图集体积/移动端显存）。 */
+  /** 每帧缩放到的高度（px），默认 160（游戏里角色显示不大，160 足够清晰；
+   *  相比 256 像素降到 ~39%，图集 ~2MB→~0.8MB，省传输/移动端显存）。 */
   cellH?: number;
   /** 抠绿适配器，默认 ChromaKeyCutoutAdapter（与立绘同一套绿判定）。 */
   cutout?: CutoutAdapter;
@@ -139,7 +140,7 @@ export async function videoToSpriteSheet(
   opts: SpriteSheetOptions = {},
 ): Promise<{ atlas: ImageBlob; meta: SpriteSheetMeta }> {
   const fps = opts.fps ?? 8;
-  const cellH = opts.cellH ?? 256;
+  const cellH = opts.cellH ?? 160;
   const cutout = opts.cutout ?? new ChromaKeyCutoutAdapter();
 
   let frames = await extractFrames(mp4, fps, cellH);
