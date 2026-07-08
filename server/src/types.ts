@@ -136,7 +136,8 @@ export interface IntentContext {
   personality: string;
   abilities: string[];
   recentHistory?: ChatTurn[]; // 近 N 轮对话，给角色上下文让回应连贯
-  memory?: string[]; // 角色长期记忆要点（自我累积，跨对话保留）
+  /** 角色对当前玩家的长期记忆（带分类，注入时按 kind 分组）。 */
+  memory?: { text: string; kind: MemoryKind }[];
   /** 世界里的其他角色花名册（不含自己/小神仙）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
   worldCharacters?: { id: string; name: string }[];
   /** 世界地点名清单（客户端 world_info 上报的 POI 名）：move_to 的 location_name 优先归一到这些名字。 */
@@ -147,15 +148,19 @@ export interface IntentContext {
   taskCandidate?: ActiveTask;
   /** 玩家的贴纸背包（id→数量）：give 的词汇依据；空背包时对送贴纸请求温柔说明还没有。 */
   inventory?: Record<string, number>;
+  /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing，命中 prompt cache。 */
+  cacheKey?: string;
 }
 
-/** 对话后让角色「自己决定记什么」的上下文（extractMemory 用）。 */
+/** 会话（Visit）结束时让角色「自己决定记什么」的上下文（extractMemory 用）。 */
 export interface MemoryExtractionContext {
   characterName: string;
   personality: string;
-  transcript: string; // 小朋友这轮说的
-  replyText: string; // 角色这轮的回应
+  /** 本次会话（Visit）里与该角色的整段对话增量（多轮），会话结束批量抽一次。 */
+  turns: { child: string; npc: string }[];
   existingMemory: string[]; // 已记住的，用于去重/避免重复记
+  /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing。 */
+  cacheKey?: string;
 }
 
 /** voice_input 编排的返回（推给客户端 character_response）。 */
@@ -185,4 +190,61 @@ export interface WorldProp {
   tile: [number, number] | null;
   /** placed=摆在世界（tile 有效）；bagged=收进收集册物品页（tile 置 null）。 */
   state: 'placed' | 'bagged';
+}
+
+/**
+ * 玩家实体（面向未来 MMO 的一等公民）。
+ * 身份来源 = 设备端「开始新游戏」时生成的稳定 UUID（前端存 user://profile.json 并随消息上报）；
+ * 本期无任何鉴权流程，未来换设备走 QR + challenge 转移（schema 已就绪，转移流程本期不实现）。
+ * 玩家档案原本只在前端本地，MMO 需上服务端——此表把档案结构建好，前端仍可保留本地缓存。
+ */
+export interface Player {
+  id: string;
+  name: string;
+  nickname: string;
+  gender: string; // boy | girl（前端 profile 口径）
+  color: string; // 喜欢的颜色名
+  spriteAsset: string; // 形象资产 hash（内容寻址，服务端已有）
+  createdAt: string; // ISO 时间；由前端 profile 带上，服务端不取墙上时钟
+}
+
+/**
+ * 一次会话（Visit）：一次「进世界到离开」，作会话结束批量抽记忆的边界（见 design §4）。
+ * 身份 = (worldId, playerId, startedAt)，绑世界+玩家而非 socket（兼容未来重连）。
+ * endedAt=null 表示进行中（掉线未收尾也可能停留 null，靠 socket.close 兜底置时）。
+ */
+export interface Visit {
+  id: number;
+  worldId: string;
+  playerId: string;
+  startedAt: number;
+  endedAt: number | null;
+}
+
+/** 记忆分类型（对齐 extractMemory 抽取口径：名字/喜好/约定/发生的事/关系）。 */
+export type MemoryKind = 'identity' | 'preference' | 'promise' | 'event' | 'relation';
+
+export const MEMORY_KINDS: readonly MemoryKind[] = ['identity', 'preference', 'promise', 'event', 'relation'];
+
+/**
+ * 一条结构化长期记忆（P3：取代 Character.memory: string[]，落 memories 独立表）。
+ * 维度 = 「哪个 NPC(owner) 对哪个玩家(aboutPlayer)」的记忆；aboutCharacter 预留 NPC↔NPC（本期主要空）。
+ * 旧存量 memory[] 迁移时 aboutPlayer='' 表示「未绑定玩家的历史记忆」，注入时与当前玩家的记忆一起取。
+ */
+export interface MemoryItem {
+  text: string;
+  kind: MemoryKind;
+  aboutPlayer: string;
+  aboutCharacter?: string;
+  ts: number;
+}
+
+/**
+ * extractMemory 的产出：LLM 只决定「记什么内容 + 归哪类」。
+ * 归属玩家(aboutPlayer)与时间(ts)由调用方(accumulateMemory)按当前会话补齐——
+ * 抽取器不知道当前是哪个玩家，也不读墙上时钟。本期主要产关于玩家的记忆，NPC↔NPC 预留。
+ */
+export interface ExtractedMemory {
+  text: string;
+  kind: MemoryKind;
 }

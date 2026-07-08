@@ -9,10 +9,10 @@ import { createCharacter, generateSprite, ModerationError } from './orchestrator
 import { triggerIdleAnimation } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
-import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
+import { handleVoice, respondToTranscript, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
-import { stickerGlyph, type ActiveTask, type Character, type VoiceResponse, type WorldProp } from './types.ts';
+import { stickerGlyph, type ActiveTask, type Character, type Player, type VoiceResponse, type WorldProp } from './types.ts';
 import { completeTaskOnEvent, praiseLine, thanksLine } from './tasks.ts';
 
 export interface ServerDeps {
@@ -43,6 +43,100 @@ function seedFairy(worldId: string): Character {
 function characterListView(store: WorldStore, worldId: string) {
   return store.listCharacters(worldId);
 }
+
+/** 只读后台快照（P6）：玩家 + 每个世界的角色（含记忆/对话）+ 物件 + Visit。直连 WorldStore，不改状态。 */
+export function buildDebugState(store: WorldStore) {
+  return {
+    players: store.listPlayers(),
+    worlds: store.listWorlds().map((w) => ({
+      id: w.id,
+      inventory: w.inventory,
+      activeTask: w.activeTask,
+      characters: store.listCharacters(w.id).map((c) => ({
+        id: c.id,
+        name: c.name,
+        isFairy: c.isFairy,
+        personality: c.personality,
+        state: c.state,
+        position: c.position,
+        memories: store.listMemories(c.id),
+        chatTurns: store.listChatTurns(c.id),
+      })),
+      props: store.listProps(w.id),
+      visits: store.listVisits(w.id),
+    })),
+  };
+}
+
+/** 单页只读 dashboard：拉 /debug/state 渲染。纯静态 HTML+JS，token 从本页 URL 透传给 state 接口。 */
+const DEBUG_DASHBOARD_HTML = `<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>maliang 状态后台</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 -apple-system,system-ui,"PingFang SC",sans-serif; margin: 0; background:#f5f3ee; color:#222; }
+  header { padding: 14px 20px; background:#2b2b2b; color:#f5f3ee; display:flex; align-items:baseline; gap:12px; }
+  header h1 { font-size: 16px; margin:0; font-weight:600; }
+  header .meta { font-size:12px; opacity:.7; }
+  header button { margin-left:auto; font-size:12px; padding:4px 12px; border-radius:6px; border:1px solid #666; background:#3a3a3a; color:#eee; cursor:pointer; }
+  main { padding: 16px 20px 60px; max-width: 1100px; }
+  h2 { font-size:14px; margin: 22px 0 8px; border-bottom:2px solid #d9d3c7; padding-bottom:4px; }
+  table { border-collapse: collapse; width:100%; margin:6px 0 14px; background:#fffdf8; }
+  th,td { text-align:left; padding:5px 9px; border:1px solid #e4ddcf; vertical-align:top; }
+  th { background:#efe9dd; font-weight:600; }
+  .world { border:1px solid #d9d3c7; border-radius:8px; padding:12px 14px; margin:14px 0; background:#fbf9f3; }
+  .world > .wid { font-weight:600; font-size:13px; }
+  .kind { display:inline-block; font-size:11px; padding:1px 6px; border-radius:4px; background:#e7e0d0; margin-right:4px; }
+  .mono { font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:12px; color:#555; }
+  .empty { color:#999; font-style:italic; }
+  .err { color:#b00; padding:20px; }
+  details { margin:4px 0; } summary { cursor:pointer; font-size:13px; }
+</style></head>
+<body>
+<header><h1>🧚 maliang 状态后台</h1><span class="meta" id="meta">加载中…</span><button onclick="load()">刷新</button></header>
+<main id="app"></main>
+<script>
+const token = new URLSearchParams(location.search).get('token');
+const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function kindsOf(mems){ const by={}; for(const m of mems){ (by[m.kind]=by[m.kind]||[]).push(m.text); } return by; }
+function charBlock(c){
+  const byKind = kindsOf(c.memories);
+  const memHtml = c.memories.length ? Object.entries(byKind).map(([k,ts]) =>
+    '<div><span class="kind">'+esc(k)+'</span>'+ts.map(esc).join('；')+'</div>').join('') : '<span class="empty">（无记忆）</span>';
+  const turns = c.chatTurns.slice(-12);
+  const turnHtml = turns.length ? turns.map(t =>
+    '<div class="mono">['+esc(t.playerId||'∅')+'] '+(t.role==='child'?'👦':'🧸')+' '+esc(t.text)+'</div>').join('') : '<span class="empty">（无对话）</span>';
+  return '<details'+(c.isFairy?'':' open')+'><summary><b>'+esc(c.name)+'</b> '+(c.isFairy?'🧚':'')+
+    ' <span class="mono">'+esc(c.id.slice(0,8))+' · '+esc(c.state)+' · ('+c.position.tileX+','+c.position.tileY+')</span>'+
+    ' <span class="mono">记忆'+c.memories.length+' 对话'+c.chatTurns.length+'</span></summary>'+
+    '<div style="padding:6px 0 6px 14px">'+esc(c.personality)+'<h4 style="margin:8px 0 2px;font-size:12px">记忆</h4>'+memHtml+
+    '<h4 style="margin:8px 0 2px;font-size:12px">近期对话（末12条）</h4>'+turnHtml+'</div></details>';
+}
+function render(s){
+  document.getElementById('meta').textContent = s.players.length+' 玩家 · '+s.worlds.length+' 世界';
+  let h = '<h2>玩家 Players ('+s.players.length+')</h2>';
+  h += s.players.length ? '<table><tr><th>id</th><th>名字</th><th>昵称</th><th>性别</th><th>颜色</th><th>建档</th></tr>'+
+    s.players.map(p => '<tr><td class="mono">'+esc(p.id.slice(0,12))+'</td><td>'+esc(p.name)+'</td><td>'+esc(p.nickname)+'</td><td>'+esc(p.gender)+'</td><td>'+esc(p.color)+'</td><td class="mono">'+esc(p.createdAt)+'</td></tr>').join('')+'</table>'
+    : '<p class="empty">（无玩家）</p>';
+  for(const w of s.worlds){
+    h += '<div class="world"><div class="wid">世界 '+esc(w.id)+'</div>';
+    h += '<div class="mono">背包 '+esc(JSON.stringify(w.inventory))+' · 委托 '+esc(w.activeTask?w.activeTask.type+'('+w.activeTask.npcName+')':'无')+'</div>';
+    h += '<h4 style="margin:10px 0 2px">角色 ('+w.characters.length+')</h4>'+ (w.characters.map(charBlock).join('')||'<span class="empty">（无角色）</span>');
+    h += '<h4 style="margin:10px 0 2px">物件 ('+w.props.length+') · Visit ('+w.visits.length+')</h4>';
+    h += '<div class="mono">'+w.visits.slice(0,10).map(v => v.playerId.slice(0,8)+' '+new Date(v.startedAt).toLocaleString()+(v.endedAt?' → 已结束':' · 进行中')).join('<br>')+'</div>';
+    h += '</div>';
+  }
+  document.getElementById('app').innerHTML = h;
+}
+async function load(){
+  try{
+    const r = await fetch('/debug/state'+(token?('?token='+encodeURIComponent(token)):''), {headers: token?{'x-admin-token':token}:{}});
+    if(!r.ok){ document.getElementById('app').innerHTML='<p class="err">加载失败 '+r.status+'（需要 ?token=）</p>'; return; }
+    render(await r.json());
+  }catch(e){ document.getElementById('app').innerHTML='<p class="err">'+esc(e)+'</p>'; }
+}
+load();
+</script></body></html>`;
 
 export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstance> {
   const adapters = deps.adapters ?? createAdapters(loadConfig());
@@ -212,6 +306,23 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { spriteHash: req.params.hash, animAsset, meta, status: 'ready' };
   });
 
+  // 只读状态后台（P6）：/debug/state 出 JSON 全量快照，/debug 出单页 dashboard 渲染它。
+  // 只读直连 WorldStore，不改状态。含玩家名/记忆等，配了 MALIANG_ADMIN_TOKEN 就要 ?token= 或 x-admin-token。
+  const debugToken = process.env.MALIANG_ADMIN_TOKEN;
+  const debugAuthed = (req: { headers: Record<string, unknown>; query: unknown }): boolean => {
+    if (!debugToken) return true; // 未配置 token = 开发环境，开放
+    const q = (req.query as { token?: string } | undefined)?.token;
+    return req.headers['x-admin-token'] === debugToken || q === debugToken;
+  };
+  app.get('/debug/state', async (req, reply) => {
+    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    return buildDebugState(store);
+  });
+  app.get('/debug', async (req, reply) => {
+    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    return reply.header('content-type', 'text/html; charset=utf-8').send(DEBUG_DASHBOARD_HTML);
+  });
+
   // 昂贵操作限流：每连接 N/分钟 + 全局并发上限（防刷付费 API）
   const limiter = new RateLimiter(
     Number(process.env.RATE_PER_MIN ?? 8),
@@ -225,14 +336,26 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     socket.on('message', (raw: Buffer) => {
       void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session);
     });
-    // 连接断开时释放可能仍持有的限流名额（录到一半断线）
+    // 连接断开时释放可能仍持有的限流名额（录到一半断线），并 flush 会话记忆兜底（前端没发 leave_world 就掉线）
     socket.on('close', () => {
       if (session.gate) { session.gate.release(); session.gate = null; }
       session.active = false;
+      void endSessionVisit(session, adapters, store, Date.now());
     });
   });
 
   return app;
+}
+
+/**
+ * 进行中的会话（Visit）在连接上的状态：pending 累积各角色的对话增量，
+ * 会话结束（leave_world / socket.close）或单角色超阈值时 flush 批量抽记忆。
+ */
+export interface VisitState {
+  id: number; // visits 表行 id
+  worldId: string;
+  playerId: string;
+  pending: Map<string, { child: string; npc: string }[]>; // characterId → 尚未抽取的对话增量
 }
 
 /** 边说边识别的单连接语音会话：voice_start 开讯飞流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
@@ -240,12 +363,78 @@ export interface VoiceSession {
   active: boolean;
   worldId: string;
   characterId: string;
+  /** 当前玩家 id（设备端稳定 UUID，随消息上报）：供记忆/Visit 按玩家归属（P3/P4 消费）。 */
+  playerId: string;
   asr: ASRStream | null;
   gate: { release: () => void } | null;
+  /** 进行中的会话（world_info 起、leave_world/close 收尾）；每轮对话增量累积其中，结束批量抽记忆。 */
+  visit: VisitState | null;
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { active: false, worldId: '', characterId: '', asr: null, gate: null };
+  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null };
+}
+
+const VISIT_FLUSH_THRESHOLD = 20; // 单角色累积超此轮数即中途 flush，兜底长会话掉线全丢
+
+/** 进世界：开一段 Visit。已有旧 Visit（换世界/重连）先收尾再开新的。 */
+export function startSessionVisit(
+  session: VoiceSession,
+  worldId: string,
+  playerId: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  now: number,
+): void {
+  if (session.visit) void endSessionVisit(session, adapters, store, now); // 收尾旧的（同步排空 pending，抽取后台跑）
+  session.visit = { id: store.startVisit(worldId, playerId, now), worldId, playerId, pending: new Map() };
+}
+
+/** 记一轮对话进当前 Visit 的增量；单角色超阈值即中途 flush 兜底（后台跑，不阻塞回复路径）。 */
+export function recordVisitTurn(
+  session: VoiceSession,
+  worldId: string,
+  playerId: string,
+  characterId: string,
+  transcript: string,
+  replyText: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+): void {
+  // 兜底：没经 world_info 起过 Visit（旧客户端/直连）时惰性开一段。
+  if (!session.visit) {
+    session.visit = { id: store.startVisit(worldId, playerId, Date.now()), worldId, playerId, pending: new Map() };
+  }
+  const visit = session.visit;
+  const turns = visit.pending.get(characterId) ?? [];
+  turns.push({ child: transcript, npc: replyText });
+  visit.pending.set(characterId, turns);
+  if (turns.length >= VISIT_FLUSH_THRESHOLD) {
+    const batch = turns.slice();
+    turns.length = 0; // 清空已抽取的增量，后续轮次重新累积
+    void flushMemory(visit.worldId, characterId, visit.playerId, batch, adapters, store).catch(() => {});
+  }
+}
+
+/** 会话结束（leave_world / socket.close）：flush 当前 Visit（每个有增量的角色批量抽一次）并清出 session。 */
+export async function endSessionVisit(
+  session: VoiceSession,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  endedAt: number,
+): Promise<void> {
+  const visit = session.visit;
+  if (!visit) return;
+  session.visit = null; // 先摘出，避免并发/重入重复 flush
+  const jobs: Promise<void>[] = [];
+  for (const [characterId, turns] of visit.pending) {
+    if (turns.length === 0) continue;
+    const batch = turns.slice();
+    turns.length = 0;
+    jobs.push(flushMemory(visit.worldId, characterId, visit.playerId, batch, adapters, store).catch(() => {}));
+  }
+  store.endVisit(visit.id, endedAt);
+  await Promise.all(jobs);
 }
 
 /** 得奖语音表扬：委托人音色念表扬词，合成好推 praise_tts（尽力而为，失败不影响主流程）。 */
@@ -332,6 +521,16 @@ export async function handleWsMessage(
     propId?: string; // prop_place：语音生成物件的落位回报
     tileX?: number;
     tileY?: number;
+    // 玩家身份：每条消息可带 playerId（设备端稳定 UUID）；world_info 另带 profile 供首见建档。
+    playerId?: string;
+    profile?: {
+      name?: string;
+      nickname?: string;
+      gender?: string;
+      color?: string;
+      spriteAsset?: string;
+      createdAt?: string;
+    };
   };
   try {
     msg = JSON.parse(raw);
@@ -340,20 +539,45 @@ export async function handleWsMessage(
     return;
   }
 
+  // 玩家身份：记进会话，供后续记忆/Visit 按玩家归属（P3/P4 消费）。
+  if (typeof msg.playerId === 'string' && msg.playerId) session.playerId = msg.playerId;
+
   // 客户端上报世界地点名（连上 WS 后一次）：喂给意图 LLM，让「去某地」归一到真实地名。
   // 回 world_state 同步贴纸背包与进行中委托（断线重连/重启后客户端补状态）。
   if (msg.type === 'world_info') {
     const worldId = msg.worldId ?? '';
+    // 玩家登记：world_info 带 playerId + profile 时 upsert（首见即建档，面向 MMO；无鉴权）
+    if (typeof msg.playerId === 'string' && msg.playerId && msg.profile) {
+      const p = msg.profile;
+      const player: Player = {
+        id: msg.playerId,
+        name: String(p.name ?? ''),
+        nickname: String(p.nickname ?? ''),
+        gender: String(p.gender ?? ''),
+        color: String(p.color ?? ''),
+        spriteAsset: String(p.spriteAsset ?? ''),
+        createdAt: String(p.createdAt ?? ''),
+      };
+      store.upsertPlayer(player);
+    }
     const names = (Array.isArray(msg.locations) ? msg.locations : [])
       .filter((n): n is string => typeof n === 'string' && n.trim().length > 0 && n.length <= 20)
       .map((n) => n.trim())
       .slice(0, 32);
     store.setLocations(worldId, names);
+    // 进世界 = 一段会话（Visit）开始：作会话结束批量抽记忆的边界。
+    startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now());
     socket.send(JSON.stringify({
       type: 'world_state',
       inventory: store.getInventory(worldId),
       activeTask: store.getActiveTask(worldId),
     }));
+    return;
+  }
+
+  // 离开世界（前端正常退出显式发）：会话结束，flush 批量抽记忆并收尾 Visit。掉线未发则靠 socket.close 兜底。
+  if (msg.type === 'leave_world') {
+    await endSessionVisit(session, adapters, store, Date.now());
     return;
   }
 
@@ -450,6 +674,7 @@ export async function handleWsMessage(
         {
           worldId: msg.worldId ?? '',
           characterId: msg.characterId ?? '',
+          playerId: session.playerId,
           audio: { bytes: audioBytes, mime: msg.format ?? 'audio/wav' },
         },
         adapters,
@@ -460,14 +685,8 @@ export async function handleWsMessage(
         void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store);
       }
       // 长期记忆后台累积：在回复发出后再做，不阻塞对话；失败/超时只影响这次记忆。
-      void accumulateMemory(
-        msg.worldId ?? '',
-        msg.characterId ?? '',
-        response.transcript,
-        response.replyText,
-        adapters,
-        store,
-      ).catch(() => {});
+      // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
+      recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {
@@ -498,6 +717,7 @@ export async function handleWsMessage(
       const response = await respondToTranscript(
         msg.worldId ?? '',
         msg.characterId ?? '',
+        session.playerId,
         transcript,
         adapters,
         store,
@@ -507,14 +727,8 @@ export async function handleWsMessage(
       if (response.propRequest) {
         void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store);
       }
-      void accumulateMemory(
-        msg.worldId ?? '',
-        msg.characterId ?? '',
-        response.transcript,
-        response.replyText,
-        adapters,
-        store,
-      ).catch(() => {});
+      // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
+      recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {
@@ -559,7 +773,7 @@ export async function handleWsMessage(
       socket.send(JSON.stringify({ type: 'voice_failed', reason: '没有进行中的录音会话' }));
       return;
     }
-    const { worldId, characterId, asr } = session;
+    const { worldId, characterId, playerId, asr } = session;
     session.active = false;
     session.asr = null;
     try {
@@ -569,12 +783,12 @@ export async function handleWsMessage(
         onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
         onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
       };
-      const response = await respondToTranscript(worldId, characterId, transcript, adapters, store, ttsHooks);
+      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks);
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
         void createPropAsync(socket, worldId, response.propRequest, adapters, store);
       }
-      void accumulateMemory(worldId, characterId, response.transcript, response.replyText, adapters, store).catch(() => {});
+      recordVisitTurn(session, worldId, playerId, characterId, response.transcript, response.replyText, adapters, store);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {

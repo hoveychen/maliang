@@ -1,13 +1,16 @@
 import type { LLMAdapter } from './types.ts';
 import {
   BASE_ABILITIES,
+  MEMORY_KINDS,
   STICKER_NAMES,
   stickerGlyph,
   type BehaviorScript,
   type CharacterSpec,
+  type ExtractedMemory,
   type IntentContext,
   type IntentResult,
   type MemoryExtractionContext,
+  type MemoryKind,
 } from '../types.ts';
 import { describeTask } from '../tasks.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
@@ -57,6 +60,22 @@ const ABILITY_DESC: Record<string, string> = {
 function stripFences(s: string): string {
   return s.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/i, '').trim();
 }
+
+/** 记忆注入时按 kind 分组的中文小标题（memoryLine 分组注入）。 */
+const MEMORY_KIND_LABEL: Record<MemoryKind, string> = {
+  identity: '关于这个小朋友',
+  preference: '小朋友的喜好',
+  promise: '你们的约定',
+  event: '一起经历过的事',
+  relation: '你们的关系',
+};
+
+/**
+ * 静/动态边界 marker（学 claude-code-fork 的 SYSTEM_PROMPT_DYNAMIC_BOUNDARY）：
+ * 之前是跨轮字节稳定的静态内容（角色卡/能力/规则），可命中 prompt cache；
+ * 之后是每轮可变的当前情况（花名册/地点/背包/委托/记忆），不参与缓存前缀。
+ */
+const PROMPT_DYNAMIC_BOUNDARY = '\n\n——以下是「当前情况」，每次可能不同——';
 
 interface RawSpec {
   name?: unknown;
@@ -118,34 +137,17 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
   }
 
   async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
-    const memoryLine = ctx.memory && ctx.memory.length > 0
-      ? `\n你记得关于小朋友的事：${ctx.memory.join('；')}。回应时自然地体现你记得这些。`
-      : '';
     // 能力 = 基础交互集 ∪ 角色自带（存量角色只存了旧两项，取并集免迁移）
     const abilities = [...new Set([...BASE_ABILITIES, ...ctx.abilities])];
     const abilityLines = abilities.map((a) => `- ${ABILITY_DESC[a] ?? a}`).join('\n');
-    const rosterLine = ctx.worldCharacters && ctx.worldCharacters.length > 0
-      ? `\n世界里的其他角色：${ctx.worldCharacters.map((c) => c.name).join('、')}。指令里出现角色名时必须用这些名字（口音/识别不准时对应到最像的一个）。`
-      : '';
-    const locationLine = ctx.locations && ctx.locations.length > 0
-      ? `\n世界里的地点：${ctx.locations.join('、')}。move_to 的 location_name 优先归一到这些名字（说「有风车的地方」就填「风车」）。`
-      : '';
-    // 贴纸背包与委托（奖赏系统）：背包给 give 词汇；进行中委托提醒；候选委托由 LLM 挑时机发起
     const vocab = Object.entries(STICKER_NAMES).map(([cn, id]) => `${cn}${stickerGlyph(id)}=${id}`).join('、');
-    const inv = ctx.inventory ?? {};
-    const invItems = Object.entries(inv).filter(([, n]) => n > 0);
-    const inventoryLine = invItems.length > 0
-      ? `\n小朋友的贴纸背包：${invItems.map(([id, n]) => `${stickerGlyph(id)}x${n}`).join('、')}。贴纸叫法：${vocab}。`
-      : `\n小朋友的贴纸背包现在是空的（说要送贴纸时温柔告诉他先帮大家做点小事赢贴纸）。贴纸叫法：${vocab}。`;
-    const taskLine = ctx.activeTask
-      ? `\n进行中的小任务：${describeTask(ctx.activeTask)}（委托人是${ctx.activeTask.npcName}，完成有贴纸奖励）。小朋友问起就温柔提醒，不要重复发起新任务。`
-      : ctx.taskCandidate
-        ? `\n当下没有进行中的任务。时机合适时（小朋友问「有什么要帮忙的」，或聊天里自然接得上），你可以发起这个小委托：${describeTask(ctx.taskCandidate)}，奖励一个${stickerGlyph(ctx.taskCandidate.rewardId)}贴纸。若这句回应里发起了它，输出 "offerTask": true 并用你的口吻把请求和奖励说出来；不合适就别硬塞。`
-        : '';
-    const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。
+
+    // ── 静态前缀（跨轮字节稳定，命中 prompt cache）：角色卡 + 能力 + 贴纸词汇 + 输出格式与规则 ──
+    const staticSystem = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。
 小朋友对你说了一句话，判断这是「闲聊」还是「让你（或别的角色）做一件会做的事」。
 会做的事(abilities)：
-${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLine}
+${abilityLines}
+贴纸的叫法：${vocab}。
 严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","offerTask":true或省略,"behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
@@ -155,6 +157,36 @@ ${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLi
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
 - 绝不包含暴力、恐怖、成人内容。`;
+
+    // ── 动态后缀（每轮可变，不进缓存前缀）：花名册 / 地点 / 背包 / 委托 / 分组记忆 ──
+    const rosterLine = ctx.worldCharacters && ctx.worldCharacters.length > 0
+      ? `\n世界里的其他角色：${ctx.worldCharacters.map((c) => c.name).join('、')}。指令里出现角色名时必须用这些名字（口音/识别不准时对应到最像的一个）。`
+      : '';
+    const locationLine = ctx.locations && ctx.locations.length > 0
+      ? `\n世界里的地点：${ctx.locations.join('、')}。move_to 的 location_name 优先归一到这些名字（说「有风车的地方」就填「风车」）。`
+      : '';
+    const invItems = Object.entries(ctx.inventory ?? {}).filter(([, n]) => n > 0);
+    const inventoryLine = invItems.length > 0
+      ? `\n小朋友现在的贴纸背包：${invItems.map(([id, n]) => `${stickerGlyph(id)}x${n}`).join('、')}。`
+      : `\n小朋友的贴纸背包现在是空的（说要送贴纸时温柔告诉他先帮大家做点小事赢贴纸）。`;
+    const taskLine = ctx.activeTask
+      ? `\n进行中的小任务：${describeTask(ctx.activeTask)}（委托人是${ctx.activeTask.npcName}，完成有贴纸奖励）。小朋友问起就温柔提醒，不要重复发起新任务。`
+      : ctx.taskCandidate
+        ? `\n当下没有进行中的任务。时机合适时（小朋友问「有什么要帮忙的」，或聊天里自然接得上），你可以发起这个小委托：${describeTask(ctx.taskCandidate)}，奖励一个${stickerGlyph(ctx.taskCandidate.rewardId)}贴纸。若这句回应里发起了它，输出 "offerTask": true 并用你的口吻把请求和奖励说出来；不合适就别硬塞。`
+        : '';
+    // 记忆按 kind 分组注入（memoryLine 分组注入）
+    const mem = ctx.memory ?? [];
+    let memoryLine = '';
+    if (mem.length > 0) {
+      const groups: string[] = [];
+      for (const k of MEMORY_KINDS) {
+        const texts = mem.filter((m) => m.kind === k).map((m) => m.text);
+        if (texts.length > 0) groups.push(`${MEMORY_KIND_LABEL[k]}：${texts.join('；')}`);
+      }
+      memoryLine = `\n你还记得关于这个小朋友的事：\n${groups.join('\n')}\n回应时自然地体现你记得这些。`;
+    }
+    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + inventoryLine + taskLine + memoryLine;
+
     // 把近 N 轮历史按角色映射成对话消息，让回应有上下文
     const historyMsgs = (ctx.recentHistory ?? []).map((t) => ({
       role: t.role === 'child' ? ('user' as const) : ('assistant' as const),
@@ -167,7 +199,7 @@ ${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLi
         ...historyMsgs,
         { role: 'user', content: transcript },
       ],
-      { jsonObject: true },
+      { jsonObject: true, cache: true, sessionId: ctx.cacheKey },
     );
     let raw: {
       kind?: unknown;
@@ -197,28 +229,51 @@ ${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLi
     return result;
   }
 
-  async extractMemory(ctx: MemoryExtractionContext): Promise<string[]> {
-    const known = ctx.existingMemory.length > 0 ? ctx.existingMemory.join('；') : '（暂无）';
-    const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。你刚和小朋友说了一轮话。
-从这轮里挑出「值得你长期记住」的、关于小朋友或你们关系的要点（名字、喜好、约定、发生的事）。
-- 0~3 条，每条一句简短中文、第三人称（如「小朋友叫朵朵」「小朋友喜欢恐龙」）。
+  async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
+    if (ctx.turns.length === 0) return [];
+    // 静态系统提示（跨会话字节稳定，命中 cache）：角色卡 + 抽取口径 + 分类 + 输出格式。
+    // 动态内容（这段对话 + 已知记忆）放 user 消息，不污染缓存前缀。
+    const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。你刚和小朋友聊了一会儿。
+从「这段对话」里挑出「值得你长期记住」的、关于小朋友或你们关系的要点，并给每条分类。
+分类 kind（五选一）：
+- identity=名字/身份（「小朋友叫朵朵」）
+- preference=喜好/讨厌（「小朋友喜欢恐龙」）
+- promise=约定/承诺（「答应明天一起搭积木」）
+- event=发生过的事（「今天一起去了河边」）
+- relation=关系/情感（「把我当成好朋友」）
+要求：
+- 0~3 条，每条 text 一句简短中文、第三人称；kind 用上面的英文枚举之一。
 - 只记新的、重要的；闲聊寒暄不必记；没有值得记的就空数组。
-- 不要重复已知记忆：${known}。
-严格只输出 JSON 对象：{"memories":["小朋友叫朵朵"]}，没有就 {"memories":[]}。`;
+- 不要重复「已知记忆」（附在对话后面）。
+严格只输出 JSON 对象：{"memories":[{"text":"小朋友叫朵朵","kind":"identity"}]}，没有就 {"memories":[]}。`;
+    const conversation = ctx.turns.map((t) => `小朋友：${t.child}\n你：${t.npc}`).join('\n');
+    const known = ctx.existingMemory.length > 0 ? ctx.existingMemory.join('；') : '（暂无）';
+    const user = `【这段对话】\n${conversation}\n\n【已知记忆，勿重复】${known}`;
     const content = await this.#client.chatText(
       this.#model,
       [
         { role: 'system', content: system },
-        { role: 'user', content: `小朋友说：${ctx.transcript}\n你回应：${ctx.replyText}` },
+        { role: 'user', content: user },
       ],
-      { jsonObject: true },
+      { jsonObject: true, cache: true, sessionId: ctx.cacheKey },
     );
     try {
       const raw = JSON.parse(stripFences(content)) as { memories?: unknown };
       if (Array.isArray(raw.memories)) {
         return raw.memories
-          .filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
-          .map((m) => m.trim())
+          .map((m): ExtractedMemory | null => {
+            // 兼容旧格式（纯字符串）与新格式（{text,kind}）：坏 kind 归 event，宁可保守不丢内容。
+            if (typeof m === 'string' && m.trim()) return { text: m.trim(), kind: 'event' };
+            if (m && typeof m === 'object') {
+              const text = typeof (m as { text?: unknown }).text === 'string' ? (m as { text: string }).text.trim() : '';
+              if (!text) return null;
+              const k = (m as { kind?: unknown }).kind;
+              const kind: MemoryKind = MEMORY_KINDS.includes(k as MemoryKind) ? (k as MemoryKind) : 'event';
+              return { text, kind };
+            }
+            return null;
+          })
+          .filter((m): m is ExtractedMemory => m !== null)
           .slice(0, 3);
       }
     } catch {

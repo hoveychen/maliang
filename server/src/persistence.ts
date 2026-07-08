@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, Character, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Visit, WorldProp } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 
@@ -28,12 +29,19 @@ export interface World {
 
 /**
  * 世界状态 + 生成的 sprite 资源存储。
- * 传 dataDir → 持久化到磁盘（worlds.json + assets/ + assets.json 清单）；
- * 不传 → 纯内存（测试用）。后续可换 muvee dataset / DB。
+ * 传 dataDir → 持久化到 SQLite（<dataDir>/world.db，assets/ + assets.json 清单沿用文件寻址）；
+ * 不传 → 内存 SQLite（`:memory:`，测试用）。
+ *
+ * 存储布局（P1：只换介质，对外 API 与返回结构不变）：
+ *   worlds(id, inventory JSON, active_task JSON|null)
+ *   characters(id PK, world_id, data JSON)   ← Character 整对象存一行（memory/chatHistory 暂 JSON 内嵌，表拆分留 P3/P5）
+ *   props(id PK, world_id, data JSON)
+ * saveCharacter 从「全量重写 worlds.json」变为「UPDATE 一行」，根治 chatHistory 膨胀拖慢落盘。
+ * 首启若存在旧 worlds.json 且库为空 → 一次性迁移后把 worlds.json 改名 .migrated 备份。
  */
 export class WorldStore {
   readonly #dir: string | null;
-  readonly #worlds = new Map<string, World>();
+  readonly #db: DatabaseSync;
   readonly #assets = new Map<string, ImageBlob>();
   // 立绘 hash → idle 动画记录（sprite_anims.json 持久化，跨重启保留）
   readonly #spriteAnims = new Map<string, SpriteAnimRecord>();
@@ -42,44 +50,112 @@ export class WorldStore {
 
   constructor(dataDir?: string) {
     this.#dir = dataDir ?? null;
-    if (this.#dir !== null) this.#load();
+    if (this.#dir !== null) mkdirSync(this.#dir, { recursive: true });
+    this.#db = new DatabaseSync(this.#dir !== null ? join(this.#dir, 'world.db') : ':memory:');
+    this.#initSchema();
+    if (this.#dir !== null) {
+      this.#migrateFromJson();
+      this.#migrateLegacyMemories();
+      this.#migrateLegacyChatHistory();
+      this.#loadAssets();
+      this.#loadSpriteAnims();
+    }
+  }
+
+  #initSchema(): void {
+    this.#db.exec(`
+      CREATE TABLE IF NOT EXISTS players (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS worlds (
+        id TEXT PRIMARY KEY,
+        inventory TEXT NOT NULL DEFAULT '{}',
+        active_task TEXT
+      );
+      CREATE TABLE IF NOT EXISTS characters (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_characters_world ON characters(world_id);
+      CREATE TABLE IF NOT EXISTS props (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_props_world ON props(world_id);
+      CREATE TABLE IF NOT EXISTS memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_character_id TEXT NOT NULL,
+        about_player_id TEXT NOT NULL,
+        about_character_id TEXT,
+        text TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        ts INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_mem_owner_player ON memories(owner_character_id, about_player_id);
+      CREATE TABLE IF NOT EXISTS visits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        world_id TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_visits_world_player ON visits(world_id, player_id);
+      CREATE TABLE IF NOT EXISTS chat_turns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        text TEXT NOT NULL,
+        ts INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_chat_char_player ON chat_turns(character_id, player_id, id);
+    `);
   }
 
   #assetsDir(): string {
     return join(this.#dir as string, 'assets');
   }
 
-  #load(): void {
+  /** 一次性迁移旧 worlds.json → SQLite（库为空且旧文件存在时）。迁移后旧文件改名 .migrated 备份。 */
+  #migrateFromJson(): void {
     const wf = join(this.#dir as string, 'worlds.json');
-    if (existsSync(wf)) {
-      const data = JSON.parse(readFileSync(wf, 'utf8')) as {
-        worlds: Array<{ id: string; characters: Character[]; inventory?: Record<string, number>; activeTask?: ActiveTask | null; props?: Array<Omit<WorldProp, 'state'> & { state?: WorldProp['state'] }> }>;
-      };
-      for (const w of data.worlds) {
-        const map = new Map<string, Character>();
-        for (const c of w.characters) map.set(c.id, c);
-        // 旧存档没有背包/委托/物件字段：给默认值，向后兼容（物件缺 state 视为已摆放）
-        const props = new Map<string, WorldProp>();
-        for (const p of w.props ?? []) props.set(p.id, { ...p, state: p.state ?? 'placed' });
-        this.#worlds.set(w.id, { id: w.id, characters: map, inventory: w.inventory ?? {}, activeTask: w.activeTask ?? null, props });
-      }
+    if (!existsSync(wf)) return;
+    const already = (this.#db.prepare('SELECT COUNT(*) AS c FROM worlds').get() as { c: number }).c;
+    if (already > 0) return; // 已迁移过（库非空），不重复导入
+    const data = JSON.parse(readFileSync(wf, 'utf8')) as {
+      worlds: Array<{
+        id: string;
+        characters: Character[];
+        inventory?: Record<string, number>;
+        activeTask?: ActiveTask | null;
+        props?: Array<Omit<WorldProp, 'state'> & { state?: WorldProp['state'] }>;
+      }>;
+    };
+    for (const w of data.worlds ?? []) {
+      this.#db
+        .prepare('INSERT INTO worlds (id, inventory, active_task) VALUES (?, ?, ?)')
+        .run(w.id, JSON.stringify(w.inventory ?? {}), w.activeTask ? JSON.stringify(w.activeTask) : null);
+      const insChar = this.#db.prepare('INSERT INTO characters (id, world_id, data) VALUES (?, ?, ?)');
+      for (const c of w.characters ?? []) insChar.run(c.id, w.id, JSON.stringify(c));
+      const insProp = this.#db.prepare('INSERT INTO props (id, world_id, data) VALUES (?, ?, ?)');
+      // 旧存档物件缺 state 视为已摆放（沿用旧 #load 兼容）
+      for (const p of w.props ?? []) insProp.run(p.id, w.id, JSON.stringify({ ...p, state: p.state ?? 'placed' }));
     }
-    const mf = join(this.#dir as string, 'assets.json');
-    if (existsSync(mf)) {
-      const mimes = JSON.parse(readFileSync(mf, 'utf8')) as Record<string, string>;
-      for (const hash of Object.keys(mimes)) {
-        const p = join(this.#assetsDir(), hash);
-        if (existsSync(p)) this.#assets.set(hash, { bytes: new Uint8Array(readFileSync(p)), mime: mimes[hash]! });
-      }
-    }
+    renameSync(wf, `${wf}.migrated`);
+  }
+
+  /** 立绘 idle 动画记录从 sprite_anims.json 读回（每次启动，与 assets 一样走文件寻址，不进 DB）。 */
+  #loadSpriteAnims(): void {
     const af = join(this.#dir as string, 'sprite_anims.json');
-    if (existsSync(af)) {
-      const anims = JSON.parse(readFileSync(af, 'utf8')) as Record<string, SpriteAnimRecord>;
-      for (const hash of Object.keys(anims)) {
-        const rec = anims[hash]!;
-        // 重启时把"生成中"视为失败：进程已死、那次异步任务不会回来，避免永久 pending
-        this.#spriteAnims.set(hash, rec.status === 'pending' ? { status: 'failed' } : rec);
-      }
+    if (!existsSync(af)) return;
+    const anims = JSON.parse(readFileSync(af, 'utf8')) as Record<string, SpriteAnimRecord>;
+    for (const hash of Object.keys(anims)) {
+      const rec = anims[hash]!;
+      // 重启时把"生成中"视为失败：进程已死、那次异步任务不会回来，避免永久 pending
+      this.#spriteAnims.set(hash, rec.status === 'pending' ? { status: 'failed' } : rec);
     }
   }
 
@@ -91,17 +167,14 @@ export class WorldStore {
     writeFileSync(join(this.#dir, 'sprite_anims.json'), JSON.stringify(obj));
   }
 
-  #persistWorlds(): void {
-    if (this.#dir === null) return;
-    mkdirSync(this.#dir, { recursive: true });
-    const worlds = [...this.#worlds.values()].map((w) => ({
-      id: w.id,
-      characters: [...w.characters.values()],
-      inventory: w.inventory,
-      activeTask: w.activeTask,
-      props: [...w.props.values()],
-    }));
-    writeFileSync(join(this.#dir, 'worlds.json'), JSON.stringify({ worlds }, null, 2));
+  #loadAssets(): void {
+    const mf = join(this.#dir as string, 'assets.json');
+    if (!existsSync(mf)) return;
+    const mimes = JSON.parse(readFileSync(mf, 'utf8')) as Record<string, string>;
+    for (const hash of Object.keys(mimes)) {
+      const p = join(this.#assetsDir(), hash);
+      if (existsSync(p)) this.#assets.set(hash, { bytes: new Uint8Array(readFileSync(p)), mime: mimes[hash]! });
+    }
   }
 
   #persistAssetIndex(): void {
@@ -112,78 +185,112 @@ export class WorldStore {
   }
 
   createWorld(id: string = randomUUID()): World {
-    const world: World = { id, characters: new Map(), inventory: {}, activeTask: null, props: new Map() };
-    this.#worlds.set(id, world);
-    this.#persistWorlds();
-    return world;
+    this.#db
+      .prepare('INSERT OR IGNORE INTO worlds (id, inventory, active_task) VALUES (?, ?, ?)')
+      .run(id, '{}', null);
+    return { id, characters: new Map(), inventory: {}, activeTask: null, props: new Map() };
   }
 
   getWorld(id: string): World | undefined {
-    return this.#worlds.get(id);
+    const row = this.#db.prepare('SELECT id, inventory, active_task FROM worlds WHERE id = ?').get(id) as
+      | { id: string; inventory: string; active_task: string | null }
+      | undefined;
+    if (!row) return undefined;
+    const characters = new Map<string, Character>();
+    for (const c of this.listCharacters(id)) characters.set(c.id, c);
+    const props = new Map<string, WorldProp>();
+    for (const p of this.listProps(id)) props.set(p.id, p);
+    return {
+      id: row.id,
+      characters,
+      inventory: JSON.parse(row.inventory) as Record<string, number>,
+      activeTask: row.active_task ? (JSON.parse(row.active_task) as ActiveTask) : null,
+      props,
+    };
+  }
+
+  #worldExists(id: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM worlds WHERE id = ?').get(id) !== undefined;
   }
 
   addCharacter(character: Character): void {
-    const world = this.#worlds.get(character.worldId);
-    if (!world) throw new Error(`world not found: ${character.worldId}`);
-    world.characters.set(character.id, character);
-    this.#persistWorlds();
+    if (!this.#worldExists(character.worldId)) throw new Error(`world not found: ${character.worldId}`);
+    this.saveCharacter(character);
   }
 
-  /** 角色状态变更后持久化（如 chatHistory/behaviorScript 更新）。 */
+  /** 角色状态变更后持久化（如 chatHistory/behaviorScript 更新）。整对象 UPSERT 一行。 */
   saveCharacter(character: Character): void {
-    const world = this.#worlds.get(character.worldId);
-    if (world) world.characters.set(character.id, character);
-    this.#persistWorlds();
+    this.#db
+      .prepare(
+        'INSERT INTO characters (id, world_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
+      )
+      .run(character.id, character.worldId, JSON.stringify(character));
   }
 
   /** 语音生成的 SDF 物件：新增（tile 待客户端落位回报）。 */
   addProp(worldId: string, prop: WorldProp): void {
-    const world = this.#worlds.get(worldId);
-    if (!world) throw new Error(`world not found: ${worldId}`);
-    world.props.set(prop.id, prop);
-    this.#persistWorlds();
+    if (!this.#worldExists(worldId)) throw new Error(`world not found: ${worldId}`);
+    this.#saveProp(worldId, prop);
+  }
+
+  #getProp(worldId: string, propId: string): WorldProp | undefined {
+    const row = this.#db.prepare('SELECT data FROM props WHERE id = ? AND world_id = ?').get(propId, worldId) as
+      | { data: string }
+      | undefined;
+    return row ? (JSON.parse(row.data) as WorldProp) : undefined;
+  }
+
+  #saveProp(worldId: string, prop: WorldProp): void {
+    this.#db
+      .prepare(
+        'INSERT INTO props (id, world_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
+      )
+      .run(prop.id, worldId, JSON.stringify(prop));
   }
 
   /** 客户端落位回报：记下物件的 tile，重载世界时按此恢复。 */
   setPropTile(worldId: string, propId: string, tile: [number, number]): boolean {
-    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    const prop = this.#getProp(worldId, propId);
     if (!prop) return false;
     prop.tile = tile;
-    this.#persistWorlds();
+    this.#saveProp(worldId, prop);
     return true;
   }
 
   /** 收纳：已摆物件收进收集册物品页（tile 清空）。不存在或已在背包 → false 不动账。 */
   storeProp(worldId: string, propId: string): boolean {
-    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    const prop = this.#getProp(worldId, propId);
     if (!prop || prop.state !== 'placed') return false;
     prop.state = 'bagged';
     prop.tile = null;
-    this.#persistWorlds();
+    this.#saveProp(worldId, prop);
     return true;
   }
 
   /** 摆出：背包物件放回世界指定 tile（客户端已过占地校验）。不存在或不在背包 → false。 */
   takeProp(worldId: string, propId: string, tile: [number, number]): boolean {
-    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    const prop = this.#getProp(worldId, propId);
     if (!prop || prop.state !== 'bagged') return false;
     prop.state = 'placed';
     prop.tile = tile;
-    this.#persistWorlds();
+    this.#saveProp(worldId, prop);
     return true;
   }
 
   /** 挪位：已摆物件换 tile（长按拖拽后回报）。不存在或在背包 → false。 */
   movePropTile(worldId: string, propId: string, tile: [number, number]): boolean {
-    const prop = this.#worlds.get(worldId)?.props.get(propId);
+    const prop = this.#getProp(worldId, propId);
     if (!prop || prop.state !== 'placed') return false;
     prop.tile = tile;
-    this.#persistWorlds();
+    this.#saveProp(worldId, prop);
     return true;
   }
 
   listProps(worldId: string): WorldProp[] {
-    return [...(this.#worlds.get(worldId)?.props.values() ?? [])];
+    const rows = this.#db.prepare('SELECT data FROM props WHERE world_id = ?').all(worldId) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as WorldProp);
   }
 
   /** 客户端上报的世界地点名（喂给意图 LLM 让「去某地」说的是真实地名）。 */
@@ -197,45 +304,256 @@ export class WorldStore {
 
   // ── 奖赏系统：玩家贴纸背包 + 进行中委托 ──────────────────────────────────
 
+  #getInventoryRow(worldId: string): Record<string, number> | undefined {
+    const row = this.#db.prepare('SELECT inventory FROM worlds WHERE id = ?').get(worldId) as
+      | { inventory: string }
+      | undefined;
+    return row ? (JSON.parse(row.inventory) as Record<string, number>) : undefined;
+  }
+
+  #setInventory(worldId: string, inv: Record<string, number>): void {
+    this.#db.prepare('UPDATE worlds SET inventory = ? WHERE id = ?').run(JSON.stringify(inv), worldId);
+  }
+
   getInventory(worldId: string): Record<string, number> {
-    return this.#worlds.get(worldId)?.inventory ?? {};
+    return this.#getInventoryRow(worldId) ?? {};
   }
 
   /** 发贴纸（委托奖励）。 */
   addSticker(worldId: string, stickerId: string, n = 1): void {
-    const world = this.#worlds.get(worldId);
-    if (!world) return;
-    world.inventory[stickerId] = (world.inventory[stickerId] ?? 0) + n;
-    this.#persistWorlds();
+    const inv = this.#getInventoryRow(worldId);
+    if (!inv) return;
+    inv[stickerId] = (inv[stickerId] ?? 0) + n;
+    this.#setInventory(worldId, inv);
   }
 
   /** 扣贴纸（转赠/gift 委托）。不够扣返回 false 且不动账。 */
   removeSticker(worldId: string, stickerId: string, n = 1): boolean {
-    const world = this.#worlds.get(worldId);
-    if (!world || (world.inventory[stickerId] ?? 0) < n) return false;
-    world.inventory[stickerId] = (world.inventory[stickerId] ?? 0) - n;
-    if (world.inventory[stickerId] === 0) delete world.inventory[stickerId];
-    this.#persistWorlds();
+    const inv = this.#getInventoryRow(worldId);
+    if (!inv || (inv[stickerId] ?? 0) < n) return false;
+    inv[stickerId] = (inv[stickerId] ?? 0) - n;
+    if (inv[stickerId] === 0) delete inv[stickerId];
+    this.#setInventory(worldId, inv);
     return true;
   }
 
   getActiveTask(worldId: string): ActiveTask | null {
-    return this.#worlds.get(worldId)?.activeTask ?? null;
+    const row = this.#db.prepare('SELECT active_task FROM worlds WHERE id = ?').get(worldId) as
+      | { active_task: string | null }
+      | undefined;
+    return row && row.active_task ? (JSON.parse(row.active_task) as ActiveTask) : null;
   }
 
   setActiveTask(worldId: string, task: ActiveTask | null): void {
-    const world = this.#worlds.get(worldId);
-    if (!world) return;
-    world.activeTask = task;
-    this.#persistWorlds();
+    if (!this.#worldExists(worldId)) return;
+    this.#db.prepare('UPDATE worlds SET active_task = ? WHERE id = ?').run(task ? JSON.stringify(task) : null, worldId);
   }
 
   listCharacters(worldId: string): Character[] {
-    return [...(this.#worlds.get(worldId)?.characters.values() ?? [])];
+    const rows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(worldId) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as Character);
   }
 
   getCharacter(worldId: string, characterId: string): Character | undefined {
-    return this.#worlds.get(worldId)?.characters.get(characterId);
+    const row = this.#db
+      .prepare('SELECT data FROM characters WHERE id = ? AND world_id = ?')
+      .get(characterId, worldId) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as Character) : undefined;
+  }
+
+  // ── 玩家实体（面向 MMO；身份=设备端 UUID，无鉴权，见 types.Player）──────────
+
+  /** 登记/更新玩家档案（首见即建，再见即更）。整对象 UPSERT 一行。 */
+  upsertPlayer(player: Player): void {
+    this.#db
+      .prepare('INSERT INTO players (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+      .run(player.id, JSON.stringify(player));
+  }
+
+  getPlayer(id: string): Player | undefined {
+    const row = this.#db.prepare('SELECT data FROM players WHERE id = ?').get(id) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as Player) : undefined;
+  }
+
+  listPlayers(): Player[] {
+    const rows = this.#db.prepare('SELECT data FROM players').all() as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as Player);
+  }
+
+  // ── 长期记忆（P3：结构化，按 owner NPC × aboutPlayer 维度；见 types.MemoryItem）──────
+
+  /** 旧存量 Character.memory[] → memories 表（aboutPlayer='' 未绑定历史）。幂等：搬完清空 memory[]。 */
+  #migrateLegacyMemories(): void {
+    const rows = this.#db.prepare('SELECT data FROM characters').all() as { data: string }[];
+    for (const row of rows) {
+      const c = JSON.parse(row.data) as Character;
+      if (!Array.isArray(c.memory) || c.memory.length === 0) continue;
+      for (const text of c.memory) {
+        if (typeof text === 'string' && text.trim()) {
+          this.addMemory(c.id, { text: text.trim(), kind: 'event', aboutPlayer: '', ts: 0 });
+        }
+      }
+      c.memory = []; // 清空，避免重复迁移（幂等）
+      this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?').run(JSON.stringify(c), c.id);
+    }
+  }
+
+  /** 追加一条长期记忆。 */
+  addMemory(ownerCharacterId: string, item: MemoryItem): void {
+    this.#db
+      .prepare(
+        'INSERT INTO memories (owner_character_id, about_player_id, about_character_id, text, kind, ts) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run(ownerCharacterId, item.aboutPlayer, item.aboutCharacter ?? null, item.text, item.kind, item.ts);
+  }
+
+  /** 取某 NPC 关于某玩家的记忆（含 aboutPlayer='' 的未绑定历史记忆），按插入顺序。 */
+  getMemories(ownerCharacterId: string, aboutPlayerId: string): MemoryItem[] {
+    const rows = this.#db
+      .prepare(
+        "SELECT about_player_id, about_character_id, text, kind, ts FROM memories WHERE owner_character_id = ? AND about_player_id IN (?, '') ORDER BY id",
+      )
+      .all(ownerCharacterId, aboutPlayerId) as {
+      about_player_id: string;
+      about_character_id: string | null;
+      text: string;
+      kind: string;
+      ts: number;
+    }[];
+    return rows.map((r) => ({
+      text: r.text,
+      kind: r.kind as MemoryItem['kind'],
+      aboutPlayer: r.about_player_id,
+      aboutCharacter: r.about_character_id ?? undefined,
+      ts: r.ts,
+    }));
+  }
+
+  // ── 对话历史 chat_turns（P5：从 Character.chatHistory[] 拆独立表，按 (NPC,玩家) 分页/裁剪）──────
+
+  /** 单角色×单玩家保留的对话轮上限（child/npc 各算一条）；超出裁剪最旧。 */
+  static readonly CHAT_TURN_CAP = 40;
+
+  /** 旧存量 Character.chatHistory[] → chat_turns（player_id='' 未绑定历史）。幂等：搬完清空。 */
+  #migrateLegacyChatHistory(): void {
+    const rows = this.#db.prepare('SELECT data FROM characters').all() as { data: string }[];
+    for (const row of rows) {
+      const c = JSON.parse(row.data) as Character;
+      if (!Array.isArray(c.chatHistory) || c.chatHistory.length === 0) continue;
+      for (const t of c.chatHistory) {
+        if (t && (t.role === 'child' || t.role === 'npc') && typeof t.text === 'string') {
+          this.addChatTurn(c.id, '', t.role, t.text, typeof t.ts === 'number' ? t.ts : 0);
+        }
+      }
+      c.chatHistory = []; // 清空，避免重复迁移（幂等）
+      this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?').run(JSON.stringify(c), c.id);
+    }
+  }
+
+  /** 追加一轮对话；写后按 (NPC,玩家) 裁剪到 CHAT_TURN_CAP（挤出最旧）。 */
+  addChatTurn(characterId: string, playerId: string, role: ChatTurn['role'], text: string, ts = 0): void {
+    this.#db
+      .prepare('INSERT INTO chat_turns (character_id, player_id, role, text, ts) VALUES (?, ?, ?, ?, ?)')
+      .run(characterId, playerId, role, text, ts);
+    // 裁剪：删掉超出 CAP 的最旧行（按 id 递增即时间序）。抽完记忆的旧 turn 无需保留连贯上下文。
+    this.#db
+      .prepare(
+        'DELETE FROM chat_turns WHERE character_id = ? AND player_id = ? AND id NOT IN ' +
+          '(SELECT id FROM chat_turns WHERE character_id = ? AND player_id = ? ORDER BY id DESC LIMIT ?)',
+      )
+      .run(characterId, playerId, characterId, playerId, WorldStore.CHAT_TURN_CAP);
+  }
+
+  /** 取某 NPC×某玩家最近 limit 轮对话（含 player_id='' 未绑定历史），按时间正序（最旧在前）。 */
+  getRecentTurns(characterId: string, playerId: string, limit: number): ChatTurn[] {
+    const rows = this.#db
+      .prepare(
+        "SELECT role, text, ts FROM chat_turns WHERE character_id = ? AND player_id IN (?, '') " +
+          'ORDER BY id DESC LIMIT ?',
+      )
+      .all(characterId, playerId, limit) as { role: string; text: string; ts: number }[];
+    return rows
+      .map((r) => ({ role: r.role as ChatTurn['role'], text: r.text, ts: r.ts }))
+      .reverse(); // DESC 取近 N 条后翻回正序
+  }
+
+  // ── 会话 Visit（进世界→离开为一段，作会话结束批量抽记忆的边界；见 types.Visit）──────
+
+  /** 开一段会话，返回 visitId（ended_at 置空=进行中）。startedAt 由调用方传（server 用 Date.now）。 */
+  startVisit(worldId: string, playerId: string, startedAt: number): number {
+    const info = this.#db
+      .prepare('INSERT INTO visits (world_id, player_id, started_at, ended_at) VALUES (?, ?, ?, NULL)')
+      .run(worldId, playerId, startedAt);
+    return Number(info.lastInsertRowid);
+  }
+
+  /** 收尾一段会话（leave_world 显式退出 / socket.close 兜底）。已收尾的不覆盖。 */
+  endVisit(id: number, endedAt: number): void {
+    this.#db.prepare('UPDATE visits SET ended_at = ? WHERE id = ? AND ended_at IS NULL').run(endedAt, id);
+  }
+
+  /** 查会话记录（P6 只读后台用；worldId 省略=全部），按开始时间倒序。 */
+  listVisits(worldId?: string): Visit[] {
+    const rows = (
+      worldId === undefined
+        ? this.#db.prepare('SELECT id, world_id, player_id, started_at, ended_at FROM visits ORDER BY started_at DESC').all()
+        : this.#db
+            .prepare('SELECT id, world_id, player_id, started_at, ended_at FROM visits WHERE world_id = ? ORDER BY started_at DESC')
+            .all(worldId)
+    ) as { id: number; world_id: string; player_id: string; started_at: number; ended_at: number | null }[];
+    return rows.map((r) => ({
+      id: r.id,
+      worldId: r.world_id,
+      playerId: r.player_id,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+    }));
+  }
+
+  // ── 只读观测（P6 调试后台；不改状态，直连查询）────────────────────────────
+
+  /** 列出所有世界（含背包/进行中委托）。 */
+  listWorlds(): { id: string; inventory: Record<string, number>; activeTask: ActiveTask | null }[] {
+    const rows = this.#db.prepare('SELECT id, inventory, active_task FROM worlds ORDER BY id').all() as {
+      id: string;
+      inventory: string;
+      active_task: string | null;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      inventory: JSON.parse(r.inventory) as Record<string, number>,
+      activeTask: r.active_task ? (JSON.parse(r.active_task) as ActiveTask) : null,
+    }));
+  }
+
+  /** 列出某 NPC 的全部记忆（跨所有玩家，含未绑定历史），按插入顺序。 */
+  listMemories(ownerCharacterId: string): MemoryItem[] {
+    const rows = this.#db
+      .prepare(
+        'SELECT about_player_id, about_character_id, text, kind, ts FROM memories WHERE owner_character_id = ? ORDER BY id',
+      )
+      .all(ownerCharacterId) as {
+      about_player_id: string;
+      about_character_id: string | null;
+      text: string;
+      kind: string;
+      ts: number;
+    }[];
+    return rows.map((r) => ({
+      text: r.text,
+      kind: r.kind as MemoryItem['kind'],
+      aboutPlayer: r.about_player_id,
+      aboutCharacter: r.about_character_id ?? undefined,
+      ts: r.ts,
+    }));
+  }
+
+  /** 列出某 NPC 的全部对话轮（跨所有玩家，带 playerId），按时间正序。 */
+  listChatTurns(characterId: string): { playerId: string; role: ChatTurn['role']; text: string; ts: number }[] {
+    const rows = this.#db
+      .prepare('SELECT player_id, role, text, ts FROM chat_turns WHERE character_id = ? ORDER BY id')
+      .all(characterId) as { player_id: string; role: string; text: string; ts: number }[];
+    return rows.map((r) => ({ playerId: r.player_id, role: r.role as ChatTurn['role'], text: r.text, ts: r.ts }));
   }
 
   /** 存入资源，返回内容寻址 hash。 */

@@ -6,11 +6,12 @@ import { pickTaskCandidate } from './tasks.ts';
 export interface VoiceInput {
   worldId: string;
   characterId: string;
+  /** 说话的玩家（设备端稳定 UUID；空串=未上报玩家的历史/旧客户端，记忆落未绑定桶）。 */
+  playerId: string;
   audio: AudioBlob;
 }
 
 const RECENT_TURNS = 6; // 回喂给角色的近期对话轮数（child+npc 各算一条）
-const MEMORY_CAP = 40; // 单角色长期记忆条数上限（超出丢最旧）
 
 export class CharacterNotFoundError extends Error {
   constructor(worldId: string, characterId: string) {
@@ -30,7 +31,7 @@ export async function handleVoice(
   store: WorldStore,
 ): Promise<VoiceResponse> {
   const transcript = await adapters.asr.transcribe(input.audio);
-  return respondToTranscript(input.worldId, input.characterId, transcript, adapters, store);
+  return respondToTranscript(input.worldId, input.characterId, input.playerId, transcript, adapters, store);
 }
 
 /**
@@ -54,6 +55,7 @@ export interface TTSStreamHooks {
 export async function respondToTranscript(
   worldId: string,
   characterId: string,
+  playerId: string,
   transcript: string,
   adapters: ServiceAdapters,
   store: WorldStore,
@@ -72,17 +74,21 @@ export async function respondToTranscript(
   const activeTask = store.getActiveTask(worldId) ?? undefined;
   const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, store) ?? undefined;
 
+  // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），带 kind 注入（分组）。
+  const memories = store.getMemories(characterId, playerId).map((m) => ({ text: m.text, kind: m.kind }));
   const intent = await adapters.llm.routeIntent(transcript, {
     characterName: character.name,
     personality: character.personality,
     abilities: character.abilities,
-    recentHistory: character.chatHistory.slice(-RECENT_TURNS), // 这轮之前的近 N 轮
-    memory: character.memory,
+    recentHistory: store.getRecentTurns(characterId, playerId, RECENT_TURNS), // 这轮之前的近 N 轮（按玩家）
+    memory: memories,
     worldCharacters: roster,
     locations: store.getLocations(worldId),
     activeTask,
     taskCandidate,
     inventory: store.getInventory(worldId),
+    // 稳定缓存键：绑 world×角色×玩家，做 OpenRouter sticky routing 命中 prompt cache（同一对话连续命中）。
+    cacheKey: `${worldId}:${characterId}:${playerId}`,
   });
 
   // 语音回复不再过文字审核（Boss 2026-06-18 决策：多一次 LLM 调用拖慢对话、伤体验）。
@@ -145,7 +151,7 @@ export async function respondToTranscript(
         onChunk: hooks.onChunk,
       });
       hooks.onEnd(store.putAsset(full));
-      finishTurn(store, character, transcript, replyText);
+      finishTurn(store, character, playerId, transcript, replyText);
       return response;
     } catch (err) {
       if (responded) throw err; // 已出声，只能向上失败（客户端有 voice_failed/超时兜底）
@@ -157,7 +163,7 @@ export async function respondToTranscript(
 
   const tts = await adapters.tts.synthesize(replyText, character.voiceId);
   response.ttsAsset = store.putAsset(tts);
-  finishTurn(store, character, transcript, replyText);
+  finishTurn(store, character, playerId, transcript, replyText);
   return response;
 }
 
@@ -174,48 +180,54 @@ function findByName(
   );
 }
 
-/** 回合收尾：更新对话历史并持久化（chatHistory/behaviorScript 变更）。 */
-function finishTurn(store: WorldStore, character: Character, transcript: string, replyText: string): void {
-  character.chatHistory.push({ role: 'child', text: transcript, ts: 0 });
-  character.chatHistory.push({ role: 'npc', text: replyText, ts: 0 });
-  // 注意：长期记忆抽取（extractMemory，含一次 LLM 调用）已移出回复关键路径，
-  // 由 WS 处理器在回复发出后后台调用 accumulateMemory。
+/** 回合收尾：把这轮对话写入 chat_turns（按玩家），并持久化角色状态（behaviorScript 变更）。 */
+function finishTurn(
+  store: WorldStore,
+  character: Character,
+  playerId: string,
+  transcript: string,
+  replyText: string,
+): void {
+  store.addChatTurn(character.id, playerId, 'child', transcript, 0);
+  store.addChatTurn(character.id, playerId, 'npc', replyText, 0);
+  // 注意：长期记忆抽取（extractMemory）已移出回复关键路径，改由会话结束（Visit flush）批量做。
+  // 这里仍需 saveCharacter：指令即时生效路径可能改了 character.behaviorScript/state。
   store.saveCharacter(character);
 }
 
 /**
- * 对话后让角色「自己挑出值得长期记住的要点」，去重 + 上限累积到 character.memory 并持久化。
- * 设计为「尽力而为」：由 WS 处理器在回复发出后后台调用（不 await 进回复路径），
+ * 会话（Visit）结束时，让角色对整段对话增量「自己挑出值得长期记住的要点」，
+ * 去重后按 (NPC, 当前玩家) 维度落 memories 表。相比旧「每轮抽一次」，一次会话每个角色只调一次 LLM（省调用）。
+ * 设计为「尽力而为」：由 WS 处理器在会话结束（leave_world / socket.close）或超阈值时后台调用，
  * 失败/超时只影响这次记忆、绝不影响角色回复。
+ * （记忆条数上限/裁剪留 P5 chat_turns 治理时一并处理，本期先只追加。）
  */
-export async function accumulateMemory(
+export async function flushMemory(
   worldId: string,
   characterId: string,
-  transcript: string,
-  replyText: string,
+  playerId: string,
+  turns: { child: string; npc: string }[],
   adapters: ServiceAdapters,
   store: WorldStore,
 ): Promise<void> {
+  if (turns.length === 0) return;
   const character = store.getCharacter(worldId, characterId);
   if (!character) return;
+  // 已记的（该 NPC 对这个玩家的，含未绑定历史）喂给抽取器去重，并在落地前再兜一次去重。
+  const existing = store.getMemories(characterId, playerId);
+  const existingTexts = new Set(existing.map((m) => m.text));
   const remembered = await adapters.llm.extractMemory({
     characterName: character.name,
     personality: character.personality,
-    transcript,
-    replyText,
-    existingMemory: character.memory,
+    turns,
+    existingMemory: existing.map((m) => m.text),
+    cacheKey: `${worldId}:${characterId}:${playerId}`,
   });
-  let changed = false;
   for (const item of remembered) {
-    const m = item.trim();
-    if (m && !character.memory.includes(m)) {
-      character.memory.push(m);
-      changed = true;
+    const text = item.text.trim();
+    if (text && !existingTexts.has(text)) {
+      existingTexts.add(text);
+      store.addMemory(characterId, { text, kind: item.kind, aboutPlayer: playerId, ts: 0 });
     }
   }
-  if (character.memory.length > MEMORY_CAP) {
-    character.memory = character.memory.slice(-MEMORY_CAP); // 超出丢最旧
-    changed = true;
-  }
-  if (changed) store.saveCharacter(character);
 }

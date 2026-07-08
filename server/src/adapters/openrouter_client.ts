@@ -14,6 +14,11 @@ interface ChatResponse {
       images?: Array<{ image_url?: { url?: string }; url?: string }>;
     };
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    // OpenRouter：读缓存量 cached_tokens、写缓存量 cache_write_tokens（非 Anthropic 的 cache_creation_input_tokens）。
+    prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+  };
   error?: { message?: string; code?: number };
 }
 
@@ -55,17 +60,30 @@ export class OpenRouterClient {
     return json;
   }
 
-  /** 文本对话，返回 message.content。 */
+  /**
+   * 文本对话，返回 message.content。
+   * opts.cache：请求顶层加 `cache_control:{type:'ephemeral'}`——OpenRouter 托管断点滑动，
+   *   显式缓存 provider（Anthropic/Qwen）据此打点；自动缓存 provider（Moonshot/Gemini…）忽略它，
+   *   靠 messages 前缀字节稳定命中（故 prompt 已按静态在前/动态在后编排）。
+   * opts.sessionId：作 session_id 做 sticky routing，保证同一对话落同一上游 provider（缓存才连续命中）。
+   * 命中量记 usage.prompt_tokens_details.cached_tokens；设 MALIANG_LLM_CACHE_DEBUG 打印，便于观测击穿。
+   */
   async chatText(
     model: string,
     messages: ChatMessage[],
-    opts: { jsonObject?: boolean } = {},
+    opts: { jsonObject?: boolean; cache?: boolean; sessionId?: string } = {},
   ): Promise<string> {
     // kimi-k2.6 默认开启 reasoning，实测使单次调用从 ~1.8s 涨到 ~8s；语音链路两次 LLM 调用
     // （routeIntent + 文字审核）会累计到十几秒。幼儿对话不需要思考链，统一禁用。
     const body: Record<string, unknown> = { model, messages, reasoning: { enabled: false } };
     if (opts.jsonObject) body.response_format = { type: 'json_object' };
+    if (opts.cache) body.cache_control = { type: 'ephemeral' };
+    if (opts.sessionId) body.session_id = opts.sessionId;
     const json = await this.#post(body);
+    if (process.env.MALIANG_LLM_CACHE_DEBUG) {
+      const d = json.usage?.prompt_tokens_details;
+      console.log(`[llm-cache] prompt=${json.usage?.prompt_tokens ?? '?'} cached=${d?.cached_tokens ?? 0} write=${d?.cache_write_tokens ?? 0} session=${opts.sessionId ?? '-'}`);
+    }
     const content = json.choices?.[0]?.message?.content;
     if (!content) throw new Error('OpenRouter: empty content');
     return content;

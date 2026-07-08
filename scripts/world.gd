@@ -987,6 +987,9 @@ func _process(delta: float) -> void:
 ## 世界卸载/退出：把所有执行器的在途异步寻路任务收干净，防 WorkerThreadPool 在
 ## 引擎关停时销毁在途任务残留的绑定 Callable 崩溃（真机退出/回测退出 exit 134）。
 func _exit_tree() -> void:
+	# 离开世界 = 会话（Visit）结束：显式发 leave_world 让服务端 flush 批量抽记忆（掉线由服务端 close 兜底）。
+	if backend != null and world_id != "":
+		backend.send_leave_world(world_id)
 	for ex in _executors:
 		ex.cancel()  # 把各自在途寻路任务转孤儿
 	BehaviorExecutor.flush_all_blocking()  # 阻塞收完（关停允许阻塞）
@@ -1582,6 +1585,7 @@ func _bootstrap() -> void:
 		online = true
 		world_id = String(world.get("id", "default"))
 		backend.url = (api.base as String).replace("http", "ws") + "/ws"
+		backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入
 		backend.connect_to_server()
 		for n in npcs:
 			OccupancyMap.char_unregister(String(n.get("id", "")))
@@ -2318,7 +2322,7 @@ func _send_world_info() -> void:
 	var names: Array = []
 	for poi in POIS:
 		names.append(String(poi.get("name", "")))
-	backend.send_world_info(world_id, names)
+	backend.send_world_info(world_id, names, PlayerProfile.upload_dict()) # 带档案供服务端首见建玩家
 
 # ── 奖赏系统：委托状态 / 提示 chip / 完成判定 ──────────────────────────────
 

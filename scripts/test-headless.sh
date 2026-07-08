@@ -39,6 +39,8 @@ UNIT_TESTS=(
   test_game_audio
   test_sdf_static_baker
   test_paper_idle
+  test_player_profile
+  test_backend_player_id
 )
 fails=0
 

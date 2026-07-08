@@ -23,6 +23,8 @@ signal sent(msg: Dictionary)
 
 var _ws := WebSocketPeer.new()
 var _open := false
+## 当前玩家 id（设备端稳定 UUID）：由 world.gd bootstrap 时从档案设入，_send 统一注入每条消息。
+var player_id := ""
 
 func connect_to_server() -> void:
 	# 默认入站缓冲 64KB：慢帧场景（录屏/低端机）下一帧间隔内的 TTS 分片突发
@@ -54,9 +56,21 @@ func send_voice_transcript(world_id: String, character_id: String, transcript: S
 func send_create_character(world_id: String, intent_text: String) -> void:
 	_send({ "type": "create_character_request", "worldId": world_id, "intentText": intent_text, "byFairy": true })
 
+## 离开世界（玩家正常退出）：显式通知服务端收尾会话（Visit），触发批量抽记忆。
+## 世界卸载后紧接着场景切换/节点释放，socket 可能来不及发——poll 一次尽量把帧推出；
+## 万一没发到也不丢记忆，服务端 socket.close 会兜底 flush。
+func send_leave_world(world_id: String) -> void:
+	_send({ "type": "leave_world", "worldId": world_id })
+	if _open:
+		_ws.poll()
+
 ## 上报世界地点名清单（POI 名，连上后一次）：意图 LLM 用来归一「去某地」的地名。
-func send_world_info(world_id: String, locations: Array) -> void:
-	_send({ "type": "world_info", "worldId": world_id, "locations": locations })
+## profile 非空时随 world_info 上报，供服务端首见建玩家档（面向 MMO；见 server types.Player）。
+func send_world_info(world_id: String, locations: Array, profile := {}) -> void:
+	var msg := { "type": "world_info", "worldId": world_id, "locations": locations }
+	if not profile.is_empty():
+		msg["profile"] = profile
+	_send(msg)
 
 ## 委托完成事件（客户端确定性判定：送达/带到/到点）。服务端匹配进行中委托则回 task_complete。
 func send_task_event(world_id: String, kind: String, extra := {}) -> void:
@@ -83,6 +97,9 @@ func send_prop_move(world_id: String, prop_id: String, tile: Vector2i) -> void:
 	_send({ "type": "prop_move", "worldId": world_id, "propId": prop_id, "tileX": tile.x, "tileY": tile.y })
 
 func _send(obj: Dictionary) -> void:
+	# 统一注入玩家身份：每条出站消息带 playerId（设备端 UUID），服务端按玩家归属记忆/Visit。
+	if not player_id.is_empty() and not obj.has("playerId"):
+		obj["playerId"] = player_id
 	sent.emit(obj)
 	if _open:
 		_ws.send_text(JSON.stringify(obj))
