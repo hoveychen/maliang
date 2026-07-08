@@ -8,20 +8,23 @@ extends RefCounted
 ## 所以圆头锥直接用胶囊壳按半径插值搓出来，不必精确。
 
 ## 细分档位：跟 paper_character 的 6×12 一个量级，单件角色约 2~5k 顶点。
+## density 缩放段数（下限保轮廓不塌）：可动物件用 1.0（逐帧吸附要够密）；
+## 静态烘焙布景用低档——SDF 的圆润来自梯度法线（法线插值与网格密度无关），
+## 密度只影响轮廓圆滑度，god 视角一棵树百来像素，8~10 段轮廓足够。
 const SPHERE_SEGS := 24
 const SPHERE_RINGS := 16
 const CAPSULE_SEGS := 20
 const CAPSULE_RINGS := 12
 const BOX_SUBDIV := 6
 
-static func build(prims: Array) -> ArrayMesh:
+static func build(prims: Array, density := 1.0) -> ArrayMesh:
 	var verts := PackedVector3Array()
 	var norms := PackedVector3Array()
 	var uvs := PackedVector2Array()
 	var uv2s := PackedVector2Array()
 	var idx := PackedInt32Array()
 	for i in range(prims.size()):
-		_append_shell(prims[i], float(i), verts, norms, uvs, uv2s, idx)
+		_append_shell(prims[i], float(i), density, verts, norms, uvs, uv2s, idx)
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
@@ -39,6 +42,7 @@ static func build(prims: Array) -> ArrayMesh:
 static func _append_shell(
 	pr: SdfMath.Prim,
 	prim_index: float,
+	density: float,
 	verts: PackedVector3Array,
 	norms: PackedVector3Array,
 	uvs: PackedVector2Array,
@@ -51,8 +55,8 @@ static func _append_shell(
 			var s := SphereMesh.new()
 			s.radius = pr.params.x
 			s.height = pr.params.x * 2.0
-			s.radial_segments = SPHERE_SEGS
-			s.rings = SPHERE_RINGS
+			s.radial_segments = maxi(8, roundi(SPHERE_SEGS * density))
+			s.rings = maxi(5, roundi(SPHERE_RINGS * density))
 			src = s
 		SdfMath.SHAPE_CAPSULE, SdfMath.SHAPE_CONE:
 			var c := CapsuleMesh.new()
@@ -60,15 +64,16 @@ static func _append_shell(
 			var half := pr.params.y if pr.shape == SdfMath.SHAPE_CAPSULE else pr.params.z
 			c.radius = r
 			c.height = 2.0 * (half + r)  # CapsuleMesh.height 是含两端半球的总高
-			c.radial_segments = CAPSULE_SEGS
-			c.rings = CAPSULE_RINGS
+			c.radial_segments = maxi(8, roundi(CAPSULE_SEGS * density))
+			c.rings = maxi(4, roundi(CAPSULE_RINGS * density))
 			src = c
 		SdfMath.SHAPE_BOX:
 			var b := BoxMesh.new()
 			b.size = pr.params * 2.0
-			b.subdivide_width = BOX_SUBDIV
-			b.subdivide_height = BOX_SUBDIV
-			b.subdivide_depth = BOX_SUBDIV
+			var sub := maxi(1, roundi(BOX_SUBDIV * density))
+			b.subdivide_width = sub
+			b.subdivide_height = sub
+			b.subdivide_depth = sub
 			src = b
 	var arr := src.get_mesh_arrays()
 	var sv: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
