@@ -189,6 +189,10 @@ func _ready() -> void:
 	# 哨兵对：括住整棵树的 _process 跨度（见 ProcProf 注释）
 	add_child(ProcProf.Sentinel.make(true))
 	add_child(ProcProf.Sentinel.make(false))
+	# 移动端 3D 降采样：关阴影后下一堵墙是像素填充率（真机全分辨率 10fps、1/4 像素 18fps），
+	# 0.7 双线性放大对水彩软风格几乎无损；HUD/UI 走 canvas 仍是原生分辨率
+	if OS.has_feature("mobile"):
+		get_viewport().scaling_3d_scale = 0.7
 	_setup_backend()
 	api = Api.new()
 	api.name = "Api"
@@ -956,7 +960,9 @@ func _update_hud() -> void:
 	_perf_accum = 0.0
 	var fps := Engine.get_frames_per_second()
 	var vp := get_viewport().get_viewport_rid()
-	perf_label.text = "%d fps（帧 %.1f ms）\n脚本逻辑 %.1f + 物理 %.1f ms\n渲染CPU %.1f ms / GPU %.1f ms\nDC %d  物体 %d  三角 %.1f 万" % [
+	# 注意：TIME_PROCESS 的计时窗含 RenderingServer sync/draw（等上帧 GPU + 提交 + present），
+	# 且是 1s 内最大值——不是纯脚本时间，标「主循环」防误读（本浮层曾因标「脚本逻辑」误导排查）
+	perf_label.text = "%d fps（帧 %.1f ms）\n主循环 %.1f + 物理 %.1f ms\n渲染CPU %.1f ms / GPU %.1f ms\nDC %d  物体 %d  三角 %.1f 万" % [
 		int(fps), 1000.0 / maxf(fps, 1.0),
 		Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
 		Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
