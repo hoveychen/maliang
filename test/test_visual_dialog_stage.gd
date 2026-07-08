@@ -77,6 +77,9 @@ func _check_staged() -> void:
 	_check("hover cleared", player.has("hover"), false)
 	var off := WorldGrid.shortest_delta(player["logical"], staged_expect).length()
 	_check("player landed on stage (off=%.2f)" % off, off < 0.3, true)
+	# bug#2 回归：小跳落定后玩家仍面朝 NPC（右侧来→朝左 PI），不被小跳位移方向翻反
+	_check("player still faces npc after hop (face=%.2f)" % float(player.get("paper_face", -9.0)),
+			is_equal_approx(float(player.get("paper_face", -9.0)), PI), true)
 
 func _check_framing() -> void:
 	# 双方占位形象都是 3.2 单位（PLACEHOLDER_HEIGHT）→ 基础构图距离 = 3.2 / (2*0.5*tan25°) ≈ 6.86
