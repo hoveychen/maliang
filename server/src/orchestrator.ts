@@ -50,8 +50,9 @@ async function generateCut(adapters: ServiceAdapters, visualDescription: string)
 /**
  * 朝向兜底：游戏端约定「原图=朝右」（world.gd 水平镜像做朝左），但生图模型对
  * prompt 里 "facing right" 的服从没有硬保证（线上曾出过整批朝左/正面的存量）。
- * 检测到朝左 → 水平翻转即合规；正面 → 翻转无意义（左右对称），重试一次生图，
- * 仍不合规就保守用第一张（正面只是螃蟹步，不至于倒走）；unknown（检测故障）放行。
+ * 检测到朝左 → 水平翻转即合规；正面/bad（多角色三视图、裁切残图）→ 翻转无意义，
+ * 重试一次生图，仍不合规就保守用第一张（正面只是螃蟹步，不至于倒走）；
+ * unknown（检测故障）放行。
  */
 async function ensureFacingRight(
   adapters: ServiceAdapters,
@@ -60,7 +61,7 @@ async function ensureFacingRight(
 ): Promise<ImageBlob> {
   const facing = await adapters.orientation.detectFacing(cut);
   if (facing === 'left') return flipHorizontal(cut);
-  if (facing !== 'front') return cut;
+  if (facing !== 'front' && facing !== 'bad') return cut;
   let retry: ImageBlob;
   try {
     retry = await generateCut(adapters, visualDescription);
@@ -70,7 +71,8 @@ async function ensureFacingRight(
   const facing2 = await adapters.orientation.detectFacing(retry);
   if (facing2 === 'left') return flipHorizontal(retry);
   if (facing2 === 'right') return retry;
-  return cut;
+  // 重试仍 front/bad/unknown：两张都不理想，优先没被判 bad 的那张
+  return facing === 'bad' && facing2 !== 'bad' ? retry : cut;
 }
 
 /**

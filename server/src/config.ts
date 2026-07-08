@@ -37,8 +37,10 @@ export function loadConfig(): Config {
     // 旧默认 kimi-k2.6 实测 ~8s 且飘（默认开 reasoning），是语音延迟的主要变数。
     llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'qwen/qwen3.6-flash',
     imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image',
-    // 立绘朝向检测（看图回答 LEFT/RIGHT/FRONT）：gemini flash 多模态，便宜、~1s。
-    visionModel: process.env.OPENROUTER_VISION_MODEL ?? 'google/gemini-3.1-flash',
+    // 立绘朝向检测（看图回答 LEFT/RIGHT/FRONT/BAD）。3.5-flash 为 2026-07-08 实测选型：
+    // 3.1-flash 不是有效 OpenRouter ID（首批上线全 400 放行，喵小橘朝左漏网）；
+    // 3.1-flash-lite 左右混淆（把明确朝左的旧小狐判 RIGHT）；3.5-flash 8 张样本全符合预期。
+    visionModel: process.env.OPENROUTER_VISION_MODEL ?? 'google/gemini-3.5-flash',
     moderationTextModel: process.env.OPENROUTER_MOD_TEXT_MODEL ?? 'moonshotai/kimi-k2.6',
     xfyunAppId: process.env.XFYUN_APP_ID,
     xfyunApiKey: process.env.XFYUN_API_KEY,

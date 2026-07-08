@@ -89,7 +89,8 @@ export class OpenRouterClient {
           ],
         },
       ],
-      reasoning: { enabled: false },
+      // 不带 reasoning 字段：gemini-3.5-flash 等强制 reasoning 的模型收到
+      // {enabled:false} 会 400 "Reasoning is mandatory"（2026-07-08 实测）。
     });
     const content = json.choices?.[0]?.message?.content;
     if (!content) throw new Error('OpenRouter: empty content');
