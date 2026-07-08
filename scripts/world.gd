@@ -253,6 +253,22 @@ func _setup_environment() -> void:
 ## 白天动态天空：渐变 + 卡通云漂移 + 太阳光晕（shaders/sky_day.gdshader）。
 ## ambient 走纯色源不依赖天空 radiance，radiance 取最小档 + 仅材质变更时重烘
 ## （REALTIME 档强制 256 且逐帧重烘，安卓平板不划算；本世界高粗糙度+关高光，反射用不上）。
+## 云漂移相位步进（0.25s 一步，视觉无感）：sky shader 不用 TIME（会触发 radiance
+## 逐帧重烘，见 sky_day.gdshader 头注释），由这里按材质 wind 参数积分 cloud_offset
+## ——wind 从材质读而非常量，QA 用 WIND_X 放大风速的截帧脚本仍然生效。
+const SKY_STEP := 0.25
+var _sky_step_t := 0.0
+var _sky_offset := Vector2.ZERO
+
+func _step_sky(delta: float) -> void:
+	_sky_step_t += delta
+	if _sky_step_t < SKY_STEP:
+		return
+	var m := _env.sky.sky_material as ShaderMaterial
+	_sky_offset += (m.get_shader_parameter("wind") as Vector2) * _sky_step_t
+	m.set_shader_parameter("cloud_offset", _sky_offset)
+	_sky_step_t = 0.0
+
 func _make_day_sky() -> Sky:
 	var noise := FastNoiseLite.new()
 	noise.seed = 7
@@ -815,6 +831,7 @@ func _process(delta: float) -> void:
 	# （RENDER_RADIUS 110 > 最高补偿后的可见地面半径 ~103，不会露出 chunk 边缘）
 	_env.fog_depth_begin = FOG_DEPTH_BEGIN + _cur_focus_y
 	_env.fog_depth_end = FOG_DEPTH_END + _cur_focus_y
+	_step_sky(delta)
 	_update_camera()
 	tp = _prof_lap(tp, "cam")
 	chunk_manager.update(focus_logical)

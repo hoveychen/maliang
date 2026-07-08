@@ -9,6 +9,14 @@ extends MeshInstance3D
 
 const CULL_MARGIN := 220.0  ## 与 chunk_manager 一致：world-bend 位移大，防误剔除
 
+## 可动物件壳密度：顶点吸附（snap_iters 次全基本体场求值/顶点/帧 × 主+描边两 pass）
+## 是真机成本主轴——隐藏 7 个物件 100ms→24.8ms。0.6 档顶点数 ≈ 36%，梯度法线保平滑；
+## 可动物件屏占比大于树，比烘焙布景的 0.34 档保守。
+const SHELL_DENSITY := 0.6
+## 吸附迭代数（主壳/描边壳）：移动端 2/1 已收敛，桌面 4/4 观感与旧版完全一致。
+static var _snap_iters_main := 2 if OS.has_feature("mobile") else 4
+static var _snap_iters_outline := 1 if OS.has_feature("mobile") else 4
+
 static var _shell_shader: Shader = null
 static var _outline_shader: Shader = null
 
@@ -52,7 +60,7 @@ func _setup(cfg: Dictionary) -> void:
 	prims = rig.prims
 	meta = rig.meta
 
-	mesh = SdfMeshBuilder.build(prims)
+	mesh = SdfMeshBuilder.build(prims, SHELL_DENSITY)
 	extra_cull_margin = CULL_MARGIN
 
 	if _shell_shader == null:
@@ -61,11 +69,13 @@ func _setup(cfg: Dictionary) -> void:
 	var main := ShaderMaterial.new()
 	main.shader = _shell_shader
 	main.set_shader_parameter("color_k", cfg.color_k)
+	main.set_shader_parameter("snap_iters", _snap_iters_main)
 	_mats = [main]
 	if cfg.outline > 0.0:
 		var outline := ShaderMaterial.new()
 		outline.shader = _outline_shader
 		outline.set_shader_parameter("outline_width", cfg.outline)
+		outline.set_shader_parameter("snap_iters", _snap_iters_outline)
 		main.next_pass = outline
 		_mats.append(outline)
 	for m in _mats:
