@@ -128,7 +128,6 @@ var album_panel: PanelContainer    ## 收集册面板：贴纸/物品分页（ta
 var _album_cells: Dictionary = {}  ## 贴纸 id → { "glyph": TextureRect, "count": Label }
 # 物品系统：语音造物的物件可摆可收，收集册物品页列出收进背包的（服务端权威，state 同步）
 var world_props: Dictionary = {}   ## 语音物件 id → { "spec", "state"(placed/bagged), "tile"(Array|null) }
-var _album_tab_buttons: Dictionary = {} ## 兼容保留（旧 tab 机制已被手机 app 网格取代，暂空）
 var _album_pages: Dictionary = {}  ## "stickers"/"items"/"settings" → Control（app 页面，挂进手机屏幕）
 # —— 手机 HUD：左下角手机菜单，点开在 HUD 里弹「手机壳 + iPhone 式屏幕」——
 # 通用换壳管线：手机皮肤 id → 启动器图标/手机壳资产；以后小朋友解锁新手机只需加一项并切
@@ -2727,17 +2726,6 @@ func _toggle_album() -> void:
 		_close_phone_app() # 每次打开手机都回到主屏
 		_refresh_album()
 		_update_phone_banner()
-
-## 分页切换：tab 高亮 + 只显示当前页；离开设置页时收起确认行。
-func _set_album_tab(tab: String) -> void:
-	for key in _album_tab_buttons:
-		(_album_tab_buttons[key] as Button).button_pressed = (key == tab)
-		(_album_pages[key] as Control).visible = (key == tab)
-	if _reroll_confirm != null and tab != "settings":
-		_reroll_confirm.visible = false
-	if _avatar_preview != null and tab != "settings":
-		_avatar_preview.visible = false
-		_avatar_hash = ""
 
 ## 设置页：重新捏角色——先 ？✓✗ 确认一遍防小手误触，确认后回童话书 onboarding。
 func _on_reroll_pressed() -> void:
