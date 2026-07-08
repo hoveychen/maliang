@@ -21,6 +21,12 @@ func _reroll_button() -> Button:
 func _confirm_row() -> HBoxContainer:
 	return scene.get("_reroll_confirm") as HBoxContainer
 
+func _avatar_button() -> Button:
+	return scene.get("_avatar_btn") as Button
+
+func _avatar_preview() -> Control:
+	return scene.get("_avatar_preview") as Control
+
 func _tick() -> void:
 	frame += 1
 	match frame:
@@ -47,19 +53,29 @@ func _tick() -> void:
 			_check("confirm shown after ask", _confirm_row().visible, true)
 			(_confirm_row().get_child(2) as Button).emit_signal("pressed") # ✗
 			_check("confirm dismissed by no", _confirm_row().visible, false)
-		20:
+		17:
+			# 换形象按钮在场且预览收着；点击→按钮禁用（请求飞行中，假 API 会失败恢复）
+			_check("avatar button present", _avatar_button().text, "换形象")
+			_check("avatar preview hidden", _avatar_preview().visible, false)
+			_avatar_button().emit_signal("pressed")
+			_check("avatar busy while pending", _avatar_button().disabled, true)
+		35:
+			# 假 API（MALIANG_API_BASE=…:1）请求落败：按钮恢复可再试，预览仍收着
+			_check("avatar btn recovered after fail", _avatar_button().disabled, false)
+			_check("avatar preview still hidden", _avatar_preview().visible, false)
+		40:
 			# 再问一遍点 ✓ → 回童话书
 			_reroll_button().emit_signal("pressed")
 			(_confirm_row().get_child(1) as Button).emit_signal("pressed") # ✓
 			scene = null # 场景即将被释放，后续只看 current_scene
-		45:
+		65:
 			var cur := current_scene
 			_check("switched to Onboarding", cur != null and cur.name == "Onboarding", true)
 			if fails == 0:
 				print("visual_settings PASS")
 			else:
 				printerr("visual_settings FAILED: %d" % fails)
-		50:
+		70:
 			quit(fails)
 
 func _check(name: String, got: Variant, want: Variant) -> void:

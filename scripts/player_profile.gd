@@ -31,3 +31,11 @@ static func save_profile(p: Dictionary) -> void:
 static func clear() -> void:
 	if exists():
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(PATH))
+
+## 档案答案 → 形象描述（onboarding 生成与设置页「换形象」共用，防两处文案漂移；
+## 风格/朝向后缀由服务端生图管线统一拼接）。字段缺失时用兜底词，旧档案也能拼。
+static func avatar_description(p: Dictionary) -> String:
+	var who := "小男孩" if String(p.get("gender", "")) == "boy" else "小女孩"
+	return "一个可爱的%s形象，穿着%s的衣服，抱着一只%s玩偶，一看就很喜欢%s" % [
+		who, String(p.get("color", "彩色")),
+		String(p.get("likes", "小兔子")), String(p.get("interest", "玩耍"))]
