@@ -17,6 +17,18 @@ const SHELL_DENSITY := 0.6
 static var _snap_iters_main := 2 if OS.has_feature("mobile") else 4
 static var _snap_iters_outline := 1 if OS.has_feature("mobile") else 4
 
+## AdaptiveQuality 换档：作用于已存在（perf_props 组）与后续创建的所有物件。
+static func set_snap_iters(main_iters: int, outline_iters: int, tree: SceneTree) -> void:
+	_snap_iters_main = main_iters
+	_snap_iters_outline = outline_iters
+	for n in tree.get_nodes_in_group("perf_props"):
+		var p := n as SdfProp
+		if p == null or p._mats.is_empty():
+			continue
+		p._mats[0].set_shader_parameter("snap_iters", main_iters)
+		if p._mats.size() > 1:
+			p._mats[1].set_shader_parameter("snap_iters", outline_iters)
+
 static var _shell_shader: Shader = null
 static var _outline_shader: Shader = null
 

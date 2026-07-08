@@ -189,10 +189,12 @@ func _ready() -> void:
 	# 哨兵对：括住整棵树的 _process 跨度（见 ProcProf 注释）
 	add_child(ProcProf.Sentinel.make(true))
 	add_child(ProcProf.Sentinel.make(false))
-	# 移动端 3D 降采样：关阴影后下一堵墙是像素填充率（真机全分辨率 10fps、1/4 像素 18fps），
-	# 0.7 双线性放大对水彩软风格几乎无损；HUD/UI 走 canvas 仍是原生分辨率
+	# 移动端 T1 默认档：3D 降采样 0.7（像素填充率是关阴影后的第二堵墙；HUD/UI 走
+	# canvas 仍原生分辨率），随后 AdaptiveQuality 按实测帧时自动升/降档并持久化
 	if OS.has_feature("mobile"):
 		get_viewport().scaling_3d_scale = 0.7
+		if not FileAccess.file_exists("user://perf_sweep"):  # 扫频诊断时不许换档搅数据
+			add_child(AdaptiveQuality.make(self, chunk_manager))
 	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
 	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
 		add_child(PerfSweep.make(self, _env))
