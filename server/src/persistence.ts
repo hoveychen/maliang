@@ -3,6 +3,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ActiveTask, Character, WorldProp } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
+import type { SpriteSheetMeta } from './sprite_sheet.ts';
+
+/**
+ * 立绘 idle 动画记录，按源立绘 hash 键控（fairy/player/NPC 统一）。
+ * status=pending 生成中；ready 带图集资产 hash + meta；failed 生成失败（客户端保留静态）。
+ */
+export interface SpriteAnimRecord {
+  status: 'pending' | 'ready' | 'failed';
+  animAsset?: string;
+  meta?: SpriteSheetMeta;
+}
 
 export interface World {
   id: string;
@@ -24,6 +35,8 @@ export class WorldStore {
   readonly #dir: string | null;
   readonly #worlds = new Map<string, World>();
   readonly #assets = new Map<string, ImageBlob>();
+  // 立绘 hash → idle 动画记录（sprite_anims.json 持久化，跨重启保留）
+  readonly #spriteAnims = new Map<string, SpriteAnimRecord>();
   // 世界地点名清单（POI，客户端 world_info 上报）：纯内存，客户端每次连上重发，不持久化
   readonly #locations = new Map<string, string[]>();
 
@@ -59,6 +72,23 @@ export class WorldStore {
         if (existsSync(p)) this.#assets.set(hash, { bytes: new Uint8Array(readFileSync(p)), mime: mimes[hash]! });
       }
     }
+    const af = join(this.#dir as string, 'sprite_anims.json');
+    if (existsSync(af)) {
+      const anims = JSON.parse(readFileSync(af, 'utf8')) as Record<string, SpriteAnimRecord>;
+      for (const hash of Object.keys(anims)) {
+        const rec = anims[hash]!;
+        // 重启时把"生成中"视为失败：进程已死、那次异步任务不会回来，避免永久 pending
+        this.#spriteAnims.set(hash, rec.status === 'pending' ? { status: 'failed' } : rec);
+      }
+    }
+  }
+
+  #persistSpriteAnims(): void {
+    if (this.#dir === null) return;
+    mkdirSync(this.#dir, { recursive: true });
+    const obj: Record<string, SpriteAnimRecord> = {};
+    for (const [hash, rec] of this.#spriteAnims) obj[hash] = rec;
+    writeFileSync(join(this.#dir, 'sprite_anims.json'), JSON.stringify(obj));
   }
 
   #persistWorlds(): void {
@@ -222,5 +252,25 @@ export class WorldStore {
 
   getAsset(hash: string): ImageBlob | undefined {
     return this.#assets.get(hash);
+  }
+
+  /** 取某立绘的 idle 动画记录（无则 undefined，客户端据此保留静态或轮询）。 */
+  getSpriteAnim(spriteHash: string): SpriteAnimRecord | undefined {
+    return this.#spriteAnims.get(spriteHash);
+  }
+
+  setSpriteAnimPending(spriteHash: string): void {
+    this.#spriteAnims.set(spriteHash, { status: 'pending' });
+    this.#persistSpriteAnims();
+  }
+
+  setSpriteAnimReady(spriteHash: string, animAsset: string, meta: SpriteSheetMeta): void {
+    this.#spriteAnims.set(spriteHash, { status: 'ready', animAsset, meta });
+    this.#persistSpriteAnims();
+  }
+
+  setSpriteAnimFailed(spriteHash: string): void {
+    this.#spriteAnims.set(spriteHash, { status: 'failed' });
+    this.#persistSpriteAnims();
   }
 }

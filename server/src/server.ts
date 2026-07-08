@@ -6,6 +6,7 @@ import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
+import { triggerIdleAnimation } from './idle_animation.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
@@ -89,6 +90,8 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     fairy.appearance.spriteAsset = hash;
     fairy.appearance.visualDescription = FAIRY_VISUAL_DESC;
     store.saveCharacter(fairy);
+    // 试点：静态立绘先返回，idle 动画后台异步补（客户端轮询 /sprite-anim/:hash）
+    triggerIdleAnimation(adapters, store, hash);
     return { id: fairy.id, spriteAsset: hash, regenerated: true };
   });
 
@@ -122,6 +125,8 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const check = await adapters.moderation.moderateText(desc);
     if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
     const hash = await generateSprite(adapters, desc, store);
+    // 试点：玩家形象静态先返回，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
+    triggerIdleAnimation(adapters, store, hash);
     return { spriteAsset: hash };
   });
 
@@ -169,6 +174,14 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const asset = store.getAsset(req.params.hash);
     if (!asset) return reply.code(404).send({ error: 'asset not found' });
     return reply.header('content-type', asset.mime).send(Buffer.from(asset.bytes));
+  });
+
+  // 立绘 idle 动画状态轮询：客户端拿到静态 spriteAsset 后轮询本路由，
+  // status=ready 时取 animAsset（图集，走 /assets/:hash）+ meta（cols/rows/fps…）切动画。
+  // 无记录返回 none（未触发/不在试点范围）；pending 生成中；failed 保留静态。
+  app.get<{ Params: { hash: string } }>('/sprite-anim/:hash', async (req) => {
+    const rec = store.getSpriteAnim(req.params.hash);
+    return rec ?? { status: 'none' };
   });
 
   // 昂贵操作限流：每连接 N/分钟 + 全局并发上限（防刷付费 API）
