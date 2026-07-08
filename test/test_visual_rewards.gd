@@ -17,6 +17,10 @@ var sent: Array = []
 var give_done := 0
 
 func _initialize() -> void:
+	# TEST_SEED 固定全局 RNG（NPC 漫游/相位都吃它）：偶发失败可用同种子确定性复跑
+	var s := OS.get_environment("TEST_SEED")
+	if not s.is_empty():
+		seed(int(s))
 	scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	process_frame.connect(_tick)
@@ -100,7 +104,12 @@ func _tick() -> void:
 			scene.call("_set_active_task", null)
 		70:
 			# give：语音 give 指令 → 玩家走位到受赠者旁交接（拦截不进 NPC 执行器）。
-			# 玩家先传送回小蓝附近（从池塘走回去太远且隔水，不是本断言要验的东西）
+			# 玩家先传送回小蓝附近（从池塘走回去太远且隔水，不是本断言要验的东西）。
+			# 先冻结全部 NPC 漫游（同产线 _halt_npc 对受赠者的语义）：本断言只考走位交接，
+			# 旁观 NPC 随机游走曾偶发把走位终点挤到到达阈值外→give 被静默放弃→f240 误报
+			# （复现诊断:d(player,blue)=18.31 pending=false，受赠者恢复漫游后越走越远）。
+			for ex in (scene.get("_executors") as Array):
+				(ex as BehaviorExecutor).cancel()
 			var player: Dictionary = scene.get("player")
 			player["logical"] = WorldGrid.wrap_pos((blue["logical"] as Vector2) + Vector2(7.0, 0.0))
 			OccupancyMap.char_register(String(player["id"]), player["logical"], int(player["span"]))
@@ -111,6 +120,14 @@ func _tick() -> void:
 			_check("give not instant when far", _last_of("give_item").is_empty(), true)
 			_check("blue not driven by give script", scene.call("_has_executor_for", blue), false)
 		240:
+			if give_done == 0: # 失败自诊断：定位是走位没到、被放弃、还是执行器没跑完
+				var player: Dictionary = scene.get("player")
+				var pend: Dictionary = scene.get("_pending_give")
+				var ex: Variant = scene.get("_player_executor")
+				var d := WorldGrid.shortest_delta(player["logical"], blue["logical"]).length()
+				printerr("  DIAG give stuck: d(player,blue)=%.2f pending=%s exec=%s done=%s" % [
+					d, str(not pend.is_empty()),
+					str(ex != null), str(ex != null and (ex as BehaviorExecutor).is_done())])
 			_check("give completed after walk", give_done > 0, true)
 		250:
 			if fails == 0:
