@@ -186,6 +186,16 @@ func _ready() -> void:
 	_setup_fairy_offline()
 	_setup_ear()
 	_setup_hud()
+	# 哨兵对：括住整棵树的 _process 跨度（见 ProcProf 注释）
+	add_child(ProcProf.Sentinel.make(true))
+	add_child(ProcProf.Sentinel.make(false))
+	# 移动端 3D 降采样：关阴影后下一堵墙是像素填充率（真机全分辨率 10fps、1/4 像素 18fps），
+	# 0.7 双线性放大对水彩软风格几乎无损；HUD/UI 走 canvas 仍是原生分辨率
+	if OS.has_feature("mobile"):
+		get_viewport().scaling_3d_scale = 0.7
+	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
+	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
+		add_child(PerfSweep.make(self, _env))
 	_setup_backend()
 	api = Api.new()
 	api.name = "Api"
@@ -211,12 +221,10 @@ func _setup_environment() -> void:
 	light.rotation_degrees = Vector3(-55.0, -40.0, 0.0)
 	light.light_color = Color(1.0, 0.96, 0.86) # 暖阳（Pokopia 式午后柔光）
 	light.light_energy = 1.25
-	# 弯曲已改为世界空间位移（world_bend.gdshader）：相机/shadow pass 几何一致，可开阴影。
-	# 单 split 正交 + 短距离：Android 平板便宜；雾在 ~95 淡出，阴影只需覆盖近处。
-	light.shadow_enabled = true
-	light.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-	light.directional_shadow_max_distance = 90.0
-	light.shadow_blur = 1.5
+	# 实时阴影不开：老移动 GPU（Mali-G76 实测）定向阴影一开整帧 ~2.5 倍开销
+	# （7↔18fps），且与投影几何量、软/硬过滤、阴影图尺寸都无关——是阴影管线本身的代价。
+	# 影子锚定感由 BlobShadow 脚下暗斑承担（角色/可动物件），布景平光贴合 Pokopia 风。
+	light.shadow_enabled = false
 	add_child(light)
 
 	var we := WorldEnvironment.new()
@@ -346,6 +354,7 @@ func _apply_player_sprite() -> void:
 	node.pixel_size = 5.0 / float(tex.get_height())
 	node.offset = Vector2(0.0, float(tex.get_height()) / 2.0)
 	node.modulate = Color.WHITE
+	BlobShadow.attach(node, clampf(float(tex.get_width()) * node.pixel_size * 0.38, 0.4, 1.4))
 
 ## 离线模式的小仙子随从（在线时 _bootstrap 会清掉、换成服务端小神仙）。
 ## 悬浮飞行：不登记占用图、不走寻路，由 _update_fairy 驱动跟随玩家。
@@ -355,6 +364,7 @@ func _setup_fairy_offline() -> void:
 	add_child(node)
 	node.setup(tex, Color.WHITE, "小神仙")
 	node.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
+	BlobShadow.detach(node) # 悬浮飞行不落地，脚下暗斑穿帮
 	var spawn := WorldGrid.wrap_pos(player["logical"] + Vector2(3.0, 2.0))
 	npcs.append({ "node": node, "logical": spawn, "id": "fairy_local", "is_fairy": true, "hover": FAIRY_HOVER })
 	fairy_voice = FairyVoice.new()
@@ -716,20 +726,64 @@ func _physics_process(delta: float) -> void:
 			player["logical"] = moved
 			OccupancyMap.char_register(PLAYER_ID, moved, PLAYER_SPAN)
 
+## _process 分段计时（平板 fps<10 二阶段：真机脚本逻辑 162ms/帧，热点分布只能实测）。
+## 累计各段 usec，debug 构建每 ~2s 往 stdout（安卓即 logcat godot tag）吐一行降序分布。
+var _prof := {}
+var _prof_t := 0.0
+var _prof_frames := 0
+
+func _prof_lap(prev: int, key: String) -> int:
+	var now := Time.get_ticks_usec()
+	_prof[key] = int(_prof.get(key, 0)) + (now - prev)
+	return now
+
+func _prof_flush(delta: float) -> void:
+	_prof_t += delta
+	_prof_frames += 1
+	if _prof_t < 2.0:
+		return
+	var total := 0
+	for k in _prof:
+		total += _prof[k]
+	_prof.merge(ProcProf.take())  # 其他脚本的账本（allproc/sdfprop/ws…）并入展示，不计入 world 合计
+	var keys := _prof.keys()
+	keys.sort_custom(func(a, b): return _prof[a] > _prof[b])
+	var n := maxi(_prof_frames, 1)
+	# eng = 引擎口径 TIME_PROCESS（整个 process 步，含所有节点 _process 与可能的交换链等待），
+	# 与分段合计的差 = world._process 之外的时间，用于判断热点归属
+	var line := "PERF %.1fms/f eng=%.1f nodes=%d:" % [float(total) / 1000.0 / n,
+			Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+			int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))]
+	for k in keys.slice(0, 10):
+		line += " %s=%.1f" % [k, float(_prof[k]) / 1000.0 / n]
+	print(line)
+	_prof.clear()
+	_prof_t = 0.0
+	_prof_frames = 0
+
 func _process(delta: float) -> void:
+	var tp := Time.get_ticks_usec()
 	_drain_tts_stream()
+	tp = _prof_lap(tp, "tts")
 	_step_hold_follow(delta)
 	_step_prop_press(delta)
 	_step_prop_drag()
+	tp = _prof_lap(tp, "hold/prop")
 	_step_task(delta)
 	_check_give()
+	tp = _prof_lap(tp, "task/give")
 	_step_executors(delta)
+	tp = _prof_lap(tp, "executors")
 	_check_approach()
+	tp = _prof_lap(tp, "approach")
 	_update_fairy(delta)
+	tp = _prof_lap(tp, "fairy")
 	_step_voice(delta)
+	tp = _prof_lap(tp, "voice")
 	# 语音链路占用时压低 BGM，给人声让路（与开放麦闭麦判定同一组信号）
 	game_audio.set_ducked(_recording or thinking_label.visible or _tts_player.playing \
 			or (fairy_voice != null and fairy_voice.is_playing()))
+	tp = _prof_lap(tp, "duck")
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
 	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)
@@ -762,15 +816,23 @@ func _process(delta: float) -> void:
 	_env.fog_depth_begin = FOG_DEPTH_BEGIN + _cur_focus_y
 	_env.fog_depth_end = FOG_DEPTH_END + _cur_focus_y
 	_update_camera()
+	tp = _prof_lap(tp, "cam")
 	chunk_manager.update(focus_logical)
+	tp = _prof_lap(tp, "chunk")
 	_reposition_npcs(delta)
+	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
 	_update_ear()
+	tp = _prof_lap(tp, "tap/ear")
 	_update_think_bubble(delta)
 	_update_emotion_bubble(delta)
 	_update_npc_chats(delta)
 	_update_speak_anim(delta)
+	tp = _prof_lap(tp, "bubbles")
 	_update_hud()
+	tp = _prof_lap(tp, "hud")
+	if perf_label != null:
+		_prof_flush(delta)
 
 func _step_executors(delta: float) -> void:
 	for ex in _executors:
@@ -901,7 +963,9 @@ func _update_hud() -> void:
 	_perf_accum = 0.0
 	var fps := Engine.get_frames_per_second()
 	var vp := get_viewport().get_viewport_rid()
-	perf_label.text = "%d fps（帧 %.1f ms）\n脚本逻辑 %.1f + 物理 %.1f ms\n渲染CPU %.1f ms / GPU %.1f ms\nDC %d  物体 %d  三角 %.1f 万" % [
+	# 注意：TIME_PROCESS 的计时窗含 RenderingServer sync/draw（等上帧 GPU + 提交 + present），
+	# 且是 1s 内最大值——不是纯脚本时间，标「主循环」防误读（本浮层曾因标「脚本逻辑」误导排查）
+	perf_label.text = "%d fps（帧 %.1f ms）\n主循环 %.1f + 物理 %.1f ms\n渲染CPU %.1f ms / GPU %.1f ms\nDC %d  物体 %d  三角 %.1f 万" % [
 		int(fps), 1000.0 / maxf(fps, 1.0),
 		Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
 		Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
@@ -1396,11 +1460,13 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 	if is_fairy:
 		# 小仙子随从：头部大小（时之笛式），无论真图/占位都按 FAIRY_HEIGHT 归一
 		npc.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
+		BlobShadow.detach(npc) # 悬浮飞行不落地，脚下暗斑穿帮
 	elif real:
 		# 生成图分辨率高，按高度归一化到约 6 单位，脚底对齐原点
 		var h := float(tex.get_height())
 		npc.pixel_size = 6.0 / h
 		npc.offset = Vector2(0.0, h / 2.0)
+		BlobShadow.attach(npc, clampf(float(tex.get_width()) * npc.pixel_size * 0.38, 0.4, 1.4))
 	var logical := at_logical
 	if logical == Vector2.INF:
 		# 小世界：忽略后端旧坐标(原 1000×1000 的 tile 500)，统一放到村庄中心(chunk2 = world 中心)

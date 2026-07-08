@@ -127,11 +127,13 @@ func _make_slot() -> Dictionary:
 	tile.material_override = _ground_mat
 	tile.extra_cull_margin = CULL_MARGIN
 	root.add_child(tile)
+	tile.add_to_group("perf_terrain")  # PerfSweep 分解扫频用（debug 诊断）
 	var water := MeshInstance3D.new()
 	water.material_override = _water_mat
 	water.extra_cull_margin = CULL_MARGIN
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF  # 半透明水面不投影
 	root.add_child(water)
+	water.add_to_group("perf_water")
 	var deco := Node3D.new()
 	root.add_child(deco)
 	return { "root": root, "tile": tile, "water": water, "deco": deco, "wrapped": Vector2i(-999, -999) }
@@ -596,10 +598,12 @@ func _flush_batches(parent: Node3D, batches: Dictionary) -> void:
 		mmi.multimesh = mm
 		mmi.material_override = info["mat"]
 		mmi.extra_cull_margin = CULL_MARGIN
-		# 草丛/灌木不投影：贴地小件影子读不出来，白给阴影 pass 加负担；树影保留（场景锚定感）
-		if key == "bush" or key.begins_with("tuft"):
-			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# 散布物一律不投影：真机（Mali-G76）瓶颈是顶点吞吐，shadow pass 重画全部散布
+		# 几何是 7fps 的主因（关阴影实测 18fps）。树冠平光贴合 Pokopia 风；
+		# 影子锚定感由角色/建筑/可动物件保留投影承担（shadow max distance 45）。
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		parent.add_child(mmi)
+		mmi.add_to_group("perf_scatter")  # PerfSweep 分解扫频用（debug 诊断）
 
 ## 散布种类注册表（懒建）：key → { mesh, mat }。
 ## 树/灌木用烘焙 mesh + SdfStaticBaker 共享材质；石/草从 KayKit 场景剥出
