@@ -239,6 +239,9 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 		_spawn_sdf_on_tile(deco, wrapped, dp, dp_anchor, false)
 
 	# 分区散布：逐 tile 确定性判定。草丛不占位（可穿行的纯点缀），其余占 1×1。
+	# 视觉不逐个建节点：按 mesh 种类收集变换，每区块每种一个 MultiMesh——
+	# 500+ 散布逐个 MeshInstance3D（×阴影 pass 再翻倍）是 DC 2000+ 的主因。
+	var batches := {}
 	for j in range(CHUNK_TILES):
 		for i in range(CHUNK_TILES):
 			var ti := Vector2i(i, j)
@@ -249,18 +252,19 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 			var hk := hash(gt)
 			var pos := _tile_local(ti, wrapped)
 			if kind == DECO_TUFT:
-				_spawn(deco, TUFT_SCENES[posmod(hk, TUFT_SCENES.size())], pos, 1.5 + float(posmod(hk, 3)) * 0.3, float(posmod(hk, 360)))
+				_batch(batches, "tuft%d" % posmod(hk, TUFT_SCENES.size()), pos, 1.5 + float(posmod(hk, 3)) * 0.3, float(posmod(hk, 360)))
 				continue
 			if not OccupancyMap.prop_area_ok(gt, 1, 1, false, false):
 				continue
 			_claim(wrapped, gt, 1, 1)
 			match kind:
 				DECO_TREE:
-					_spawn_baked(deco, TREE_MESHES[posmod(hk, TREE_MESHES.size())], pos, 0.85 + float(posmod(hk, 5)) * 0.09, float(posmod(hk, 360)))
+					_batch(batches, "tree%d" % posmod(hk, TREE_MESHES.size()), pos, 0.85 + float(posmod(hk, 5)) * 0.09, float(posmod(hk, 360)))
 				DECO_BUSH:
-					_spawn_baked(deco, BUSH_MESH, pos, 1.0 + float(posmod(hk, 3)) * 0.25, float(posmod(hk, 360)))
+					_batch(batches, "bush", pos, 1.0 + float(posmod(hk, 3)) * 0.25, float(posmod(hk, 360)))
 				DECO_ROCK:
-					_spawn(deco, ROCK_SCENES[posmod(hk, ROCK_SCENES.size())], pos, 1.6 + float(posmod(hk, 3)) * 0.4, float(posmod(hk, 360)))
+					_batch(batches, "rock%d" % posmod(hk, ROCK_SCENES.size()), pos, 1.6 + float(posmod(hk, 3)) * 0.4, float(posmod(hk, 360)))
+	_flush_batches(deco, batches)
 
 ## 分区散布判定：全局 tile → 长什么（确定性，只在草地上长）。
 ## 分区从北往南：山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、
@@ -571,6 +575,51 @@ func _spawn_baked(parent: Node3D, mesh: ArrayMesh, pos: Vector3, scale_f: float,
 	mi.rotation_degrees = Vector3(0.0, yaw_deg, 0.0)
 	mi.scale = Vector3.ONE * scale_f
 	parent.add_child(mi)
+
+## 散布合批：种类 key → 收集实例变换（_flush_batches 一次性建 MultiMesh）。
+func _batch(batches: Dictionary, key: String, pos: Vector3, scale_f: float, yaw_deg: float) -> void:
+	var basis := Basis(Vector3.UP, deg_to_rad(yaw_deg)).scaled(Vector3.ONE * scale_f)
+	batches.get_or_add(key, []).append(Transform3D(basis, pos))
+
+## 每种散布一个 MultiMeshInstance3D（共享 mesh + 共享 bend 材质 = 一次 draw call）。
+func _flush_batches(parent: Node3D, batches: Dictionary) -> void:
+	for key: String in batches:
+		var info := _scatter_kind(key)
+		var arr: Array = batches[key]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = info["mesh"]
+		mm.instance_count = arr.size()
+		for i in range(arr.size()):
+			mm.set_instance_transform(i, arr[i])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.material_override = info["mat"]
+		mmi.extra_cull_margin = CULL_MARGIN
+		parent.add_child(mmi)
+
+## 散布种类注册表（懒建）：key → { mesh, mat }。
+## 树/灌木用烘焙 mesh + SdfStaticBaker 共享材质；石/草从 KayKit 场景剥出
+## mesh 和 bend 包裹后的材质（_wrap_material 有缓存，同调色板 atlas 只建一份）。
+static var _scatter_kinds: Dictionary = {}
+
+func _scatter_kind(key: String) -> Dictionary:
+	if _scatter_kinds.has(key):
+		return _scatter_kinds[key]
+	var info := {}
+	if key.begins_with("tree"):
+		info = { "mesh": TREE_MESHES[int(key.trim_prefix("tree"))], "mat": SdfStaticBaker.material() }
+	elif key == "bush":
+		info = { "mesh": BUSH_MESH, "mat": SdfStaticBaker.material() }
+	else:
+		var scene: PackedScene = ROCK_SCENES[int(key.trim_prefix("rock"))] if key.begins_with("rock") \
+				else TUFT_SCENES[int(key.trim_prefix("tuft"))]
+		var inst := scene.instantiate()
+		var mi: MeshInstance3D = inst.find_children("*", "MeshInstance3D", true, false)[0]
+		info = { "mesh": mi.mesh, "mat": BendMat.wrap_material(mi.get_active_material(0)) }
+		inst.free()
+	_scatter_kinds[key] = info
+	return info
 
 ## 实例化 KayKit 场景：包裹 bend 材质 + 大裁剪边距（弯曲位移会超出原始 AABB）。
 func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, yaw_deg: float) -> Node3D:

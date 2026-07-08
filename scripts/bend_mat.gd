@@ -41,6 +41,10 @@ static func make_textured(
 ## 对同一 StandardMaterial3D 做缓存，整包资产共享一张调色板 atlas 时只建一个材质。
 static var _wrapped_cache: Dictionary = {}
 
+## 单材质版 wrap：MultiMesh 合批没有场景树可遍历，剥出的 mesh 材质走这里。
+static func wrap_material(src: Material) -> ShaderMaterial:
+	return src if src is ShaderMaterial else _wrap_material(src)
+
 static func wrap_scene(root: Node) -> void:
 	for node in root.find_children("*", "MeshInstance3D", true, false):
 		var mi: MeshInstance3D = node
