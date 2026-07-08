@@ -7,6 +7,8 @@ export interface Config {
   openrouterApiKey: string | undefined;
   llmModel: string;
   imageModel: string;
+  /** 立绘朝向检测用的 vision 模型（看图回答朝向）。 */
+  visionModel: string;
   moderationTextModel: string;
   xfyunAppId: string | undefined;
   xfyunApiKey: string | undefined;
@@ -35,6 +37,8 @@ export function loadConfig(): Config {
     // 旧默认 kimi-k2.6 实测 ~8s 且飘（默认开 reasoning），是语音延迟的主要变数。
     llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'qwen/qwen3.6-flash',
     imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image',
+    // 立绘朝向检测（看图回答 LEFT/RIGHT/FRONT）：gemini flash 多模态，便宜、~1s。
+    visionModel: process.env.OPENROUTER_VISION_MODEL ?? 'google/gemini-3.1-flash',
     moderationTextModel: process.env.OPENROUTER_MOD_TEXT_MODEL ?? 'moonshotai/kimi-k2.6',
     xfyunAppId: process.env.XFYUN_APP_ID,
     xfyunApiKey: process.env.XFYUN_API_KEY,

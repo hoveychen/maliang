@@ -71,6 +71,31 @@ export class OpenRouterClient {
     return content;
   }
 
+  /** 看图提问（vision）：文字 + 一张图（data URL 内联），返回 message.content。 */
+  async chatVision(
+    model: string,
+    prompt: string,
+    image: { bytes: Uint8Array; mime: string },
+  ): Promise<string> {
+    const dataUrl = `data:${image.mime};base64,${Buffer.from(image.bytes).toString('base64')}`;
+    const json = await this.#post({
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+      reasoning: { enabled: false },
+    });
+    const content = json.choices?.[0]?.message?.content;
+    if (!content) throw new Error('OpenRouter: empty content');
+    return content;
+  }
+
   /** 图像生成，返回首张图的 bytes + mime（从 data URL 解析）。 */
   async chatImage(model: string, prompt: string): Promise<{ bytes: Uint8Array; mime: string }> {
     const json = await this.#post({
