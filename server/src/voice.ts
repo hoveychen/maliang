@@ -134,6 +134,9 @@ export async function respondToTranscript(
       }
     }
   }
+  // 造角色入口：不在这里合成/发普通回应，交给 WS 层的引导会话（guideCreation）驱动——
+  // 由它合成仙子的问句 TTS 并下发 creation_prompt（含图标选项），避免入口这轮重复出声。
+  if (response.characterRequest) return response;
   // LLM 在这句回应里发起了委托候选 → 设为进行中，随 character_response 下发给客户端做提示
   if (intent.offerTask && taskCandidate) {
     store.setActiveTask(worldId, taskCandidate);

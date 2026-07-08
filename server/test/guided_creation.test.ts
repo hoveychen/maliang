@@ -3,6 +3,30 @@ import assert from 'node:assert/strict';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { newCreationState, type CreationState, type GuideCreationResult } from '../src/types.ts';
 import { CREATION_OPTIONS, findOption, optionsByCategory } from '../src/creation_options.ts';
+import { buildServer, handleWsMessage, newVoiceSession, type VoiceSession } from '../src/server.ts';
+import { WorldStore } from '../src/persistence.ts';
+import { RateLimiter } from '../src/ratelimit.ts';
+
+function fakeSocket(): { send: (d: string) => void; sent: Array<Record<string, unknown>> } {
+  const sent: Array<Record<string, unknown>> = [];
+  return { send: (d: string) => sent.push(JSON.parse(d)), sent };
+}
+
+async function seeded(): Promise<{ store: WorldStore; fairyId: string; close: () => Promise<void> }> {
+  const store = new WorldStore();
+  const app = await buildServer({ adapters: createMockAdapters(), store });
+  await app.inject({ method: 'GET', url: '/worlds/default' });
+  const fairy = store.listCharacters('default').find((c) => c.isFairy)!;
+  return { store, fairyId: fairy.id, close: () => app.close() };
+}
+
+/** 驱动一条 WS 消息（每次新 mock 适配器，隔离状态）。 */
+async function ws(store: WorldStore, session: VoiceSession, msg: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+  const sock = fakeSocket();
+  const limiter = new RateLimiter(100, 100);
+  await handleWsMessage(sock, JSON.stringify(msg), createMockAdapters(), store, limiter, 'test', session);
+  return sock.sent;
+}
 
 // 模拟 P2 状态机做的事：把一轮结果的增量并回 state（供多轮累积测试用）
 function apply(state: CreationState, r: GuideCreationResult): void {
@@ -87,4 +111,101 @@ test('guideCreation：超轮兜底——turnCount 到上限强制 done', async (
   const state: CreationState = { active: true, attrs: { kind: '兔', traits: [] }, askedCategories: ['kind', 'color', 'trait', 'name', 'personality'], turnCount: 5 };
   const r = await llm.guideCreation(state, '嗯');
   assert.equal(r.done, true);
+});
+
+// ── P2 状态机 + WS 协议 ──────────────────────────────────────────────────
+
+test('voice_transcript 入口：对小仙子说含糊造角色 → 开会话 + 下发 creation_prompt(图标选项)', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    const sent = await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只小动物' });
+    assert.equal(session.creation?.active, true);
+    const prompt = sent.find((m) => m.type === 'creation_prompt');
+    assert.ok(prompt, '应下发 creation_prompt');
+    const options = prompt!.options as Array<{ id: string }>;
+    assert.ok(options.length >= 2 && options.length <= 4);
+    assert.equal(sent.some((m) => m.type === 'character_response'), false, '入口不发普通 character_response');
+  } finally {
+    await close();
+  }
+});
+
+test('多轮：入口给类型 → creation_reply 点颜色 → 攒够 done → gen_complete 入库', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    const before = store.listCharacters('default').length;
+    // 入口：说「小猫」→ 有 kind，缺颜色 → 追问
+    await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只小猫' });
+    assert.equal(session.creation?.attrs.kind, '猫');
+    assert.equal(session.creation?.active, true);
+    // 点颜色卡「红」→ 攒够 → 造
+    const sent = await ws(store, session, { type: 'creation_reply', worldId: 'default', characterId: fairyId, optionId: 'red' });
+    assert.equal(session.creation, null, '造完清掉会话');
+    assert.ok(sent.some((m) => m.type === 'gen_complete'), '应 gen_complete');
+    assert.equal(store.listCharacters('default').length, before + 1, '角色入库');
+  } finally {
+    await close();
+  }
+});
+
+test('快捷方式：一句说全 → 入口首轮即 done，不发 creation_prompt', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    const before = store.listCharacters('default').length;
+    const sent = await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只会飞的红色小猫' });
+    assert.equal(session.creation, null, '首轮即完成，不留会话');
+    assert.equal(sent.some((m) => m.type === 'creation_prompt'), false, '快捷路径不追问');
+    assert.ok(sent.some((m) => m.type === 'gen_complete'));
+    assert.equal(store.listCharacters('default').length, before + 1);
+  } finally {
+    await close();
+  }
+});
+
+test('creation_reply 无进行中会话 → voice_failed', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    const sent = await ws(store, session, { type: 'creation_reply', worldId: 'default', characterId: fairyId, optionId: 'cat' });
+    assert.equal(sent[0]?.type, 'voice_failed');
+  } finally {
+    await close();
+  }
+});
+
+test('creation_cancel / leave_world 清掉会话', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只小狗' });
+    assert.notEqual(session.creation, null);
+    await ws(store, session, { type: 'creation_cancel' });
+    assert.equal(session.creation, null);
+    // 再开一次，用 leave_world 清
+    await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只小兔' });
+    assert.notEqual(session.creation, null);
+    await ws(store, session, { type: 'leave_world', worldId: 'default' });
+    assert.equal(session.creation, null);
+  } finally {
+    await close();
+  }
+});
+
+test('会话进行中普通语音不走 routeIntent：说话被当作造角色答复', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只小猫' });
+    assert.equal(session.creation?.attrs.kind, '猫');
+    // 会话中说「蓝」→ 应累积成颜色(造角色答复)，而非走闲聊/指令
+    const sent = await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '蓝' });
+    // 蓝色→攒够→done gen_complete；且全程不出现 character_response(没走 routeIntent)
+    assert.equal(sent.some((m) => m.type === 'character_response'), false);
+    assert.ok(sent.some((m) => m.type === 'gen_complete'));
+  } finally {
+    await close();
+  }
 });
