@@ -117,6 +117,10 @@ var world_props: Dictionary = {}   ## 语音物件 id → { "spec", "state"(plac
 var _album_tab_buttons: Dictionary = {} ## "stickers"/"items"/"settings" → Button（tab 高亮切换）
 var _album_pages: Dictionary = {}  ## "stickers"/"items"/"settings" → Control（分页容器）
 var _reroll_confirm: HBoxContainer ## 设置页"重新捏角色"的 ✓/✗ 确认行（防小手误触）
+var _avatar_btn: Button            ## 设置页"换形象"按钮（生成中禁用防连点）
+var _avatar_preview: VBoxContainer ## 换形象预览区（新形象图 + ✓/✗），平时隐藏
+var _avatar_img: TextureRect       ## 预览图
+var _avatar_hash := ""             ## 待确认的新形象资产 hash（✓ 才落档案）
 var _items_grid: GridContainer     ## 物品页网格（bagged 物件动态重建）
 var _items_empty: Label            ## 物品页空态提示
 const PROP_LONG_PRESS := 0.6       ## 长按拾起阈值（秒），期间手指基本不动
@@ -658,6 +662,36 @@ func _setup_hud() -> void:
 	_reroll_confirm.add_child(reroll_no)
 	_reroll_confirm.visible = false
 	settings_page.add_child(_reroll_confirm)
+	# 换形象：免翻书只重生成形象图（名字/称呼不动），预览满意才落档案
+	_avatar_btn = Button.new()
+	_avatar_btn.text = "换形象"
+	_avatar_btn.icon = UiAssets.tex("ic_wand")
+	_avatar_btn.add_theme_constant_override("icon_max_width", 36)
+	_avatar_btn.add_theme_font_size_override("font_size", 26)
+	UiAssets.style_card_button(_avatar_btn)
+	_avatar_btn.pressed.connect(_on_avatar_regen_pressed)
+	settings_page.add_child(_avatar_btn)
+	_avatar_preview = VBoxContainer.new()
+	_avatar_preview.alignment = BoxContainer.ALIGNMENT_CENTER
+	_avatar_preview.add_theme_constant_override("separation", 12)
+	_avatar_img = TextureRect.new()
+	_avatar_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_avatar_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_avatar_img.custom_minimum_size = Vector2(220.0, 220.0)
+	_avatar_img.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_avatar_preview.add_child(_avatar_img)
+	var avatar_row := HBoxContainer.new()
+	avatar_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	avatar_row.add_theme_constant_override("separation", 24)
+	var avatar_yes := UiAssets.icon_button("ic_yes", 72.0)
+	avatar_yes.pressed.connect(_on_avatar_regen_yes)
+	avatar_row.add_child(avatar_yes)
+	var avatar_no := UiAssets.icon_button("ic_no", 72.0)
+	avatar_no.pressed.connect(_on_avatar_regen_no)
+	avatar_row.add_child(avatar_no)
+	_avatar_preview.add_child(avatar_row)
+	_avatar_preview.visible = false
+	settings_page.add_child(_avatar_preview)
 	_album_pages = { "stickers": grid, "items": items_page, "settings": settings_page }
 	var pages := VBoxContainer.new()
 	pages.add_theme_constant_override("separation", 20)
@@ -2289,6 +2323,9 @@ func _set_album_tab(tab: String) -> void:
 		(_album_pages[key] as Control).visible = (key == tab)
 	if _reroll_confirm != null and tab != "settings":
 		_reroll_confirm.visible = false
+	if _avatar_preview != null and tab != "settings":
+		_avatar_preview.visible = false
+		_avatar_hash = ""
 
 ## 设置页：重新捏角色——先 ？✓✗ 确认一遍防小手误触，确认后回童话书 onboarding。
 func _on_reroll_pressed() -> void:
@@ -2299,6 +2336,43 @@ func _on_reroll_yes() -> void:
 
 func _on_reroll_no() -> void:
 	_reroll_confirm.visible = false
+
+## 设置页：换形象——用档案答案重新生图（走服务端朝向保险丝），预览 ✓ 才落档案并热更新。
+func _on_avatar_regen_pressed() -> void:
+	if _avatar_btn.disabled:
+		return
+	_avatar_btn.disabled = true
+	_avatar_preview.visible = false
+	var desc := PlayerProfile.avatar_description(PlayerProfile.load_profile())
+	var res := await api.post_json("/player-sprite", { "visualDescription": desc })
+	var new_hash := String(res.get("spriteAsset", ""))
+	var tex: Texture2D = null
+	if not new_hash.is_empty():
+		tex = await api.fetch_texture(new_hash)
+	if not is_inside_tree() or _avatar_btn == null:
+		return # 面板已销毁（切场景），静默放弃
+	_avatar_btn.disabled = false
+	if tex == null:
+		return # 离线/生成失败：按钮恢复可再试，不打断小朋友
+	_avatar_hash = new_hash
+	_avatar_img.texture = tex
+	_avatar_preview.visible = true
+	game_audio.play_sfx("reveal")
+
+func _on_avatar_regen_yes() -> void:
+	if _avatar_hash.is_empty():
+		return
+	var profile := PlayerProfile.load_profile()
+	profile["sprite_asset"] = _avatar_hash
+	PlayerProfile.save_profile(profile)
+	_avatar_hash = ""
+	_avatar_preview.visible = false
+	game_audio.play_sfx("confirm")
+	_apply_player_sprite() # 热更新在场玩家贴图，立即生效
+
+func _on_avatar_regen_no() -> void:
+	_avatar_hash = ""
+	_avatar_preview.visible = false
 
 func _refresh_album() -> void:
 	for id in _album_cells:
