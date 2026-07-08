@@ -781,13 +781,35 @@ func _physics_process(delta: float) -> void:
 ## _process 分段计时（平板 fps<10 二阶段：真机脚本逻辑 162ms/帧，热点分布只能实测）。
 ## 累计各段 usec，debug 构建每 ~2s 往 stdout（安卓即 logcat godot tag）吐一行降序分布。
 var _prof := {}
+var _prof_max := {}      ## 各段窗口内单帧最大值（2s 平均会抹平 200ms 级单帧凶手）
+var _prof_frame_acc := 0 ## 本帧各段合计（帧级尖峰即时打印用）
+var _frame_worst_key := ""
+var _frame_worst_us := 0
 var _prof_t := 0.0
 var _prof_frames := 0
 
 func _prof_lap(prev: int, key: String) -> int:
 	var now := Time.get_ticks_usec()
-	_prof[key] = int(_prof.get(key, 0)) + (now - prev)
+	var us := now - prev
+	_prof[key] = int(_prof.get(key, 0)) + us
+	if us > int(_prof_max.get(key, 0)):
+		_prof_max[key] = us
+	if us > _frame_worst_us:
+		_frame_worst_us = us
+		_frame_worst_key = key
+	_prof_frame_acc += us
 	return now
+
+## 帧级尖峰即时打印（带 logcat 时间戳，可与麦克风/TTS 事件对齐）；每帧开头 reset。
+func _prof_frame_begin() -> void:
+	_prof_frame_acc = 0
+	_frame_worst_us = 0
+	_frame_worst_key = ""
+
+func _prof_frame_end() -> void:
+	if _prof_frame_acc > 80000:
+		print("FSPIKE total=%.0fms worst=%s:%.0fms" % [float(_prof_frame_acc) / 1000.0,
+				_frame_worst_key, float(_frame_worst_us) / 1000.0])
 
 func _prof_flush(delta: float) -> void:
 	_prof_t += delta
@@ -809,11 +831,20 @@ func _prof_flush(delta: float) -> void:
 	for k in keys.slice(0, 10):
 		line += " %s=%.1f" % [k, float(_prof[k]) / 1000.0 / n]
 	print(line)
+	# 单帧最大值（找间歇性尖峰的凶手：哪一段曾在单帧内爆过）
+	var mkeys := _prof_max.keys()
+	mkeys.sort_custom(func(a, b): return _prof_max[a] > _prof_max[b])
+	var mline := "PERFMAX"
+	for k in mkeys.slice(0, 6):
+		mline += " %s=%.0f" % [k, float(_prof_max[k]) / 1000.0]
+	print(mline)
 	_prof.clear()
+	_prof_max.clear()
 	_prof_t = 0.0
 	_prof_frames = 0
 
 func _process(delta: float) -> void:
+	_prof_frame_begin()
 	var tp := Time.get_ticks_usec()
 	_drain_tts_stream()
 	tp = _prof_lap(tp, "tts")
@@ -885,6 +916,7 @@ func _process(delta: float) -> void:
 	_update_hud()
 	tp = _prof_lap(tp, "hud")
 	if perf_label != null:
+		_prof_frame_end()
 		_prof_flush(delta)
 
 func _step_executors(delta: float) -> void:
