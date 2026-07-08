@@ -588,6 +588,7 @@ func _setup_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_hud_layer = layer
+	_play_start_ms = Time.get_ticks_msec() # 已游玩时间从进入世界起算（手机 banner 用）
 
 	coord_label = Label.new()
 	coord_label.position = Vector2(16.0, 12.0)
@@ -1063,6 +1064,16 @@ func _close_phone_app() -> void:
 		_avatar_preview.visible = false
 		_avatar_hash = ""
 
+## 手机开着时每秒刷新一次 banner（时钟走字、已玩时长累加）；关着不做事，零开销。
+func _step_phone_ui(delta: float) -> void:
+	if album_panel == null or not album_panel.visible:
+		return
+	_phone_ui_t -= delta
+	if _phone_ui_t > 0.0:
+		return
+	_phone_ui_t = 1.0
+	_update_phone_banner()
+
 ## 手机 banner：时钟（实时）+ 已玩时长（本次进入世界起算）+ 小红花数（代笔占位）。
 func _update_phone_banner() -> void:
 	if _phone_clock == null:
@@ -1072,8 +1083,12 @@ func _update_phone_banner() -> void:
 	var secs := 0
 	if _play_start_ms > 0:
 		secs = int((Time.get_ticks_msec() - _play_start_ms) / 1000)
-	_phone_playtime.text = "已玩 %d:%02d" % [secs / 60, secs % 60]
+	_phone_playtime.text = _fmt_playtime(secs)
 	_phone_flowers.text = "x%d" % _red_flower_count()
+
+## 已玩秒数 → "已玩 M:SS"（抽成纯函数便于回测换算）。
+func _fmt_playtime(secs: int) -> String:
+	return "已玩 %d:%02d" % [secs / 60, secs % 60]
 
 ## 小红花数：代笔占位——真实小红花系统未接入前，先用已收集贴纸总数当占位读数。
 ## TODO(小红花): 接入真实小红花来源后替换本函数。
@@ -1183,6 +1198,8 @@ func _process(delta: float) -> void:
 	game_audio.set_ducked(_recording or thinking_label.visible or _tts_player.playing \
 			or (fairy_voice != null and fairy_voice.is_playing()))
 	tp = _prof_lap(tp, "duck")
+	_step_phone_ui(delta)
+	tp = _prof_lap(tp, "phoneui")
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
 	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)

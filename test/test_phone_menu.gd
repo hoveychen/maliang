@@ -58,4 +58,16 @@ func _run(scene: Node) -> void:
 
 	scene._update_phone_banner()
 	var clock: Label = scene.get("_phone_clock")
-	_check(clock != null and not String(clock.text).is_empty(), "banner 时钟有值")
+	_check(clock != null and String(clock.text).length() == 5 and String(clock.text).contains(":"), "banner 时钟 HH:MM")
+
+	# P3：已游玩时间——纯函数换算（不依赖引擎运行秒数，确定性）。
+	_check(int(scene.get("_play_start_ms")) > 0, "_play_start_ms 已初始化")
+	_check(String(scene._fmt_playtime(0)) == "已玩 0:00", "换算 0s → 0:00")
+	_check(String(scene._fmt_playtime(65)) == "已玩 1:05", "换算 65s → 1:05")
+	_check(String(scene._fmt_playtime(600)) == "已玩 10:00", "换算 600s → 10:00")
+	var pt: Label = scene.get("_phone_playtime")
+	_check(pt != null and String(pt.text).begins_with("已玩 "), "banner 已玩时长已填")
+	# _step_phone_ui：手机开着时按节流刷新一次不崩
+	scene.set("_phone_ui_t", 0.0)
+	scene._step_phone_ui(1.0)
+	_check(true, "_step_phone_ui 运行不崩")
