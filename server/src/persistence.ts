@@ -476,6 +476,52 @@ export class WorldStore {
     }));
   }
 
+  // ── 只读观测（P6 调试后台；不改状态，直连查询）────────────────────────────
+
+  /** 列出所有世界（含背包/进行中委托）。 */
+  listWorlds(): { id: string; inventory: Record<string, number>; activeTask: ActiveTask | null }[] {
+    const rows = this.#db.prepare('SELECT id, inventory, active_task FROM worlds ORDER BY id').all() as {
+      id: string;
+      inventory: string;
+      active_task: string | null;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      inventory: JSON.parse(r.inventory) as Record<string, number>,
+      activeTask: r.active_task ? (JSON.parse(r.active_task) as ActiveTask) : null,
+    }));
+  }
+
+  /** 列出某 NPC 的全部记忆（跨所有玩家，含未绑定历史），按插入顺序。 */
+  listMemories(ownerCharacterId: string): MemoryItem[] {
+    const rows = this.#db
+      .prepare(
+        'SELECT about_player_id, about_character_id, text, kind, ts FROM memories WHERE owner_character_id = ? ORDER BY id',
+      )
+      .all(ownerCharacterId) as {
+      about_player_id: string;
+      about_character_id: string | null;
+      text: string;
+      kind: string;
+      ts: number;
+    }[];
+    return rows.map((r) => ({
+      text: r.text,
+      kind: r.kind as MemoryItem['kind'],
+      aboutPlayer: r.about_player_id,
+      aboutCharacter: r.about_character_id ?? undefined,
+      ts: r.ts,
+    }));
+  }
+
+  /** 列出某 NPC 的全部对话轮（跨所有玩家，带 playerId），按时间正序。 */
+  listChatTurns(characterId: string): { playerId: string; role: ChatTurn['role']; text: string; ts: number }[] {
+    const rows = this.#db
+      .prepare('SELECT player_id, role, text, ts FROM chat_turns WHERE character_id = ? ORDER BY id')
+      .all(characterId) as { player_id: string; role: string; text: string; ts: number }[];
+    return rows.map((r) => ({ playerId: r.player_id, role: r.role as ChatTurn['role'], text: r.text, ts: r.ts }));
+  }
+
   /** 存入资源，返回内容寻址 hash。 */
   putAsset(blob: ImageBlob): string {
     const hash = createHash('sha256').update(blob.bytes).digest('hex').slice(0, 16);

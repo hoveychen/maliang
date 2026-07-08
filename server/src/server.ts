@@ -42,6 +42,100 @@ function characterListView(store: WorldStore, worldId: string) {
   return store.listCharacters(worldId);
 }
 
+/** 只读后台快照（P6）：玩家 + 每个世界的角色（含记忆/对话）+ 物件 + Visit。直连 WorldStore，不改状态。 */
+export function buildDebugState(store: WorldStore) {
+  return {
+    players: store.listPlayers(),
+    worlds: store.listWorlds().map((w) => ({
+      id: w.id,
+      inventory: w.inventory,
+      activeTask: w.activeTask,
+      characters: store.listCharacters(w.id).map((c) => ({
+        id: c.id,
+        name: c.name,
+        isFairy: c.isFairy,
+        personality: c.personality,
+        state: c.state,
+        position: c.position,
+        memories: store.listMemories(c.id),
+        chatTurns: store.listChatTurns(c.id),
+      })),
+      props: store.listProps(w.id),
+      visits: store.listVisits(w.id),
+    })),
+  };
+}
+
+/** 单页只读 dashboard：拉 /debug/state 渲染。纯静态 HTML+JS，token 从本页 URL 透传给 state 接口。 */
+const DEBUG_DASHBOARD_HTML = `<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>maliang 状态后台</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 -apple-system,system-ui,"PingFang SC",sans-serif; margin: 0; background:#f5f3ee; color:#222; }
+  header { padding: 14px 20px; background:#2b2b2b; color:#f5f3ee; display:flex; align-items:baseline; gap:12px; }
+  header h1 { font-size: 16px; margin:0; font-weight:600; }
+  header .meta { font-size:12px; opacity:.7; }
+  header button { margin-left:auto; font-size:12px; padding:4px 12px; border-radius:6px; border:1px solid #666; background:#3a3a3a; color:#eee; cursor:pointer; }
+  main { padding: 16px 20px 60px; max-width: 1100px; }
+  h2 { font-size:14px; margin: 22px 0 8px; border-bottom:2px solid #d9d3c7; padding-bottom:4px; }
+  table { border-collapse: collapse; width:100%; margin:6px 0 14px; background:#fffdf8; }
+  th,td { text-align:left; padding:5px 9px; border:1px solid #e4ddcf; vertical-align:top; }
+  th { background:#efe9dd; font-weight:600; }
+  .world { border:1px solid #d9d3c7; border-radius:8px; padding:12px 14px; margin:14px 0; background:#fbf9f3; }
+  .world > .wid { font-weight:600; font-size:13px; }
+  .kind { display:inline-block; font-size:11px; padding:1px 6px; border-radius:4px; background:#e7e0d0; margin-right:4px; }
+  .mono { font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:12px; color:#555; }
+  .empty { color:#999; font-style:italic; }
+  .err { color:#b00; padding:20px; }
+  details { margin:4px 0; } summary { cursor:pointer; font-size:13px; }
+</style></head>
+<body>
+<header><h1>🧚 maliang 状态后台</h1><span class="meta" id="meta">加载中…</span><button onclick="load()">刷新</button></header>
+<main id="app"></main>
+<script>
+const token = new URLSearchParams(location.search).get('token');
+const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function kindsOf(mems){ const by={}; for(const m of mems){ (by[m.kind]=by[m.kind]||[]).push(m.text); } return by; }
+function charBlock(c){
+  const byKind = kindsOf(c.memories);
+  const memHtml = c.memories.length ? Object.entries(byKind).map(([k,ts]) =>
+    '<div><span class="kind">'+esc(k)+'</span>'+ts.map(esc).join('；')+'</div>').join('') : '<span class="empty">（无记忆）</span>';
+  const turns = c.chatTurns.slice(-12);
+  const turnHtml = turns.length ? turns.map(t =>
+    '<div class="mono">['+esc(t.playerId||'∅')+'] '+(t.role==='child'?'👦':'🧸')+' '+esc(t.text)+'</div>').join('') : '<span class="empty">（无对话）</span>';
+  return '<details'+(c.isFairy?'':' open')+'><summary><b>'+esc(c.name)+'</b> '+(c.isFairy?'🧚':'')+
+    ' <span class="mono">'+esc(c.id.slice(0,8))+' · '+esc(c.state)+' · ('+c.position.tileX+','+c.position.tileY+')</span>'+
+    ' <span class="mono">记忆'+c.memories.length+' 对话'+c.chatTurns.length+'</span></summary>'+
+    '<div style="padding:6px 0 6px 14px">'+esc(c.personality)+'<h4 style="margin:8px 0 2px;font-size:12px">记忆</h4>'+memHtml+
+    '<h4 style="margin:8px 0 2px;font-size:12px">近期对话（末12条）</h4>'+turnHtml+'</div></details>';
+}
+function render(s){
+  document.getElementById('meta').textContent = s.players.length+' 玩家 · '+s.worlds.length+' 世界';
+  let h = '<h2>玩家 Players ('+s.players.length+')</h2>';
+  h += s.players.length ? '<table><tr><th>id</th><th>名字</th><th>昵称</th><th>性别</th><th>颜色</th><th>建档</th></tr>'+
+    s.players.map(p => '<tr><td class="mono">'+esc(p.id.slice(0,12))+'</td><td>'+esc(p.name)+'</td><td>'+esc(p.nickname)+'</td><td>'+esc(p.gender)+'</td><td>'+esc(p.color)+'</td><td class="mono">'+esc(p.createdAt)+'</td></tr>').join('')+'</table>'
+    : '<p class="empty">（无玩家）</p>';
+  for(const w of s.worlds){
+    h += '<div class="world"><div class="wid">世界 '+esc(w.id)+'</div>';
+    h += '<div class="mono">背包 '+esc(JSON.stringify(w.inventory))+' · 委托 '+esc(w.activeTask?w.activeTask.type+'('+w.activeTask.npcName+')':'无')+'</div>';
+    h += '<h4 style="margin:10px 0 2px">角色 ('+w.characters.length+')</h4>'+ (w.characters.map(charBlock).join('')||'<span class="empty">（无角色）</span>');
+    h += '<h4 style="margin:10px 0 2px">物件 ('+w.props.length+') · Visit ('+w.visits.length+')</h4>';
+    h += '<div class="mono">'+w.visits.slice(0,10).map(v => v.playerId.slice(0,8)+' '+new Date(v.startedAt).toLocaleString()+(v.endedAt?' → 已结束':' · 进行中')).join('<br>')+'</div>';
+    h += '</div>';
+  }
+  document.getElementById('app').innerHTML = h;
+}
+async function load(){
+  try{
+    const r = await fetch('/debug/state'+(token?('?token='+encodeURIComponent(token)):''), {headers: token?{'x-admin-token':token}:{}});
+    if(!r.ok){ document.getElementById('app').innerHTML='<p class="err">加载失败 '+r.status+'（需要 ?token=）</p>'; return; }
+    render(await r.json());
+  }catch(e){ document.getElementById('app').innerHTML='<p class="err">'+esc(e)+'</p>'; }
+}
+load();
+</script></body></html>`;
+
 export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstance> {
   const adapters = deps.adapters ?? createAdapters(loadConfig());
   const store = deps.store ?? new WorldStore(process.env.MALIANG_DATA_DIR ?? './data');
@@ -169,6 +263,23 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const asset = store.getAsset(req.params.hash);
     if (!asset) return reply.code(404).send({ error: 'asset not found' });
     return reply.header('content-type', asset.mime).send(Buffer.from(asset.bytes));
+  });
+
+  // 只读状态后台（P6）：/debug/state 出 JSON 全量快照，/debug 出单页 dashboard 渲染它。
+  // 只读直连 WorldStore，不改状态。含玩家名/记忆等，配了 MALIANG_ADMIN_TOKEN 就要 ?token= 或 x-admin-token。
+  const debugToken = process.env.MALIANG_ADMIN_TOKEN;
+  const debugAuthed = (req: { headers: Record<string, unknown>; query: unknown }): boolean => {
+    if (!debugToken) return true; // 未配置 token = 开发环境，开放
+    const q = (req.query as { token?: string } | undefined)?.token;
+    return req.headers['x-admin-token'] === debugToken || q === debugToken;
+  };
+  app.get('/debug/state', async (req, reply) => {
+    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    return buildDebugState(store);
+  });
+  app.get('/debug', async (req, reply) => {
+    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    return reply.header('content-type', 'text/html; charset=utf-8').send(DEBUG_DASHBOARD_HTML);
   });
 
   // 昂贵操作限流：每连接 N/分钟 + 全局并发上限（防刷付费 API）
