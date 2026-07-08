@@ -26,6 +26,11 @@ static func instance(mesh: Mesh) -> MeshInstance3D:
 	mi.extra_cull_margin = SdfProp.CULL_MARGIN
 	return mi
 
+## 静态烘焙壳密度：圆润观感来自梯度法线（与密度无关），密度只管轮廓——
+## god 视角一棵树屏幕上百来像素，球 8 段轮廓够用；1.0 档一棵树 5~9k 面
+## 是平板 fps<10 的主因（500 棵占世界三角形 96%），0.34 档压到 ~1k 面。
+const SHELL_DENSITY := 0.34
+
 ## spec 字典 → 烘焙 ArrayMesh；spec 不合法返回 null 并 push_warning。
 static func bake_spec(spec: Dictionary) -> ArrayMesh:
 	var cfg := SdfSpec.parse(spec)
@@ -34,7 +39,7 @@ static func bake_spec(spec: Dictionary) -> ArrayMesh:
 		return null
 	var rig := SdfSpec.build_rig(cfg)
 	var prims: Array = rig.prims
-	var shell := SdfMeshBuilder.build(prims)
+	var shell := SdfMeshBuilder.build(prims, SHELL_DENSITY)
 	var arrays := shell.surface_get_arrays(0)
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var uv2s: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV2]
