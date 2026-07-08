@@ -1,4 +1,5 @@
 extends Node
+class_name Loading
 ## 进入世界的加载过场：菜单/绘本 → 世界之间插的一层。
 ## 线程加载目标场景（真实进度不阻塞主线程），实例化后把世界挂到 root，
 ## 用高层 CanvasLayer(layer=128，压过世界 HUD 的 layer=1) 盖住首屏 chunk 逐帧铺设

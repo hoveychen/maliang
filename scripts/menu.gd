@@ -106,11 +106,16 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_tap() -> void:
 	_go_to(target_scene())
 
-## 点按音效放完再切场景（本节点一切走音就断了）
+## 点按音效放完再切场景（本节点一切走音就断了）。
+## 进世界(main.tscn)经加载过场遮住首屏铺设/网络弹入；进绘本 onboarding 轻量，直切。
 func _go_to(scene_path: String) -> void:
 	if _leaving:
 		return
 	_leaving = true
 	game_audio.play_sfx("click")
 	await get_tree().create_timer(0.15).timeout
-	get_tree().change_scene_to_file(scene_path)
+	if scene_path == "res://main.tscn":
+		Loading.next_scene = scene_path
+		get_tree().change_scene_to_file("res://loading.tscn")
+	else:
+		get_tree().change_scene_to_file(scene_path)
