@@ -8,8 +8,8 @@ extends Node3D
 ## loading.gd 收到即淡出过场交还世界。断网时 _bootstrap 提前返回，超时也会兜底放行。
 signal world_ready
 
-const READY_TIMEOUT_MS := 8000    ## 就绪硬超时：网络慢/卡时最迟 8s 也放行，不让加载画面永挂
-const READY_MIN_MS := 400         ## 最短等待：首屏 chunk 至少铺一轮，避免 world_ready 抢在铺设前发出
+const READY_TIMEOUT_SEC := 8.0    ## 就绪硬超时：网络慢/卡时最迟 8s 也放行，不让加载画面永挂
+const READY_MIN_SEC := 0.4        ## 最短等待：首屏 chunk 至少铺一轮，避免 world_ready 抢在铺设前发出
 const PLAYER_SPEED := 8.0         ## 方向键直接驱动玩家的速度（与 BehaviorExecutor.SPEED 一致）
 const GOD_PITCH_DEG := 47.0       ## 默认跟随视角：地平线落屏幕 ~4/5 高度（约 20% 天空）
 const LOCK_PITCH_DEG := 30.0      ## lock 跟随：明显放平（3/4 平视，地平线 ~3/4、约 25% 天空）
@@ -1527,18 +1527,19 @@ func _bootstrap() -> void:
 				OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
 	_bootstrapping = false
 
-## 首屏就绪守望：等首屏 chunk 全 skin 完 && 引导结束，最短 READY_MIN_MS、最长 READY_TIMEOUT_MS，
+## 首屏就绪守望：等首屏 chunk 全 skin 完 && 引导结束，最短 READY_MIN_SEC、最长 READY_TIMEOUT_SEC，
 ## 然后发 world_ready。每帧让出（await process_frame）确保 _process→chunk_manager.update 推进铺设。
+## 计时累加帧 delta（仿真时间）而非墙钟：headless 下帧比真机快得多，墙钟会让最短门永不满足。
 var _bootstrapping := false
 var _world_ready_sent := false
 func _watch_world_ready() -> void:
-	var start := Time.get_ticks_msec()
+	var elapsed := 0.0
 	while true:
 		await get_tree().process_frame
-		var elapsed := Time.get_ticks_msec() - start
-		if elapsed >= READY_TIMEOUT_MS:
+		elapsed += get_process_delta_time()
+		if elapsed >= READY_TIMEOUT_SEC:
 			break # 硬超时兜底：网络慢也放行
-		if elapsed < READY_MIN_MS:
+		if elapsed < READY_MIN_SEC:
 			continue # 最短等待，避免抢在首屏铺设前发出
 		if chunk_manager.all_skinned() and not _bootstrapping:
 			break

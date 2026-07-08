@@ -1,10 +1,15 @@
 extends Node
 class_name Loading
 ## 进入世界的加载过场：菜单/绘本 → 世界之间插的一层。
-## 线程加载目标场景（真实进度不阻塞主线程），实例化后把世界挂到 root，
-## 用高层 CanvasLayer(layer=128，压过世界 HUD 的 layer=1) 盖住首屏 chunk 逐帧铺设
-## 与网络角色弹入的窗口；等世界发 world_ready（首屏铺完 + 引导结束 / 8s 超时兜底）
-## 再淡出交还世界。画风复用主菜单：水彩背景 + 飘动小仙子 + 三点脉动「处理中」。
+## 先画出品牌遮罩，隔一帧再同步加载目标场景（把 main.tscn 及其 preload 资产的一次性
+## 开销盖在过场下，而非旧路径那样卡在菜单帧上），实例化后把世界挂到 root，用高层
+## CanvasLayer(layer=128，压过世界 HUD 的 layer=1) 盖住首屏 chunk 逐帧铺设与网络角色
+## 弹入的窗口；等世界发 world_ready（首屏铺完 + 引导结束 / 8s 超时兜底）再淡出交还世界。
+## 画风复用主菜单：水彩背景 + 飘动小仙子 + 三点脉动「处理中」。
+##
+## 不用 ResourceLoader 线程加载：目标场景脚本(chunk_manager)含大量 preload()，在加载
+## 子线程上编译会解析失败(Godot 已知的 preload-on-thread 脆弱点，headless 实测 FAILED)；
+## 同步 load 各处都稳，重活本就在世界 _ready/chunk 铺设，非磁盘 IO，同步足矣。
 ##
 ## next_scene 由上游（menu / onboarding）静态置入；缺省回落 main.tscn。
 ## 运行/测试: 上游置 Loading.next_scene 后 change_scene_to_file("res://loading.tscn")。
@@ -23,12 +28,12 @@ var _fairy_base_y := 0.0
 var _shown_at := 0
 var _world: Node = null
 var _revealing := false    ## 已开始揭开（防重复 spawn/reveal）
+var _frames := 0           ## 已过帧数（首帧只画遮罩，第二帧起才同步加载世界）
 
 func _ready() -> void:
 	_shown_at = Time.get_ticks_msec()
 	_build_overlay()
-	# 线程加载目标场景：磁盘 IO 走后台线程，主线程这一帧不卡（小仙子照常飘）
-	ResourceLoader.load_threaded_request(next_scene)
+	# 隔一帧再同步加载：先让遮罩画出来，避免加载 main.tscn 的那一帧还是黑屏
 
 func _build_overlay() -> void:
 	var layer := CanvasLayer.new()
@@ -97,20 +102,16 @@ func _process(delta: float) -> void:
 
 	if _revealing:
 		return
-	var status := ResourceLoader.load_threaded_get_status(next_scene)
-	match status:
-		ResourceLoader.THREAD_LOAD_LOADED:
-			_spawn_world()
-		ResourceLoader.THREAD_LOAD_FAILED, ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
-			# 线程加载出岔：硬切兜底，别把小朋友永远卡在过场
-			push_warning("loading: 线程加载失败，回落硬切 %s" % next_scene)
-			set_process(false)
-			get_tree().change_scene_to_file(next_scene)
+	# 首帧只画遮罩，第二帧起再同步加载（遮罩已上屏，加载卡帧也不黑）
+	_frames += 1
+	if _frames >= 2:
+		_spawn_world()
 
 func _spawn_world() -> void:
-	_revealing = true # 停止轮询，只等 world_ready
-	var packed := ResourceLoader.load_threaded_get(next_scene) as PackedScene
+	_revealing = true # 只此一次，之后只等 world_ready
+	var packed := load(next_scene) as PackedScene
 	if packed == null:
+		push_warning("loading: 加载失败，回落硬切 %s" % next_scene)
 		set_process(false)
 		get_tree().change_scene_to_file(next_scene)
 		return
