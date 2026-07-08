@@ -169,11 +169,12 @@ export function createMockAdapters(): ServiceAdapters {
         return { kind: 'chat', replyText: `（mock 回应）你说的是「${transcript}」对吗？`, emotion: 'happy' };
       },
       async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
-        // mock：确定性地从「我叫X」「我喜欢X」抽要点并分类，去重后返回（真实接 LLM 自由判断）
+        // mock：确定性地扫整段会话的每轮「我叫X」「我喜欢X」抽要点并分类，去重后返回（真实接 LLM 自由判断）
+        const child = ctx.turns.map((t) => t.child).join('\n');
         const facts: ExtractedMemory[] = [];
-        const nameM = /我叫([^\s，。!！?？]{1,8})/.exec(ctx.transcript);
+        const nameM = /我叫([^\s，。!！?？]{1,8})/.exec(child);
         if (nameM) facts.push({ text: `小朋友叫${nameM[1]}`, kind: 'identity' });
-        const likeM = /我喜欢([^\s，。!！?？]{1,12})/.exec(ctx.transcript);
+        const likeM = /我喜欢([^\s，。!！?？]{1,12})/.exec(child);
         if (likeM) facts.push({ text: `小朋友喜欢${likeM[1]}`, kind: 'preference' });
         return facts.filter((f) => !ctx.existingMemory.includes(f.text));
       },

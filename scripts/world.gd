@@ -964,6 +964,9 @@ func _process(delta: float) -> void:
 ## 世界卸载/退出：把所有执行器的在途异步寻路任务收干净，防 WorkerThreadPool 在
 ## 引擎关停时销毁在途任务残留的绑定 Callable 崩溃（真机退出/回测退出 exit 134）。
 func _exit_tree() -> void:
+	# 离开世界 = 会话（Visit）结束：显式发 leave_world 让服务端 flush 批量抽记忆（掉线由服务端 close 兜底）。
+	if backend != null and world_id != "":
+		backend.send_leave_world(world_id)
 	for ex in _executors:
 		ex.cancel()  # 把各自在途寻路任务转孤儿
 	BehaviorExecutor.flush_all_blocking()  # 阻塞收完（关停允许阻塞）

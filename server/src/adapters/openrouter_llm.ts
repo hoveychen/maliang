@@ -201,9 +201,11 @@ ${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLi
   }
 
   async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
+    if (ctx.turns.length === 0) return [];
     const known = ctx.existingMemory.length > 0 ? ctx.existingMemory.join('；') : '（暂无）';
-    const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。你刚和小朋友说了一轮话。
-从这轮里挑出「值得你长期记住」的、关于小朋友或你们关系的要点，并给每条分类。
+    const conversation = ctx.turns.map((t) => `小朋友：${t.child}\n你：${t.npc}`).join('\n');
+    const system = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。你刚和小朋友聊了一会儿（下面是这段对话）。
+从整段对话里挑出「值得你长期记住」的、关于小朋友或你们关系的要点，并给每条分类。
 分类 kind（五选一）：
 - identity=名字/身份（「小朋友叫朵朵」）
 - preference=喜好/讨厌（「小朋友喜欢恐龙」）
@@ -219,7 +221,7 @@ ${abilityLines}${rosterLine}${locationLine}${inventoryLine}${taskLine}${memoryLi
       this.#model,
       [
         { role: 'system', content: system },
-        { role: 'user', content: `小朋友说：${ctx.transcript}\n你回应：${ctx.replyText}` },
+        { role: 'user', content: conversation },
       ],
       { jsonObject: true },
     );

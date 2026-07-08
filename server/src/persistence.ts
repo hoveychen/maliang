@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, Character, MemoryItem, Player, WorldProp } from './types.ts';
+import type { ActiveTask, Character, MemoryItem, Player, Visit, WorldProp } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 
 export interface World {
@@ -80,6 +80,14 @@ export class WorldStore {
         ts INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_mem_owner_player ON memories(owner_character_id, about_player_id);
+      CREATE TABLE IF NOT EXISTS visits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        world_id TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_visits_world_player ON visits(world_id, player_id);
     `);
   }
 
@@ -374,6 +382,39 @@ export class WorldStore {
       aboutPlayer: r.about_player_id,
       aboutCharacter: r.about_character_id ?? undefined,
       ts: r.ts,
+    }));
+  }
+
+  // ── 会话 Visit（进世界→离开为一段，作会话结束批量抽记忆的边界；见 types.Visit）──────
+
+  /** 开一段会话，返回 visitId（ended_at 置空=进行中）。startedAt 由调用方传（server 用 Date.now）。 */
+  startVisit(worldId: string, playerId: string, startedAt: number): number {
+    const info = this.#db
+      .prepare('INSERT INTO visits (world_id, player_id, started_at, ended_at) VALUES (?, ?, ?, NULL)')
+      .run(worldId, playerId, startedAt);
+    return Number(info.lastInsertRowid);
+  }
+
+  /** 收尾一段会话（leave_world 显式退出 / socket.close 兜底）。已收尾的不覆盖。 */
+  endVisit(id: number, endedAt: number): void {
+    this.#db.prepare('UPDATE visits SET ended_at = ? WHERE id = ? AND ended_at IS NULL').run(endedAt, id);
+  }
+
+  /** 查会话记录（P6 只读后台用；worldId 省略=全部），按开始时间倒序。 */
+  listVisits(worldId?: string): Visit[] {
+    const rows = (
+      worldId === undefined
+        ? this.#db.prepare('SELECT id, world_id, player_id, started_at, ended_at FROM visits ORDER BY started_at DESC').all()
+        : this.#db
+            .prepare('SELECT id, world_id, player_id, started_at, ended_at FROM visits WHERE world_id = ? ORDER BY started_at DESC')
+            .all(worldId)
+    ) as { id: number; world_id: string; player_id: string; started_at: number; ended_at: number | null }[];
+    return rows.map((r) => ({
+      id: r.id,
+      worldId: r.world_id,
+      playerId: r.player_id,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
     }));
   }
 

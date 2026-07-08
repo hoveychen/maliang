@@ -149,12 +149,12 @@ export interface IntentContext {
   inventory?: Record<string, number>;
 }
 
-/** 对话后让角色「自己决定记什么」的上下文（extractMemory 用）。 */
+/** 会话（Visit）结束时让角色「自己决定记什么」的上下文（extractMemory 用）。 */
 export interface MemoryExtractionContext {
   characterName: string;
   personality: string;
-  transcript: string; // 小朋友这轮说的
-  replyText: string; // 角色这轮的回应
+  /** 本次会话（Visit）里与该角色的整段对话增量（多轮），会话结束批量抽一次。 */
+  turns: { child: string; npc: string }[];
   existingMemory: string[]; // 已记住的，用于去重/避免重复记
 }
 
@@ -201,6 +201,19 @@ export interface Player {
   color: string; // 喜欢的颜色名
   spriteAsset: string; // 形象资产 hash（内容寻址，服务端已有）
   createdAt: string; // ISO 时间；由前端 profile 带上，服务端不取墙上时钟
+}
+
+/**
+ * 一次会话（Visit）：一次「进世界到离开」，作会话结束批量抽记忆的边界（见 design §4）。
+ * 身份 = (worldId, playerId, startedAt)，绑世界+玩家而非 socket（兼容未来重连）。
+ * endedAt=null 表示进行中（掉线未收尾也可能停留 null，靠 socket.close 兜底置时）。
+ */
+export interface Visit {
+  id: number;
+  worldId: string;
+  playerId: string;
+  startedAt: number;
+  endedAt: number | null;
 }
 
 /** 记忆分类型（对齐 extractMemory 抽取口径：名字/喜好/约定/发生的事/关系）。 */

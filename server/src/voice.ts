@@ -188,20 +188,21 @@ function finishTurn(store: WorldStore, character: Character, transcript: string,
 }
 
 /**
- * 对话后让角色「自己挑出值得长期记住的要点」，去重后按 (NPC, 当前玩家) 维度落 memories 表。
- * 设计为「尽力而为」：由 WS 处理器在回复发出后后台调用（不 await 进回复路径），
+ * 会话（Visit）结束时，让角色对整段对话增量「自己挑出值得长期记住的要点」，
+ * 去重后按 (NPC, 当前玩家) 维度落 memories 表。相比旧「每轮抽一次」，一次会话每个角色只调一次 LLM（省调用）。
+ * 设计为「尽力而为」：由 WS 处理器在会话结束（leave_world / socket.close）或超阈值时后台调用，
  * 失败/超时只影响这次记忆、绝不影响角色回复。
  * （记忆条数上限/裁剪留 P5 chat_turns 治理时一并处理，本期先只追加。）
  */
-export async function accumulateMemory(
+export async function flushMemory(
   worldId: string,
   characterId: string,
   playerId: string,
-  transcript: string,
-  replyText: string,
+  turns: { child: string; npc: string }[],
   adapters: ServiceAdapters,
   store: WorldStore,
 ): Promise<void> {
+  if (turns.length === 0) return;
   const character = store.getCharacter(worldId, characterId);
   if (!character) return;
   // 已记的（该 NPC 对这个玩家的，含未绑定历史）喂给抽取器去重，并在落地前再兜一次去重。
@@ -210,8 +211,7 @@ export async function accumulateMemory(
   const remembered = await adapters.llm.extractMemory({
     characterName: character.name,
     personality: character.personality,
-    transcript,
-    replyText,
+    turns,
     existingMemory: existing.map((m) => m.text),
   });
   for (const item of remembered) {

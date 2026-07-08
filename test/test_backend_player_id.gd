@@ -31,6 +31,13 @@ func _init() -> void:
 	b.send_world_info("w1", [])
 	fails += _check("空 profile 不带 profile 键", (captured[-1] as Dictionary).has("profile"), false)
 
+	# leave_world：离开世界显式收尾会话（Visit），带 worldId + playerId
+	b.send_leave_world("w1")
+	var lw: Dictionary = captured[-1]
+	fails += _check("leave_world type", lw.get("type", ""), "leave_world")
+	fails += _check("leave_world 带 worldId", lw.get("worldId", ""), "w1")
+	fails += _check("leave_world 带 playerId", lw.get("playerId", ""), "pid-abc")
+
 	b.free()
 	if fails == 0:
 		print("backend_player_id tests PASS")

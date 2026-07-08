@@ -56,6 +56,14 @@ func send_voice_transcript(world_id: String, character_id: String, transcript: S
 func send_create_character(world_id: String, intent_text: String) -> void:
 	_send({ "type": "create_character_request", "worldId": world_id, "intentText": intent_text, "byFairy": true })
 
+## 离开世界（玩家正常退出）：显式通知服务端收尾会话（Visit），触发批量抽记忆。
+## 世界卸载后紧接着场景切换/节点释放，socket 可能来不及发——poll 一次尽量把帧推出；
+## 万一没发到也不丢记忆，服务端 socket.close 会兜底 flush。
+func send_leave_world(world_id: String) -> void:
+	_send({ "type": "leave_world", "worldId": world_id })
+	if _open:
+		_ws.poll()
+
 ## 上报世界地点名清单（POI 名，连上后一次）：意图 LLM 用来归一「去某地」的地名。
 ## profile 非空时随 world_info 上报，供服务端首见建玩家档（面向 MMO；见 server types.Player）。
 func send_world_info(world_id: String, locations: Array, profile := {}) -> void:

@@ -7,7 +7,7 @@ import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
-import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
+import { handleVoice, respondToTranscript, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { stickerGlyph, type ActiveTask, type Character, type Player, type VoiceResponse, type WorldProp } from './types.ts';
@@ -184,14 +184,26 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     socket.on('message', (raw: Buffer) => {
       void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session);
     });
-    // 连接断开时释放可能仍持有的限流名额（录到一半断线）
+    // 连接断开时释放可能仍持有的限流名额（录到一半断线），并 flush 会话记忆兜底（前端没发 leave_world 就掉线）
     socket.on('close', () => {
       if (session.gate) { session.gate.release(); session.gate = null; }
       session.active = false;
+      void endSessionVisit(session, adapters, store, Date.now());
     });
   });
 
   return app;
+}
+
+/**
+ * 进行中的会话（Visit）在连接上的状态：pending 累积各角色的对话增量，
+ * 会话结束（leave_world / socket.close）或单角色超阈值时 flush 批量抽记忆。
+ */
+export interface VisitState {
+  id: number; // visits 表行 id
+  worldId: string;
+  playerId: string;
+  pending: Map<string, { child: string; npc: string }[]>; // characterId → 尚未抽取的对话增量
 }
 
 /** 边说边识别的单连接语音会话：voice_start 开讯飞流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
@@ -203,10 +215,74 @@ export interface VoiceSession {
   playerId: string;
   asr: ASRStream | null;
   gate: { release: () => void } | null;
+  /** 进行中的会话（world_info 起、leave_world/close 收尾）；每轮对话增量累积其中，结束批量抽记忆。 */
+  visit: VisitState | null;
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null };
+  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null };
+}
+
+const VISIT_FLUSH_THRESHOLD = 20; // 单角色累积超此轮数即中途 flush，兜底长会话掉线全丢
+
+/** 进世界：开一段 Visit。已有旧 Visit（换世界/重连）先收尾再开新的。 */
+export function startSessionVisit(
+  session: VoiceSession,
+  worldId: string,
+  playerId: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  now: number,
+): void {
+  if (session.visit) void endSessionVisit(session, adapters, store, now); // 收尾旧的（同步排空 pending，抽取后台跑）
+  session.visit = { id: store.startVisit(worldId, playerId, now), worldId, playerId, pending: new Map() };
+}
+
+/** 记一轮对话进当前 Visit 的增量；单角色超阈值即中途 flush 兜底（后台跑，不阻塞回复路径）。 */
+export function recordVisitTurn(
+  session: VoiceSession,
+  worldId: string,
+  playerId: string,
+  characterId: string,
+  transcript: string,
+  replyText: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+): void {
+  // 兜底：没经 world_info 起过 Visit（旧客户端/直连）时惰性开一段。
+  if (!session.visit) {
+    session.visit = { id: store.startVisit(worldId, playerId, Date.now()), worldId, playerId, pending: new Map() };
+  }
+  const visit = session.visit;
+  const turns = visit.pending.get(characterId) ?? [];
+  turns.push({ child: transcript, npc: replyText });
+  visit.pending.set(characterId, turns);
+  if (turns.length >= VISIT_FLUSH_THRESHOLD) {
+    const batch = turns.slice();
+    turns.length = 0; // 清空已抽取的增量，后续轮次重新累积
+    void flushMemory(visit.worldId, characterId, visit.playerId, batch, adapters, store).catch(() => {});
+  }
+}
+
+/** 会话结束（leave_world / socket.close）：flush 当前 Visit（每个有增量的角色批量抽一次）并清出 session。 */
+export async function endSessionVisit(
+  session: VoiceSession,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  endedAt: number,
+): Promise<void> {
+  const visit = session.visit;
+  if (!visit) return;
+  session.visit = null; // 先摘出，避免并发/重入重复 flush
+  const jobs: Promise<void>[] = [];
+  for (const [characterId, turns] of visit.pending) {
+    if (turns.length === 0) continue;
+    const batch = turns.slice();
+    turns.length = 0;
+    jobs.push(flushMemory(visit.worldId, characterId, visit.playerId, batch, adapters, store).catch(() => {}));
+  }
+  store.endVisit(visit.id, endedAt);
+  await Promise.all(jobs);
 }
 
 /** 得奖语音表扬：委托人音色念表扬词，合成好推 praise_tts（尽力而为，失败不影响主流程）。 */
@@ -337,11 +413,19 @@ export async function handleWsMessage(
       .map((n) => n.trim())
       .slice(0, 32);
     store.setLocations(worldId, names);
+    // 进世界 = 一段会话（Visit）开始：作会话结束批量抽记忆的边界。
+    startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now());
     socket.send(JSON.stringify({
       type: 'world_state',
       inventory: store.getInventory(worldId),
       activeTask: store.getActiveTask(worldId),
     }));
+    return;
+  }
+
+  // 离开世界（前端正常退出显式发）：会话结束，flush 批量抽记忆并收尾 Visit。掉线未发则靠 socket.close 兜底。
+  if (msg.type === 'leave_world') {
+    await endSessionVisit(session, adapters, store, Date.now());
     return;
   }
 
@@ -449,15 +533,8 @@ export async function handleWsMessage(
         void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store);
       }
       // 长期记忆后台累积：在回复发出后再做，不阻塞对话；失败/超时只影响这次记忆。
-      void accumulateMemory(
-        msg.worldId ?? '',
-        msg.characterId ?? '',
-        session.playerId,
-        response.transcript,
-        response.replyText,
-        adapters,
-        store,
-      ).catch(() => {});
+      // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
+      recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {
@@ -498,15 +575,8 @@ export async function handleWsMessage(
       if (response.propRequest) {
         void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store);
       }
-      void accumulateMemory(
-        msg.worldId ?? '',
-        msg.characterId ?? '',
-        session.playerId,
-        response.transcript,
-        response.replyText,
-        adapters,
-        store,
-      ).catch(() => {});
+      // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
+      recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {
@@ -566,7 +636,7 @@ export async function handleWsMessage(
       if (response.propRequest) {
         void createPropAsync(socket, worldId, response.propRequest, adapters, store);
       }
-      void accumulateMemory(worldId, characterId, playerId, response.transcript, response.replyText, adapters, store).catch(() => {});
+      recordVisitTurn(session, worldId, playerId, characterId, response.transcript, response.replyText, adapters, store);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {
