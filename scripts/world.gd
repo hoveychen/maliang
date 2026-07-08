@@ -4,6 +4,12 @@ extends Node3D
 ## 逻辑/数据是纯平铺环面；弯曲只在渲染。角色精灵不走 shader，改用 CPU 复算
 ## 弯曲量、沿相机上方向落到弯曲地表（曲面世界放置物体的通用解法）。
 
+## 世界首屏就绪：首屏 chunk 全部 skin 完毕 + 在线引导结束（或超时兜底）后发出，
+## loading.gd 收到即淡出过场交还世界。断网时 _bootstrap 提前返回，超时也会兜底放行。
+signal world_ready
+
+const READY_TIMEOUT_MS := 8000    ## 就绪硬超时：网络慢/卡时最迟 8s 也放行，不让加载画面永挂
+const READY_MIN_MS := 400         ## 最短等待：首屏 chunk 至少铺一轮，避免 world_ready 抢在铺设前发出
 const PLAYER_SPEED := 8.0         ## 方向键直接驱动玩家的速度（与 BehaviorExecutor.SPEED 一致）
 const GOD_PITCH_DEG := 47.0       ## 默认跟随视角：地平线落屏幕 ~4/5 高度（约 20% 天空）
 const LOCK_PITCH_DEG := 30.0      ## lock 跟随：明显放平（3/4 平视，地平线 ~3/4、约 25% 天空）
@@ -208,6 +214,7 @@ func _ready() -> void:
 	add_child(api)
 	_setup_audio()
 	_bootstrap() # 在线引导（best-effort，离线则保留占位 NPC）
+	_watch_world_ready() # 首屏铺完+引导结束→发 world_ready（loading.gd 据此淡出）
 
 func _setup_audio() -> void:
 	# 麦克风采集抽到 MicRecorder（与 onboarding 共用）；TTS 播放器保留在本场景
@@ -1491,32 +1498,53 @@ func _on_failed(reason: String) -> void:
 			_utterance_cancel()
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
+## _bootstrapping 全程置位，无论在线/离线都在收尾清零——world_ready 就绪判定据此知道引导已结束。
 func _bootstrap() -> void:
+	_bootstrapping = true
 	_apply_player_sprite() # 档案形象替换占位（并行拉取，不阻塞世界引导）
 	# 加载固定的 default 世界（含预生成村民），不再每次新建
 	var world: Dictionary = await api.get_world("default")
-	if world.is_empty():
-		return # 离线：保留 hardcoded demo NPC
-	online = true
-	world_id = String(world.get("id", "default"))
-	backend.url = (api.base as String).replace("http", "ws") + "/ws"
-	backend.connect_to_server()
-	for n in npcs:
-		OccupancyMap.char_unregister(String(n.get("id", "")))
-		(n["node"] as Node).queue_free() # 清掉离线占位
-	npcs.clear()
-	var chars: Array = world.get("characters", [])
-	for c in chars:
-		await _spawn_server_character(c as Dictionary, Vector2.INF)
-	_restore_world_props(world.get("props", []))
-	# 玩家搬到小神仙旁边降生，相机跟着玩家过去
-	var fairy := _find_fairy()
-	if not fairy.is_empty():
-		focus_logical = fairy["logical"]
-		if not player.is_empty():
-			var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
-			player["logical"] = spot
-			OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	if not world.is_empty():
+		online = true
+		world_id = String(world.get("id", "default"))
+		backend.url = (api.base as String).replace("http", "ws") + "/ws"
+		backend.connect_to_server()
+		for n in npcs:
+			OccupancyMap.char_unregister(String(n.get("id", "")))
+			(n["node"] as Node).queue_free() # 清掉离线占位
+		npcs.clear()
+		var chars: Array = world.get("characters", [])
+		for c in chars:
+			await _spawn_server_character(c as Dictionary, Vector2.INF)
+		_restore_world_props(world.get("props", []))
+		# 玩家搬到小神仙旁边降生，相机跟着玩家过去
+		var fairy := _find_fairy()
+		if not fairy.is_empty():
+			focus_logical = fairy["logical"]
+			if not player.is_empty():
+				var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
+				player["logical"] = spot
+				OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	_bootstrapping = false
+
+## 首屏就绪守望：等首屏 chunk 全 skin 完 && 引导结束，最短 READY_MIN_MS、最长 READY_TIMEOUT_MS，
+## 然后发 world_ready。每帧让出（await process_frame）确保 _process→chunk_manager.update 推进铺设。
+var _bootstrapping := false
+var _world_ready_sent := false
+func _watch_world_ready() -> void:
+	var start := Time.get_ticks_msec()
+	while true:
+		await get_tree().process_frame
+		var elapsed := Time.get_ticks_msec() - start
+		if elapsed >= READY_TIMEOUT_MS:
+			break # 硬超时兜底：网络慢也放行
+		if elapsed < READY_MIN_MS:
+			continue # 最短等待，避免抢在首屏铺设前发出
+		if chunk_manager.all_skinned() and not _bootstrapping:
+			break
+	if not _world_ready_sent:
+		_world_ready_sent = true
+		world_ready.emit()
 
 func _find_fairy() -> Dictionary:
 	for n in npcs:
