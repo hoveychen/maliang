@@ -191,6 +191,7 @@ static func _make_water_mat() -> ShaderMaterial:
 func update(player_logical: Vector2) -> void:
 	var pcx := int(floor(player_logical.x / CHUNK_WORLD))
 	var pcz := int(floor(player_logical.y / CHUNK_WORLD))
+	var pending: Array = []  # 未铺设槽位 [距离, slot, wrapped]，每帧只铺最近的一块
 	for i in range(-R, R + 1):
 		for j in range(-R, R + 1):
 			var cx := pcx + i
@@ -210,12 +211,18 @@ func update(player_logical: Vector2) -> void:
 			# 圆形裁剪：超出半径的区块隐藏 → 圆形地平线，无正方形四角对角缺口
 			root.visible = d.length() < RENDER_RADIUS
 			if not slot["skinned"]:
-				slot["skinned"] = true
-				var t0 := Time.get_ticks_usec()
-				_skin(slot, wrapped)
-				var ms := float(Time.get_ticks_usec() - t0) / 1000.0
-				if ms > 30.0:
-					print("SPIKE chunk skin %s %.0fms" % [wrapped, ms])
+				pending.append([d.length(), slot, wrapped])
+	# 入场铺设分帧：单块在平板小核上 80~200ms，一帧铺 9 块曾实测卡 ~1s；
+	# 每帧只铺离焦点最近的一块（玩家脚下先有地），~9 帧内铺完
+	if not pending.is_empty():
+		pending.sort_custom(func(a, b): return a[0] < b[0])
+		var e: Array = pending[0]
+		e[1]["skinned"] = true
+		var t0 := Time.get_ticks_usec()
+		_skin(e[1], e[2])
+		var ms := float(Time.get_ticks_usec() - t0) / 1000.0
+		if ms > 30.0:
+			print("SPIKE chunk skin %s %.0fms" % [e[2], ms])
 
 ## 按 wrapped 索引刷新区块外观（autotile 地面 + 地标 + 分区散布）。
 ## 地面棋盘/路/水全部由 TerrainMap+TerrainAtlas 决定，不再逐区块调色。
