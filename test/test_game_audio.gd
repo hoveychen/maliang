@@ -11,6 +11,15 @@ func _sim(ga: GameAudio, secs: float) -> void:
 		ga._advance(0.05)
 		t += 0.05
 
+## 等 BGM 段线程加载就绪起播（step_index>=0）。BGM 改线程加载后 start_bgm 不再同步
+## 起播——用 OS.delay_msec 给 worker 真实时间，不靠循环次数猜时序。
+func _wait_bgm(ga: GameAudio) -> void:
+	for i in range(2000):
+		ga._advance(0.0)  # delta=0：只跑加载轮询、不推进时间
+		if ga.step_index >= 0:
+			return
+		OS.delay_msec(1)
+
 func _check(name: String, got: Variant, want: Variant) -> int:
 	if got == want:
 		print("PASS %s" % name)
@@ -53,7 +62,9 @@ func _run(ga: GameAudio) -> void:
 	# 用 0.05s 小步长模拟真实帧推进；一次塞大 delta 会在同帧内完成整个淡化
 	var two: Array = [GameAudio.BGM_STEPS[0], GameAudio.BGM_STEPS[0]]
 	ga.start_bgm(two)
-	_fails += _check("开播在第 0 段", ga.step_index, 0)
+	_fails += _check("start_bgm 不同步起播(线程加载中)", ga.step_index, -1)
+	_wait_bgm(ga)
+	_fails += _check("线程加载完起播在第 0 段", ga.step_index, 0)
 	_sim(ga, GameAudio.SECTION_SECS + 0.1)
 	_fails += _check("section 到点换段", ga.step_index, 1)
 	_fails += _check("交叉淡化进行中", ga._fade_left > 0.0, true)
@@ -76,6 +87,7 @@ func _run(ga: GameAudio) -> void:
 
 	# 单段模式：永不换段
 	ga.start_bgm([GameAudio.BGM_STEPS[0]])
+	_wait_bgm(ga)
 	_sim(ga, GameAudio.SECTION_SECS * 3.0)
 	_fails += _check("单段不轮换", ga.step_index, 0)
 	ga.stop_bgm()

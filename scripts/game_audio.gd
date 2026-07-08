@@ -42,6 +42,7 @@ var _sfx_last := {}            # name -> 距上次播放累计秒
 var _music_a: AudioStreamPlayer
 var _music_b: AudioStreamPlayer
 var _steps: Array = []         # 当前 BGM 段列表(AudioStream)
+var _bgm_want: Array = []       # 待线程加载的 BGM 段路径(全部就绪才起播)；空=无待加载
 var step_index := -1           # 当前段序号(-1=未播)
 var _active_is_a := true       # 正在出声的是 a 还是 b
 var _section_left := 0.0       # 距下次换段剩余秒
@@ -69,6 +70,10 @@ func _ready() -> void:
 		p.bus = "Music"
 		p.volume_db = -60.0
 		add_child(p)
+	# SFX 后台预加载：启动即在 worker 线程请求所有音效，首次交互前基本已就绪，
+	# 避免首播时同步 load + Ogg 解码卡帧（play_sfx 未就绪时同步兜底，极少见）。
+	for path in SFX.values():
+		ResourceLoader.load_threaded_request(path)
 
 func play_sfx(sfx_name: String) -> bool:
 	if not SFX.has(sfx_name):
@@ -78,7 +83,11 @@ func play_sfx(sfx_name: String) -> bool:
 		return false
 	var path: String = SFX[sfx_name]
 	if not _sfx_streams.has(path):
-		_sfx_streams[path] = load(path)
+		# 后台预加载已就绪则直接取（无阻塞）；否则同步兜底（首帧内抢播的极少数）
+		if ResourceLoader.load_threaded_get_status(path) == ResourceLoader.THREAD_LOAD_LOADED:
+			_sfx_streams[path] = ResourceLoader.load_threaded_get(path)
+		else:
+			_sfx_streams[path] = load(path)
 	var player := _pick_sfx_player()
 	player.stream = _sfx_streams[path]
 	player.pitch_scale = randf_range(0.96, 1.04)
@@ -92,11 +101,32 @@ func _pick_sfx_player() -> AudioStreamPlayer:
 			return p
 	return _sfx_players[0]
 
-# steps 传 BGM_STEPS 切片；单段就一直 loop，多段按 SECTION_SECS 轮换交叉淡化
+# steps 传 BGM_STEPS 切片；单段就一直 loop，多段按 SECTION_SECS 轮换交叉淡化。
+# 线程加载：请求所有段在 worker 线程加载，全部就绪后由 _poll_bgm_load 起播——
+# 菜单 _ready 起播 68s BGM WAV 不再同步卡帧（此前 ~68s WAV 同步 load 是入场一跳）。
 func start_bgm(step_paths: Array = BGM_STEPS) -> void:
+	stop_bgm()
+	_bgm_want = step_paths.duplicate()
+	for path in _bgm_want:
+		ResourceLoader.load_threaded_request(path)
+
+## BGM 段线程加载轮询：全部就绪才组装 _steps 并起播（生产单段=等这一条 WAV）。
+func _poll_bgm_load() -> void:
+	if _bgm_want.is_empty():
+		return
+	for path in _bgm_want:
+		match ResourceLoader.load_threaded_get_status(path):
+			ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+				return  # 还有段在加载，整体等齐
+			ResourceLoader.THREAD_LOAD_FAILED, ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+				push_warning("GameAudio: BGM 线程加载失败 %s" % path)
+				_bgm_want.clear()
+				return
+	# 全部 LOADED
 	_steps.clear()
-	for path in step_paths:
-		_steps.append(load(path))
+	for path in _bgm_want:
+		_steps.append(ResourceLoader.load_threaded_get(path))
+	_bgm_want.clear()
 	if _steps.is_empty():
 		return
 	step_index = 0
@@ -110,6 +140,7 @@ func start_bgm(step_paths: Array = BGM_STEPS) -> void:
 func stop_bgm() -> void:
 	step_index = -1
 	_steps.clear()
+	_bgm_want.clear()
 	_music_a.stop()
 	_music_b.stop()
 
@@ -121,6 +152,7 @@ func _process(delta: float) -> void:
 
 # 拆出来供 headless 测试直接推进虚拟时间
 func _advance(delta: float) -> void:
+	_poll_bgm_load()  # BGM 段线程加载就绪则起播（不阻塞）
 	for key in _sfx_last:
 		_sfx_last[key] += delta
 	if step_index < 0:
