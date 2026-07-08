@@ -149,13 +149,18 @@ static func _reconstruct(came: Dictionary, goal_i: int, start_i: int, from_pos: 
 
 ## string-pulling 视线拉直：从锚点起贪心跳到最远的可通视 waypoint，
 ## 把 8 向楼梯折线拉成平滑直线段（也顺带缩短路长）。
+## 前瞻窗口封顶：无界版对长路径是 O(k²) 段通视 × 每 0.1m 采样——跟随远目标每 0.5s
+## 重寻路时单次拉直可烧数百毫秒（真机 FSPIKE 恒定 ~670ms 的嫌疑主项）。
+## 窗口内拉直观感一致（远处折线晚几步拉平），成本变 O(k×窗口)。
+const SMOOTH_LOOKAHEAD := 8
+
 static func _smooth(from_pos: Vector2, pts: PackedVector2Array, span: int, exclude_id: String) -> PackedVector2Array:
 	var out := PackedVector2Array()
 	var anchor := WorldGrid.wrap_pos(from_pos)
 	var i := 0
 	while i < pts.size():
 		var best := i
-		var j := pts.size() - 1
+		var j := mini(pts.size() - 1, i + SMOOTH_LOOKAHEAD)
 		while j > i:
 			if _segment_ok(anchor, pts[j], span, exclude_id):
 				best = j

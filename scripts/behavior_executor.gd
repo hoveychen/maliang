@@ -200,8 +200,10 @@ func _begin_move() -> void:
 	_plan_path()
 
 func _plan_path() -> void:
-	# budgeted=true：角色行为寻路受单帧预算约束（多 NPC 同帧寻路失败叠加曾单帧 1.3s）
-	_waypoints = Pathfinder.find_path(_target["logical"], _move_to, _span(), _char_id(), true, 4000, true)
+	# budgeted=true：角色行为寻路受单帧预算约束（多 NPC 同帧寻路失败叠加曾单帧 1.3s）；
+	# 搜索上限 1500：NPC 走位都是近程（wander 半径 7m/跟随/送信到人旁），
+	# 全图长搜索只服务「目标不可达」的病态用例——早认输走直线滑动，观感一致
+	_waypoints = Pathfinder.find_path(_target["logical"], _move_to, _span(), _char_id(), true, 1500, true)
 	_wp_i = 0
 	_direct = _waypoints.is_empty()
 

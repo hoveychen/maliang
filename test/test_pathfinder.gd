@@ -14,9 +14,10 @@ func _init() -> void:
 	fails += _check("flat reaches", _near(p[p.size() - 1], b, 1.0), true)
 	fails += _check("flat mover-executable", _executable(a, p), true)
 
-	# 拉直版（string-pulling）：平地无遮挡 → 单段直线；终点一致
+	# 拉直版（string-pulling）：平地无遮挡 → 前瞻窗口内拉直（SMOOTH_LOOKAHEAD 封顶，
+	# 无界拉直对长路径 O(k²) 曾真机单次 ~600ms），段数远少于逐格；终点一致
 	var ps := Pathfinder.find_path(a, b)
-	fails += _check("smooth flat single segment", ps.size(), 1)
+	fails += _check("smooth flat few segments", ps.size() <= 3 and ps.size() >= 1, true)
 	fails += _check("smooth same end", ps[ps.size() - 1] == p[p.size() - 1], true)
 	fails += _check("smooth fine-walkable", _fine_walkable(a, ps), true)
 
