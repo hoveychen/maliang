@@ -39,3 +39,26 @@ static func avatar_description(p: Dictionary) -> String:
 	return "一个可爱的%s形象，穿着%s的衣服，抱着一只%s玩偶，一看就很喜欢%s" % [
 		who, String(p.get("color", "彩色")),
 		String(p.get("likes", "小兔子")), String(p.get("interest", "玩耍"))]
+
+## 确保档案里有稳定玩家 id：设备端「开始新游戏」时生成的 UUID（面向未来 MMO / QR 换机迁移）。
+## 首次调用生成并写盘；已有则原样返回。无鉴权——这个 UUID 就是玩家唯一身份。
+static func ensure_player_id() -> String:
+	var p := load_profile()
+	var pid := String(p.get("player_id", ""))
+	if pid.is_empty():
+		pid = Crypto.new().generate_random_bytes(16).hex_encode()
+		p["player_id"] = pid
+		save_profile(p)
+	return pid
+
+## 上报给服务端 world_info 的玩家档案子集（首见建档用；键名对齐 server types.Player 的驼峰口径）。
+static func upload_dict() -> Dictionary:
+	var p := load_profile()
+	return {
+		"name": String(p.get("name", "")),
+		"nickname": String(p.get("nickname", "")),
+		"gender": String(p.get("gender", "")),
+		"color": String(p.get("color", "")),
+		"spriteAsset": String(p.get("sprite_asset", "")),
+		"createdAt": String(p.get("created_at", "")),
+	}

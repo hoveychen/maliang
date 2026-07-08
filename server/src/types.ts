@@ -186,3 +186,19 @@ export interface WorldProp {
   /** placed=摆在世界（tile 有效）；bagged=收进收集册物品页（tile 置 null）。 */
   state: 'placed' | 'bagged';
 }
+
+/**
+ * 玩家实体（面向未来 MMO 的一等公民）。
+ * 身份来源 = 设备端「开始新游戏」时生成的稳定 UUID（前端存 user://profile.json 并随消息上报）；
+ * 本期无任何鉴权流程，未来换设备走 QR + challenge 转移（schema 已就绪，转移流程本期不实现）。
+ * 玩家档案原本只在前端本地，MMO 需上服务端——此表把档案结构建好，前端仍可保留本地缓存。
+ */
+export interface Player {
+  id: string;
+  name: string;
+  nickname: string;
+  gender: string; // boy | girl（前端 profile 口径）
+  color: string; // 喜欢的颜色名
+  spriteAsset: string; // 形象资产 hash（内容寻址，服务端已有）
+  createdAt: string; // ISO 时间；由前端 profile 带上，服务端不取墙上时钟
+}

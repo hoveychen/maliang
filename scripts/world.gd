@@ -1559,6 +1559,7 @@ func _bootstrap() -> void:
 		online = true
 		world_id = String(world.get("id", "default"))
 		backend.url = (api.base as String).replace("http", "ws") + "/ws"
+		backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入
 		backend.connect_to_server()
 		for n in npcs:
 			OccupancyMap.char_unregister(String(n.get("id", "")))
@@ -2292,7 +2293,7 @@ func _send_world_info() -> void:
 	var names: Array = []
 	for poi in POIS:
 		names.append(String(poi.get("name", "")))
-	backend.send_world_info(world_id, names)
+	backend.send_world_info(world_id, names, PlayerProfile.upload_dict()) # 带档案供服务端首见建玩家
 
 # ── 奖赏系统：委托状态 / 提示 chip / 完成判定 ──────────────────────────────
 

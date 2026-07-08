@@ -38,6 +38,8 @@ UNIT_TESTS=(
   test_voice_vad
   test_game_audio
   test_sdf_static_baker
+  test_player_profile
+  test_backend_player_id
 )
 fails=0
 

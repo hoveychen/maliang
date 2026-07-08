@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, Character, WorldProp } from './types.ts';
+import type { ActiveTask, Character, Player, WorldProp } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 
 export interface World {
@@ -48,6 +48,10 @@ export class WorldStore {
 
   #initSchema(): void {
     this.#db.exec(`
+      CREATE TABLE IF NOT EXISTS players (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS worlds (
         id TEXT PRIMARY KEY,
         inventory TEXT NOT NULL DEFAULT '{}',
@@ -292,6 +296,25 @@ export class WorldStore {
       .prepare('SELECT data FROM characters WHERE id = ? AND world_id = ?')
       .get(characterId, worldId) as { data: string } | undefined;
     return row ? (JSON.parse(row.data) as Character) : undefined;
+  }
+
+  // ── 玩家实体（面向 MMO；身份=设备端 UUID，无鉴权，见 types.Player）──────────
+
+  /** 登记/更新玩家档案（首见即建，再见即更）。整对象 UPSERT 一行。 */
+  upsertPlayer(player: Player): void {
+    this.#db
+      .prepare('INSERT INTO players (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+      .run(player.id, JSON.stringify(player));
+  }
+
+  getPlayer(id: string): Player | undefined {
+    const row = this.#db.prepare('SELECT data FROM players WHERE id = ?').get(id) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as Player) : undefined;
+  }
+
+  listPlayers(): Player[] {
+    const rows = this.#db.prepare('SELECT data FROM players').all() as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as Player);
   }
 
   /** 存入资源，返回内容寻址 hash。 */

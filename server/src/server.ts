@@ -10,7 +10,7 @@ import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { handleVoice, respondToTranscript, accumulateMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
-import { stickerGlyph, type ActiveTask, type Character, type VoiceResponse, type WorldProp } from './types.ts';
+import { stickerGlyph, type ActiveTask, type Character, type Player, type VoiceResponse, type WorldProp } from './types.ts';
 import { completeTaskOnEvent, praiseLine, thanksLine } from './tasks.ts';
 
 export interface ServerDeps {
@@ -199,12 +199,14 @@ export interface VoiceSession {
   active: boolean;
   worldId: string;
   characterId: string;
+  /** 当前玩家 id（设备端稳定 UUID，随消息上报）：供记忆/Visit 按玩家归属（P3/P4 消费）。 */
+  playerId: string;
   asr: ASRStream | null;
   gate: { release: () => void } | null;
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { active: false, worldId: '', characterId: '', asr: null, gate: null };
+  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null };
 }
 
 /** 得奖语音表扬：委托人音色念表扬词，合成好推 praise_tts（尽力而为，失败不影响主流程）。 */
@@ -291,6 +293,16 @@ export async function handleWsMessage(
     propId?: string; // prop_place：语音生成物件的落位回报
     tileX?: number;
     tileY?: number;
+    // 玩家身份：每条消息可带 playerId（设备端稳定 UUID）；world_info 另带 profile 供首见建档。
+    playerId?: string;
+    profile?: {
+      name?: string;
+      nickname?: string;
+      gender?: string;
+      color?: string;
+      spriteAsset?: string;
+      createdAt?: string;
+    };
   };
   try {
     msg = JSON.parse(raw);
@@ -299,10 +311,27 @@ export async function handleWsMessage(
     return;
   }
 
+  // 玩家身份：记进会话，供后续记忆/Visit 按玩家归属（P3/P4 消费）。
+  if (typeof msg.playerId === 'string' && msg.playerId) session.playerId = msg.playerId;
+
   // 客户端上报世界地点名（连上 WS 后一次）：喂给意图 LLM，让「去某地」归一到真实地名。
   // 回 world_state 同步贴纸背包与进行中委托（断线重连/重启后客户端补状态）。
   if (msg.type === 'world_info') {
     const worldId = msg.worldId ?? '';
+    // 玩家登记：world_info 带 playerId + profile 时 upsert（首见即建档，面向 MMO；无鉴权）
+    if (typeof msg.playerId === 'string' && msg.playerId && msg.profile) {
+      const p = msg.profile;
+      const player: Player = {
+        id: msg.playerId,
+        name: String(p.name ?? ''),
+        nickname: String(p.nickname ?? ''),
+        gender: String(p.gender ?? ''),
+        color: String(p.color ?? ''),
+        spriteAsset: String(p.spriteAsset ?? ''),
+        createdAt: String(p.createdAt ?? ''),
+      };
+      store.upsertPlayer(player);
+    }
     const names = (Array.isArray(msg.locations) ? msg.locations : [])
       .filter((n): n is string => typeof n === 'string' && n.trim().length > 0 && n.length <= 20)
       .map((n) => n.trim())

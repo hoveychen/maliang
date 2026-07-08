@@ -23,6 +23,8 @@ signal sent(msg: Dictionary)
 
 var _ws := WebSocketPeer.new()
 var _open := false
+## 当前玩家 id（设备端稳定 UUID）：由 world.gd bootstrap 时从档案设入，_send 统一注入每条消息。
+var player_id := ""
 
 func connect_to_server() -> void:
 	# 默认入站缓冲 64KB：慢帧场景（录屏/低端机）下一帧间隔内的 TTS 分片突发
@@ -55,8 +57,12 @@ func send_create_character(world_id: String, intent_text: String) -> void:
 	_send({ "type": "create_character_request", "worldId": world_id, "intentText": intent_text, "byFairy": true })
 
 ## 上报世界地点名清单（POI 名，连上后一次）：意图 LLM 用来归一「去某地」的地名。
-func send_world_info(world_id: String, locations: Array) -> void:
-	_send({ "type": "world_info", "worldId": world_id, "locations": locations })
+## profile 非空时随 world_info 上报，供服务端首见建玩家档（面向 MMO；见 server types.Player）。
+func send_world_info(world_id: String, locations: Array, profile := {}) -> void:
+	var msg := { "type": "world_info", "worldId": world_id, "locations": locations }
+	if not profile.is_empty():
+		msg["profile"] = profile
+	_send(msg)
 
 ## 委托完成事件（客户端确定性判定：送达/带到/到点）。服务端匹配进行中委托则回 task_complete。
 func send_task_event(world_id: String, kind: String, extra := {}) -> void:
@@ -83,6 +89,9 @@ func send_prop_move(world_id: String, prop_id: String, tile: Vector2i) -> void:
 	_send({ "type": "prop_move", "worldId": world_id, "propId": prop_id, "tileX": tile.x, "tileY": tile.y })
 
 func _send(obj: Dictionary) -> void:
+	# 统一注入玩家身份：每条出站消息带 playerId（设备端 UUID），服务端按玩家归属记忆/Visit。
+	if not player_id.is_empty() and not obj.has("playerId"):
+		obj["playerId"] = player_id
 	sent.emit(obj)
 	if _open:
 		_ws.send_text(JSON.stringify(obj))
