@@ -43,8 +43,9 @@ export interface CutoutAdapter {
 /**
  * 立绘朝向。游戏端约定「原图=朝右」（world.gd 向左走时水平镜像），
  * 生图模型对 "facing right" 的服从没有硬保证，所以生成管线要检测兜底。
+ * 'bad' = 图本身不可用（多角色三视图/裁切残图），与 'front' 一样走重试。
  */
-export type SpriteFacing = 'left' | 'right' | 'front' | 'unknown';
+export type SpriteFacing = 'left' | 'right' | 'front' | 'bad' | 'unknown';
 
 /** 朝向检测：立绘 → 面朝方向。真实实现接 OpenRouter vision；检测失败返回 'unknown'（放行，不阻塞生成）。 */
 export interface OrientationAdapter {

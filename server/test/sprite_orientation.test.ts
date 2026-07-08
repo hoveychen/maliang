@@ -12,13 +12,17 @@ test('parseFacing 整词匹配，容忍大小写与解释文字', () => {
   assert.equal(parseFacing('right'), 'right');
   assert.equal(parseFacing('The character is facing LEFT.'), 'left');
   assert.equal(parseFacing('FRONT (facing the viewer)'), 'front');
+  assert.equal(parseFacing('BAD - multiple characters'), 'bad');
   assert.equal(parseFacing('完全看不懂'), 'unknown');
   // "upright" 不能误配成 right——必须整词
   assert.equal(parseFacing('the pose is upright'), 'unknown');
+  // 强制 reasoning 的模型会 leak 出下划线粘连词（线上实测遇到），\b 边界会漏配
+  assert.equal(parseFacing('RIGHT_of_thought'), 'right');
 });
 
-// chatVision 请求体：图以 data URL 内联在 image_url part 里，禁 reasoning。
-test('chatVision 请求体带图且禁用 reasoning', async () => {
+// chatVision 请求体：图以 data URL 内联在 image_url part 里。
+// 不得带 reasoning 字段——gemini-3.5-flash 强制 reasoning，{enabled:false} 会 400（实测）。
+test('chatVision 请求体带图且不带 reasoning 字段', async () => {
   let captured: any = null;
   const orig = globalThis.fetch;
   globalThis.fetch = (async (_url: any, init: any) => {
@@ -31,7 +35,7 @@ test('chatVision 请求体带图且禁用 reasoning', async () => {
   }) as any;
   try {
     const client = new OpenRouterClient('test-key');
-    const answer = await client.chatVision('google/gemini-3.1-flash', 'which way?', {
+    const answer = await client.chatVision('google/gemini-3.5-flash', 'which way?', {
       bytes: Uint8Array.from([1, 2, 3]),
       mime: 'image/png',
     });
@@ -40,7 +44,7 @@ test('chatVision 请求体带图且禁用 reasoning', async () => {
     globalThis.fetch = orig;
   }
   assert.ok(captured, '应发出请求');
-  assert.deepEqual(captured.reasoning, { enabled: false });
+  assert.equal('reasoning' in captured, false, '带 reasoning 字段会被强制 reasoning 的模型 400');
   const parts = captured.messages[0].content;
   assert.equal(parts[0].type, 'text');
   assert.equal(parts[1].type, 'image_url');
@@ -137,6 +141,22 @@ test('管线：正面重试仍正面 → 放行不再重试', async () => {
   let calls = 0;
   const store = new WorldStore();
   const hash = await generateSprite(adaptersWithFacing(['front', 'front'], () => calls++), 'a cat', store);
+  assert.equal(calls, 2, '只重试一次');
+  assert.ok(store.getAsset(hash), '仍应产出资产');
+});
+
+test('管线：bad（三视图/残图）→ 重试一次；重试合格则采用', async () => {
+  let calls = 0;
+  const store = new WorldStore();
+  const hash = await generateSprite(adaptersWithFacing(['bad', 'right'], () => calls++), 'a cat', store);
+  assert.equal(calls, 2, 'bad 应触发一次重试');
+  assert.deepEqual(leftPixel(store.getAsset(hash)!), [255, 0, 0], '重试图合格原样采用');
+});
+
+test('管线：bad 重试仍 front → 优先没被判 bad 的重试图', async () => {
+  let calls = 0;
+  const store = new WorldStore();
+  const hash = await generateSprite(adaptersWithFacing(['bad', 'front'], () => calls++), 'a cat', store);
   assert.equal(calls, 2, '只重试一次');
   assert.ok(store.getAsset(hash), '仍应产出资产');
 });
