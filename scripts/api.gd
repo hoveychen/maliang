@@ -70,8 +70,18 @@ func fetch_texture(asset_hash: String) -> Texture2D:
 	http.queue_free()
 	if int(res[1]) != 200:
 		return null
+	var buf := res[3] as PackedByteArray
 	var img := Image.new()
-	if img.load_png_from_buffer(res[3] as PackedByteArray) != OK:
+	var e := ERR_INVALID_DATA
+	# 按 magic bytes 分派：静态立绘是 PNG，idle 动画图集是 WebP（体积小得多）。
+	if buf.size() >= 12 and buf[0] == 0x52 and buf[1] == 0x49 and buf[2] == 0x46 and buf[3] == 0x46 \
+			and buf[8] == 0x57 and buf[9] == 0x45 and buf[10] == 0x42 and buf[11] == 0x50:
+		e = img.load_webp_from_buffer(buf)
+	elif buf.size() >= 2 and buf[0] == 0xFF and buf[1] == 0xD8:
+		e = img.load_jpg_from_buffer(buf)
+	else:
+		e = img.load_png_from_buffer(buf)
+	if e != OK:
 		return null
 	return ImageTexture.create_from_image(img)
 
