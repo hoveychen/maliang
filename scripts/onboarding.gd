@@ -427,12 +427,9 @@ func _build_generate(box: VBoxContainer, _p: Dictionary) -> void:
 	_gen_confirm.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_generate_avatar()
 
-## 答案 → 形象描述（风格后缀由服务端生图管线统一拼接）。
+## 答案 → 形象描述（公用逻辑在 PlayerProfile.avatar_description，设置页「换形象」同款）。
 func _avatar_description() -> String:
-	var who := "小男孩" if String(answers.get("gender", "")) == "boy" else "小女孩"
-	return "一个可爱的%s形象，穿着%s的衣服，抱着一只%s玩偶，一看就很喜欢%s" % [
-		who, String(answers.get("color", "彩色")),
-		String(answers.get("likes", "小兔子")), String(answers.get("interest", "玩耍"))]
+	return PlayerProfile.avatar_description(answers)
 
 ## 预取：进 intro 页就开始生图（结果落 _prefetch_*，generate 页直接用）。
 func _start_avatar_prefetch() -> void:
