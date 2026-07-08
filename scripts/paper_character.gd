@@ -38,6 +38,8 @@ var modulate := Color.WHITE:
 		_mat.set_shader_parameter("modulate", v)
 
 var _mat: ShaderMaterial
+## idle 动画图集 meta（空=静态整图）；非空时几何按单格 cellW×cellH 算、shader 分格播放。
+var _sheet: Dictionary = {}
 
 func _init() -> void:
 	if _shader == null:
@@ -67,11 +69,35 @@ func set_paper_motion(flutter_amp: float, curl: float) -> void:
 	_mat.set_shader_parameter("flutter_amp", flutter_amp)
 	_mat.set_shader_parameter("curl", curl)
 
+## 从静态立绘切到 idle 动画图集。meta 为服务端 SpriteSheetMeta（cols/rows/frameCount/fps/cellW/cellH）。
+## world_height：期望世界高度（米），与切换前静态立绘保持一致，观感不跳。phase：相位偏移（秒）。
+func play_idle(atlas: Texture2D, meta: Dictionary, world_height: float, phase := 0.0) -> void:
+	var ch := float(meta.get("cellH", 0))
+	var cw := float(meta.get("cellW", 0))
+	if atlas == null or ch <= 0.0 or cw <= 0.0:
+		return
+	_sheet = meta
+	_mat.set_shader_parameter("sheet_cols", int(meta.get("cols", 1)))
+	_mat.set_shader_parameter("sheet_rows", int(meta.get("rows", 1)))
+	_mat.set_shader_parameter("sheet_frames", int(meta.get("frameCount", 0)))
+	_mat.set_shader_parameter("sheet_fps", float(meta.get("fps", 8)))
+	_mat.set_shader_parameter("sheet_phase", phase)
+	pixel_size = world_height / ch  # setter 会触发 _refresh_geometry（此时 _sheet 已置）
+	offset = Vector2(0.0, ch / 2.0)
+	texture = atlas
+	BlobShadow.attach(self, clampf(cw * pixel_size * 0.38, 0.4, 1.4))
+
 func _refresh_geometry() -> void:
 	if texture == null:
 		return
-	var w := float(texture.get_width()) * pixel_size
-	var h := float(texture.get_height()) * pixel_size
+	# sprite-sheet 模式按单格尺寸算几何（整张图集含多格，可见的只有一格）
+	var tw := float(texture.get_width())
+	var th := float(texture.get_height())
+	if not _sheet.is_empty():
+		tw = float(_sheet.get("cellW", tw))
+		th = float(_sheet.get("cellH", th))
+	var w := tw * pixel_size
+	var h := th * pixel_size
 	var q := mesh as QuadMesh
 	q.size = Vector2(w, h)
 	q.center_offset = Vector3(offset.x * pixel_size, offset.y * pixel_size, 0.0)

@@ -38,6 +38,7 @@ UNIT_TESTS=(
   test_voice_vad
   test_game_audio
   test_sdf_static_baker
+  test_paper_idle
 )
 fails=0
 

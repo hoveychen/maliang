@@ -390,6 +390,29 @@ func _apply_player_sprite() -> void:
 	node.offset = Vector2(0.0, float(tex.get_height()) / 2.0)
 	node.modulate = Color.WHITE
 	BlobShadow.attach(node, clampf(float(tex.get_width()) * node.pixel_size * 0.38, 0.4, 1.4))
+	# 试点：玩家形象静态就位后，后台轮询 idle 动画，就绪则静态切动画（世界高度保持 5 单位）
+	_poll_idle_anim(node, asset, 5.0, 0.0)
+
+## 试点：拿到静态立绘后后台轮询 idle 动画，就绪则把该 PaperCharacter 从静态切成动画播放。
+## world_height 与静态一致（观感不跳）。node 可能中途被销毁，每步 is_instance_valid 守卫。
+## fire-and-forget 调用（不 await）：跑到首个 await 就返回，后续在信号上续跑。
+func _poll_idle_anim(node: PaperCharacter, sprite_hash: String, world_height: float, phase: float) -> void:
+	if sprite_hash.is_empty():
+		return
+	for _i in 40: # 最多 ~2 分钟（3s×40），覆盖视频生成 60~90s + 排队
+		if not is_instance_valid(node):
+			return
+		var rec := await api.fetch_sprite_anim(sprite_hash)
+		var status := String(rec.get("status", "none"))
+		if status == "ready":
+			var meta: Dictionary = rec.get("meta", {})
+			var atlas := await api.fetch_texture(String(rec.get("animAsset", "")))
+			if atlas != null and is_instance_valid(node):
+				node.play_idle(atlas, meta, world_height, phase)
+			return
+		if status == "failed":
+			return
+		await get_tree().create_timer(3.0).timeout
 
 ## 离线模式的小仙子随从（在线时 _bootstrap 会清掉、换成服务端小神仙）。
 ## 悬浮飞行：不登记占用图、不走寻路，由 _update_fairy 驱动跟随玩家。
@@ -1626,6 +1649,9 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 		# 小仙子随从：头部大小（时之笛式），无论真图/占位都按 FAIRY_HEIGHT 归一
 		npc.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
 		BlobShadow.detach(npc) # 悬浮飞行不落地，脚下暗斑穿帮
+		# 试点：仙子真图就绪后，后台轮询 idle 动画，就绪则静态切动画
+		if real:
+			_poll_idle_anim(npc, asset, FAIRY_HEIGHT, 0.0)
 	elif real:
 		# 生成图分辨率高，按高度归一化到约 6 单位，脚底对齐原点
 		var h := float(tex.get_height())

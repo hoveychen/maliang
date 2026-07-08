@@ -11,6 +11,7 @@ import { createMockAdapters } from './mock.ts';
 import { OpenRouterClient } from './openrouter_client.ts';
 import { OpenRouterLLMAdapter } from './openrouter_llm.ts';
 import { OpenRouterImageAdapter } from './openrouter_image.ts';
+import { OpenRouterVideoAdapter } from './openrouter_video.ts';
 import { ChromaKeyCutoutAdapter } from './chroma_cutout.ts';
 import { OpenRouterOrientationAdapter } from './openrouter_orientation.ts';
 import { XfyunASRAdapter, XfyunTTSAdapter, type XfyunCreds } from './xfyun.ts';
@@ -110,6 +111,8 @@ export function createAdapters(config: Config): ServiceAdapters {
     llm: new OpenRouterLLMAdapter(client, config.llmModel),
     image: new OpenRouterImageAdapter(imageClient, config.imageModel),
     cutout: new ChromaKeyCutoutAdapter(),
+    // idle 动画：异步补，慢（60~90s），自带长超时轮询，不共享上面的 client。
+    video: new OpenRouterVideoAdapter(config.openrouterApiKey as string, { model: config.videoModel }),
     orientation: new OpenRouterOrientationAdapter(visionClient, config.visionModel),
     asr,
     tts,
