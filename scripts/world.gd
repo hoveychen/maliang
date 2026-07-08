@@ -193,6 +193,9 @@ func _ready() -> void:
 	# 0.7 双线性放大对水彩软风格几乎无损；HUD/UI 走 canvas 仍是原生分辨率
 	if OS.has_feature("mobile"):
 		get_viewport().scaling_3d_scale = 0.7
+	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
+	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
+		add_child(PerfSweep.make(self, _env))
 	_setup_backend()
 	api = Api.new()
 	api.name = "Api"

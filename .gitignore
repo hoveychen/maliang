@@ -1,6 +1,6 @@
 # Godot 4
 .godot/
-/android/
+/android
 export.cfg
 *.translation
 /build/
@@ -17,7 +17,7 @@ TASKS.md
 server/models/
 
 # 端侧 ASR 插件产物（scripts/build-asr-plugin.sh 生成/下载）
-addons/maliang_asr/bin/
+addons/maliang_asr/bin
 asr_plugin/libs/
 asr_plugin/src/main/assets/
 asr_plugin/build/

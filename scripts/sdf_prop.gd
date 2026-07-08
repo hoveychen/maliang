@@ -142,6 +142,9 @@ func _wander_step(delta: float) -> void:
 	position += vel * minf(delta, to_target.length() / maxf(speed, 0.01))
 	animator.move_vel = transform.basis.inverse() * (dir * speed)
 
+func _enter_tree() -> void:
+	add_to_group("perf_props")  # PerfSweep 分解扫频用（debug 诊断）
+
 func _process(delta: float) -> void:
 	if animator == null:
 		return
