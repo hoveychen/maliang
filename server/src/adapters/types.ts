@@ -17,6 +17,11 @@ export interface AudioBlob {
   mime: string;
 }
 
+export interface VideoBlob {
+  bytes: Uint8Array;
+  mime: string;
+}
+
 /** LLM：造角色 spec / 意图路由 / 角色对话。真实实现接 OpenRouter。 */
 export interface LLMAdapter {
   designCharacter(intentText: string, byFairy: boolean): Promise<CharacterSpec>;
@@ -38,6 +43,15 @@ export interface ImageAdapter {
 /** 抠图：纯色（绿幕）背景 → 透明 PNG。 */
 export interface CutoutAdapter {
   removeBackground(input: ImageBlob): Promise<ImageBlob>;
+}
+
+/**
+ * idle 动画视频：透明立绘 → 首尾闭合的 idle 循环视频（绿幕 mp4，待抠帧成图集）。
+ * 真实实现接 OpenRouter /api/v1/videos（Seedance）；绿幕合成+首尾帧闭合在实现内。
+ * 慢（60~90s），只在造角色后异步补，不进对话闭环。
+ */
+export interface VideoAdapter {
+  generateIdleAnimation(sprite: ImageBlob): Promise<VideoBlob>;
 }
 
 /**
@@ -91,6 +105,7 @@ export interface ServiceAdapters {
   llm: LLMAdapter;
   image: ImageAdapter;
   cutout: CutoutAdapter;
+  video: VideoAdapter;
   orientation: OrientationAdapter;
   asr: ASRAdapter;
   tts: TTSAdapter;

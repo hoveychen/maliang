@@ -7,6 +7,8 @@ export interface Config {
   openrouterApiKey: string | undefined;
   llmModel: string;
   imageModel: string;
+  /** idle 动画视频模型（Seedance）。透明立绘→绿幕 idle 循环 mp4。 */
+  videoModel: string;
   /** 立绘朝向检测用的 vision 模型（看图回答朝向）。 */
   visionModel: string;
   moderationTextModel: string;
@@ -37,6 +39,9 @@ export function loadConfig(): Config {
     // 旧默认 kimi-k2.6 实测 ~8s 且飘（默认开 reasoning），是语音延迟的主要变数。
     llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'qwen/qwen3.6-flash',
     imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image',
+    // idle 动画视频：seedance-1-5-pro 为 2026-07-08 实测选型（480p/4s $0.046/条，是能用里最便宜；
+    // 首=尾帧做无缝闭合 RMSE 0.025 够用）。Google Veo 全系对幼儿角色 403 不可用；Seedance 2.0 更贵。
+    videoModel: process.env.OPENROUTER_VIDEO_MODEL ?? 'bytedance/seedance-1-5-pro',
     // 立绘朝向检测（看图回答 LEFT/RIGHT/FRONT/BAD）。3.5-flash 为 2026-07-08 实测选型：
     // 3.1-flash 不是有效 OpenRouter ID（首批上线全 400 放行，喵小橘朝左漏网）；
     // 3.1-flash-lite 左右混淆（把明确朝左的旧小狐判 RIGHT）；3.5-flash 8 张样本全符合预期。

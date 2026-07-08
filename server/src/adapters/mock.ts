@@ -1,4 +1,4 @@
-import type { ServiceAdapters, ImageBlob, AudioBlob } from './types.ts';
+import type { ServiceAdapters, ImageBlob, AudioBlob, VideoBlob } from './types.ts';
 import {
   BASE_ABILITIES,
   STICKER_NAMES,
@@ -34,6 +34,11 @@ const GO_WORDS = /(去|到|走去|过去)/;
 function audioStub(): AudioBlob {
   // 极小的占位音频（mock TTS）。真实 TTS 由讯飞产出。
   return { bytes: Uint8Array.from([0x52, 0x49, 0x46, 0x46]), mime: 'audio/wav' };
+}
+
+function videoStub(): VideoBlob {
+  // 极小的占位视频（mock idle 动画）。真实由 Seedance 产出 mp4。
+  return { bytes: Uint8Array.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]), mime: 'video/mp4' };
 }
 
 /** mock 适配器：不调用任何外部服务，跑通整条编排闭环。 */
@@ -210,6 +215,11 @@ export function createMockAdapters(): ServiceAdapters {
     cutout: {
       async removeBackground(input: ImageBlob): Promise<ImageBlob> {
         return input; // mock：原样返回
+      },
+    },
+    video: {
+      async generateIdleAnimation(_sprite: ImageBlob): Promise<VideoBlob> {
+        return videoStub();
       },
     },
     orientation: {
