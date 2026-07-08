@@ -37,6 +37,24 @@ function encodePng(r: Raster): Uint8Array {
   return new Uint8Array(PNG.sync.write(png));
 }
 
+/** 水平镜像（朝左的立绘翻成朝右）。输出统一 PNG（保 alpha）。 */
+export function flipHorizontal(input: ImageBlob): ImageBlob {
+  const { width: w, height: h, data: d } = decode(input.bytes);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w >> 1; x++) {
+      const a = (row + x) * 4;
+      const b = (row + w - 1 - x) * 4;
+      for (let c = 0; c < 4; c++) {
+        const t = d[a + c]!;
+        d[a + c] = d[b + c]!;
+        d[b + c] = t;
+      }
+    }
+  }
+  return { bytes: encodePng({ width: w, height: h, data: d }), mime: 'image/png' };
+}
+
 /**
  * 绿幕抠图（纯 JS，支持 PNG/JPEG 输入，输出透明 PNG）。
  * 关键：只抠「与图像边界连通」的绿（背景是连续的），用 flood-fill 从四边扩散；

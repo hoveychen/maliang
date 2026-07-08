@@ -12,6 +12,7 @@ import { OpenRouterClient } from './openrouter_client.ts';
 import { OpenRouterLLMAdapter } from './openrouter_llm.ts';
 import { OpenRouterImageAdapter } from './openrouter_image.ts';
 import { ChromaKeyCutoutAdapter } from './chroma_cutout.ts';
+import { OpenRouterOrientationAdapter } from './openrouter_orientation.ts';
 import { XfyunASRAdapter, XfyunTTSAdapter, type XfyunCreds } from './xfyun.ts';
 import { LocalASRAdapter, LocalTTSAdapter, hasLocalVoiceModels } from './local.ts';
 import { FallbackTTSAdapter, MinimaxTTSAdapter } from './minimax.ts';
@@ -103,10 +104,13 @@ export function createAdapters(config: Config): ServiceAdapters {
   // 生图单独用长超时客户端：实测 gemini 生图常态 60~75s，共享 25s 客户端必超时；
   // 语音意图等文本请求仍保持 25s（保护对话闭环延迟）。
   const imageClient = new OpenRouterClient(config.openrouterApiKey as string, 120000);
+  // 朝向检测带图上传（base64 后 1-2MB），25s 客户端偶发不够，给 60s。
+  const visionClient = new OpenRouterClient(config.openrouterApiKey as string, 60000);
   return {
     llm: new OpenRouterLLMAdapter(client, config.llmModel),
     image: new OpenRouterImageAdapter(imageClient, config.imageModel),
     cutout: new ChromaKeyCutoutAdapter(),
+    orientation: new OpenRouterOrientationAdapter(visionClient, config.visionModel),
     asr,
     tts,
     moderation: new OpenRouterModerationAdapter(client, config.moderationTextModel),

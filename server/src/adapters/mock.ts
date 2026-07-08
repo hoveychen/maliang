@@ -212,6 +212,11 @@ export function createMockAdapters(): ServiceAdapters {
         return input; // mock：原样返回
       },
     },
+    orientation: {
+      async detectFacing(_image: ImageBlob) {
+        return 'right' as const; // mock：默认合规朝向（测试想验证翻转/重试时自行覆盖）
+      },
+    },
     moderation: {
       async moderateText(text: string) {
         return BAD_WORDS.test(text)

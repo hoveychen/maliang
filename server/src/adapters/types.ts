@@ -40,6 +40,17 @@ export interface CutoutAdapter {
   removeBackground(input: ImageBlob): Promise<ImageBlob>;
 }
 
+/**
+ * 立绘朝向。游戏端约定「原图=朝右」（world.gd 向左走时水平镜像），
+ * 生图模型对 "facing right" 的服从没有硬保证，所以生成管线要检测兜底。
+ */
+export type SpriteFacing = 'left' | 'right' | 'front' | 'unknown';
+
+/** 朝向检测：立绘 → 面朝方向。真实实现接 OpenRouter vision；检测失败返回 'unknown'（放行，不阻塞生成）。 */
+export interface OrientationAdapter {
+  detectFacing(image: ImageBlob): Promise<SpriteFacing>;
+}
+
 /** 语音识别：音频 → 中文文字。真实实现接讯飞。 */
 /** 流式识别会话：录音中持续 feed 分片（实时发往讯飞），finish 收尾并返回最终转写。 */
 export interface ASRStream {
@@ -79,6 +90,7 @@ export interface ServiceAdapters {
   llm: LLMAdapter;
   image: ImageAdapter;
   cutout: CutoutAdapter;
+  orientation: OrientationAdapter;
   asr: ASRAdapter;
   tts: TTSAdapter;
   moderation: ModerationAdapter;
