@@ -596,6 +596,9 @@ func _flush_batches(parent: Node3D, batches: Dictionary) -> void:
 		mmi.multimesh = mm
 		mmi.material_override = info["mat"]
 		mmi.extra_cull_margin = CULL_MARGIN
+		# 草丛/灌木不投影：贴地小件影子读不出来，白给阴影 pass 加负担；树影保留（场景锚定感）
+		if key == "bush" or key.begins_with("tuft"):
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		parent.add_child(mmi)
 
 ## 散布种类注册表（懒建）：key → { mesh, mat }。
