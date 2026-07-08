@@ -428,6 +428,22 @@ func _dialog_camera() -> Dictionary:
 	var spk_h := npc_h if who == "npc" else player_h
 	return compute_dialog_cam(center, spk_l, base_h, spk_h, camera.fov, who == "idle")
 
+## 站位落点可通行判定：该 logical 处玩家 footprint（PLAYER_SPAN）是否空闲（物件/建筑+角色层，
+## 排除玩家自己）。与寻路 Pathfinder.cell_free 同源，建筑经 OccupancyMap 登记故能挡住。
+func _stage_cell_free(pos: Vector2) -> bool:
+	return Pathfinder.cell_free(OccupancyMap.to_cell(pos), PLAYER_SPAN, PLAYER_ID)
+
+## 选站位：首选进入侧（NPC±STAGE_GAP）；被占则改站对侧；两侧都站不下返回玩家当前到位点（不跳）。
+func _pick_stage_target(npc_l: Vector2, player_l: Vector2) -> Vector2:
+	var pref := staged_logical(npc_l, player_l, STAGE_GAP)
+	if _stage_cell_free(pref):
+		return pref
+	var dx := WorldGrid.shortest_delta(npc_l, player_l).x
+	var other := WorldGrid.wrap_pos(npc_l + Vector2(-stage_side(dx) * STAGE_GAP, 0.0))
+	if _stage_cell_free(other):
+		return other
+	return player_l # 两侧都被挡：留在已可达的到位点，绝不跳进不可通行处
+
 ## 玩家跳向对话站位：横向按最短环面向量缓入插值、竖直叠加 sin 弧线小跳；落地登记占用。
 ## 小跳期间 _update_paper_motion 走 _hop 分支（不按位移换面/摇摆，保持进对话设定的相对朝向）。
 func _step_hop(delta: float) -> void:
@@ -440,6 +456,9 @@ func _step_hop(delta: float) -> void:
 	player["hover"] = STAGE_HOP_HEIGHT * sin(k * PI)
 	if k >= 1.0:
 		player["logical"] = _stage_player_logical
+		# 落定当帧把 paper_prev 对齐到落点：清零残余位移速度，避免 _update_paper_motion
+		# 用小跳末速度把玩家翻成"朝行进方向"（长跳跨到对侧时会背对 NPC，即"方向反了"）
+		player["paper_prev"] = _stage_player_logical
 		player.erase("hover")
 		player.erase("_hop")
 		_hop_t = -1.0
@@ -1865,17 +1884,21 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	selected = npc
 	game_audio.play_sfx("enter")
 	_check_deliver_task(npc) # 带话委托：亲自走到目标角色旁开始对话 = 送达
-	# 面对面 + 站桩：进近身时双方朝向对方，玩家按进入侧（dx 符号）跳到 NPC 对应侧站位（NPC 原地不动）
+	# 面对面 + 站桩：玩家按进入侧跳到 NPC 对应侧站位（NPC 原地不动）。落点必须可通行——
+	# 首选侧被建筑/物件占用就改站对侧，两侧都站不下则不跳（留在已可达的到位点，防跳进房子卡死）。
 	var d := _find_npc_dict(npc)
 	if not d.is_empty() and not player.is_empty():
-		var dx := WorldGrid.shortest_delta(d["logical"], player["logical"]).x
-		d["paper_face"] = 0.0 if dx > 0.0 else PI
-		player["paper_face"] = 0.0 if dx <= 0.0 else PI
-		_cancel_player_move()
-		_hop_from = player["logical"]
-		_stage_player_logical = staged_logical(d["logical"], player["logical"], STAGE_GAP)
-		player["_hop"] = true
-		_hop_t = 0.0
+		var target := _pick_stage_target(d["logical"], player["logical"])
+		# 朝向按最终落点相对 NPC 定（保证换到对侧时也朝对方，不用进入侧 dx）
+		var fdx := WorldGrid.shortest_delta(d["logical"], target).x
+		d["paper_face"] = 0.0 if fdx > 0.0 else PI
+		player["paper_face"] = 0.0 if fdx <= 0.0 else PI
+		if WorldGrid.shortest_delta(target, player["logical"]).length() > 0.05:
+			_cancel_player_move()
+			_hop_from = player["logical"]
+			_stage_player_logical = target
+			player["_hop"] = true
+			_hop_t = 0.0
 	# lock：相机平滑切到更低角(3/4)；距离/焦点交给对话构图（_dialog_camera）逐帧算
 	_locked = npc
 	_target_pitch = LOCK_PITCH_DEG
