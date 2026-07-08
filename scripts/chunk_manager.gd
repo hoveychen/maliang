@@ -118,9 +118,19 @@ func set_terrain_low_detail(on: bool) -> void:
 var _dynamic_props: Array = []
 
 func _ready() -> void:
-	for i in range(-R, R + 1):
-		for j in range(-R, R + 1):
-			_slots.append(_make_slot())
+	# 槽位与 wrapped 区块恒等绑定：3×3 槽位恰好覆盖 3×3 环面世界一遍（CHUNKS_PER_SIDE
+	# == 2R+1 是本设计前提），每个 wrapped 只需铺一次内容，之后 update 只挪位置——
+	# 旧的「跨界换 wrapped 就重铺」在真机上单帧连铺 3~4 块（实测 300~1000ms，移动顿到 1fps）。
+	for x in range(CHUNKS_PER_SIDE):
+		for z in range(CHUNKS_PER_SIDE):
+			var slot := _make_slot()
+			slot["wrapped"] = Vector2i(x, z)
+			slot["skinned"] = false
+			_slots.append(slot)
+
+## 恒等索引：wrapped → 槽位（_ready 的创建顺序 x*边长+z）。
+func _slot_of(wrapped: Vector2i) -> Dictionary:
+	return _slots[wrapped.x * CHUNKS_PER_SIDE + wrapped.y]
 
 func _make_slot() -> Dictionary:
 	if _ground_mat == null:
@@ -181,7 +191,6 @@ static func _make_water_mat() -> ShaderMaterial:
 func update(player_logical: Vector2) -> void:
 	var pcx := int(floor(player_logical.x / CHUNK_WORLD))
 	var pcz := int(floor(player_logical.y / CHUNK_WORLD))
-	var idx := 0
 	for i in range(-R, R + 1):
 		for j in range(-R, R + 1):
 			var cx := pcx + i
@@ -191,19 +200,22 @@ func update(player_logical: Vector2) -> void:
 				(float(cx) + 0.5) * CHUNK_WORLD,
 				(float(cz) + 0.5) * CHUNK_WORLD)
 			var d := WorldGrid.shortest_delta(player_logical, center_logical)
-			var slot: Dictionary = _slots[idx]
+			# 槽位按 wrapped 恒等绑定（见 _ready 注释）：内容只铺一次，之后只挪位置
+			var wrapped := Vector2i(
+				posmod(cx, CHUNKS_PER_SIDE),
+				posmod(cz, CHUNKS_PER_SIDE))
+			var slot := _slot_of(wrapped)
 			var root: Node3D = slot["root"]
 			root.position = Vector3(d.x, 0.0, d.y)
 			# 圆形裁剪：超出半径的区块隐藏 → 圆形地平线，无正方形四角对角缺口
 			root.visible = d.length() < RENDER_RADIUS
-			# wrap 后的区块索引决定外观
-			var wrapped := Vector2i(
-				posmod(cx, CHUNKS_PER_SIDE),
-				posmod(cz, CHUNKS_PER_SIDE))
-			if wrapped != slot["wrapped"]:
-				slot["wrapped"] = wrapped
+			if not slot["skinned"]:
+				slot["skinned"] = true
+				var t0 := Time.get_ticks_usec()
 				_skin(slot, wrapped)
-			idx += 1
+				var ms := float(Time.get_ticks_usec() - t0) / 1000.0
+				if ms > 30.0:
+					print("SPIKE chunk skin %s %.0fms" % [wrapped, ms])
 
 ## 按 wrapped 索引刷新区块外观（autotile 地面 + 地标 + 分区散布）。
 ## 地面棋盘/路/水全部由 TerrainMap+TerrainAtlas 决定，不再逐区块调色。
