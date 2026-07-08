@@ -19,6 +19,14 @@ const LOCK_DIST := 20.0
 const ZOOM_MIN := 16.0
 const ZOOM_MAX := 64.0
 const CAM_EASE := 6.0             ## 视角过渡速度（pitch/dist/focus 一起缓动）
+# 对话站桩 + 双方构图 + 说话人跟随（近身对话专用，见 _enter_interaction / compute_dialog_cam）
+const STAGE_GAP := 5.0            ## 站位间距（米）：玩家跳到 NPC 对应侧、离 NPC 此距离处站定
+const STAGE_HOP_DUR := 0.32       ## 玩家跳到站位的小跳时长（秒）
+const STAGE_HOP_HEIGHT := 1.1     ## 小跳竖直弧线峰高（米）
+const DIALOG_FILL := 0.5          ## 基础构图：最高者高度占屏中间 50%（1/4 → 3/4）
+const DIALOG_ZOOM_MIN := 6.0      ## 对话态轨道距离下限（远小于 god 态 ZOOM_MIN，允许贴近构图小体型角色）
+const SPEAK_SHIFT := 0.35         ## 说话人跟随：焦点朝说话方偏移的比例（0=两人中点，1=完全对准说话方）
+const SPEAK_ZOOM_BLEND := 0.45    ## 说话人跟随：轨道距离朝「说话方单独占 50%」混合的比例（小体型→距离更近→zoom 更多）
 const PICK_RADIUS_PX := 80.0
 const THINK_TIMEOUT := 40.0       ## 「思考中」最长等待秒数；超时(响应丢失/网络/TLS)自动清除，杜绝永久卡死
 const UNMUTE_GRACE := 0.3         ## 闭麦（思考/TTS）结束后的静默恢复期：残响尾音不算开口
@@ -64,6 +72,9 @@ var _target_dist := GOD_DIST
 var _cur_focus_y := 0.0             ## 相机焦点高度 = focus 所在 tile 的台阶高度（缓动，防上台阶时画面跳变）
 var _env: Environment               ## 世界环境（深度雾起止随 _cur_focus_y 补偿，山顶视角不整体变浓雾）
 var _locked: PaperCharacter = null ## lock 跟随的角色（null=god 自由模式）
+var _stage_player_logical := Vector2.ZERO ## 对话玩家站位（小跳落点）
+var _hop_from := Vector2.ZERO      ## 小跳起点 logical
+var _hop_t := -1.0                 ## 玩家小跳已播秒数（<0=不在跳，见 _step_hop）
 var camera: Camera3D
 var chunk_manager: ChunkManager
 var coord_label: Label
@@ -316,6 +327,7 @@ func _setup_camera() -> void:
 	camera = Camera3D.new()
 	camera.name = "Camera"
 	camera.fov = 50.0
+	camera.keep_aspect = Camera3D.KEEP_HEIGHT # fov 恒为竖直视角：对话构图按竖直 FOV 反算距离，横屏/竖屏一致
 	camera.far = 900.0
 	add_child(camera)
 	_update_camera()
@@ -326,11 +338,86 @@ func _setup_camera() -> void:
 ## 双指手势的临时偏移（_gest_*）叠加在基准之上：俯仰加偏移、距离乘倍率、绕焦点环绕 yaw。
 func _update_camera() -> void:
 	var pitch := deg_to_rad(clampf(_cur_pitch + _gest_pitch, GESTURE_PITCH_MIN, GESTURE_PITCH_MAX))
-	var dist := clampf(_cur_dist * _gest_zoom, ZOOM_MIN, ZOOM_MAX)
+	# 对话态放开近距下限（贴近小体型角色构图）；god 态仍守 ZOOM_MIN
+	var zmin := DIALOG_ZOOM_MIN if _locked != null else ZOOM_MIN
+	var dist := clampf(_cur_dist * _gest_zoom, zmin, ZOOM_MAX)
 	var focus := Vector3(0.0, _cur_focus_y, 0.0)
 	var offset := Vector3(0.0, sin(pitch) * dist, cos(pitch) * dist).rotated(Vector3.UP, _gest_yaw)
 	camera.global_position = focus + offset
 	camera.look_at(focus, Vector3.UP)
+
+## 站桩侧（纯函数）：dx = shortest_delta(NPC→玩家).x，>0 玩家在 NPC 右侧、否则左侧（含 dx≈0 默认左）。
+static func stage_side(dx: float) -> float:
+	return 1.0 if dx > 0.0 else -1.0
+
+## 玩家对话站位（纯函数）：站到 NPC 的进入侧、离 NPC STAGE_GAP 处（保持玩家从哪边来就站哪边）。
+static func staged_logical(npc_l: Vector2, player_l: Vector2, gap: float) -> Vector2:
+	var dx := WorldGrid.shortest_delta(npc_l, player_l).x
+	return WorldGrid.wrap_pos(npc_l + Vector2(stage_side(dx) * gap, 0.0))
+
+## 对话相机构图（纯函数，便于单测）：给定两人中点、当前说话方位置与双方立绘世界高度，
+## 反算轨道距离与焦点。基础态（is_idle=思考/无人说话）取两人 max 高度占屏中间 50%、焦点居中；
+## 说话态则朝说话方偏移焦点、并向「说话方单独占 50%」混一点距离——小体型（如仙子）单独构图
+## 距离更近，天然 zoom 更多。dist 未夹 min，由 _update_camera 按对话态 DIALOG_ZOOM_MIN 收口。
+static func compute_dialog_cam(center: Vector2, speaker_logical: Vector2, base_h: float,
+		speaker_h: float, fov_deg: float, is_idle: bool) -> Dictionary:
+	var tanhalf := tan(deg_to_rad(fov_deg * 0.5))
+	# 高度 H 占屏比 FILL 时的轨道距离：可见世界高 = 2*d*tan(fov/2)，令 H/可见高 = FILL
+	var base_dist := base_h / (2.0 * DIALOG_FILL * tanhalf)
+	if is_idle:
+		return { "want": center, "dist": base_dist, "lift": base_h * 0.5 }
+	var seg := WorldGrid.shortest_delta(center, speaker_logical)
+	var want := WorldGrid.wrap_pos(center + seg * SPEAK_SHIFT)
+	var indiv := speaker_h / (2.0 * DIALOG_FILL * tanhalf) # 说话方单独占 50% 的距离
+	var dist := lerpf(base_dist, indiv, SPEAK_ZOOM_BLEND)
+	var lift := lerpf(base_h, speaker_h, SPEAK_SHIFT) * 0.5 # 焦点竖直居中随偏移比例过渡
+	return { "want": want, "dist": dist, "lift": lift }
+
+## 对话中判定「谁在说话」：NPC 的 TTS 或（对仙子时）仙子语音在播 = npc；思考中 = idle（构图归中）；
+## 其余（录音中 / 静待玩家开口）= player。焦点/距离据此朝对应角色偏移（见 _process 焦点块）。
+func _dialog_speaker() -> String:
+	if _tts_player.playing:
+		return "npc"
+	var fairy := _find_fairy()
+	if not fairy.is_empty() and selected == fairy.get("node") \
+			and fairy_voice != null and fairy_voice.is_playing():
+		return "npc"
+	if thinking_label.visible:
+		return "idle"
+	return "player"
+
+## 用当前场景状态喂 compute_dialog_cam：两人中点、双方立绘高度、当前说话方。
+func _dialog_camera() -> Dictionary:
+	var np := _find_npc_dict(_locked)
+	if np.is_empty():
+		return { "want": player["logical"], "dist": _target_dist, "lift": 0.0 }
+	var npc_l: Vector2 = np["logical"]
+	var player_l: Vector2 = player["logical"]
+	var npc_h := _char_top(_locked)
+	var player_h := _char_top(player["node"] as PaperCharacter)
+	var base_h := maxf(npc_h, player_h)
+	var center := WorldGrid.wrap_pos(npc_l + WorldGrid.shortest_delta(npc_l, player_l) * 0.5)
+	var who := _dialog_speaker()
+	var spk_l := npc_l if who == "npc" else player_l
+	var spk_h := npc_h if who == "npc" else player_h
+	return compute_dialog_cam(center, spk_l, base_h, spk_h, camera.fov, who == "idle")
+
+## 玩家跳向对话站位：横向按最短环面向量缓入插值、竖直叠加 sin 弧线小跳；落地登记占用。
+## 小跳期间 _update_paper_motion 走 _hop 分支（不按位移换面/摇摆，保持进对话设定的相对朝向）。
+func _step_hop(delta: float) -> void:
+	if _hop_t < 0.0 or player.is_empty():
+		return
+	_hop_t += delta
+	var k := clampf(_hop_t / STAGE_HOP_DUR, 0.0, 1.0)
+	var seg := WorldGrid.shortest_delta(_hop_from, _stage_player_logical)
+	player["logical"] = WorldGrid.wrap_pos(_hop_from + seg * smoothstep(0.0, 1.0, k))
+	player["hover"] = STAGE_HOP_HEIGHT * sin(k * PI)
+	if k >= 1.0:
+		player["logical"] = _stage_player_logical
+		player.erase("hover")
+		player.erase("_hop")
+		_hop_t = -1.0
+		OccupancyMap.char_register(PLAYER_ID, _stage_player_logical, PLAYER_SPAN)
 
 func _setup_npcs() -> void:
 	var defs := [
@@ -932,6 +1019,7 @@ func _process(delta: float) -> void:
 	game_audio.set_ducked(_recording or thinking_label.visible or _tts_player.playing \
 			or (fairy_voice != null and fairy_voice.is_playing()))
 	tp = _prof_lap(tp, "duck")
+	_step_hop(delta)  # 进对话时玩家跳向站位（在焦点/摆位之前推进，相机随之贴合）
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
 	_cur_pitch = lerpf(_cur_pitch, _target_pitch, t)
@@ -947,17 +1035,23 @@ func _process(delta: float) -> void:
 	_gest_yaw = lerpf(_gest_yaw, _gest_yaw_t, t)
 	_gest_pitch = lerpf(_gest_pitch, _gest_pitch_t, t)
 	_gest_zoom = lerpf(_gest_zoom, _gest_zoom_t, t)
-	# 聚焦缓动：测试 override > 交互对象 > 玩家（饥荒式相机永远跟着「我」）
+	# 聚焦缓动：测试 override > 对话构图（站桩+说话人跟随）> 交互对象 > 玩家（饥荒式相机永远跟着「我」）
 	var want := focus_logical
+	var lift := 0.0  ## 对话构图的焦点竖直抬升（把双方/说话方框在屏幕竖直中段）
 	if focus_override != Vector2.INF:
 		want = focus_override
+	elif _locked != null and is_instance_valid(_locked) and not player.is_empty():
+		var dc := _dialog_camera()
+		want = dc["want"]
+		_target_dist = dc["dist"]
+		lift = dc["lift"]
 	elif _locked != null and is_instance_valid(_locked):
 		want = _find_npc_dict(_locked).get("logical", focus_logical)
 	elif not player.is_empty():
 		want = player["logical"]
 	var fd := WorldGrid.shortest_delta(focus_logical, want)
 	focus_logical = WorldGrid.wrap_pos(focus_logical + fd * t)
-	var fy := float(TerrainMap.tile_height(WorldGrid.to_tile(focus_logical))) * TerrainMap.STEP_HEIGHT
+	var fy := float(TerrainMap.tile_height(WorldGrid.to_tile(focus_logical))) * TerrainMap.STEP_HEIGHT + lift
 	_cur_focus_y = lerpf(_cur_focus_y, fy, t)
 	# 相机随焦点抬升后离地更远，雾距同步外推，山顶视角与平地一样通透
 	# （RENDER_RADIUS 110 > 最高补偿后的可见地面半径 ~103，不会露出 chunk 边缘）
@@ -1042,6 +1136,15 @@ func _place_char(n: Dictionary, lean: float, delta: float) -> void:
 ## 动画状态记在角色字典（paper_* 键），节点只吃结果，无需自带脚本。
 func _update_paper_motion(n: Dictionary, node: PaperCharacter, lean: float, delta: float) -> void:
 	var cur: Vector2 = n["logical"]
+	# 小跳中：冻结位移速度（不触发走路摇摆/换面），保持进对话设定的相对朝向，只做翻面收敛
+	if bool(n.get("_hop", false)):
+		n["paper_prev"] = cur
+		var face_h := float(n.get("paper_face", 0.0))
+		var fry_h := move_toward(float(n.get("paper_fry", face_h)), face_h, FLIP_SPEED * delta)
+		n["paper_fry"] = fry_h
+		node.rotation = Vector3(-lean * cos(fry_h), fry_h + _gest_yaw, 0.0)
+		node.set_paper_motion(0.0, 0.0)
+		return
 	var vel := WorldGrid.shortest_delta(n.get("paper_prev", cur), cur) / maxf(delta, 0.0001)
 	n["paper_prev"] = cur
 	# 朝向目标：横向速度超过阈值才换面（防原地抖动）；纵向移动保持上次朝向
@@ -1495,16 +1598,20 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	selected = npc
 	game_audio.play_sfx("enter")
 	_check_deliver_task(npc) # 带话委托：亲自走到目标角色旁开始对话 = 送达
-	# 面对面：进近身时双方朝向对方（paper_face 由动作层每帧收敛）
+	# 面对面 + 站桩：进近身时双方朝向对方，玩家按进入侧（dx 符号）跳到 NPC 对应侧站位（NPC 原地不动）
 	var d := _find_npc_dict(npc)
 	if not d.is_empty() and not player.is_empty():
 		var dx := WorldGrid.shortest_delta(d["logical"], player["logical"]).x
 		d["paper_face"] = 0.0 if dx > 0.0 else PI
 		player["paper_face"] = 0.0 if dx <= 0.0 else PI
-	# lock：相机平滑切到更低角(3/4)+拉近，聚焦跟随该角色
+		_cancel_player_move()
+		_hop_from = player["logical"]
+		_stage_player_logical = staged_logical(d["logical"], player["logical"], STAGE_GAP)
+		player["_hop"] = true
+		_hop_t = 0.0
+	# lock：相机平滑切到更低角(3/4)；距离/焦点交给对话构图（_dialog_camera）逐帧算
 	_locked = npc
 	_target_pitch = LOCK_PITCH_DEG
-	_target_dist = LOCK_DIST
 	banner.text = "想说什么就直接跟%s说吧" % npc.char_name
 	banner.visible = true
 	thinking_label.visible = false
@@ -1520,6 +1627,11 @@ func _exit_interaction() -> void:
 	_mic.stop()
 	_vad = null
 	selected = null
+	# 中途退出时清掉未完成的小跳（保留当前位置，不瞬移回落点）
+	if not player.is_empty():
+		player.erase("_hop")
+		player.erase("hover")
+	_hop_t = -1.0
 	_resume_stopped_npc() # 被叫停等玩家的对象恢复闲逛
 	# 切回跟随玩家视角（平滑过渡）
 	_locked = null

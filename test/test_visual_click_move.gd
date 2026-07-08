@@ -100,8 +100,9 @@ func _check_interaction() -> void:
 	if npc_node != null:
 		var d := _dict_of(npc_node)
 		if not d.is_empty():
+			# 站桩：进对话后玩家跳到 NPC 对应侧、离 NPC 恰好 STAGE_GAP(5.0) 处（不再贴身）
 			var dist := WorldGrid.shortest_delta(player["logical"], d["logical"]).length()
-			_check("player adjacent to npc (dist=%.2f)" % dist, dist <= 3.2, true)
+			_check("player staged at STAGE_GAP from npc (dist=%.2f)" % dist, absf(dist - 5.0) < 0.6, true)
 	_check("banner visible", (scene.get("banner") as Label).visible, true)
 
 ## 开放麦·短促噪声：触发开口但有声段太短 → 静默取消（不进思考、继续聆听）。
