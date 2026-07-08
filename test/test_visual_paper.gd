@@ -15,6 +15,7 @@ var frame := 0
 var fails := 0
 var _mid_flip_seen := false ## 换向期间任一帧 ry 落在中间角
 var _idle_curl_max := 0.0   ## 待机期间 |curl| 峰值
+var _sway_max := 0.0        ## 走路期间 |rotation.z| 峰值（相位随机，单帧抽样会撞 sin≈0 误报）
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
@@ -34,11 +35,14 @@ func _tick() -> void:
 			_structural(node)
 		_ when frame > 10 and frame <= 30:
 			_drive(player, Vector2(-0.8, 0.0)) # 向左走 2s（8m/s @ 10fps）
+			# 摇摆相位 randf()*TAU 起步：单帧抽样会偶发撞上 sin≈0（实测全套 ~0.6%/次误报），
+			# 改走路期间累计峰值，f31 一并断言
+			_sway_max = maxf(_sway_max, absf(node.rotation.z))
 		_ when frame == 31:
 			_check("走路强度拉起 (paper_walk)", float(player.get("paper_walk", 0.0)) > 0.5, true)
 			_check("走路下摆飘动非零 (flutter_amp)", _param(node, "flutter_amp") > 0.03, true)
 			_check("向左移动完成翻面 (ry≈PI)", absf(node.rotation.y - PI) < 0.1, true)
-			_check("走路左右摇摆在动 (rotation.z)", absf(node.rotation.z) > 0.001, true)
+			_check("走路左右摇摆在动 (max|rotation.z|)", _sway_max > 0.001, true)
 		_ when frame > 31 and frame <= 45:
 			_drive(player, Vector2(0.8, 0.0)) # 换向右走：翻面回 0，中途必过侧身
 			var ry := node.rotation.y
