@@ -2,7 +2,8 @@ extends Node
 class_name GameAudio
 # 背景音乐 + 音效管理器。惯例同 MicRecorder：class_name + 各场景 _ready 里实例化。
 # 运行时确保 Music/SFX 两条 bus（幂等，场景切换重进不重复建）。
-# BGM 用双播放器交叉淡化串接同 BPM 的渐进 loop；录音/思考/TTS 时 duck 压低音乐。
+# BGM 现用单条长 loop（bgm_main.wav ~68s 连续曲，导入开 loop 无缝循环）；录音/思考/TTS 时 duck 压低音乐。
+# 双播放器交叉淡化机制保留：传入多条 step 会按 SECTION_SECS 轮换串接，但生产只喂单条 → 不轮换、纯 loop。
 # 注意 headless dummy 音频 playing 永真，逻辑状态一律自己记账，不依赖 playing 翻转。
 
 const SFX := {
@@ -23,9 +24,7 @@ const SFX := {
 	"reveal": "res://assets/audio/kenney_jingles/jingles_PIZZI03.ogg",  # 形象揭晓
 }
 const BGM_STEPS := [
-	"res://assets/audio/bgm/bgm_step1.wav",
-	"res://assets/audio/bgm/bgm_step2.wav",
-	"res://assets/audio/bgm/bgm_step3.wav",
+	"res://assets/audio/bgm/bgm_main.wav", # 单条 ~68s 连续曲，原地无缝 loop（不再三段轮换）
 ]
 
 const SFX_POOL := 4
@@ -34,7 +33,7 @@ const MUSIC_DB := -14.0        # 音乐常态音量：垫在语音下面
 const SFX_DB := -6.0
 const DUCK_DB := -12.0         # duck 时在常态上再压这么多
 const DUCK_LERP := 6.0         # duck 渐变速率(每秒 dB 权重)
-const SECTION_SECS := 19.2     # 每段 BGM 播两个 9.6s loop 后换下一段
+const SECTION_SECS := 19.2     # 多段模式下每段播这么久后轮换（单条模式不生效）
 const CROSSFADE_SECS := 1.2
 
 var _sfx_players: Array[AudioStreamPlayer] = []
