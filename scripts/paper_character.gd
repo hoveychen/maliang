@@ -17,11 +17,13 @@ const SUBDIV_W := 6
 const SUBDIV_H := 12
 
 static var _shader: Shader = null
+static var _xray_shader: Shader = null
 
 var texture: Texture2D = null:
 	set(v):
 		texture = v
 		_mat.set_shader_parameter("albedo_tex", v)
+		_xray_mat.set_shader_parameter("albedo_tex", v)
 		_refresh_geometry()
 var pixel_size := 0.01:
 	set(v):
@@ -38,14 +40,21 @@ var modulate := Color.WHITE:
 		_mat.set_shader_parameter("modulate", v)
 
 var _mat: ShaderMaterial
+## 穿透 pass 材质：被建筑/树/地形挡住时画半透明剪影浮在遮挡物上（见 paper_xray.gdshader）。
+var _xray_mat: ShaderMaterial
 ## idle 动画图集 meta（空=静态整图）；非空时几何按单格 cellW×cellH 算、shader 分格播放。
 var _sheet: Dictionary = {}
 
 func _init() -> void:
 	if _shader == null:
 		_shader = load("res://shaders/paper_character.gdshader")
+	if _xray_shader == null:
+		_xray_shader = load("res://shaders/paper_xray.gdshader")
 	_mat = ShaderMaterial.new()
 	_mat.shader = _shader
+	_xray_mat = ShaderMaterial.new()
+	_xray_mat.shader = _xray_shader
+	_mat.next_pass = _xray_mat  # 穿透剪影作为主材质的 next_pass，排在不透明之后读深度
 	var q := QuadMesh.new()
 	q.subdivide_width = SUBDIV_W
 	q.subdivide_depth = SUBDIV_H
@@ -68,6 +77,8 @@ func setup(tex: Texture2D, color: Color, cname: String) -> void:
 func set_paper_motion(flutter_amp: float, curl: float) -> void:
 	_mat.set_shader_parameter("flutter_amp", flutter_amp)
 	_mat.set_shader_parameter("curl", curl)
+	_xray_mat.set_shader_parameter("flutter_amp", flutter_amp)
+	_xray_mat.set_shader_parameter("curl", curl)
 
 ## 从静态立绘切到 idle 动画图集。meta 为服务端 SpriteSheetMeta（cols/rows/frameCount/fps/cellW/cellH）。
 ## world_height：期望世界高度（米），与切换前静态立绘保持一致，观感不跳。phase：相位偏移（秒）。
@@ -77,11 +88,12 @@ func play_idle(atlas: Texture2D, meta: Dictionary, world_height: float, phase :=
 	if atlas == null or ch <= 0.0 or cw <= 0.0:
 		return
 	_sheet = meta
-	_mat.set_shader_parameter("sheet_cols", int(meta.get("cols", 1)))
-	_mat.set_shader_parameter("sheet_rows", int(meta.get("rows", 1)))
-	_mat.set_shader_parameter("sheet_frames", int(meta.get("frameCount", 0)))
-	_mat.set_shader_parameter("sheet_fps", float(meta.get("fps", 8)))
-	_mat.set_shader_parameter("sheet_phase", phase)
+	for m in [_mat, _xray_mat]:
+		m.set_shader_parameter("sheet_cols", int(meta.get("cols", 1)))
+		m.set_shader_parameter("sheet_rows", int(meta.get("rows", 1)))
+		m.set_shader_parameter("sheet_frames", int(meta.get("frameCount", 0)))
+		m.set_shader_parameter("sheet_fps", float(meta.get("fps", 8)))
+		m.set_shader_parameter("sheet_phase", phase)
 	pixel_size = world_height / ch  # setter 会触发 _refresh_geometry（此时 _sheet 已置）
 	offset = Vector2(0.0, ch / 2.0)
 	texture = atlas
@@ -112,3 +124,4 @@ func _refresh_geometry() -> void:
 	q.size = Vector2(w, h)
 	q.center_offset = Vector3(offset.x * pixel_size, offset.y * pixel_size, 0.0)
 	_mat.set_shader_parameter("quad_size", Vector2(w, h))
+	_xray_mat.set_shader_parameter("quad_size", Vector2(w, h))
