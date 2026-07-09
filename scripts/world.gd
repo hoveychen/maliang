@@ -832,25 +832,35 @@ func _setup_hud() -> void:
 	screen_pad.add_child(screen_vbox)
 	# —— 顶部 banner（iPhone 状态栏式）：时钟 · 已玩时长 · 小红花（P3 填活值）——
 	var banner_bar := HBoxContainer.new()
-	banner_bar.add_theme_constant_override("separation", 10)
+	banner_bar.add_theme_constant_override("separation", 6)
 	_phone_clock = Label.new()
-	_style_card_label(_phone_clock, 22)
+	_style_card_label(_phone_clock, 20)
 	banner_bar.add_child(_phone_clock)
 	_phone_playtime = Label.new()
-	_style_card_label(_phone_playtime, 20)
+	_style_card_label(_phone_playtime, 18)
 	_phone_playtime.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_phone_playtime.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	banner_bar.add_child(_phone_playtime)
-	banner_bar.add_child(UiAssets.icon_rect("st_flower", 26.0)) # 小红花图标（代笔占位读数见下）
+	banner_bar.add_child(UiAssets.icon_rect("st_flower", 22.0)) # 小红花图标（代笔占位读数见下）
 	_phone_flowers = Label.new()
-	_style_card_label(_phone_flowers, 22)
+	_style_card_label(_phone_flowers, 18)
 	banner_bar.add_child(_phone_flowers)
 	screen_vbox.add_child(banner_bar)
 	screen_vbox.add_child(HSeparator.new())
+	# banner 下方内容套一层竖向滚动：内容超出屏区时滚动，绝不把手机壳撑大（横向须自适应贴合）。
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	screen_vbox.add_child(scroll)
+	var scroll_inner := VBoxContainer.new()
+	scroll_inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(scroll_inner)
 	# —— 主屏：4x4 app 网格（前 N 格实装 app，其余留白）——
 	_phone_home = VBoxContainer.new()
 	_phone_home.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	screen_vbox.add_child(_phone_home)
+	scroll_inner.add_child(_phone_home)
 	var app_grid := GridContainer.new()
 	app_grid.columns = 4
 	app_grid.add_theme_constant_override("h_separation", 8)
@@ -867,22 +877,22 @@ func _setup_hud() -> void:
 	_phone_app_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_phone_app_view.add_theme_constant_override("separation", 12)
 	_phone_app_view.visible = false
-	screen_vbox.add_child(_phone_app_view)
+	scroll_inner.add_child(_phone_app_view)
 	var app_bar := HBoxContainer.new()
-	app_bar.add_theme_constant_override("separation", 10)
+	app_bar.add_theme_constant_override("separation", 8)
 	var back_btn := Button.new()
-	back_btn.text = "返回主屏"
-	back_btn.add_theme_font_size_override("font_size", 22)
+	back_btn.text = "返回"
+	back_btn.add_theme_font_size_override("font_size", 20)
 	UiAssets.style_card_button(back_btn)
 	back_btn.pressed.connect(_close_phone_app)
 	app_bar.add_child(back_btn)
 	_phone_app_title = Label.new()
-	_style_card_label(_phone_app_title, 26)
+	_style_card_label(_phone_app_title, 24)
 	_phone_app_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_phone_app_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	app_bar.add_child(_phone_app_title)
 	var app_bar_spacer := Control.new() # 让标题视觉居中（右侧留一块与返回键等宽的空）
-	app_bar_spacer.custom_minimum_size = Vector2(96.0, 0.0)
+	app_bar_spacer.custom_minimum_size = Vector2(48.0, 0.0)
 	app_bar.add_child(app_bar_spacer)
 	_phone_app_view.add_child(app_bar)
 	_phone_app_host = VBoxContainer.new()
@@ -891,12 +901,13 @@ func _setup_hud() -> void:
 	# ── 三个 app 的页面（内容沿用原贴纸/物品/设置，_refresh_album 等仍适用）──
 	var grid := GridContainer.new()
 	grid.columns = 4
-	grid.add_theme_constant_override("h_separation", 28)
-	grid.add_theme_constant_override("v_separation", 16)
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	for id in STICKER_ORDER:
 		var cell := VBoxContainer.new()
 		cell.alignment = BoxContainer.ALIGNMENT_CENTER
-		var glyph := UiAssets.icon_rect(String(UiAssets.STICKER_ICONS.get(id, "st_star")), 64.0)
+		var glyph := UiAssets.icon_rect(String(UiAssets.STICKER_ICONS.get(id, "st_star")), 40.0)
 		var count := Label.new()
 		count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_style_card_label(count, 22)
@@ -909,11 +920,14 @@ func _setup_hud() -> void:
 	items_page.alignment = BoxContainer.ALIGNMENT_CENTER
 	_items_grid = GridContainer.new()
 	_items_grid.columns = 4
-	_items_grid.add_theme_constant_override("h_separation", 28)
-	_items_grid.add_theme_constant_override("v_separation", 16)
+	_items_grid.add_theme_constant_override("h_separation", 8)
+	_items_grid.add_theme_constant_override("v_separation", 8)
+	_items_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_items_empty = Label.new()
 	_items_empty.text = "还没有收起来的物品"
 	_items_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_items_empty.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY # 窄屏区不撑宽，自动换行
+	_items_empty.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_style_card_label(_items_empty, 24)
 	items_page.add_child(_items_grid)
 	items_page.add_child(_items_empty)
@@ -931,12 +945,12 @@ func _setup_hud() -> void:
 	settings_page.add_child(reroll)
 	_reroll_confirm = HBoxContainer.new()
 	_reroll_confirm.alignment = BoxContainer.ALIGNMENT_CENTER
-	_reroll_confirm.add_theme_constant_override("separation", 24)
-	_reroll_confirm.add_child(UiAssets.icon_rect("ic_question", 56.0))
-	var reroll_yes := UiAssets.icon_button("ic_yes", 72.0)
+	_reroll_confirm.add_theme_constant_override("separation", 12)
+	_reroll_confirm.add_child(UiAssets.icon_rect("ic_question", 48.0))
+	var reroll_yes := UiAssets.icon_button("ic_yes", 52.0)
 	reroll_yes.pressed.connect(_on_reroll_yes)
 	_reroll_confirm.add_child(reroll_yes)
-	var reroll_no := UiAssets.icon_button("ic_no", 72.0)
+	var reroll_no := UiAssets.icon_button("ic_no", 52.0)
 	reroll_no.pressed.connect(_on_reroll_no)
 	_reroll_confirm.add_child(reroll_no)
 	_reroll_confirm.visible = false
@@ -956,16 +970,16 @@ func _setup_hud() -> void:
 	_avatar_img = TextureRect.new()
 	_avatar_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_avatar_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_avatar_img.custom_minimum_size = Vector2(220.0, 220.0)
+	_avatar_img.custom_minimum_size = Vector2(160.0, 160.0)
 	_avatar_img.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_avatar_preview.add_child(_avatar_img)
 	var avatar_row := HBoxContainer.new()
 	avatar_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	avatar_row.add_theme_constant_override("separation", 24)
-	var avatar_yes := UiAssets.icon_button("ic_yes", 72.0)
+	avatar_row.add_theme_constant_override("separation", 16)
+	var avatar_yes := UiAssets.icon_button("ic_yes", 52.0)
 	avatar_yes.pressed.connect(_on_avatar_regen_yes)
 	avatar_row.add_child(avatar_yes)
-	var avatar_no := UiAssets.icon_button("ic_no", 72.0)
+	var avatar_no := UiAssets.icon_button("ic_no", 52.0)
 	avatar_no.pressed.connect(_on_avatar_regen_no)
 	avatar_row.add_child(avatar_no)
 	_avatar_preview.add_child(avatar_row)
@@ -3018,12 +3032,15 @@ func _refresh_items_page() -> void:
 		var spec: Dictionary = world_props[pid].get("spec", {})
 		var cell := VBoxContainer.new()
 		cell.alignment = BoxContainer.ALIGNMENT_CENTER
-		var glyph := UiAssets.icon_button("ic_gift", 64.0) # 点一下摆回玩家身旁
+		cell.custom_minimum_size = Vector2(44.0, 0.0)
+		var glyph := UiAssets.icon_button("ic_gift", 44.0) # 点一下摆回玩家身旁
 		glyph.pressed.connect(_take_prop_out.bind(String(pid)))
 		var name_label := Label.new()
 		name_label.text = String(spec.get("name", "小玩意"))
 		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_style_label(name_label, 20)
+		name_label.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+		name_label.custom_minimum_size = Vector2(44.0, 0.0)
+		_style_label(name_label, 18)
 		cell.add_child(glyph)
 		cell.add_child(name_label)
 		_items_grid.add_child(cell)

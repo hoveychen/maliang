@@ -45,12 +45,18 @@ func _run(scene: Node) -> void:
 	var appview: Control = scene.get("_phone_app_view")
 	_check(appview != null and not appview.visible, "主屏时 app 视图隐藏")
 
+	# 手机壳固定尺寸：打开任何 app 都不能把 album_panel 撑大（内容超出屏区应滚动/裁剪，不撑壳）。
+	var fixed_w := album_panel.custom_minimum_size.x
+	var fixed_h := album_panel.custom_minimum_size.y
 	var pages: Dictionary = scene.get("_album_pages")
 	for id in ["stickers", "items", "settings"]:
 		scene._open_app(id)
 		_check(String(scene.get("_phone_open_app")) == id, "打开 app: %s" % id)
 		_check(appview.visible and not home.visible, "%s：app 视图显示、主屏隐藏" % id)
 		_check((pages[id] as Control).visible, "%s：对应页面可见" % id)
+		var cms := album_panel.get_combined_minimum_size()
+		_check(cms.x <= fixed_w + 1.0, "%s：不撑宽手机壳 (壳宽 %.0f, 内容 %.0f)" % [id, fixed_w, cms.x])
+		_check(cms.y <= fixed_h + 1.0, "%s：不撑高手机壳 (壳高 %.0f, 内容 %.0f)" % [id, fixed_h, cms.y])
 
 	scene._close_phone_app()
 	_check(home.visible and not appview.visible, "返回主屏")
