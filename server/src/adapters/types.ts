@@ -43,6 +43,8 @@ export interface LLMAdapter {
 /** 生图：真实实现接 OpenRouter（google/gemini-*-image），输出纯色背景立绘。 */
 export interface ImageAdapter {
   generateSprite(visualDescription: string): Promise<ImageBlob>;
+  /** 造角色图标专用生图：扁平贴纸图标画风（非角色框），见 sprite_style.buildIconPrompt。 */
+  generateIcon(visualDescription: string): Promise<ImageBlob>;
 }
 
 /** 抠图：纯色（绿幕）背景 → 透明 PNG。 */

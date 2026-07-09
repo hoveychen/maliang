@@ -37,6 +37,42 @@ function encodePng(r: Raster): Uint8Array {
   return new Uint8Array(PNG.sync.write(png));
 }
 
+/**
+ * 给透明 PNG 主体加一圈白色 die-cut 贴纸边（纸片马里奥贴纸感），不靠生图模型画。
+ * 做法：对 alpha 轮廓做 radius 次形态学膨胀，膨胀出来（原本透明、现被并入）的像素涂白不透明，
+ * 主体像素原样保留（含它自己的黑描边）→ 主体外多一圈白边。radius 默认按短边 ~3.5% 取,
+ * 保证缩到卡片尺寸后白边仍可见。
+ */
+export function addStickerBorder(input: ImageBlob, radius?: number): ImageBlob {
+  const { width: w, height: h, data: d } = decode(input.bytes);
+  const r = radius ?? Math.max(8, Math.round(Math.min(w, h) * 0.035));
+  const n = w * h;
+  const subject = new Uint8Array(n);
+  for (let i = 0; i < n; i++) subject[i] = d[i * 4 + 3]! > 40 ? 1 : 0;
+  let cur = subject.slice();
+  let next = new Uint8Array(n);
+  for (let step = 0; step < r; step++) {
+    next.set(cur);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (cur[i]) continue;
+        if (
+          (x > 0 && cur[i - 1]) || (x < w - 1 && cur[i + 1]) ||
+          (y > 0 && cur[i - w]) || (y < h - 1 && cur[i + w])
+        ) next[i] = 1;
+      }
+    }
+    const tmp = cur; cur = next; next = tmp;
+  }
+  for (let i = 0; i < n; i++) {
+    if (cur[i] && !subject[i]) {
+      d[i * 4] = 255; d[i * 4 + 1] = 255; d[i * 4 + 2] = 255; d[i * 4 + 3] = 255;
+    }
+  }
+  return { bytes: encodePng({ width: w, height: h, data: d }), mime: 'image/png' };
+}
+
 /** 水平镜像（朝左的立绘翻成朝右）。输出统一 PNG（保 alpha）。 */
 export function flipHorizontal(input: ImageBlob): ImageBlob {
   const { width: w, height: h, data: d } = decode(input.bytes);

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ImageBlob, ServiceAdapters } from './adapters/types.ts';
-import { flipHorizontal } from './adapters/chroma_cutout.ts';
+import { flipHorizontal, addStickerBorder } from './adapters/chroma_cutout.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, CharacterSpec, CreateCharacterInput, GenStage } from './types.ts';
 
@@ -87,6 +87,22 @@ export async function generateSprite(
   const cut = await generateCut(adapters, visualDescription);
   const upright = await ensureFacingRight(adapters, visualDescription, cut);
   return store.putAsset(upright);
+}
+
+/**
+ * 造角色选项图标（P3）：图标专用生图（扁平贴纸图标画风，非角色框）→ 绿幕抠图 → 程序加白 die-cut
+ * 贴纸边 → 存储，返回 assetHash。与 generateSprite 不同：不跑朝向兜底（图标无朝向），画风走
+ * buildIconPrompt（不拟人化抽象概念），白边由 addStickerBorder 后期描（不靠模型）。
+ */
+export async function generateIconAsset(
+  adapters: ServiceAdapters,
+  visualDescription: string,
+  store: WorldStore,
+): Promise<string> {
+  const raw = await adapters.image.generateIcon(visualDescription);
+  const cut = await adapters.cutout.removeBackground(raw);
+  const bordered = addStickerBorder(cut);
+  return store.putAsset(bordered);
 }
 
 /**

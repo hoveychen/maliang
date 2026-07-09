@@ -287,6 +287,9 @@ export function createMockAdapters(): ServiceAdapters {
       async generateSprite(_visualDescription: string): Promise<ImageBlob> {
         return pngStub();
       },
+      async generateIcon(_visualDescription: string): Promise<ImageBlob> {
+        return pngStub();
+      },
     },
     cutout: {
       async removeBackground(input: ImageBlob): Promise<ImageBlob> {
