@@ -162,18 +162,50 @@ const PHONE_APPS := [
 ]
 ## app 图标占位：AIGC 专属图标未落盘前，先借现有风格一致的贴纸/图标顶上。
 const PHONE_APP_FALLBACK := { "stickers": "st_flower", "items": "ic_gift", "settings": "ic_gear" }
-const PHONE_GRID_SLOTS := 16        ## 4x4
+const PHONE_GRID_COLS := 3          ## 主屏图标网格列数（3x3）
+const PHONE_PAGE_SLOTS := 9         ## 每页图标格数（3x3）
+const PHONE_HEIGHT_RATIO := 0.9     ## 机身高占视口比（贴右侧、竖向居中）
+const PHONE_RIGHT_MARGIN := 24.0    ## 机身距屏幕右边距
+## 手机近身相机：开手机时按玩家立绘高度反算距离，让玩家（自适应身高）占屏高约 70%，
+## 并把焦点右移，使玩家落在屏幕偏左、右侧留给手机（PHONE_PLAYER_NDC_X 方向若反了取负）。
+const PHONE_CAM_FILL := 0.70        ## 玩家立绘占屏高约 70%（按 _char_top 反算距离，自适应身高）
+const PHONE_CAM_DIST_MIN := 3.5     ## 近身距离下限（比对话态更近，撑到 70%）
+const PHONE_PLAYER_NDC_X := 0.30    ## 玩家横向落点（0=正中，0.30=中心偏左 30%），右侧留给手机
+## 可玩时间预算（桌面 widget 用饼图展示剩余；超时冷却）：默认每轮 45 分钟、冷却 10 分钟，循环。
+const PLAY_BUDGET_SEC := 2700       ## 每轮可玩时长（45 分钟）
+const PLAY_COOLDOWN_SEC := 600      ## 超时冷却时长（10 分钟）
 var _phone_screen: Control          ## 屏幕内容区（banner + 主页网格 + app 视图）
-var _phone_home: Control            ## 主页：4x4 app 网格
+var _phone_home: Control            ## 主页：桌面 widget + 3x3 图标分页
 var _phone_app_view: Control        ## 打开某个 app 后的视图（顶部返回条 + 页面宿主）
 var _phone_app_host: Control        ## app 页面挂载点（复用 _album_pages 的页面）
 var _phone_app_title: Label         ## 打开的 app 标题
-var _phone_clock: Label             ## banner 时钟（实时）
-var _phone_playtime: Label          ## banner 已游玩时间（本次进入世界起算）
-var _phone_flowers: Label           ## banner 小红花数（代笔占位，见 _red_flower_count）
+var _phone_clock: Label             ## 状态栏时钟（实时）
+var _phone_signal: Control          ## 状态栏信号格（绿=WS 在线、灰=离线，见 _update_phone_banner）
+var _phone_playpie: PlayTimePie     ## 桌面 widget 可玩时间饼图（闹钟+饼，剩余可玩时间可视化）
+var _phone_flowers: Label           ## 桌面 widget 小红花数（代笔占位，见 _red_flower_count）
 var _phone_open_app := ""           ## 当前打开的 app id（空=停在主页）
-var _play_start_ms := 0             ## 本次进入世界的起始 ticks_msec（算已游玩时间）
 var _phone_ui_t := 0.0              ## banner 刷新节流计时
+# —— 可玩时间预算（真强制冷却，跨会话持久化，见 tick/reconcile_play_budget + PlayerProfile.*_play_budget）——
+var _play_used_sec := 0.0           ## 本轮已累计活跃游玩秒数
+var _play_cooldown_until := 0.0     ## 冷却结束 unix 时间戳（0=不在冷却）
+var _play_blocked := false          ## 当前是否被冷却拦截（拦世界交互 + 弹冷却遮罩）
+var _play_remaining_frac := 1.0     ## 可玩剩余比例（喂桌面 widget 饼图）
+var _play_cooldown_frac := 0.0      ## 冷却进度比例（喂冷却遮罩饼图）
+var _play_save_t := 0.0             ## 预算落盘节流计时
+var _cooldown_overlay: Control      ## 冷却期全屏拦截遮罩（挡世界交互 + 闹钟饼图倒计时 + 文案）
+var _cooldown_pie: PlayTimePie      ## 遮罩上的大闹钟饼图（冷却进度）
+# —— 手机开合的遮罩/相机态/图标分页 ——
+var _phone_scrim: Control           ## 手机开着时的全屏透明遮罩：吞掉手机外的点击→收起手机（不当移动指令）
+var _phone_cam := false             ## 手机近身相机态（开手机 true，收手机 false）
+var _phone_cam_saved_dist := 0.0    ## 进近身前的 _target_dist（收手机还原）
+var _phone_cam_shift := 0.0         ## 近身焦点右移量（按距离/宽高比动态算，见 _recompute_phone_cam）
+var _phone_cam_lift := 0.0          ## 近身焦点竖直抬升（把玩家框在屏幕竖直中段）
+var _phone_pager: ScrollContainer   ## 主屏图标分页横滚容器（iPhone 式左右翻页）
+var _phone_pages_box: HBoxContainer ## 各页并排（每页宽=分页容器宽）
+var _phone_dots: HBoxContainer      ## 翻页圆点指示（>1 页才显示）
+var _phone_page := 0                ## 当前页
+var _phone_page_w := 0.0            ## 单页宽（=分页容器宽，翻页/贴合用）
+var _phone_pager_dragging := false  ## 正在拖拽分页（松手后贴合到最近页）
 var _reroll_confirm: HBoxContainer ## 设置页"重新捏角色"的 ✓/✗ 确认行（防小手误触）
 var _avatar_btn: Button            ## 设置页"换形象"按钮（生成中禁用防连点）
 var _avatar_preview: VBoxContainer ## 换形象预览区（新形象图 + ✓/✗），平时隐藏
@@ -371,8 +403,8 @@ func _setup_camera() -> void:
 ## 双指手势的临时偏移（_gest_*）叠加在基准之上：俯仰加偏移、距离乘倍率、绕焦点环绕 yaw。
 func _update_camera() -> void:
 	var pitch := deg_to_rad(clampf(_cur_pitch + _gest_pitch, GESTURE_PITCH_MIN, GESTURE_PITCH_MAX))
-	# 对话态放开近距下限（贴近小体型角色构图）；god 态仍守 ZOOM_MIN
-	var zmin := DIALOG_ZOOM_MIN if _locked != null else ZOOM_MIN
+	# 对话态/手机近身态放开近距下限（贴近构图）；god 态仍守 ZOOM_MIN
+	var zmin := DIALOG_ZOOM_MIN if (_locked != null or _phone_cam) else ZOOM_MIN
 	var dist := clampf(_cur_dist * _gest_zoom, zmin, ZOOM_MAX)
 	var focus := Vector3(0.0, _cur_focus_y, 0.0)
 	var offset := Vector3(0.0, sin(pitch) * dist, cos(pitch) * dist).rotated(Vector3.UP, _gest_yaw)
@@ -700,7 +732,7 @@ func _setup_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_hud_layer = layer
-	_play_start_ms = Time.get_ticks_msec() # 已游玩时间从进入世界起算（手机 banner 用）
+	_load_play_budget() # 恢复跨会话可玩时间预算（隔会话对账：冷却已过/长休息则刷新）
 
 	coord_label = Label.new()
 	coord_label.position = Vector2(16.0, 12.0)
@@ -792,28 +824,41 @@ func _setup_hud() -> void:
 	_style_phone_launcher(album_button)
 	layer.add_child(album_button)
 
-	# ── 手机机身：竖屏，居中；有 AIGC 手机壳资产用图，否则程序化深色圆角机身占位 ──
+	# 手机开着时的全屏透明遮罩：点手机外的任何位置→收起手机（吞掉该点击，不当世界移动指令）。
+	# 先于机身入层，机身后入 → 机身盖在遮罩之上；机身区域点击照常给机身，机身外给遮罩。
+	_phone_scrim = Control.new()
+	_phone_scrim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_phone_scrim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_phone_scrim.visible = false
+	_phone_scrim.gui_input.connect(_on_phone_scrim_input)
+	layer.add_child(_phone_scrim)
+
+	# ── 手机机身：竖屏，贴屏幕右侧、竖向居中、高约 90% 视口；有 AIGC 手机壳资产用图，否则程序化占位 ──
 	album_panel = PanelContainer.new()
-	album_panel.set_anchors_preset(Control.PRESET_CENTER)
-	album_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	album_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	album_panel.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	album_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN # 从右锚点向左长
+	album_panel.grow_vertical = Control.GROW_DIRECTION_BOTH     # 竖向居中
+	album_panel.offset_right = -PHONE_RIGHT_MARGIN
 	album_panel.visible = false
 	var skin: Dictionary = PHONE_SKINS.get(_phone_skin, {})
 	var has_shell := _apply_phone_shell(album_panel)
 	# 机身尺寸 + 屏区：有壳图时全部从壳贴图自动推导——宽高比按像素、屏幕区域按中心检测，
 	# 换任何新手机壳零手调；占位机身用竖屏近似 + 奶油屏。
-	var pw := 360.0
-	var ph := 660.0
+	# 机身高 = 视口高 * 90%，并以 PHONE_TARGET_H 兜底（仅在极小/headless 视口时兜底触发，
+	# 平板上 90% 永远大于兜底）；宽按壳/占位宽高比推，贴合右侧。
+	var vp_h := float(get_viewport().get_visible_rect().size.y)
+	var ph := maxf(vp_h * PHONE_HEIGHT_RATIO, PHONE_TARGET_H)
+	var aspect := 360.0 / 660.0 # 占位机身竖屏宽高比（无壳图时）
 	var ins := { "l": 0.0, "t": 0.0, "r": 0.0, "b": 0.0 }
 	if has_shell:
 		var shell_tex := UiAssets.tex(String(skin.get("shell", "")))
 		var img: Image = shell_tex.get_image() if shell_tex != null else null
 		if img != null and img.get_width() > 8 and img.get_height() > 8:
-			ph = PHONE_TARGET_H
-			pw = ph * float(img.get_width()) / float(img.get_height())
+			aspect = float(img.get_width()) / float(img.get_height())
 			ins = _detect_shell_screen_insets(img)
 		else:
 			has_shell = false # 拿不到像素→退回占位机身
+	var pw := ph * aspect
 	album_panel.custom_minimum_size = Vector2(pw, ph)
 	# bezel：有壳图→贴合自动检测出的屏区，让机身+蜻蜓翼当边框露出；占位机身→小边距。
 	var bezel := MarginContainer.new()
@@ -845,21 +890,16 @@ func _setup_hud() -> void:
 	var screen_vbox := VBoxContainer.new()
 	screen_vbox.add_theme_constant_override("separation", 12)
 	screen_pad.add_child(screen_vbox)
-	# —— 顶部 banner（iPhone 状态栏式）：时钟 · 已玩时长 · 小红花（P3 填活值）——
+	# —— 顶部状态栏（极简 iPhone 式）：当前时间（左）+ 信号格（右，绿=WS 在线 / 灰=离线）——
+	# 已玩时长、小红花不在状态栏，改到主屏桌面 widget（见 _build_phone_widget）。
 	var banner_bar := HBoxContainer.new()
 	banner_bar.add_theme_constant_override("separation", 6)
 	_phone_clock = Label.new()
 	_style_card_label(_phone_clock, 20)
+	_phone_clock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	banner_bar.add_child(_phone_clock)
-	_phone_playtime = Label.new()
-	_style_card_label(_phone_playtime, 18)
-	_phone_playtime.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_phone_playtime.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	banner_bar.add_child(_phone_playtime)
-	banner_bar.add_child(UiAssets.icon_rect("st_flower", 22.0)) # 小红花图标（代笔占位读数见下）
-	_phone_flowers = Label.new()
-	_style_card_label(_phone_flowers, 18)
-	banner_bar.add_child(_phone_flowers)
+	_phone_signal = _make_signal_indicator()
+	banner_bar.add_child(_phone_signal)
 	screen_vbox.add_child(banner_bar)
 	screen_vbox.add_child(HSeparator.new())
 	# banner 下方内容套一层竖向滚动：内容超出屏区时滚动，绝不把手机壳撑大（横向须自适应贴合）。
@@ -872,21 +912,30 @@ func _setup_hud() -> void:
 	var scroll_inner := VBoxContainer.new()
 	scroll_inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(scroll_inner)
-	# —— 主屏：4x4 app 网格（前 N 格实装 app，其余留白）——
+	# —— 主屏：桌面 widget（整条卡片：已玩时长 + 小红花）+ 3x3 图标分页（iPhone 式左右翻页）——
 	_phone_home = VBoxContainer.new()
 	_phone_home.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_phone_home.add_theme_constant_override("separation", 14)
 	scroll_inner.add_child(_phone_home)
-	var app_grid := GridContainer.new()
-	app_grid.columns = 4
-	app_grid.add_theme_constant_override("h_separation", 8)
-	app_grid.add_theme_constant_override("v_separation", 8)
-	app_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_phone_home.add_child(app_grid)
-	for i in PHONE_GRID_SLOTS:
-		if i < PHONE_APPS.size():
-			app_grid.add_child(_make_app_icon(PHONE_APPS[i]))
-		else:
-			app_grid.add_child(_make_blank_slot())
+	_phone_home.add_child(_build_phone_widget())
+	# 图标分页：横向 ScrollContainer，内含并排的页（每页一个 3x3 网格）；拖拽翻页、松手贴合、圆点指示。
+	_phone_pager = ScrollContainer.new()
+	_phone_pager.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_phone_pager.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_phone_pager.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_phone_pager.get_h_scroll_bar().modulate = Color(1.0, 1.0, 1.0, 0.0) # 藏横向滚动条（iPhone 无条）
+	_phone_pager.gui_input.connect(_on_phone_pager_input)
+	_phone_home.add_child(_phone_pager)
+	_phone_pages_box = HBoxContainer.new()
+	_phone_pages_box.add_theme_constant_override("separation", 0)
+	_phone_pager.add_child(_phone_pages_box)
+	_build_phone_pages()
+	# 翻页圆点（>1 页才显示）
+	_phone_dots = HBoxContainer.new()
+	_phone_dots.alignment = BoxContainer.ALIGNMENT_CENTER
+	_phone_dots.add_theme_constant_override("separation", 8)
+	_phone_home.add_child(_phone_dots)
+	_rebuild_phone_dots()
 	# —— 打开某个 app 后的视图：顶部返回条 + 页面宿主（页面即原贴纸/物品/设置面板）——
 	_phone_app_view = VBoxContainer.new()
 	_phone_app_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1058,6 +1107,11 @@ func _setup_hud() -> void:
 	_npc_chat_bubble = UiAssets.bubble_sprite("ic_note", 1.7)
 	add_child(_npc_chat_bubble)
 
+	# 冷却拦截遮罩：可玩时间用尽后弹出（挡整屏世界交互）；闹钟饼图倒计时，冷却结束自动收起。
+	# 末位入层→盖在其余 HUD 之上，MOUSE_FILTER_STOP 吞掉所有点击。
+	_cooldown_overlay = _build_cooldown_overlay()
+	layer.add_child(_cooldown_overlay)
+
 func _style_label(l: Label, size: int) -> void:
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", Color.WHITE)
@@ -1218,25 +1272,145 @@ func _make_app_icon(app: Array) -> Control:
 	box.add_child(cap)
 	return box
 
-## 空格子（留白占位）：极淡的奶油圆角框，保持 4x4 网格形状但明确是「还没有 app」。
-func _make_blank_slot() -> Control:
-	var box := VBoxContainer.new()
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 4)
-	var tile := Panel.new()
-	tile.custom_minimum_size = Vector2(44.0, 44.0)
-	tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+## 桌面 widget（整条卡片，少文字纯 UI）：左「可玩时间闹钟饼图」+ 右「小红花图标+数」。
+func _build_phone_widget() -> PanelContainer:
+	var card := PanelContainer.new()
+	var cs := UiAssets.card_style(18.0, 1.0)
+	cs.shadow_size = 0
+	card.add_theme_stylebox_override("panel", cs)
+	var pad := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		pad.add_theme_constant_override(side, 12)
+	card.add_child(pad)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	pad.add_child(row)
+	# 左：可玩时间闹钟饼图（剩余可玩时间可视化，不识字也能看懂）
+	var pie_box := CenterContainer.new()
+	pie_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_phone_playpie = PlayTimePie.new()
+	_phone_playpie.custom_minimum_size = Vector2(64.0, 64.0)
+	pie_box.add_child(_phone_playpie)
+	row.add_child(pie_box)
+	row.add_child(VSeparator.new())
+	# 右：小红花（图标 + 数，无文字说明）
+	var fl_box := HBoxContainer.new()
+	fl_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	fl_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fl_box.add_theme_constant_override("separation", 6)
+	fl_box.add_child(UiAssets.icon_rect("st_flower", 34.0))
+	_phone_flowers = Label.new()
+	_style_card_label(_phone_flowers, 26)
+	fl_box.add_child(_phone_flowers)
+	row.add_child(fl_box)
+	return card
+
+## 按 PHONE_APPS 切页填充图标（每页 3x3=9 格，不足格不铺留白，仿 iPhone 主屏）。
+func _build_phone_pages() -> void:
+	for c in _phone_pages_box.get_children():
+		c.queue_free()
+	var n := PHONE_APPS.size()
+	var pages := int(ceil(float(maxi(n, 1)) / float(PHONE_PAGE_SLOTS)))
+	var idx := 0
+	for _p in pages:
+		var page := HBoxContainer.new() # 页宽=分页容器宽（每帧同步），网格居中
+		page.alignment = BoxContainer.ALIGNMENT_CENTER
+		var g := GridContainer.new()
+		g.columns = PHONE_GRID_COLS
+		g.add_theme_constant_override("h_separation", 16)
+		g.add_theme_constant_override("v_separation", 16)
+		for _s in PHONE_PAGE_SLOTS:
+			if idx < n:
+				g.add_child(_make_app_icon(PHONE_APPS[idx]))
+				idx += 1
+		page.add_child(g)
+		_phone_pages_box.add_child(page)
+
+## 翻页圆点：页数=页容器子数；>1 才显示，当前页高亮。
+func _rebuild_phone_dots() -> void:
+	if _phone_dots == null:
+		return
+	for c in _phone_dots.get_children():
+		c.queue_free()
+	var pages := _phone_pages_box.get_child_count() if _phone_pages_box != null else 0
+	_phone_dots.visible = pages > 1
+	for i in pages:
+		var dot := Panel.new()
+		dot.custom_minimum_size = Vector2(8.0, 8.0)
+		dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		dot.add_theme_stylebox_override("panel", _phone_dot_style(i == _phone_page))
+		_phone_dots.add_child(dot)
+
+## 只重着色圆点（页切换时用，不重建节点）。
+func _highlight_phone_dot() -> void:
+	if _phone_dots == null:
+		return
+	var i := 0
+	for dot in _phone_dots.get_children():
+		(dot as Panel).add_theme_stylebox_override("panel", _phone_dot_style(i == _phone_page))
+		i += 1
+
+func _phone_dot_style(active: bool) -> StyleBoxFlat:
 	var st := StyleBoxFlat.new()
-	st.bg_color = Color(UiAssets.CARD_BG.r, UiAssets.CARD_BG.g, UiAssets.CARD_BG.b, 0.28)
-	st.set_corner_radius_all(16)
-	st.set_border_width_all(2)
-	st.border_color = Color(UiAssets.CARD_BORDER.r, UiAssets.CARD_BORDER.g, UiAssets.CARD_BORDER.b, 0.45)
-	tile.add_theme_stylebox_override("panel", st)
-	box.add_child(tile)
-	var cap := Label.new() # 空 caption 与 app 图标等高对齐
-	_style_card_label(cap, 18)
-	box.add_child(cap)
+	st.set_corner_radius_all(4)
+	st.bg_color = Color(0.35, 0.24, 0.10, 0.85) if active else Color(0.35, 0.24, 0.10, 0.28)
+	return st
+
+## 状态栏信号格：三根递增的小竖条；颜色由 _update_phone_banner 按 WS 在线态刷（绿/灰）。
+func _make_signal_indicator() -> Control:
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	box.alignment = BoxContainer.ALIGNMENT_END
+	for h in [8.0, 13.0, 18.0]:
+		var bar := ColorRect.new()
+		bar.custom_minimum_size = Vector2(4.0, h)
+		bar.size_flags_vertical = Control.SIZE_SHRINK_END
+		box.add_child(bar)
 	return box
+
+## 手机遮罩点击：点手机外任意处→收起手机（吞掉事件，不下发为世界移动指令）。
+func _on_phone_scrim_input(e: InputEvent) -> void:
+	var press := (e is InputEventScreenTouch and (e as InputEventScreenTouch).pressed) \
+			or (e is InputEventMouseButton and (e as InputEventMouseButton).pressed)
+	if press:
+		_close_phone()
+		_phone_scrim.accept_event()
+
+## 分页拖拽：ScrollContainer 原生触摸拖动横滚，松手时贴合到最近页并更新圆点。
+func _on_phone_pager_input(e: InputEvent) -> void:
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pressed = (e as InputEventScreenTouch).pressed
+	elif e is InputEventMouseButton:
+		pressed = (e as InputEventMouseButton).pressed
+	else:
+		return
+	if pressed:
+		_phone_pager_dragging = true
+	else:
+		_phone_pager_dragging = false
+		if _phone_page_w > 1.0 and _phone_pages_box != null:
+			var last := maxi(0, _phone_pages_box.get_child_count() - 1)
+			_phone_page = clampi(int(round(_phone_pager.scroll_horizontal / _phone_page_w)), 0, last)
+			_highlight_phone_dot()
+
+## 手机开着时每帧推进分页：同步单页宽=容器宽；未拖拽时把滚动缓动贴合到当前页。
+func _step_phone_pager(delta: float) -> void:
+	if _phone_pager == null or album_panel == null or not album_panel.visible:
+		return
+	var w := _phone_pager.size.x
+	if w > 1.0 and not is_equal_approx(w, _phone_page_w):
+		_phone_page_w = w
+		for pg in _phone_pages_box.get_children():
+			(pg as Control).custom_minimum_size.x = w
+	if not _phone_pager_dragging and _phone_page_w > 1.0:
+		var target := int(round(_phone_page * _phone_page_w))
+		var cur := _phone_pager.scroll_horizontal
+		if absi(cur - target) > 1:
+			_phone_pager.scroll_horizontal = int(round(lerpf(float(cur), float(target), minf(1.0, 12.0 * delta))))
+		else:
+			_phone_pager.scroll_horizontal = target
 
 ## 打开一个 app：主屏隐藏、app 视图显示，只显示该页并刷新。
 func _open_app(id: String) -> void:
@@ -1276,21 +1450,136 @@ func _step_phone_ui(delta: float) -> void:
 	_phone_ui_t = 1.0
 	_update_phone_banner()
 
-## 手机 banner：时钟（实时）+ 已玩时长（本次进入世界起算）+ 小红花数（代笔占位）。
+## 手机状态栏 + 桌面 widget 刷新：状态栏时钟（实时）+ 信号格（WS 在线态）；
+## widget 已玩时长（本次进入世界起算）+ 小红花数（代笔占位）。
 func _update_phone_banner() -> void:
 	if _phone_clock == null:
 		return
 	var t := Time.get_time_dict_from_system()
 	_phone_clock.text = "%02d:%02d" % [int(t.get("hour", 0)), int(t.get("minute", 0))]
-	var secs := 0
-	if _play_start_ms > 0:
-		secs = int((Time.get_ticks_msec() - _play_start_ms) / 1000)
-	_phone_playtime.text = _fmt_playtime(secs)
-	_phone_flowers.text = "x%d" % _red_flower_count()
+	if _phone_playpie != null:
+		# 桌面 widget 饼图：可玩阶段显示绿色剩余、冷却阶段显示蓝色进度（值由 _step_play_budget 每帧更新）。
+		_phone_playpie.set_state(_play_remaining_frac, _play_blocked, _play_cooldown_frac)
+	if _phone_flowers != null:
+		_phone_flowers.text = "x%d" % _red_flower_count()
+	# 信号格：WS 在线→绿、离线→灰（每秒随 _step_phone_ui 刷新）
+	if _phone_signal != null:
+		var online := backend != null and backend.is_online()
+		var col := Color(0.30, 0.78, 0.42) if online else Color(0.60, 0.60, 0.60, 0.5)
+		for bar in _phone_signal.get_children():
+			(bar as ColorRect).color = col
 
-## 已玩秒数 → "已玩 M:SS"（抽成纯函数便于回测换算）。
-func _fmt_playtime(secs: int) -> String:
-	return "已玩 %d:%02d" % [secs / 60, secs % 60]
+## 可玩时间每帧推进（静态纯函数，便于回测）：
+## 冷却中→到点则重置(used=0、解锁)，否则维持并算冷却进度；否则累计 delta，满预算则进冷却。
+## 返回 {used, cooldown_until, blocked, remaining_frac, cooldown_frac}。
+static func tick_play_budget(used: float, cooldown_until: float, now: float, delta: float,
+		budget: float, cooldown: float) -> Dictionary:
+	if cooldown_until > 0.0:
+		if now >= cooldown_until:
+			return { "used": 0.0, "cooldown_until": 0.0, "blocked": false, "remaining_frac": 1.0, "cooldown_frac": 0.0 }
+		var cdf := clampf(1.0 - (cooldown_until - now) / cooldown, 0.0, 1.0)
+		return { "used": used, "cooldown_until": cooldown_until, "blocked": true, "remaining_frac": 0.0, "cooldown_frac": cdf }
+	var nu := used + maxf(0.0, delta)
+	if nu >= budget:
+		return { "used": budget, "cooldown_until": now + cooldown, "blocked": true, "remaining_frac": 0.0, "cooldown_frac": 0.0 }
+	return { "used": nu, "cooldown_until": 0.0, "blocked": false, "remaining_frac": 1.0 - nu / budget, "cooldown_frac": 0.0 }
+
+## 进世界时对持久化预算「隔会话对账」（静态纯函数）：冷却已过则清零；未冷却但离开够久(≥cooldown)＝自然休息，刷新预算。
+static func reconcile_play_budget(used: float, cooldown_until: float, last_active: float,
+		now: float, cooldown: float) -> Dictionary:
+	if cooldown_until > 0.0:
+		if now >= cooldown_until:
+			return { "used": 0.0, "cooldown_until": 0.0 }
+		return { "used": used, "cooldown_until": cooldown_until }
+	if last_active > 0.0 and (now - last_active) >= cooldown:
+		return { "used": 0.0, "cooldown_until": 0.0 }
+	return { "used": used, "cooldown_until": cooldown_until }
+
+## 进世界：读持久化预算 + 隔会话对账（冷却期内重进仍被拦、冷却已过/长休息则刷新）。
+func _load_play_budget() -> void:
+	var pb := PlayerProfile.load_play_budget()
+	var now := Time.get_unix_time_from_system()
+	var rec := reconcile_play_budget(float(pb["used_sec"]), float(pb["cooldown_until"]),
+			float(pb["last_active"]), now, float(PLAY_COOLDOWN_SEC))
+	_play_used_sec = float(rec["used"])
+	_play_cooldown_until = float(rec["cooldown_until"])
+
+## 每帧推进可玩时间预算：累计活跃游玩、到点进冷却、冷却到点解锁；同步 widget/遮罩，节流落盘。
+func _step_play_budget(delta: float) -> void:
+	var now := Time.get_unix_time_from_system()
+	var was_blocked := _play_blocked
+	var st := tick_play_budget(_play_used_sec, _play_cooldown_until, now, delta,
+			float(PLAY_BUDGET_SEC), float(PLAY_COOLDOWN_SEC))
+	_play_used_sec = float(st["used"])
+	_play_cooldown_until = float(st["cooldown_until"])
+	_play_blocked = bool(st["blocked"])
+	_play_remaining_frac = float(st["remaining_frac"])
+	_play_cooldown_frac = float(st["cooldown_frac"])
+	if _play_blocked != was_blocked:
+		_apply_cooldown_block(_play_blocked) # 进/出冷却的一次性动作（弹/收遮罩、收手机断对话）
+	if _cooldown_overlay != null and _cooldown_overlay.visible and _cooldown_pie != null:
+		_cooldown_pie.set_state(0.0, true, _play_cooldown_frac)
+	# 节流落盘（每 5s + 状态切换即存），关 App 也不丢
+	_play_save_t -= delta
+	if _play_save_t <= 0.0 or _play_blocked != was_blocked:
+		_play_save_t = 5.0
+		PlayerProfile.save_play_budget(_play_used_sec, _play_cooldown_until, now)
+
+## 进/出冷却的一次性副作用：进冷却→弹全屏遮罩、收手机、断当前对话、小仙子语音提示；出冷却→收遮罩+语音。
+func _apply_cooldown_block(blocked: bool) -> void:
+	if _cooldown_overlay != null:
+		_cooldown_overlay.visible = blocked
+	if blocked:
+		_close_phone()
+		if _locked != null:
+			_exit_interaction() # 断开近身对话，回自由视角（冷却期不许交互）
+		if fairy_voice != null:
+			fairy_voice.try_play("cooldown_start") # 小仙子语音提示：该休息啦
+	elif fairy_voice != null:
+		fairy_voice.try_play("cooldown_end") # 冷却结束：休息好啦，继续玩
+
+## 冷却拦截遮罩：半透明暗底 + 居中卡片（大闹钟饼图倒计时 + 文案）。整屏 STOP 吞点击，冷却期挡住世界。
+func _build_cooldown_overlay() -> Control:
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	root.visible = false
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0.10, 0.07, 0.03, 0.72)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UiAssets.card_style(26.0, 1.0))
+	center.add_child(card)
+	var pad := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		pad.add_theme_constant_override(side, 28)
+	card.add_child(pad)
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 16)
+	pad.add_child(col)
+	_cooldown_pie = PlayTimePie.new()
+	_cooldown_pie.custom_minimum_size = Vector2(140.0, 140.0)
+	_cooldown_pie.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	col.add_child(_cooldown_pie)
+	var title := Label.new()
+	title.text = "玩得好开心！"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_card_label(title, 34)
+	col.add_child(title)
+	var msg := Label.new()
+	msg.text = "先休息一下，\n等小闹钟转满就能再来玩啦~"
+	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_style_card_label(msg, 24)
+	col.add_child(msg)
+	return root
 
 ## 小红花数：代笔占位——真实小红花系统未接入前，先用已收集贴纸总数当占位读数。
 ## TODO(小红花): 接入真实小红花来源后替换本函数。
@@ -1402,6 +1691,8 @@ func _process(delta: float) -> void:
 	tp = _prof_lap(tp, "duck")
 	_step_hop(delta)  # 进对话时玩家跳向站位（在焦点/摆位之前推进，相机随之贴合）
 	_step_phone_ui(delta)
+	_step_phone_pager(delta)
+	_step_play_budget(delta)
 	tp = _prof_lap(tp, "phoneui")
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)
@@ -1423,6 +1714,10 @@ func _process(delta: float) -> void:
 	var lift := 0.0  ## 对话构图的焦点竖直抬升（把双方/说话方框在屏幕竖直中段）
 	if focus_override != Vector2.INF:
 		want = focus_override
+	elif _phone_cam and not player.is_empty():
+		# 手机近身：焦点右移让玩家渲染到屏幕偏左、右侧留给手机；距离/抬升在 _recompute_phone_cam 定。
+		want = WorldGrid.wrap_pos(player["logical"] + Vector2(_phone_cam_shift, 0.0))
+		lift = _phone_cam_lift
 	elif _locked != null and is_instance_valid(_locked) and not player.is_empty():
 		var dc := _dialog_camera()
 		want = dc["want"]
@@ -2425,8 +2720,7 @@ func _take_prop_out(pid: String) -> void:
 	wp["tile"] = [placed.x, placed.y]
 	if online:
 		backend.send_prop_take(world_id, pid, placed)
-	if album_panel.visible:
-		_toggle_album() # 收起面板看物件落地
+	_close_phone() # 收起手机看物件落地（幂等，同时退近身相机）
 	banner.text = "摆出来啦！"
 	banner.visible = true
 
@@ -3071,13 +3365,64 @@ func _pulse_album_button() -> void:
 	tw.tween_property(album_button, "scale", Vector2(1.3, 1.3), 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_property(album_button, "scale", Vector2.ONE, 0.2)
 
-## 收集册开合与刷新：拥有的亮+数量，没拥有的暗剪影（收集感）。
+## 手机开合（点左下角手机按钮切换）：开→显示机身+遮罩+进近身相机；关→反之。
 func _toggle_album() -> void:
-	album_panel.visible = not album_panel.visible
 	if album_panel.visible:
-		_close_phone_app() # 每次打开手机都回到主屏
-		_refresh_album()
-		_update_phone_banner()
+		_close_phone()
+	else:
+		_open_phone()
+
+## 打开手机：机身+全屏遮罩显示，回主屏、刷新册子/banner，相机进近身（玩家挪屏左）。
+func _open_phone() -> void:
+	album_panel.visible = true
+	if _phone_scrim != null:
+		_phone_scrim.visible = true
+	_close_phone_app() # 每次打开手机都回到主屏
+	_refresh_album()
+	_update_phone_banner()
+	_enter_phone_cam()
+
+## 收起手机：机身+遮罩隐藏，相机还原到近身前视角（幂等，未开则不动）。
+func _close_phone() -> void:
+	if album_panel == null or not album_panel.visible:
+		return
+	album_panel.visible = false
+	if _phone_scrim != null:
+		_phone_scrim.visible = false
+	_exit_phone_cam()
+
+## 进近身相机：按玩家身高算 70% 构图参数 + 复位手势偏移（yaw=0，让 +X 焦点偏移把玩家推到屏左）。
+func _enter_phone_cam() -> void:
+	if _phone_cam:
+		return
+	_phone_cam = true
+	_phone_cam_saved_dist = _target_dist
+	_recompute_phone_cam()
+	_gest_yaw_t = 0.0
+	_gest_pitch_t = 0.0
+	_gest_zoom_t = 1.0
+	_gest_reset_t = 0.0
+
+## 按玩家立绘高度反算近身参数：距离使玩家占屏高 PHONE_CAM_FILL(≈70%)，
+## 焦点右移 _phone_cam_shift 让玩家落屏偏左，抬升 _phone_cam_lift 把玩家框在竖直中段。
+func _recompute_phone_cam() -> void:
+	var h := 3.2
+	if not player.is_empty() and player.get("node") != null:
+		h = _char_top(player["node"] as PaperCharacter)
+	var tanhalf := tan(deg_to_rad(camera.fov * 0.5))
+	var dist := clampf(h / (2.0 * PHONE_CAM_FILL * tanhalf), PHONE_CAM_DIST_MIN, ZOOM_MAX)
+	var vp := get_viewport().get_visible_rect().size
+	var aspect := (vp.x / vp.y) if vp.y > 1.0 else (1280.0 / 720.0)
+	_target_dist = dist
+	_phone_cam_shift = PHONE_PLAYER_NDC_X * dist * tanhalf * aspect
+	_phone_cam_lift = h * 0.5
+
+## 退近身相机：还原近身前的目标距离（焦点自动回到玩家，见 _process 相机块）。
+func _exit_phone_cam() -> void:
+	if not _phone_cam:
+		return
+	_phone_cam = false
+	_target_dist = _phone_cam_saved_dist
 
 ## 设置页：重新捏角色——先 ？✓✗ 确认一遍防小手误触，确认后回童话书 onboarding。
 func _on_reroll_pressed() -> void:

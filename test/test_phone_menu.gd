@@ -31,13 +31,25 @@ func _run(scene: Node) -> void:
 
 	var home: Control = scene.get("_phone_home")
 	_check(home != null, "_phone_home 存在")
-	var grid: GridContainer = null
-	if home != null:
-		for c in home.get_children():
-			if c is GridContainer:
-				grid = c
-				break
-	_check(grid != null and grid.get_child_count() == 16, "主屏 4x4 = 16 格")
+	# 遮罩 + 状态栏信号格存在
+	_check(scene.get("_phone_scrim") != null, "_phone_scrim（点外部收起遮罩）存在")
+	_check(scene.get("_phone_signal") != null, "_phone_signal（状态栏信号格）存在")
+	# 主屏图标分页：3x3 网格、每页 columns=3；所有页图标总数 = 已实装 app 数（3）
+	var pager: ScrollContainer = scene.get("_phone_pager")
+	var pages_box: HBoxContainer = scene.get("_phone_pages_box")
+	_check(pager != null, "_phone_pager（图标分页横滚）存在")
+	_check(pages_box != null and pages_box.get_child_count() >= 1, "至少一页图标")
+	var icon_total := 0
+	var cols_ok := true
+	if pages_box != null:
+		for page in pages_box.get_children():
+			for g in page.get_children():
+				if g is GridContainer:
+					if (g as GridContainer).columns != 3:
+						cols_ok = false
+					icon_total += g.get_child_count()
+	_check(cols_ok, "每页网格 columns=3 (3x3)")
+	_check(icon_total == 3, "图标总数 = 已实装 app 数 3（stickers/items/settings）")
 
 	scene._toggle_album()
 	_check(album_panel.visible, "打开后面板可见")
@@ -66,13 +78,23 @@ func _run(scene: Node) -> void:
 	var clock: Label = scene.get("_phone_clock")
 	_check(clock != null and String(clock.text).length() == 5 and String(clock.text).contains(":"), "banner 时钟 HH:MM")
 
-	# P3：已游玩时间——纯函数换算（不依赖引擎运行秒数，确定性）。
-	_check(int(scene.get("_play_start_ms")) > 0, "_play_start_ms 已初始化")
-	_check(String(scene._fmt_playtime(0)) == "已玩 0:00", "换算 0s → 0:00")
-	_check(String(scene._fmt_playtime(65)) == "已玩 1:05", "换算 65s → 1:05")
-	_check(String(scene._fmt_playtime(600)) == "已玩 10:00", "换算 600s → 10:00")
-	var pt: Label = scene.get("_phone_playtime")
-	_check(pt != null and String(pt.text).begins_with("已玩 "), "banner 已玩时长已填")
+	# 可玩时间真强制状态机（tick/reconcile 纯函数，budget=100s、cooldown=60s、now=1000）
+	var t1: Dictionary = scene.tick_play_budget(0.0, 0.0, 1000.0, 40.0, 100.0, 60.0)
+	_check(is_equal_approx(float(t1["used"]), 40.0) and not bool(t1["blocked"]) \
+			and is_equal_approx(float(t1["remaining_frac"]), 0.6), "累计 40/100：剩 60%、不拦")
+	var t2: Dictionary = scene.tick_play_budget(95.0, 0.0, 1000.0, 10.0, 100.0, 60.0)
+	_check(bool(t2["blocked"]) and is_equal_approx(float(t2["cooldown_until"]), 1060.0), "满 100 → 进冷却(至 now+60)")
+	var t3: Dictionary = scene.tick_play_budget(100.0, 1060.0, 1030.0, 1.0, 100.0, 60.0)
+	_check(bool(t3["blocked"]) and is_equal_approx(float(t3["cooldown_frac"]), 0.5), "冷却中：拦、进度 50%")
+	var t4: Dictionary = scene.tick_play_budget(100.0, 1060.0, 1060.0, 1.0, 100.0, 60.0)
+	_check(not bool(t4["blocked"]) and is_equal_approx(float(t4["used"]), 0.0), "冷却到点 → 解锁、清零")
+	var r1: Dictionary = scene.reconcile_play_budget(100.0, 1060.0, 1000.0, 1030.0, 60.0)
+	_check(is_equal_approx(float(r1["cooldown_until"]), 1060.0), "隔会话：冷却期内重进仍锁")
+	var r2: Dictionary = scene.reconcile_play_budget(80.0, 0.0, 1000.0, 1060.0, 60.0)
+	_check(is_equal_approx(float(r2["used"]), 0.0), "隔会话：长休息(≥冷却)刷新预算")
+	var pie = scene.get("_phone_playpie")
+	_check(pie != null and pie is PlayTimePie, "widget 可玩时间饼图存在(PlayTimePie)")
+	_check(scene.get("_cooldown_overlay") != null, "冷却拦截遮罩存在")
 	# _step_phone_ui：手机开着时按节流刷新一次不崩
 	scene.set("_phone_ui_t", 0.0)
 	scene._step_phone_ui(1.0)
