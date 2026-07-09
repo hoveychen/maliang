@@ -63,14 +63,25 @@ export interface ActiveTask {
   npcName: string;
   targetName?: string;
   locationName?: string;
-  itemId?: string;
   message?: string;
-  rewardId: string;
+  /** 完成时盖的章款式 id（STAMP_STYLES 之一，纯演出）。 */
+  stampStyle: string;
 }
+
+/** 玩家钱包：小红花代币 + 集邮盖章进度（与 server/src/types.ts Wallet 对齐）。 */
+export interface Wallet {
+  flowers: number;
+  stampProgress: number;
+  stampsTotal: number;
+}
+
+/** 与 server/src/types.ts 对齐：小红花上限 / 每满几章换一朵花。 */
+export const MAX_FLOWERS = 9;
+export const STAMPS_PER_FLOWER = 3;
 
 export interface WorldRow {
   id: string;
-  inventory: Record<string, number>;
+  wallet: Wallet;
   activeTask: ActiveTask | null;
   locations: string[];
   characterCount: number;
@@ -150,16 +161,13 @@ export interface CharacterDetail {
   spriteAnim: SpriteAnimRecord;
 }
 
-/** 贴纸 id → emoji（与 server/src/types.ts STICKERS 对齐；后台展示用）。 */
-export const STICKER_GLYPHS: Record<string, string> = {
-  flower: '🌸',
-  apple: '🍎',
+/** 盖章款式 id → emoji（与 server/src/types.ts STAMP_STYLES 对齐；后台展示用）。 */
+export const STAMP_GLYPHS: Record<string, string> = {
   star: '⭐',
-  shell: '🐚',
-  ladybug: '🐞',
-  candy: '🍬',
-  clover: '🍀',
-  gem: '💎',
+  smile: '😊',
+  paw: '🐾',
+  medal: '🏅',
+  heart: '❤️',
 };
 
 export const MEMORY_KIND_LABELS: Record<string, string> = {
