@@ -9,7 +9,7 @@ import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
-import { generateIdleAnimation, triggerIdleAnimation, type ToSpriteSheet } from './idle_animation.ts';
+import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
@@ -25,6 +25,8 @@ export interface ServerDeps {
   store?: WorldStore;
   /** 视频→图集转换缝（缺省真实 ffmpeg；测试注入假实现以免依赖网络/ffmpeg）。 */
   toSpriteSheet?: ToSpriteSheet;
+  /** 启动时回填存量角色的 idle 动画（只在真实进程入口 index.ts 开；测试建 server 不触发生成）。 */
+  backfillOnBoot?: boolean;
 }
 
 /** 按 magic bytes 识别图片 mime（上传的图集可能是 PNG 或 WebP）。 */
@@ -411,6 +413,12 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       void endSessionVisit(session, adapters, store, Date.now());
     });
   });
+
+  // 存量回填：把造角色流程上线前预种的村民补上 idle 动画（fire-and-forget，只在真实进程开，不阻塞启动）。
+  if (deps.backfillOnBoot) {
+    const n = backfillIdleAnimations(adapters, store, toSpriteSheet);
+    if (n > 0) app.log.info(`idle 动画存量回填：触发 ${n} 个角色`);
+  }
 
   return app;
 }

@@ -6,8 +6,9 @@ import { join } from 'node:path';
 import { buildServer } from '../src/server.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
-import { generateIdleAnimation, triggerIdleAnimation, type ToSpriteSheet } from '../src/idle_animation.ts';
+import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from '../src/idle_animation.ts';
 import type { SpriteSheetMeta } from '../src/sprite_sheet.ts';
+import type { Character } from '../src/types.ts';
 
 const META: SpriteSheetMeta = {
   cols: 2, rows: 2, frameCount: 3, fps: 8, cellW: 20, cellH: 30, width: 40, height: 60,
@@ -63,6 +64,32 @@ test('triggerIdleAnimation: 已 ready 则去重（不再触发转换）', async 
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(called, false, '已 ready 不应再触发生成');
   assert.equal(store.getSpriteAnim(sprite)?.animAsset, 'existing', '记录不被覆盖');
+});
+
+test('backfillIdleAnimations: 只回填无记录的角色（ready/failed 跳过，同 hash 去重）', async () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  // 不同字节 → 不同 hash（资产内容寻址；putSprite 固定字节会撞成同一个）。
+  const h1 = store.putAsset({ bytes: Uint8Array.from([1, 1, 1]), mime: 'image/png' }); // 已 ready → 跳过
+  const h2 = store.putAsset({ bytes: Uint8Array.from([2, 2, 2]), mime: 'image/png' }); // 无记录 → 触发
+  const h3 = store.putAsset({ bytes: Uint8Array.from([3, 3, 3]), mime: 'image/png' }); // failed → 跳过（不重试烧钱）
+  store.setSpriteAnimReady(h1, 'a1', META);
+  store.setSpriteAnimFailed(h3);
+  // backfill 只读 appearance.spriteAsset，存最小对象即可（saveCharacter 存 JSON、listCharacters 原样解析）。
+  const mk = (id: string, hash: string): Character =>
+    ({ id, worldId: 'w1', appearance: { spriteAsset: hash } } as unknown as Character);
+  store.addCharacter(mk('c1', h1));
+  store.addCharacter(mk('c2', h2));
+  store.addCharacter(mk('c3', h3));
+  store.addCharacter(mk('c4', h2)); // 同 hash 共用 → 只触发一次
+
+  const n = backfillIdleAnimations(createMockAdapters(), store, fakeSheet);
+  assert.equal(n, 1, '只 h2 从未尝试过 → 触发 1 个（去重后）');
+  assert.notEqual(store.getSpriteAnim(h2), undefined, 'h2 触发后已有记录（同步先置 pending）');
+  await new Promise((r) => setTimeout(r, 20)); // 等 fakeSheet 收敛
+  assert.equal(store.getSpriteAnim(h2)?.status, 'ready', 'h2 生成完成 → ready');
+  assert.equal(store.getSpriteAnim(h1)?.status, 'ready', 'h1 原 ready 不动');
+  assert.equal(store.getSpriteAnim(h3)?.status, 'failed', 'h3 failed 未被重试');
 });
 
 test('GET /sprite-anim/:hash: ready 返回记录；未知返回 none', async () => {
