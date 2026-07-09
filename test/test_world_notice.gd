@@ -66,6 +66,8 @@ func _run_checks() -> void:
 	_check("近身空闲村民被置打招呼动作", act == "wave" or act == "nod", true)
 	_check("转头朝玩家(玩家在右→face=0)", float(npc.get("paper_face", -1.0)), 0.0)
 	_check("触发后冷却被重置为正", float(npc.get("notice_cd", 0.0)) > 0.0, true)
+	var bub := npc.get("notice_bubble") as Sprite3D
+	_check("头顶小表情气泡已弹出可见", bub != null and bub.visible, true)
 
 	# C1) 远处(20m)→不触发
 	npc["logical"] = WorldGrid.wrap_pos(pl + Vector2(20.0, 0.0))

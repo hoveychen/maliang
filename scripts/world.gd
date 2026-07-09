@@ -61,6 +61,9 @@ const NOTICE_RADIUS := 6.5   ## 触发半径（米）：玩家进这个范围内
 const NOTICE_CD_MIN := 8.0   ## 单个村民两次打招呼的最短间隔（秒）
 const NOTICE_CD_MAX := 20.0  ## 最长间隔（秒）；每次随机取，天然错峰不齐步
 const NOTICE_WALK_EPS := 0.06 ## paper_walk 低于此视作站定（走动中不打断脚步去打招呼）
+const NOTICE_BUBBLE_LIFE := 2.2  ## 打招呼小表情气泡展示秒数（含尾段淡出）
+const NOTICE_BUBBLE_H := 1.5     ## 气泡世界高度（米）
+const NOTICE_EMOTES := ["happy", "wave"] ## 打招呼随机小表情（正向友好）
 # 平板双指手势临时视角（捏合缩放 / 双指位移环绕+俯仰；松手 5s 无操作自动复原）
 const GESTURE_RESET_DELAY := 5.0   ## 全部手指抬起后无进一步手势的复原倒计时（秒）
 const GESTURE_YAW_SENS := 0.005    ## 双指横移 → 水平环绕角（rad/px，~200px 转 57°）
@@ -1882,6 +1885,7 @@ func _update_npc_notice(delta: float) -> void:
 	for n in npcs:
 		if n.get("is_fairy", false):
 			continue
+		_animate_notice_bubble(n, delta)  # 已弹出的小表情气泡继续 pop/淡出/跟头顶
 		if not n.has("notice_cd"):  # 首次见到：随机初始冷却，天然错峰
 			n["notice_cd"] = randf_range(NOTICE_CD_MIN, NOTICE_CD_MAX)
 		var cd := float(n["notice_cd"]) - delta
@@ -1899,11 +1903,46 @@ func _update_npc_notice(delta: float) -> void:
 			n["notice_cd"] = 0.0 if (busy or float(n.get("paper_walk", 0.0)) > NOTICE_WALK_EPS) \
 					else randf_range(NOTICE_CD_MIN, NOTICE_CD_MAX) * 0.5
 			continue
-		# 触发：转头面向玩家（立绘朝右为 0）+ 随机挥手/点头，重置冷却
+		# 触发：转头面向玩家（立绘朝右为 0）+ 随机挥手/点头 + 头顶小表情气泡，重置冷却
 		n["paper_face"] = 0.0 if d.x >= 0.0 else PI
 		n["paper_action"] = "wave" if randf() < 0.6 else "nod"
 		n["paper_action_t"] = 0.0
+		_pop_notice_bubble(n)
 		n["notice_cd"] = randf_range(NOTICE_CD_MIN, NOTICE_CD_MAX)
+
+## 在村民头顶弹一个小表情气泡（per-NPC 懒建 Sprite3D，不复用 selected 单例的 emotion_bubble）。
+func _pop_notice_bubble(n: Dictionary) -> void:
+	var bub := n.get("notice_bubble") as Sprite3D
+	if bub == null or not is_instance_valid(bub):
+		bub = UiAssets.bubble_sprite("em_happy", NOTICE_BUBBLE_H)
+		add_child(bub)
+		n["notice_bubble"] = bub
+	bub.texture = UiAssets.emotion_tex(NOTICE_EMOTES[randi() % NOTICE_EMOTES.size()])
+	bub.visible = true
+	bub.modulate = Color.WHITE
+	bub.scale = Vector3.ONE * 0.4
+	n["notice_bub_t"] = 0.0
+
+## 打招呼气泡每帧演出：弹出过冲 → 稳定 → 尾段淡出隐藏；跟随村民头顶。
+func _animate_notice_bubble(n: Dictionary, delta: float) -> void:
+	var bub := n.get("notice_bubble") as Sprite3D
+	if bub == null or not is_instance_valid(bub) or not bub.visible:
+		return
+	var node := n["node"] as PaperCharacter
+	bub.global_position = node.global_position + Vector3(0.0, _char_top(node) + 1.1, 0.0)
+	var t := float(n.get("notice_bub_t", 0.0)) + delta
+	n["notice_bub_t"] = t
+	if t < 0.2:  # 0→1.2 过冲
+		bub.scale = Vector3.ONE * lerpf(0.4, 1.2, t / 0.2)
+	elif t < 0.35: # 1.2→1.0 回落
+		bub.scale = Vector3.ONE * lerpf(1.2, 1.0, (t - 0.2) / 0.15)
+	else:
+		bub.scale = Vector3.ONE
+	var left := NOTICE_BUBBLE_LIFE - t
+	if left <= 0.0:
+		bub.visible = false
+	elif left < 0.5:  # 尾段淡出
+		bub.modulate.a = left / 0.5
 
 ## 把节点放到「弯曲后」的地表位置。与 world_bend.gdshader 同一公式：
 ## 世界空间、以原点（玩家）为中心的水平距离平方下沉（shadow pass 一致，见着色器注释）。
