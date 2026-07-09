@@ -2500,12 +2500,15 @@ func _bootstrap() -> void:
 			(n["node"] as Node).queue_free() # 清掉离线占位
 		npcs.clear()
 		var chars: Array = world.get("characters", [])
-		# 逐个村民推进 boot 子进度：这段（逐个下载/解码立绘）是引导里最耗时的长尾，
-		# 每落一个村民就把 _boot_sub 往前推一格，loading 仙子据此持续前行，不再停门前干等。
+		# 先并发预取所有角色素材（anim 优先，跳静态大图）：冷启动从「逐个立绘串行下载」的长尾
+		# 降到「最慢一个并发」，杜绝首次进世界接近 25s 揭幕硬超时、村民后补的观感。
 		var total := chars.size()
+		_boot_status = "唤醒村民 0/%d" % total
+		var prefetched := await _prefetch_characters(chars)
+		# 素材已就位，顺序降生（命中内存缓存瞬时）；逐个推进 _boot_sub，loading 仙子据此持续前行。
 		for i in range(total):
 			_boot_status = "唤醒村民 %d/%d" % [i + 1, total]
-			await _spawn_server_character(chars[i] as Dictionary, Vector2.INF)
+			await _spawn_server_character(chars[i] as Dictionary, Vector2.INF, prefetched)
 			_boot_sub = float(i + 1) / float(total) if total > 0 else 1.0
 		_boot_status = "布置世界…"
 		_restore_world_props(world.get("props", []))
@@ -2576,17 +2579,82 @@ func _find_fairy() -> Dictionary:
 			return n
 	return {}
 
+## 角色主键：后端 id，无则名字兜底（与 _spawn_server_character 的登记键一致）。
+func _char_id(c: Dictionary) -> String:
+	var cid := String(c.get("id", ""))
+	if cid.is_empty():
+		cid = String(c.get("name", ""))
+	return cid
+
+## 决定角色降生用哪个素材：idle 动画就绪则用动画图集（~200KB，跳过 ~1.2MB 静态立绘——老板要求
+## 「有动画就不要立绘」），否则用静态立绘。anim_rec 为 fetch_sprite_anim 返回。纯函数，供单测。
+## 返回 { "hash": 目标资产 hash, "is_anim": bool, "meta": Dictionary }。
+func _pick_char_asset(anim_rec: Dictionary, sprite_hash: String) -> Dictionary:
+	if String(anim_rec.get("status", "")) == "ready":
+		var anim_hash := String(anim_rec.get("animAsset", ""))
+		if not anim_hash.is_empty():
+			return { "hash": anim_hash, "is_anim": true, "meta": anim_rec.get("meta", {}) }
+	return { "hash": sprite_hash, "is_anim": false, "meta": {} }
+
+## 并发预取所有角色的降生素材：先并发查 idle 动画状态，anim-ready 只拉动画图集（跳静态大图），
+## 否则拉静态立绘。返回 cid -> { tex, is_anim, meta, sprite_hash }。冷启动从「N 个立绘串行下载」
+## 降到「最慢一个并发」；命中磁盘/内存缓存则零下载。逐个 fire-and-forget，计数归零即全部就绪。
+func _prefetch_characters(chars: Array) -> Dictionary:
+	var results := {}
+	if chars.is_empty():
+		return results
+	var pending := [chars.size()] # 数组包一层做可变计数（引用语义，供 _prefetch_one 递减）
+	for c in chars:
+		_prefetch_one(c as Dictionary, results, pending)
+	while pending[0] > 0:
+		await get_tree().process_frame
+	return results
+
+## 预取单个角色（fire-and-forget，跑到首个 await 即返回，后续在网络回调续跑）：查动画状态→按
+## _pick_char_asset 选素材→拉纹理；动画图集拉取失败回落静态立绘。完成后 results[cid] 落位、计数减一。
+func _prefetch_one(c: Dictionary, results: Dictionary, pending: Array) -> void:
+	var cid := _char_id(c)
+	var appearance: Dictionary = c.get("appearance", {})
+	var sprite := String(appearance.get("spriteAsset", ""))
+	var entry := { "tex": null, "is_anim": false, "meta": {}, "sprite_hash": sprite }
+	if not sprite.is_empty():
+		var rec := await api.fetch_sprite_anim(sprite)
+		var pick := _pick_char_asset(rec, sprite)
+		var tex := await api.fetch_texture(String(pick["hash"]))
+		if tex != null:
+			entry["tex"] = tex
+			entry["is_anim"] = bool(pick["is_anim"])
+			entry["meta"] = pick["meta"]
+		elif bool(pick["is_anim"]): # 动画图集拉取失败 → 回落静态立绘
+			var st := await api.fetch_texture(sprite)
+			if st != null:
+				entry["tex"] = st
+	results[cid] = entry
+	pending[0] -= 1
+
 ## 从后端 Character 字典生成一个 PaperCharacter。at_logical 非 INF 时覆盖其逻辑坐标。
-func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
+## prefetched 非空时从中取纹理/动画（_prefetch_characters 已并发拉好，命中内存缓存瞬时）；
+## 缺省 {} 时（如新造角色单发）走自拉旧路径。
+func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {}) -> void:
 	var npc := PaperCharacter.new()
 	add_child(npc)
 	var appearance: Dictionary = c.get("appearance", {})
 	var asset := String(appearance.get("spriteAsset", ""))
+	var cid := _char_id(c)
 	var tex: Texture2D = critter_tex
 	var color := Color.WHITE
 	var real := false
-	if not asset.is_empty():
-		var t := await api.fetch_texture(asset)
+	var use_anim := false          # 该角色是否直接以 idle 动画图集降生（跳过静态立绘下载）
+	var anim_meta: Dictionary = {}
+	if prefetched.has(cid):
+		var e: Dictionary = prefetched[cid] # 预取已并发拉好（anim 优先）；命中内存缓存瞬时
+		if e.get("tex") != null:
+			tex = e["tex"]
+			real = true
+			use_anim = bool(e.get("is_anim", false))
+			anim_meta = e.get("meta", {})
+	elif not asset.is_empty():
+		var t := await api.fetch_texture(asset) # 无预取（如新造角色单发）：自拉静态立绘
 		if t != null:
 			tex = t
 			real = true
@@ -2595,22 +2663,27 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 	npc.setup(tex, color, String(c.get("name", "")))
 	var is_fairy := bool(c.get("isFairy", false))
 	if is_fairy:
-		# 小仙子随从：头部大小（时之笛式），无论真图/占位都按 FAIRY_HEIGHT 归一
-		npc.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
 		BlobShadow.detach(npc) # 悬浮飞行不落地，脚下暗斑穿帮
-		# 试点：仙子真图就绪后，后台轮询 idle 动画，就绪则静态切动画
-		if real:
-			_poll_idle_anim(npc, asset, FAIRY_HEIGHT, 0.0)
+		if use_anim: # 已是动画图集：直接以动画降生（play_idle 覆盖 setup 的静态尺寸，同帧无闪）
+			npc.play_idle(tex, anim_meta, FAIRY_HEIGHT, 0.0)
+		else:
+			# 小仙子随从：头部大小（时之笛式），无论真图/占位都按 FAIRY_HEIGHT 归一
+			npc.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
+			if real: # 静态就位后后台轮询 idle 动画，就绪则切动画
+				_poll_idle_anim(npc, asset, FAIRY_HEIGHT, 0.0)
 	elif real:
-		# 生成图分辨率高，按高度归一化到约 6 单位，脚底对齐原点
-		var h := float(tex.get_height())
-		npc.pixel_size = 6.0 / h
-		npc.offset = Vector2(0.0, h / 2.0)
-		BlobShadow.attach(npc, clampf(float(tex.get_width()) * npc.pixel_size * 0.38, 0.4, 1.4))
-		# 村民真图就绪后，后台轮询 idle 动画，就绪则静态切动画（与玩家/仙子同一条链路）。
 		# 相位按 id 错开，避免整村同帧起跳的机械感（31帧/8fps 循环约 3.9s）。
-		var anim_phase := float(String(c.get("id", c.get("name", ""))).hash() % 256) / 256.0 * 3.9
-		_poll_idle_anim(npc, asset, 6.0, anim_phase)
+		var anim_phase := float(cid.hash() % 256) / 256.0 * 3.9
+		if use_anim: # 已是动画图集：直接以动画降生
+			npc.play_idle(tex, anim_meta, 6.0, anim_phase)
+		else:
+			# 生成图分辨率高，按高度归一化到约 6 单位，脚底对齐原点
+			var h := float(tex.get_height())
+			npc.pixel_size = 6.0 / h
+			npc.offset = Vector2(0.0, h / 2.0)
+			BlobShadow.attach(npc, clampf(float(tex.get_width()) * npc.pixel_size * 0.38, 0.4, 1.4))
+			# 村民真图就绪后，后台轮询 idle 动画，就绪则静态切动画（与玩家/仙子同一条链路）。
+			_poll_idle_anim(npc, asset, 6.0, anim_phase)
 	var logical := at_logical
 	if logical == Vector2.INF:
 		# 小世界：忽略后端旧坐标(原 1000×1000 的 tile 500)，统一放到村庄中心(chunk2 = world 中心)
@@ -2623,9 +2696,6 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 			_villager_count += 1
 			var ang := float(k) * 2.399963
 			logical = WorldGrid.wrap_pos(center + Vector2(cos(ang), sin(ang)) * (10.0 + float(k) * 3.0))
-	var cid := String(c.get("id", ""))
-	if cid.is_empty():
-		cid = String(c.get("name", "")) # 后端无 id 时用名字兜底，保证角色层有主
 	var dict := { "node": npc, "logical": logical, "id": cid, "is_fairy": is_fairy }
 	if is_fairy:
 		dict["hover"] = FAIRY_HOVER # 悬浮随从：不登记占用（飞行不挡路），由 _update_fairy 驱动
