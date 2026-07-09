@@ -91,6 +91,8 @@ export interface Character {
   name: string;
   personality: string;
   voiceId: string;
+  /** 进对话时的招呼风格（warm|shy|playful|gentle）；缺省按 id 稳定哈希落到一种，见 greetings.ts。 */
+  greetingStyle?: string;
   appearance: { visualDescription: string; spriteAsset: string; scale: number };
   memory: string[];
   chatHistory: ChatTurn[];
