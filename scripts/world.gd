@@ -1124,9 +1124,15 @@ func _make_app_icon(app: Array) -> Control:
 	btn.expand_icon = true
 	btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	btn.add_theme_constant_override("icon_max_width", 42)
-	var st := UiAssets.card_style(16.0, 1.0)
-	st.shadow_size = 3
-	st.shadow_offset = Vector2(0.0, 2.0)
+	# app 图标底：近白 + 明显沙色描边 + 稍大投影，在奶油壳屏上更跳（比奶油底对比高）。
+	var st := StyleBoxFlat.new()
+	st.bg_color = Color(1.0, 1.0, 0.995)
+	st.set_corner_radius_all(16)
+	st.set_border_width_all(2)
+	st.border_color = Color(0.85, 0.72, 0.50)
+	st.shadow_color = Color(0.35, 0.24, 0.10, 0.32)
+	st.shadow_size = 5
+	st.shadow_offset = Vector2(0.0, 3.0)
 	btn.add_theme_stylebox_override("normal", st)
 	var stp: StyleBoxFlat = st.duplicate()
 	stp.bg_color = UiAssets.CARD_ACCENT
