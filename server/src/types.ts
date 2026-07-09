@@ -185,6 +185,8 @@ export interface VoiceResponse {
   propRequest?: string;
   /** create_character 意图的新伙伴描述：不下发客户端，由 WS 层摘走并异步造角色（gen_progress/gen_complete 推送）。仅小仙子有此能力。 */
   characterRequest?: string;
+  /** 主动招呼（进对话对方先开口）：transcript 为空且非玩家发起，客户端据此跳过「没听清」提示。 */
+  greeting?: boolean;
 }
 
 /** 世界里由语音生成的 SDF 物件（spec 结构见 sdf_prop.ts；tile 为客户端落位后回报）。 */

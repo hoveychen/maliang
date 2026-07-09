@@ -198,6 +198,7 @@ export async function greetCharacter(
     transcript: '', // 主动招呼，无玩家话语
     replyText: line,
     ttsAsset: '',
+    greeting: true, // 客户端据此跳过「没听清」提示（招呼不是玩家发起的一轮）
   };
 
   const streamFn = adapters.tts.synthesizeStream?.bind(adapters.tts);
