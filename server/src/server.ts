@@ -16,7 +16,7 @@ import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
+import { newCreationState, INITIAL_FLOWERS, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
@@ -231,6 +231,27 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       char.appearance.spriteAsset = hash;
       store.saveCharacter(char);
       return { id: char.id, name: char.name, prev, spriteAsset: hash };
+    },
+  );
+
+  // 管理端点：把某世界的小红花数直接设为指定值（缺省 INITIAL_FLOWERS）。
+  // 共享 default 世界初始额度被造角色/造物花光后，用它补花便于测试（不改经济规则）。
+  // 只动 flowers，盖章进度保留。必须配 MALIANG_ADMIN_TOKEN。
+  app.post<{ Params: { id: string }; Body: { flowers?: number } | null }>(
+    '/admin/worlds/:id/flowers',
+    async (req, reply) => {
+      const token = process.env.MALIANG_ADMIN_TOKEN;
+      if (!token || req.headers['x-admin-token'] !== token) {
+        return reply.code(403).send({ error: 'admin token required' });
+      }
+      const world = store.getWorld(req.params.id);
+      if (!world) return reply.code(404).send({ error: 'world not found' });
+      const n = req.body?.flowers ?? INITIAL_FLOWERS;
+      if (typeof n !== 'number' || !Number.isFinite(n)) {
+        return reply.code(400).send({ error: 'flowers must be a number' });
+      }
+      const wallet = store.setFlowers(req.params.id, n);
+      return { id: req.params.id, wallet };
     },
   );
 

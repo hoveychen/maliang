@@ -431,6 +431,15 @@ export class WorldStore {
     return w;
   }
 
+  /** 管理用：把小红花数直接设为 n（夹紧到 0..MAX_FLOWERS），盖章进度不动。返回结算后的钱包。世界不存在则原样返回空钱包。 */
+  setFlowers(worldId: string, n: number): Wallet {
+    const w = this.getWallet(worldId);
+    if (!this.#worldExists(worldId)) return w;
+    w.flowers = Math.max(0, Math.min(MAX_FLOWERS, Math.floor(n)));
+    this.#setWallet(worldId, w);
+    return w;
+  }
+
   getActiveTask(worldId: string): ActiveTask | null {
     const row = this.#db.prepare('SELECT active_task FROM worlds WHERE id = ?').get(worldId) as
       | { active_task: string | null }
