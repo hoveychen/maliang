@@ -28,7 +28,7 @@ a { color: inherit; }
   position: sticky; top: 0; height: 100vh;
 }
 .seal-block { padding: 22px 20px 16px; border-bottom: 1px solid var(--hairline); display: flex; gap: 12px; align-items: center; }
-.seal {
+.stamp {
   width: 44px; height: 44px; flex: none; background: var(--seal); color: #f6efe2;
   font-family: var(--serif); font-weight: 700; font-size: 17px; line-height: 1.1;
   display: grid; place-items: center; text-align: center;

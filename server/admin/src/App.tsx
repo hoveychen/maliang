@@ -19,7 +19,7 @@ export function App() {
       <div className="layout">
         <aside className="side">
           <div className="seal-block">
-            <div className="seal">馬良</div>
+            <div className="stamp">馬良</div>
             <div>
               <div className="title">马良管理台</div>
               <div className="sub">世界状态 · 只读</div>

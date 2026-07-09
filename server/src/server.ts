@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
+import fastifyStatic from '@fastify/static';
 import type { ServiceAdapters, ASRStream } from './adapters/types.ts';
 import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
@@ -331,10 +334,19 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   });
   // 资源化只读 API（/debug/api/*）：React 多页面后台分资源拉取（见 debug_api.ts）。
   registerDebugApi(app, store, debugAuthed);
-  app.get('/debug', async (req, reply) => {
-    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
-    return reply.header('content-type', 'text/html; charset=utf-8').send(DEBUG_DASHBOARD_HTML);
-  });
+  // /debug 页面：优先托管 admin/dist（React 多页面管理台，Docker 多阶段构建产出）。
+  // HTML/JS 是公开壳子不含数据（数据全在带门禁的 /debug/api/*），页面本身不设 token 门——
+  // 打开后 SPA 里粘 token 即可用（也兼容 ?token= 透传）。未构建（本地测试）回退旧版内嵌单页。
+  const adminDist = path.join(import.meta.dirname, '..', 'admin', 'dist');
+  if (existsSync(path.join(adminDist, 'index.html'))) {
+    await app.register(fastifyStatic, { root: adminDist, prefix: '/debug/' });
+    app.get('/debug', async (_req, reply) => reply.sendFile('index.html'));
+  } else {
+    app.get('/debug', async (req, reply) => {
+      if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+      return reply.header('content-type', 'text/html; charset=utf-8').send(DEBUG_DASHBOARD_HTML);
+    });
+  }
 
   // 引导式造角色图标（P3）：GET 看当前映射；POST 批量生成（幂等，?force=1 全量重生）。
   // 与 /debug 同一 admin token 门禁。生成走服务端的 image adapter（prod 有真 key）。
