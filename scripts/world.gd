@@ -90,6 +90,16 @@ var chunk_manager: ChunkManager
 var coord_label: Label
 var perf_label: Label    ## 调试性能浮层（仅 debug 构建）：CPU 逻辑/渲染提交/GPU 实测三组耗时对比判瓶颈
 var _perf_accum := 0.0   ## 浮层刷新节流（0.25s 一次，避免数字抖到读不了）
+# 调试语音耗时浮层（仅 debug）：一轮对话四段 ms —— VAD（开口→断句）/ASR（端侧识别）/
+# LLM（发转写→回应）/TTS（回应→首音出声）。ASR 与 VAD 已拆开；服务端 ASR 路径拆不开时并入 LLM。
+var voice_prof_label: Label
+var _vt_speak_start := 0  ## 开口 _utterance_begin
+var _vt_speak_end := 0    ## 断句 _utterance_commit
+var _vt_asr_done := 0     ## 端侧识别出文本 _on_local_asr_final
+var _vt_send := 0         ## 发 voice_transcript（端侧）/ voice_end（服务端）
+var _vt_response := 0     ## character_response 到达
+var _vt_tts_out := 0      ## 本轮首个 TTS 音频起播
+var _vt_local := false    ## 本轮是否端侧 ASR（决定 ASR/LLM 拆分口径）
 var banner: Label
 var heard_label: Label   ## 顶部显示 ASR 识别到的文字（"听到：…"，给家长确认）
 
@@ -773,6 +783,17 @@ func _setup_hud() -> void:
 		_style_label(perf_label, 20)
 		layer.add_child(perf_label)
 		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+
+		# 语音耗时浮层：贴在 FPS 浮层下方（同为右上角，仅 debug）
+		voice_prof_label = Label.new()
+		voice_prof_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		voice_prof_label.offset_left = -430.0
+		voice_prof_label.offset_right = -16.0
+		voice_prof_label.offset_top = 160.0
+		voice_prof_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		_style_label(voice_prof_label, 20)
+		voice_prof_label.text = "语音耗时(ms)\n（说句话看看）"
+		layer.add_child(voice_prof_label)
 
 	banner = Label.new()
 	banner.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -2951,6 +2972,7 @@ func _setup_local_asr() -> void:
 
 func _on_local_asr_final(text: String) -> void:
 	_local_asr_session = false
+	_vt_asr_done = Time.get_ticks_msec() # 端侧识别出文本
 	var t := text.strip_edges()
 	if t.is_empty():
 		# 端侧就知道没听清，不必打扰服务端
@@ -2959,6 +2981,7 @@ func _on_local_asr_final(text: String) -> void:
 		heard_label.text = "没听清，再说一次试试"
 		heard_label.visible = true
 		return
+	_vt_send = Time.get_ticks_msec() # 发转写 → 到 character_response 即纯 LLM 耗时
 	backend.send_voice_transcript(world_id, _selected_id(), t)
 
 func _on_local_asr_error(msg: String) -> void:
@@ -3014,6 +3037,13 @@ func _utterance_begin(head: PackedByteArray) -> void:
 	if selected == null or _recording:
 		return
 	_recording = true
+	# 语音耗时：开口即新一轮，清零各段戳
+	_vt_speak_start = Time.get_ticks_msec()
+	_vt_speak_end = 0
+	_vt_asr_done = 0
+	_vt_send = 0
+	_vt_response = 0
+	_vt_tts_out = 0
 	game_audio.play_sfx("mic_on")
 	_pending_pcm = head.duplicate()
 	_chunk_accum = 0.0
@@ -3038,6 +3068,11 @@ func _utterance_commit() -> void:
 		_asr_local.stopSession() # final_result 信号回来后走 voice_transcript
 	else:
 		backend.send_voice_end()
+	# 语音耗时：断句时刻 + 本轮 ASR 口径；服务端路径此刻即已发出(voice_end)，send 戳就是断句戳
+	_vt_speak_end = Time.get_ticks_msec()
+	_vt_local = _local_asr_session
+	if not _local_asr_session:
+		_vt_send = _vt_speak_end
 	_think_timer.start(THINK_TIMEOUT)  # 兜底：响应没回来也会自动解卡
 
 ## 太短的误触/中途退出：静默丢弃本段，双 ASR 路径都不产生任何回复。麦克风保持聆听。
@@ -3065,6 +3100,11 @@ func _on_character_response(data: Dictionary) -> void:
 	thinking_label.visible = false
 	# 主动招呼（对方先开口）：不是玩家发起的一轮，跳过「听到/没听清」提示，只放招呼台词+TTS
 	var is_greeting := bool(data.get("greeting", false))
+	# 语音耗时：玩家发起的一轮记回应到达并刷新浮层（招呼非玩家轮，跳过）
+	if not is_greeting:
+		_vt_response = Time.get_ticks_msec()
+		_vt_tts_out = 0
+		_update_voice_prof()
 	if not is_greeting:
 		var transcript := String(data.get("transcript", ""))
 		if transcript.is_empty():
@@ -3183,6 +3223,7 @@ func _start_tts_stream(rate: int) -> void:
 	_tts_gen_playback = _tts_player.get_stream_playback()
 	_tts_ending = false
 	_tts_gen_capacity = _tts_gen_playback.get_frames_available() # 刚开播缓冲全空 = 实际容量
+	_mark_tts_out()
 
 func _on_tts_chunk(pcm: PackedByteArray) -> void:
 	if _tts_gen_playback != null:
@@ -3240,6 +3281,7 @@ func _play_tts(asset: String) -> void:
 	wav.data = bytes
 	_tts_player.stream = wav
 	_tts_player.play()
+	_mark_tts_out()
 
 ## clientTts 主路径：edge-tts 本地合成优先（≈300ms 整句），失败逐句降级服务端 tts_request。
 ## pending 期间视同出声（闭麦/压 BGM），防合成空窗漏进角色自己的声音。
@@ -3265,10 +3307,38 @@ func _play_tts_mp3(bytes: PackedByteArray) -> void:
 	mp3.data = bytes
 	_tts_player.stream = mp3
 	_tts_player.play()
+	_mark_tts_out()
 
 func _on_tts_start(mime: String) -> void:
 	_tts_pending = false
 	_start_tts_stream(_parse_rate(mime, 24000))
+
+## 记本轮首个 TTS 音频起播时刻（三条起播路径共用）。只记玩家发起且尚未记过的一轮，
+## 招呼/纯音效等无 character_response 的出声不计入耗时统计。
+func _mark_tts_out() -> void:
+	if voice_prof_label == null or _vt_response == 0 or _vt_tts_out != 0:
+		return
+	_vt_tts_out = Time.get_ticks_msec()
+	_update_voice_prof()
+
+## 刷新右上角语音耗时浮层。TTS 未出声时该段显“…”。
+func _update_voice_prof() -> void:
+	if voice_prof_label == null or _vt_speak_start == 0:
+		return
+	var vad := maxi(0, _vt_speak_end - _vt_speak_start)
+	var llm := maxi(0, _vt_response - _vt_send)
+	var lines: Array[String] = ["语音耗时(ms)", "VAD %d" % vad]
+	if _vt_local:
+		lines.append("ASR %d 端侧" % maxi(0, _vt_asr_done - _vt_speak_end))
+		lines.append("LLM %d" % llm)
+	else:
+		lines.append("ASR server")
+		lines.append("LLM %d 含ASR" % llm)
+	if _vt_tts_out != 0:
+		lines.append("TTS %d" % maxi(0, _vt_tts_out - _vt_response))
+	else:
+		lines.append("TTS …")
+	voice_prof_label.text = "\n".join(lines)
 
 ## edge 探活/退避重探 + pending 兜底超时。available 初始 false，首帧即触发第一次探活。
 func _step_edge_tts(delta: float) -> void:
