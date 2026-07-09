@@ -34,5 +34,5 @@ window/handheld/orientation=1
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
-textures/vram_compression/import_etc2_astc=true
 renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true

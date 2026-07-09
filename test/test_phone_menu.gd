@@ -78,13 +78,16 @@ func _run(scene: Node) -> void:
 	var clock: Label = scene.get("_phone_clock")
 	_check(clock != null and String(clock.text).length() == 5 and String(clock.text).contains(":"), "banner 时钟 HH:MM")
 
-	# P3：已游玩时间——纯函数换算（不依赖引擎运行秒数，确定性）。
+	# 可玩时间：_play_state 纯函数（每轮 45min 可玩→10min 冷却，循环），widget 闹钟饼图据此渲染。
 	_check(int(scene.get("_play_start_ms")) > 0, "_play_start_ms 已初始化")
-	_check(String(scene._fmt_playtime(0)) == "已玩 0:00", "换算 0s → 0:00")
-	_check(String(scene._fmt_playtime(65)) == "已玩 1:05", "换算 65s → 1:05")
-	_check(String(scene._fmt_playtime(600)) == "已玩 10:00", "换算 600s → 10:00")
-	var pt: Label = scene.get("_phone_playtime")
-	_check(pt != null and String(pt.text).begins_with("已玩 "), "banner 已玩时长已填")
+	var s0: Dictionary = scene._play_state(0)
+	_check(is_equal_approx(float(s0["remaining"]), 1.0) and not bool(s0["cooldown"]), "0s：满格可玩、不冷却")
+	var s_mid: Dictionary = scene._play_state(1350) # 45min 的一半
+	_check(is_equal_approx(float(s_mid["remaining"]), 0.5) and not bool(s_mid["cooldown"]), "1350s(半程)：剩 50%")
+	var s_cd: Dictionary = scene._play_state(2700 + 300) # 进冷却 5min（冷却 10min 的一半）
+	_check(bool(s_cd["cooldown"]) and is_equal_approx(float(s_cd["cooldown_frac"]), 0.5), "45min 后：冷却中、进度 50%")
+	var pie = scene.get("_phone_playpie")
+	_check(pie != null and pie is PlayTimePie, "widget 可玩时间饼图存在(PlayTimePie)")
 	# _step_phone_ui：手机开着时按节流刷新一次不崩
 	scene.set("_phone_ui_t", 0.0)
 	scene._step_phone_ui(1.0)

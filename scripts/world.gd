@@ -166,10 +166,14 @@ const PHONE_GRID_COLS := 3          ## 主屏图标网格列数（3x3）
 const PHONE_PAGE_SLOTS := 9         ## 每页图标格数（3x3）
 const PHONE_HEIGHT_RATIO := 0.9     ## 机身高占视口比（贴右侧、竖向居中）
 const PHONE_RIGHT_MARGIN := 24.0    ## 机身距屏幕右边距
-## 手机近身相机：开手机时相机 zoom 拉近 + 焦点右移，让玩家落在屏幕左侧（右侧留给手机）。
-## 两个值都可在真机上调；PHONE_CAM_SHIFT 方向若相反（玩家跑到右边）取负号即可。
-const PHONE_CAM_DIST := 13.0        ## 近身轨道距离（真机可调）
-const PHONE_CAM_SHIFT := 7.0        ## 焦点右移的 logical 量，让玩家落屏左（真机可调）
+## 手机近身相机：开手机时按玩家立绘高度反算距离，让玩家（自适应身高）占屏高约 70%，
+## 并把焦点右移，使玩家落在屏幕偏左、右侧留给手机（PHONE_PLAYER_NDC_X 方向若反了取负）。
+const PHONE_CAM_FILL := 0.70        ## 玩家立绘占屏高约 70%（按 _char_top 反算距离，自适应身高）
+const PHONE_CAM_DIST_MIN := 3.5     ## 近身距离下限（比对话态更近，撑到 70%）
+const PHONE_PLAYER_NDC_X := 0.30    ## 玩家横向落点（0=正中，0.30=中心偏左 30%），右侧留给手机
+## 可玩时间预算（桌面 widget 用饼图展示剩余；超时冷却）：默认每轮 45 分钟、冷却 10 分钟，循环。
+const PLAY_BUDGET_SEC := 2700       ## 每轮可玩时长（45 分钟）
+const PLAY_COOLDOWN_SEC := 600      ## 超时冷却时长（10 分钟）
 var _phone_screen: Control          ## 屏幕内容区（banner + 主页网格 + app 视图）
 var _phone_home: Control            ## 主页：桌面 widget + 3x3 图标分页
 var _phone_app_view: Control        ## 打开某个 app 后的视图（顶部返回条 + 页面宿主）
@@ -177,7 +181,7 @@ var _phone_app_host: Control        ## app 页面挂载点（复用 _album_pages
 var _phone_app_title: Label         ## 打开的 app 标题
 var _phone_clock: Label             ## 状态栏时钟（实时）
 var _phone_signal: Control          ## 状态栏信号格（绿=WS 在线、灰=离线，见 _update_phone_banner）
-var _phone_playtime: Label          ## 桌面 widget 已游玩时间（本次进入世界起算）
+var _phone_playpie: PlayTimePie     ## 桌面 widget 可玩时间饼图（闹钟+饼，剩余可玩时间可视化）
 var _phone_flowers: Label           ## 桌面 widget 小红花数（代笔占位，见 _red_flower_count）
 var _phone_open_app := ""           ## 当前打开的 app id（空=停在主页）
 var _play_start_ms := 0             ## 本次进入世界的起始 ticks_msec（算已游玩时间）
@@ -186,6 +190,8 @@ var _phone_ui_t := 0.0              ## banner 刷新节流计时
 var _phone_scrim: Control           ## 手机开着时的全屏透明遮罩：吞掉手机外的点击→收起手机（不当移动指令）
 var _phone_cam := false             ## 手机近身相机态（开手机 true，收手机 false）
 var _phone_cam_saved_dist := 0.0    ## 进近身前的 _target_dist（收手机还原）
+var _phone_cam_shift := 0.0         ## 近身焦点右移量（按距离/宽高比动态算，见 _recompute_phone_cam）
+var _phone_cam_lift := 0.0          ## 近身焦点竖直抬升（把玩家框在屏幕竖直中段）
 var _phone_pager: ScrollContainer   ## 主屏图标分页横滚容器（iPhone 式左右翻页）
 var _phone_pages_box: HBoxContainer ## 各页并排（每页宽=分页容器宽）
 var _phone_dots: HBoxContainer      ## 翻页圆点指示（>1 页才显示）
@@ -1253,7 +1259,7 @@ func _make_app_icon(app: Array) -> Control:
 	box.add_child(cap)
 	return box
 
-## 桌面 widget（整条卡片，自由布局）：左「已玩时长」+ 右「小红花」；数值由 _update_phone_banner 填。
+## 桌面 widget（整条卡片，少文字纯 UI）：左「可玩时间闹钟饼图」+ 右「小红花图标+数」。
 func _build_phone_widget() -> PanelContainer:
 	var card := PanelContainer.new()
 	var cs := UiAssets.card_style(18.0, 1.0)
@@ -1261,38 +1267,29 @@ func _build_phone_widget() -> PanelContainer:
 	card.add_theme_stylebox_override("panel", cs)
 	var pad := MarginContainer.new()
 	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		pad.add_theme_constant_override(side, 14)
+		pad.add_theme_constant_override(side, 12)
 	card.add_child(pad)
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 12)
+	row.add_theme_constant_override("separation", 14)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	pad.add_child(row)
-	# 已玩时长（值形如「已玩 M:SS」，_fmt_playtime 出）
-	var pt_box := VBoxContainer.new()
-	pt_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	pt_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_phone_playtime = Label.new()
-	_phone_playtime.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_style_card_label(_phone_playtime, 24)
-	pt_box.add_child(_phone_playtime)
-	row.add_child(pt_box)
+	# 左：可玩时间闹钟饼图（剩余可玩时间可视化，不识字也能看懂）
+	var pie_box := CenterContainer.new()
+	pie_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_phone_playpie = PlayTimePie.new()
+	_phone_playpie.custom_minimum_size = Vector2(64.0, 64.0)
+	pie_box.add_child(_phone_playpie)
+	row.add_child(pie_box)
 	row.add_child(VSeparator.new())
-	# 小红花（图标 + 数 + 说明）
-	var fl_box := VBoxContainer.new()
+	# 右：小红花（图标 + 数，无文字说明）
+	var fl_box := HBoxContainer.new()
 	fl_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	fl_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var fl_row := HBoxContainer.new()
-	fl_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	fl_row.add_theme_constant_override("separation", 6)
-	fl_row.add_child(UiAssets.icon_rect("st_flower", 26.0))
+	fl_box.add_theme_constant_override("separation", 6)
+	fl_box.add_child(UiAssets.icon_rect("st_flower", 34.0))
 	_phone_flowers = Label.new()
-	_style_card_label(_phone_flowers, 24)
-	fl_row.add_child(_phone_flowers)
-	fl_box.add_child(fl_row)
-	var fl_cap := Label.new()
-	fl_cap.text = "小红花"
-	fl_cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_style_card_label(fl_cap, 16)
-	fl_box.add_child(fl_cap)
+	_style_card_label(_phone_flowers, 26)
+	fl_box.add_child(_phone_flowers)
 	row.add_child(fl_box)
 	return card
 
@@ -1450,8 +1447,9 @@ func _update_phone_banner() -> void:
 	var secs := 0
 	if _play_start_ms > 0:
 		secs = int((Time.get_ticks_msec() - _play_start_ms) / 1000)
-	if _phone_playtime != null:
-		_phone_playtime.text = _fmt_playtime(secs)
+	if _phone_playpie != null:
+		var ps := _play_state(secs)
+		_phone_playpie.set_state(ps["remaining"], ps["cooldown"], ps["cooldown_frac"])
 	if _phone_flowers != null:
 		_phone_flowers.text = "x%d" % _red_flower_count()
 	# 信号格：WS 在线→绿、离线→灰（每秒随 _step_phone_ui 刷新）
@@ -1461,9 +1459,15 @@ func _update_phone_banner() -> void:
 		for bar in _phone_signal.get_children():
 			(bar as ColorRect).color = col
 
-## 已玩秒数 → "已玩 M:SS"（抽成纯函数便于回测换算）。
-func _fmt_playtime(secs: int) -> String:
-	return "已玩 %d:%02d" % [secs / 60, secs % 60]
+## 可玩时间状态（纯函数，便于回测）：本次已玩 elapsed 秒 → {remaining(0..1), cooldown(bool), cooldown_frac(0..1)}。
+## 每轮可玩 PLAY_BUDGET_SEC、之后冷却 PLAY_COOLDOWN_SEC，循环往复（widget 闹钟饼图据此渲染）。
+func _play_state(elapsed: int) -> Dictionary:
+	var e := maxi(0, elapsed)
+	var cycle := PLAY_BUDGET_SEC + PLAY_COOLDOWN_SEC
+	var pos := e % cycle
+	if pos < PLAY_BUDGET_SEC:
+		return { "remaining": 1.0 - float(pos) / float(PLAY_BUDGET_SEC), "cooldown": false, "cooldown_frac": 0.0 }
+	return { "remaining": 0.0, "cooldown": true, "cooldown_frac": float(pos - PLAY_BUDGET_SEC) / float(PLAY_COOLDOWN_SEC) }
 
 ## 小红花数：代笔占位——真实小红花系统未接入前，先用已收集贴纸总数当占位读数。
 ## TODO(小红花): 接入真实小红花来源后替换本函数。
@@ -1598,8 +1602,9 @@ func _process(delta: float) -> void:
 	if focus_override != Vector2.INF:
 		want = focus_override
 	elif _phone_cam and not player.is_empty():
-		# 手机近身：焦点右移（+X）让玩家渲染到屏幕左侧，右侧留给手机；距离已在 _enter_phone_cam 拉近。
-		want = WorldGrid.wrap_pos(player["logical"] + Vector2(PHONE_CAM_SHIFT, 0.0))
+		# 手机近身：焦点右移让玩家渲染到屏幕偏左、右侧留给手机；距离/抬升在 _recompute_phone_cam 定。
+		want = WorldGrid.wrap_pos(player["logical"] + Vector2(_phone_cam_shift, 0.0))
+		lift = _phone_cam_lift
 	elif _locked != null and is_instance_valid(_locked) and not player.is_empty():
 		var dc := _dialog_camera()
 		want = dc["want"]
@@ -3273,17 +3278,31 @@ func _close_phone() -> void:
 		_phone_scrim.visible = false
 	_exit_phone_cam()
 
-## 进近身相机：拉近轨道距离 + 复位手势偏移（yaw=0，让 +X 焦点偏移把玩家推到屏左）。
+## 进近身相机：按玩家身高算 70% 构图参数 + 复位手势偏移（yaw=0，让 +X 焦点偏移把玩家推到屏左）。
 func _enter_phone_cam() -> void:
 	if _phone_cam:
 		return
 	_phone_cam = true
 	_phone_cam_saved_dist = _target_dist
-	_target_dist = PHONE_CAM_DIST
+	_recompute_phone_cam()
 	_gest_yaw_t = 0.0
 	_gest_pitch_t = 0.0
 	_gest_zoom_t = 1.0
 	_gest_reset_t = 0.0
+
+## 按玩家立绘高度反算近身参数：距离使玩家占屏高 PHONE_CAM_FILL(≈70%)，
+## 焦点右移 _phone_cam_shift 让玩家落屏偏左，抬升 _phone_cam_lift 把玩家框在竖直中段。
+func _recompute_phone_cam() -> void:
+	var h := 3.2
+	if not player.is_empty() and player.get("node") != null:
+		h = _char_top(player["node"] as PaperCharacter)
+	var tanhalf := tan(deg_to_rad(camera.fov * 0.5))
+	var dist := clampf(h / (2.0 * PHONE_CAM_FILL * tanhalf), PHONE_CAM_DIST_MIN, ZOOM_MAX)
+	var vp := get_viewport().get_visible_rect().size
+	var aspect := (vp.x / vp.y) if vp.y > 1.0 else (1280.0 / 720.0)
+	_target_dist = dist
+	_phone_cam_shift = PHONE_PLAYER_NDC_X * dist * tanhalf * aspect
+	_phone_cam_lift = h * 0.5
 
 ## 退近身相机：还原近身前的目标距离（焦点自动回到玩家，见 _process 相机块）。
 func _exit_phone_cam() -> void:
