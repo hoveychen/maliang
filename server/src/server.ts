@@ -9,6 +9,7 @@ import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
+import { trimToContent } from './adapters/chroma_cutout.ts';
 import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
@@ -254,6 +255,43 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       return { id: req.params.id, wallet };
     },
   );
+
+  // 管理端点：存量角色立绘「原地裁边」。把已存立绘裁到贴身盒（trimToContent）重新入库，
+  // 角色 spriteAsset 指向裁后新 hash，并重触发 idle 动画重生成（用新默认 cellH=256）。
+  // 只裁透明边、不重新生图 → 不改小朋友认得的形象。裁后立绘更贴身 → Seedance idle 取景更好。
+  // ?world=<id> 限定单个世界；缺省全世界。已贴身的立绘（无可裁）跳过动画重生成免重复烧钱。
+  // 必须配 MALIANG_ADMIN_TOKEN。
+  app.post<{ Querystring: { world?: string } }>('/admin/retrim-sprites', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const worldFilter = req.query.world;
+    const worlds = store.listWorlds().filter((w) => !worldFilter || w.id === worldFilter);
+    const characters: { id: string; name: string; prev: string; spriteAsset: string; changed: boolean }[] = [];
+    const regenTriggered = new Set<string>();
+    for (const w of worlds) {
+      for (const c of store.listCharacters(w.id)) {
+        const prev = c.appearance?.spriteAsset;
+        if (!prev) continue; // 仙子等无立绘（用本地图集）跳过
+        const blob = store.getAsset(prev);
+        if (!blob) continue;
+        const hash = store.putAsset(trimToContent(blob));
+        const changed = hash !== prev;
+        if (changed) {
+          c.appearance.spriteAsset = hash;
+          store.saveCharacter(c);
+          // 裁后是全新 hash（无动画记录）→ 触发一次按新分辨率重生成
+          if (!regenTriggered.has(hash)) {
+            regenTriggered.add(hash);
+            triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
+          }
+        }
+        characters.push({ id: c.id, name: c.name, prev, spriteAsset: hash, changed });
+      }
+    }
+    return { count: characters.length, regenerated: regenTriggered.size, characters };
+  });
 
   // onboarding 玩家形象：描述（由问题答案拼装）→ 生图 → 资产 hash。不建角色——
   // 玩家档案在设备端，资产内容寻址共享。描述过文字审核（防客户端篡改）。
