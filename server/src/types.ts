@@ -166,6 +166,8 @@ export interface VoiceResponse {
   /** 流式 TTS：character_response 先行，音频随 tts_chunk 推送（PCM16，mime 见 ttsMime）。 */
   ttsStreaming?: boolean;
   ttsMime?: string; // 如 audio/L16;rate=24000，客户端据此设采样率
+  /** 出声角色的音色 id：clientTts 客户端据此映射 edge-tts 音色本地合成（见 docs/edge-tts-client-design.md）。 */
+  voiceId?: string;
   /** behaviorScript 的执行者角色 id：小朋友点名让别的角色做时才有，缺省=characterId。 */
   performerId?: string;
   /** 这句回应里新发起的委托（LLM offerTask 且服务端已设为进行中）→ 客户端显示任务提示。 */
