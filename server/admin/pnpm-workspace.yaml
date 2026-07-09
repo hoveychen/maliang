@@ -1,0 +1,6 @@
+# 标记 admin 为独立 workspace 根：阻止 pnpm 向上找到 server/pnpm-workspace.yaml
+# （admin 有自己的 lockfile，不进 server 的依赖树——server Docker 构建只拷 server 的锁文件）。
+packages:
+  - '.'
+allowBuilds:
+  esbuild: true

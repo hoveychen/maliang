@@ -3,6 +3,17 @@
 # Node 26：node:sqlite（持久化 P1）在 22.5 起为实验特性、早期需 --experimental-sqlite，
 # 26 起稳定内置、无需标志（本地 dev 即 26.4）；CMD 用裸 `node` 不带标志，故基线锁 26。
 # sherpa-onnx-node 为 N-API 预编译（ABI 跨 major 稳定），已实测在 26 加载正常。
+
+# ── 阶段一：构建 /debug 管理台（React+Vite）。产物纯静态，运行时不需要 admin 依赖树 ──
+FROM node:26-slim AS admin-build
+RUN npm install -g corepack@latest && corepack enable
+WORKDIR /admin
+COPY server/admin/package.json server/admin/pnpm-lock.yaml server/admin/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY server/admin/ ./
+RUN pnpm build
+
+# ── 阶段二：运行时 ──
 FROM node:26-slim
 
 WORKDIR /app
@@ -20,6 +31,8 @@ COPY server/package.json server/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 
 COPY server/ ./
+# 管理台构建产物（server.ts 检测到 admin/dist 即在 /debug 托管 SPA）
+COPY --from=admin-build /admin/dist ./admin/dist
 
 # muvee：HTTP 必须在 8080；持久化只有 /workspace 存活 →
 # 数据目录与语音模型（~1GB，启动时拉一次后复用）都指向 /workspace
