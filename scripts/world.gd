@@ -120,6 +120,8 @@ var _recording := false
 var active_task: Dictionary = {}   ## 进行中委托（空=无），见 _set_active_task
 var inventory: Dictionary = {}     ## 贴纸背包 id→数量
 var task_chip: HBoxContainer       ## 右上角委托提示（目标图标+短名 ⇒ 奖励贴纸图标）
+var _creation_cards: HBoxContainer ## 引导式造角色的图标选项卡（浮在横幅上方；平时隐藏）
+var _in_creation := false          ## 正在与小仙子引导式造角色（期间语音/点选都是造角色答复）
 var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _pending_give: Dictionary = {} ## give 转赠途中 { "item": 贴纸id, "npc": 受赠者字典 }
 var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
@@ -589,6 +591,17 @@ func _setup_hud() -> void:
 	_style_label(banner, 28)
 	banner.visible = false
 	layer.add_child(banner)
+
+	# 引导式造角色的图标选项卡：一排大按钮，浮在横幅上方居中（3 岁友好大点击区）。
+	# 图标就绪前先显示文字 label（iconAsset 空）；点一下即答复小仙子。
+	_creation_cards = HBoxContainer.new()
+	_creation_cards.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_creation_cards.offset_top = -196.0
+	_creation_cards.offset_bottom = -104.0
+	_creation_cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	_creation_cards.add_theme_constant_override("separation", 18)
+	_creation_cards.visible = false
+	layer.add_child(_creation_cards)
 
 	# 收听 HUD：近身对话期间浮在横幅上方——AIGC 生成的奶油圆角边框贴图（hud_listen，
 	# 麦克风+音波+星饰烤进边框），一排珊瑚色声波柱嵌在边框空心内板、随音量跳动，
@@ -1517,6 +1530,11 @@ func _exit_interaction() -> void:
 	game_audio.play_sfx("exit")
 	if _recording:
 		_utterance_cancel() # 说到一半退出：静默丢弃，不留半开会话
+	if _in_creation:
+		_in_creation = false # 退出与小仙子的交互：取消未完成的造角色会话
+		_hide_creation_cards()
+		if online:
+			backend.send_creation_cancel()
 	_mic.stop()
 	_vad = null
 	selected = null
@@ -1547,6 +1565,7 @@ func _setup_backend() -> void:
 	backend.tts_end.connect(func() -> void: _tts_ending = true)
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
+	backend.creation_prompt.connect(_on_creation_prompt)
 	backend.prop_created.connect(_on_prop_created)
 	backend.prop_failed.connect(_on_prop_failed)
 	backend.failed.connect(_on_failed)
@@ -1687,10 +1706,14 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 		_start_ambient_wander(npcs[npcs.size() - 1])
 
 func _on_gen_progress(stage: String) -> void:
+	_in_creation = false # 进造角色管线：引导会话已结束（服务端已开造）
+	_hide_creation_cards()
 	thinking_label.text = "施法中… (%s)" % stage
 	thinking_label.visible = true
 
 func _on_gen_complete(character: Dictionary) -> void:
+	_in_creation = false
+	_hide_creation_cards()
 	thinking_label.visible = false
 	# 新角色在小神仙旁边降生
 	var fairy := _find_fairy()
@@ -2054,6 +2077,69 @@ func _on_character_response(data: Dictionary) -> void:
 		var asset := String(data.get("ttsAsset", ""))
 		if not asset.is_empty():
 			_play_tts(asset)
+
+## 引导式造角色：小仙子追问一轮 —— 念出问句(TTS) + 弹出图标选项卡；小朋友点卡或直接说都行。
+func _on_creation_prompt(data: Dictionary) -> void:
+	if _think_timer != null:
+		_think_timer.stop()
+	thinking_label.visible = false
+	_in_creation = true
+	banner.text = String(data.get("replyText", data.get("question", "")))
+	banner.visible = true
+	_show_emotion("happy")
+	_build_creation_cards(data.get("options", []))
+	var asset := String(data.get("ttsAsset", ""))
+	if not asset.is_empty():
+		_play_tts(asset) # 仙子把问题和选项念出来（幼儿不识字）
+
+## 造一排选项卡：图标就绪(iconAsset 非空)显示图标，否则先显示中文 label。点一下即答复小仙子。
+func _build_creation_cards(options: Array) -> void:
+	for c in _creation_cards.get_children():
+		c.queue_free()
+	for opt in options:
+		if typeof(opt) != TYPE_DICTIONARY:
+			continue
+		var oid := String((opt as Dictionary).get("id", ""))
+		if oid.is_empty():
+			continue
+		var card := Button.new()
+		card.custom_minimum_size = Vector2(120.0, 92.0)
+		card.text = String((opt as Dictionary).get("label", oid))
+		# Button 也吃这些 theme override（_style_label 参数限定 Label，这里直接给按钮）
+		card.add_theme_font_size_override("font_size", 30)
+		card.add_theme_color_override("font_color", Color.WHITE)
+		card.add_theme_color_override("font_outline_color", Color.BLACK)
+		card.add_theme_constant_override("outline_size", 6)
+		var icon_asset := String((opt as Dictionary).get("iconAsset", ""))
+		if not icon_asset.is_empty():
+			_apply_card_icon(card, icon_asset) # 图标就绪：异步贴图（不阻塞卡片弹出）
+		card.pressed.connect(_on_creation_card.bind(oid))
+		_creation_cards.add_child(card)
+	_creation_cards.visible = _creation_cards.get_child_count() > 0
+
+## 选项卡图标（P3 生成后 iconAsset 才非空）：异步拉图贴到按钮，失败保留文字兜底。
+func _apply_card_icon(card: Button, asset: String) -> void:
+	var tex := await api.fetch_texture(asset)
+	if tex != null and is_instance_valid(card):
+		card.icon = tex
+		card.expand_icon = true
+		card.text = "" # 有图就不显字
+
+## 点了某张选项卡：答复小仙子，收起卡片、进入思考态等下一轮/成品。
+func _on_creation_card(option_id: String) -> void:
+	if not _in_creation or selected == null:
+		return
+	game_audio.play_sfx("bell")
+	backend.send_creation_reply(world_id, _selected_id(), option_id)
+	_hide_creation_cards()
+	thinking_label.text = "施法中…"
+	thinking_label.visible = true
+
+## 收起选项卡（答复后/造好/退出）。
+func _hide_creation_cards() -> void:
+	for c in _creation_cards.get_children():
+		c.queue_free()
+	_creation_cards.visible = false
 
 ## 流式 TTS：character_response 先到，PCM 分片随 tts_chunk 推来，边收边播（首包即出声）。
 func _start_tts_stream(rate: int) -> void:

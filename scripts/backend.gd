@@ -8,6 +8,8 @@ signal tts_chunk(pcm: PackedByteArray)
 signal tts_end
 signal gen_progress(stage: String)
 signal gen_complete(character: Dictionary)
+## 引导式造角色：小仙子追问一轮（含图标选项 + 仙子问句 TTS 资源）
+signal creation_prompt(data: Dictionary)
 signal prop_created(prop: Dictionary)
 signal prop_failed(reason: String)
 signal failed(reason: String)
@@ -55,6 +57,14 @@ func send_voice_transcript(world_id: String, character_id: String, transcript: S
 
 func send_create_character(world_id: String, intent_text: String) -> void:
 	_send({ "type": "create_character_request", "worldId": world_id, "intentText": intent_text, "byFairy": true })
+
+## 引导式造角色答复：小朋友点了图标卡（option_id）就传 option_id；否则语音答复走 voice_transcript/voice_end。
+func send_creation_reply(world_id: String, character_id: String, option_id: String) -> void:
+	_send({ "type": "creation_reply", "worldId": world_id, "characterId": character_id, "optionId": option_id })
+
+## 取消引导式造角色（退出与小仙子的交互）：服务端清掉会话，后续语音不再当造角色答复。
+func send_creation_cancel() -> void:
+	_send({ "type": "creation_cancel" })
 
 ## 离开世界（玩家正常退出）：显式通知服务端收尾会话（Visit），触发批量抽记忆。
 ## 世界卸载后紧接着场景切换/节点释放，socket 可能来不及发——poll 一次尽量把帧推出；
@@ -138,6 +148,8 @@ func _dispatch(data: Dictionary) -> void:
 			gen_progress.emit(String(data.get("stage", "")))
 		"gen_complete":
 			gen_complete.emit(data.get("character", {}))
+		"creation_prompt":
+			creation_prompt.emit(data)
 		"world_state":
 			world_state.emit(data)
 		"task_complete":
