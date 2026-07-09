@@ -161,3 +161,24 @@ button.plain:hover { background: var(--paper-dim); }
 .error-box input { font: 13px var(--mono); padding: 4px 8px; border: 1px solid var(--hairline); background: var(--paper-raise); color: var(--ink); }
 .loading { color: var(--ink-soft); padding: 30px 0; font-size: 13px; }
 .empty { color: var(--ink-soft); font-style: italic; padding: 14px 0; }
+
+/* 立绘放大预览遮罩 */
+.sprite-click { cursor: zoom-in; }
+.lightbox {
+  position: fixed; inset: 0; z-index: 100; cursor: default;
+  background: #26221bcc; display: grid; place-items: center; padding: 24px;
+}
+.lightbox-body {
+  background: var(--paper); border: 1px solid var(--hairline); box-shadow: 4px 4px 0 #26221b55;
+  padding: 20px 22px 14px; max-width: min(92vw, 800px); max-height: 92vh; overflow: auto;
+}
+.lightbox-row { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; }
+.lightbox-row figure { margin: 0; text-align: center; }
+.lightbox-row img, .sprite-canvas {
+  width: min(320px, 40vw); height: min(320px, 40vw); object-fit: contain;
+  background: repeating-conic-gradient(var(--paper-dim) 0% 25%, var(--paper-raise) 0% 50%) 0 0 / 24px 24px;
+  border: 1px solid var(--hairline);
+}
+.lightbox-row figcaption { font-size: 12px; color: var(--ink-soft); margin-top: 6px; }
+.lightbox-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.lightbox-foot .mono { flex: 1; word-break: break-all; }
