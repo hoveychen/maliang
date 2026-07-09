@@ -1,13 +1,13 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { fmtTs, useApi } from '../api.ts';
-import { STICKER_GLYPHS, TASK_TYPE_LABELS, type WorldDetail } from '../types.ts';
+import { MAX_FLOWERS, STAMP_GLYPHS, STAMPS_PER_FLOWER, TASK_TYPE_LABELS, type WorldDetail } from '../types.ts';
 import { AnimStatusBadge, Fallback, PageHead, RowLink, ShortId, Sprite, Stats } from '../components.tsx';
 
 const TABS = [
   { key: 'characters', label: '角色' },
   { key: 'props', label: '物品' },
   { key: 'events', label: '世界事件' },
-  { key: 'inventory', label: '贴纸背包' },
+  { key: 'wallet', label: '小红花钱包' },
 ] as const;
 
 export function WorldDetailPage() {
@@ -21,7 +21,7 @@ export function WorldDetailPage() {
         characters: data.characters.length,
         props: data.props.length,
         events: data.visits.length + (data.activeTask ? 1 : 0),
-        inventory: Object.values(data.inventory).filter((n) => n > 0).length,
+        wallet: data.wallet.flowers,
       }
     : {};
 
@@ -117,8 +117,7 @@ export function WorldDetailPage() {
                     {data.activeTask.targetName && <><dt>对象</dt><dd>{data.activeTask.targetName}</dd></>}
                     {data.activeTask.locationName && <><dt>地点</dt><dd>{data.activeTask.locationName}</dd></>}
                     {data.activeTask.message && <><dt>要带的话</dt><dd>{data.activeTask.message}</dd></>}
-                    {data.activeTask.itemId && <><dt>要送的贴纸</dt><dd>{STICKER_GLYPHS[data.activeTask.itemId] ?? data.activeTask.itemId}</dd></>}
-                    <dt>奖励</dt><dd>{STICKER_GLYPHS[data.activeTask.rewardId] ?? data.activeTask.rewardId}</dd>
+                    <dt>完成盖章</dt><dd>{STAMP_GLYPHS[data.activeTask.stampStyle] ?? '❔'} {data.activeTask.stampStyle}</dd>
                   </dl>
                 </div>
               ) : <div className="empty">当前没有进行中的委托</div>}
@@ -147,23 +146,23 @@ export function WorldDetailPage() {
             </>
           )}
 
-          {tab === 'inventory' && (
-            Object.entries(data.inventory).filter(([, n]) => n > 0).length === 0
-              ? <div className="empty">背包是空的</div>
-              : (
-                <table className="grid" style={{ maxWidth: 420 }}>
-                  <thead><tr><th>贴纸</th><th>id</th><th>数量</th></tr></thead>
-                  <tbody>
-                    {Object.entries(data.inventory).filter(([, n]) => n > 0).map(([sid, n]) => (
-                      <tr key={sid}>
-                        <td style={{ fontSize: 22 }}>{STICKER_GLYPHS[sid] ?? '❔'}</td>
-                        <td className="mono">{sid}</td>
-                        <td className="num-cell">{n}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
+          {tab === 'wallet' && (
+            <table className="grid" style={{ maxWidth: 420 }}>
+              <tbody>
+                <tr>
+                  <td>🌸 小红花</td>
+                  <td className="num-cell"><b>{data.wallet.flowers}</b><span className="aux">/{MAX_FLOWERS}</span></td>
+                </tr>
+                <tr>
+                  <td>未结算盖章</td>
+                  <td className="num-cell">{data.wallet.stampProgress}<span className="aux">/{STAMPS_PER_FLOWER}</span></td>
+                </tr>
+                <tr>
+                  <td>累计盖章</td>
+                  <td className="num-cell">{data.wallet.stampsTotal}</td>
+                </tr>
+              </tbody>
+            </table>
           )}
         </>
       )}

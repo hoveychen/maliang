@@ -1,11 +1,10 @@
 import { useApi } from '../api.ts';
-import { STICKER_GLYPHS, TASK_TYPE_LABELS, type WorldRow } from '../types.ts';
+import { STAMPS_PER_FLOWER, TASK_TYPE_LABELS, type Wallet, type WorldRow } from '../types.ts';
 import { Fallback, PageHead, RowLink } from '../components.tsx';
 
-export function inventoryGlyphs(inv: Record<string, number>): string {
-  const parts = Object.entries(inv).filter(([, n]) => n > 0);
-  if (parts.length === 0) return '';
-  return parts.map(([id, n]) => `${STICKER_GLYPHS[id] ?? id}×${n}`).join(' ');
+/** 钱包一行摘要：小红花数 + 未结算盖章进度。 */
+export function walletSummary(wallet: Wallet): string {
+  return `🌸×${wallet.flowers} · 章 ${wallet.stampProgress}/${STAMPS_PER_FLOWER}`;
 }
 
 export function WorldsPage() {
@@ -24,7 +23,7 @@ export function WorldsPage() {
       ) : (
         <table className="grid">
           <thead>
-            <tr><th>id</th><th>角色</th><th>物品</th><th>会话（进行中/总）</th><th>贴纸背包</th><th>进行中委托</th><th>地点</th></tr>
+            <tr><th>id</th><th>角色</th><th>物品</th><th>会话（进行中/总）</th><th>钱包（花/章）</th><th>进行中委托</th><th>地点</th></tr>
           </thead>
           <tbody>
             {data.worlds.map((w) => (
@@ -33,7 +32,7 @@ export function WorldsPage() {
                 <td className="num-cell">{w.characterCount}{w.fairyCount > 0 && <span className="mono"> (仙×{w.fairyCount})</span>}</td>
                 <td className="num-cell">{w.propCount}</td>
                 <td className="num-cell">{w.activeVisitCount > 0 ? <b>{w.activeVisitCount}</b> : 0}/{w.visitCount}</td>
-                <td>{inventoryGlyphs(w.inventory) || <span className="empty-cell">空</span>}</td>
+                <td className="mono">{walletSummary(w.wallet)}</td>
                 <td>
                   {w.activeTask
                     ? <span className="badge seal">{TASK_TYPE_LABELS[w.activeTask.type] ?? w.activeTask.type} · {w.activeTask.npcName}</span>
