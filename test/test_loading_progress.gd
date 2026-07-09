@@ -32,6 +32,33 @@ func _init() -> void:
 	fails += _check("全铺时 all_skinned 亦为真", cm.all_skinned(), true)
 	cm.free()
 
+	# --- ready_progress 细粒度：boot 段随 _boot_sub 单调推进，消除长尾停顿 ---
+	# 裸实例（不入树，只读方法用到的 _boot_stage/_boot_sub/_boot_status + chunk_manager==null 走 0）。
+	var w: Node = (load("res://scripts/world.gd") as GDScript).new()
+	w.set("chunk_manager", null) # 显式：无 chunk 时 chunk_f=0，进度只看 boot 段
+	w.set("_boot_stage", 0)
+	var p0: float = w.call("ready_progress")
+	w.set("_boot_stage", 1); w.set("_boot_sub", 0.0)
+	var p1a: float = w.call("ready_progress")
+	w.set("_boot_sub", 0.5)
+	var p1b: float = w.call("ready_progress")
+	w.set("_boot_sub", 1.0)
+	var p1c: float = w.call("ready_progress")
+	w.set("_boot_stage", 2)
+	var p2: float = w.call("ready_progress")
+	fails += _check("stage0 起点=0.08", is_equal_approx(p0, 0.08), true)
+	fails += _check("stage1 子进度单调推进（0<0.5<1）", p1a < p1b and p1b < p1c, true)
+	fails += _check("stage1 sub=0 = 0.08+0.46*0.4", is_equal_approx(p1a, 0.08 + 0.46 * 0.4), true)
+	fails += _check("stage1 sub=1 与 stage2 连续（无跳变）", is_equal_approx(p1c, p2), true)
+	fails += _check("进度全程封顶 0.95", p2 <= 0.95, true)
+
+	# --- ready_status：有文案返回文案；无文案回落铺设百分比 ---
+	w.set("_boot_status", "")
+	fails += _check("空文案回落铺草地", String(w.call("ready_status")).begins_with("铺草地"), true)
+	w.set("_boot_status", "唤醒村民 2/3")
+	fails += _check("有文案原样返回", String(w.call("ready_status")), "唤醒村民 2/3")
+	w.free()
+
 	print("test_loading_progress: %d fail(s)" % fails)
 	quit(fails)
 
