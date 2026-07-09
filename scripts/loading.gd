@@ -26,14 +26,20 @@ const FLY_MARGIN := 44.0  ## 飞行航道左右留白
 const PROG_FOLLOW := 2.5  ## 显示进度追真进度的速度（每秒）：真里程碑落地时仙子快速前冲
 const PROG_CREEP := 0.035 ## 真进度停滞时的慢爬（每秒），朝 0.9 渐近但永不到顶——到顶只由 world_ready 触发
 const CREEP_CEIL := 0.9   ## 慢爬封顶：网络久等时仙子最多爬到 90%，留最后一截给「真就绪」
-const LAND_TIME := 0.5    ## world_ready 后仙子冲刺到终点（_prog→1）的时长
+const LAND_TIME := 0.45   ## world_ready 后仙子冲刺到终点（_prog→1）的时长
 
-var _fade_root: Control    ## 淡出目标（整层视觉挂它下面，改 modulate:a）
+const PORTAL_SIZE := 220.0 ## 传送门屏上直径（航道终点），仙子飞向它
+const PORTAL_TEX := 240    ## 传送门贴图分辨率（程序化生成，见 _make_portal_tex）
+const PORTAL_SPIN := 0.6   ## 传送门漩涡自转角速度（弧度/秒）
+
+var _fade_root: Control    ## 淡出目标（背景+三点挂它下面，改 modulate:a 剥离）
+var _portal: TextureRect   ## 航道终点的传送门（挂 CanvasLayer 上、盖过 _fade_root，单独转场）
 var _fairy: TextureRect
 var _dots: Array[ColorRect] = []
 var _t := 0.0
 var _prog := 0.0           ## 显示进度 [0,1]：驱动仙子横向位置；真进度来自 _world.ready_progress()
 var _landing := false      ## world_ready 后接管 _prog（tween 冲到 1.0），_process 不再跟随真进度
+var _transitioning := false ## 传送门转场已接管（门的位置/缩放交给 tween，_process 只保留自转）
 var _shown_at := 0
 var _world: Node = null
 var _revealing := false    ## 已开始揭开（防重复 spawn/reveal）
@@ -94,10 +100,47 @@ func _build_overlay() -> void:
 		_fade_root.add_child(d)
 		_dots.append(d)
 
+	# 航道终点的传送门：挂在 CanvasLayer 上、盖过 _fade_root（故仙子飞近时被门遮住＝飞入感）。
+	# 转场时单独动它（居中+放大+淡出），不随背景 _fade_root 一起淡。程序化生成，无素材依赖。
+	_portal = TextureRect.new()
+	_portal.texture = _make_portal_tex(PORTAL_TEX)
+	_portal.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_portal.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_portal.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_portal.custom_minimum_size = Vector2(PORTAL_SIZE, PORTAL_SIZE)
+	_portal.pivot_offset = Vector2(PORTAL_SIZE * 0.5, PORTAL_SIZE * 0.5) # 自转/缩放绕门心
+	_portal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(_portal)
+
+## 程序化生成发光漩涡传送门：环带峰值在 r≈0.82，叠角向螺旋亮暗（自转即漩涡流动），
+## 内部留一层青→紫的半透微光。返回 ImageTexture，无外部素材依赖。
+func _make_portal_tex(size: int) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var c := float(size) * 0.5
+	var inner := Color(0.55, 0.92, 1.0) # 青色核
+	var outer := Color(0.62, 0.42, 1.0) # 紫色环缘
+	for y in size:
+		for x in size:
+			var dx := (float(x) - c) / c
+			var dy := (float(y) - c) / c
+			var r := sqrt(dx * dx + dy * dy)
+			if r > 1.0:
+				img.set_pixel(x, y, Color(0, 0, 0, 0))
+				continue
+			var ang := atan2(dy, dx)
+			var ring := exp(-pow((r - 0.82) / 0.16, 2.0))      # 高斯环带
+			var swirl := 0.72 + 0.28 * sin(ang * 5.0 + r * 14.0) # 角向螺旋
+			var core := (1.0 - r) * 0.26                         # 内部微光
+			var a := clampf(ring * swirl + core, 0.0, 1.0)
+			var col := inner.lerp(outer, r) * (0.85 + 0.4 * ring)
+			img.set_pixel(x, y, Color(col.r, col.g, col.b, a))
+	return ImageTexture.create_from_image(img)
+
 func _process(delta: float) -> void:
 	_t += delta
 	_advance_progress(delta)
 	_layout_fairy()
+	_layout_portal()
 	# 三点顺序脉动（相位错开），alpha 在 0.35~1.0 之间呼吸
 	for i in range(_dots.size()):
 		var a := 0.35 + 0.65 * (0.5 + 0.5 * sin(_t * 4.0 - i * 0.9))
@@ -138,6 +181,27 @@ func _layout_fairy() -> void:
 	_fairy.offset_bottom = base_y + FAIRY_H + bob
 	var s := 1.0 + sin(_t * 2.0) * 0.04
 	_fairy.scale = Vector2(s, s)
+
+## 仙子飞行终点＝门心（_prog=1 时仙子框中心），转场里仙子被吸入此处。
+func _finish_center() -> Vector2:
+	var vp := _fade_root.size
+	return Vector2(vp.x - FLY_MARGIN - FAIRY_W * 0.5, vp.y * 0.40 + FAIRY_H * 0.5)
+
+## 传送门定位：始终自转（漩涡流动），未转场时钉在航道终点并轻微呼吸；
+## 转场开始后位置/缩放交给 tween，这里只保留自转。
+func _layout_portal() -> void:
+	if _portal == null:
+		return
+	_portal.rotation = _t * PORTAL_SPIN
+	if _transitioning or _fade_root == null:
+		return
+	var pc := _finish_center()
+	_portal.offset_left = pc.x - PORTAL_SIZE * 0.5
+	_portal.offset_top = pc.y - PORTAL_SIZE * 0.5
+	_portal.offset_right = pc.x + PORTAL_SIZE * 0.5
+	_portal.offset_bottom = pc.y + PORTAL_SIZE * 0.5
+	var ps := 1.0 + sin(_t * 2.2) * 0.05
+	_portal.scale = Vector2(ps, ps)
 
 func _spawn_world() -> void:
 	_revealing = true # 只此一次，之后只等 world_ready
