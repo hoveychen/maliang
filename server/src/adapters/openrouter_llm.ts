@@ -17,13 +17,16 @@ import { describeTask } from '../tasks.ts';
 import { findOption, optionsByCategory } from '../creation_options.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
 import { fallbackSdfPropSpec, validateSdfPropSpec, type SdfPropSpec } from '../sdf_prop.ts';
+import { isKnownVoice, fallbackVoice, voicePromptLines } from '../voice_catalog.ts';
 
 const DESIGNER_SYSTEM = `你是幼儿园游戏「maliang」的角色设计师。根据小朋友的口头想法，设计一个可爱、儿童友好的角色。
 严格只输出 JSON，无 markdown 代码块、无多余文字，格式：
-{"name": "中文名字", "personality": "1-2句中文个性描述", "visualDescription": "ENGLISH image prompt"}
+{"name": "中文名字", "personality": "1-2句中文个性描述", "visualDescription": "ENGLISH image prompt", "voiceId": "音色id"}
 规则：
 - name、personality 用中文，温暖童趣。
 - visualDescription 用英文，只描述角色主体外观（种类、配色、服饰、表情等），不要写画风/构图/背景——服务端会统一追加动森（Animal Crossing）画风与绿幕背景。
+- voiceId 按角色的性格气质与体型从下面的音色表里选，必须原样使用表内 id（方言/台湾腔只给明显匹配的角色，别滥用）：
+${voicePromptLines()}
 - 绝不包含暴力、恐怖、武器、成人内容。`;
 
 const FALLBACK_VISUAL = 'a cute small round animal friend with a happy smiling face';
@@ -84,6 +87,7 @@ interface RawSpec {
   name?: unknown;
   personality?: unknown;
   visualDescription?: unknown;
+  voiceId?: unknown;
 }
 
 function str(v: unknown, fallback: string): string {
@@ -116,7 +120,8 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
       name: str(raw.name, '新朋友'),
       personality: str(raw.personality, '一个友好、好奇的小伙伴，喜欢和小朋友玩。'),
       visualDescription: str(raw.visualDescription, FALLBACK_VISUAL),
-      voiceId: 'cn-child-default', // 真实音色 id 在 M2 接讯飞时确定
+      // LLM 按性格从音色目录选；非法/缺失按名字稳定哈希落主力池（同名同声）
+      voiceId: isKnownVoice(str(raw.voiceId, '')) ? str(raw.voiceId, '') : fallbackVoice(str(raw.name, '新朋友')),
       scale: 1.0,
       abilities: [...BASE_ABILITIES], // 系统预设能力，固定（不取 LLM 的flavor）
     };

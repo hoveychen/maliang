@@ -19,6 +19,7 @@ import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -48,7 +49,7 @@ function seedFairy(worldId: string): Character {
     isFairy: true,
     name: '小神仙',
     personality: '温柔的小神仙，能按小朋友的想法创造新伙伴。',
-    voiceId: 'mock-voice-cn-fairy',
+    voiceId: FAIRY_VOICE,
     appearance: { visualDescription: FAIRY_VISUAL_DESC, spriteAsset: '', scale: 1.2 },
     memory: [],
     chatHistory: [],
@@ -418,6 +419,9 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   if (deps.backfillOnBoot) {
     const n = backfillIdleAnimations(adapters, store, toSpriteSheet);
     if (n > 0) app.log.info(`idle 动画存量回填：触发 ${n} 个角色`);
+    // 音色回填：voiceId 不在 edge 目录里的老角色按 id 稳定哈希落主力池，仙子固定 Xiaoyi（幂等，同步很快）。
+    const nv = backfillVoices(store);
+    if (nv > 0) app.log.info(`音色存量回填：改写 ${nv} 个角色`);
   }
 
   return app;
@@ -766,7 +770,7 @@ export async function advanceCreation(
     .map((id) => findOption(id))
     .filter((o): o is NonNullable<typeof o> => !!o)
     .map((o) => ({ id: o.id, label: o.label, iconAsset: store.getCreationIcon(o.id) }));
-  const fairyVoiceId = store.getCharacter(worldId, fairyId)?.voiceId ?? 'mock-voice-cn-fairy';
+  const fairyVoiceId = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
   let ttsAsset = '';
   if (!session.clientTts) {
     try {
