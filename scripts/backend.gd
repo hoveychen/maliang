@@ -28,6 +28,10 @@ var _open := false
 ## 当前玩家 id（设备端稳定 UUID）：由 world.gd bootstrap 时从档案设入，_send 统一注入每条消息。
 var player_id := ""
 
+## WS 是否已连上（供手机状态栏信号格显示网络是否通畅）。
+func is_online() -> bool:
+	return _open
+
 func connect_to_server() -> void:
 	# 默认入站缓冲 64KB：慢帧场景（录屏/低端机）下一帧间隔内的 TTS 分片突发
 	# 会撑爆缓冲直接断连，后续推送（如 prop_created）全部丢失——调大到 2MB。

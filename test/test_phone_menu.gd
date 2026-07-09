@@ -31,13 +31,25 @@ func _run(scene: Node) -> void:
 
 	var home: Control = scene.get("_phone_home")
 	_check(home != null, "_phone_home 存在")
-	var grid: GridContainer = null
-	if home != null:
-		for c in home.get_children():
-			if c is GridContainer:
-				grid = c
-				break
-	_check(grid != null and grid.get_child_count() == 16, "主屏 4x4 = 16 格")
+	# 遮罩 + 状态栏信号格存在
+	_check(scene.get("_phone_scrim") != null, "_phone_scrim（点外部收起遮罩）存在")
+	_check(scene.get("_phone_signal") != null, "_phone_signal（状态栏信号格）存在")
+	# 主屏图标分页：3x3 网格、每页 columns=3；所有页图标总数 = 已实装 app 数（3）
+	var pager: ScrollContainer = scene.get("_phone_pager")
+	var pages_box: HBoxContainer = scene.get("_phone_pages_box")
+	_check(pager != null, "_phone_pager（图标分页横滚）存在")
+	_check(pages_box != null and pages_box.get_child_count() >= 1, "至少一页图标")
+	var icon_total := 0
+	var cols_ok := true
+	if pages_box != null:
+		for page in pages_box.get_children():
+			for g in page.get_children():
+				if g is GridContainer:
+					if (g as GridContainer).columns != 3:
+						cols_ok = false
+					icon_total += g.get_child_count()
+	_check(cols_ok, "每页网格 columns=3 (3x3)")
+	_check(icon_total == 3, "图标总数 = 已实装 app 数 3（stickers/items/settings）")
 
 	scene._toggle_album()
 	_check(album_panel.visible, "打开后面板可见")
