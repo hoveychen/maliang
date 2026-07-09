@@ -10,10 +10,61 @@ extends Node
 ## 该不变量由 test_loading_progress 守护。
 const GET_WORLD_TIMEOUT_SEC := 18.0
 
+## 资产磁盘缓存目录。资产是内容寻址（hash 即内容摘要，永不变），故缓存永久有效、无需失效——
+## 命中即免网络往返，重复进世界不再逐个村民重下贴图/音频。文件名 = hash（十六进制，天然文件名安全）。
+const CACHE_DIR := "user://asset_cache"
+
+## 内存里已解码的纹理缓存（本次会话内）：同一 hash 免磁盘读+免重复解码（如仙子 idle 轮询反复取同图）。
+var _tex_mem: Dictionary = {}
+
 func _ready() -> void:
 	var env := OS.get_environment("MALIANG_API_BASE")
 	if not env.is_empty():
 		base = env
+
+## hash → 磁盘缓存文件路径（user://asset_cache/<hash>）。
+func _cache_path(asset_hash: String) -> String:
+	return CACHE_DIR.path_join(asset_hash)
+
+## 读磁盘缓存的裸字节；未命中/读失败返回空 PackedByteArray。
+func _cache_read(asset_hash: String) -> PackedByteArray:
+	var path := _cache_path(asset_hash)
+	if not FileAccess.file_exists(path):
+		return PackedByteArray()
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return PackedByteArray()
+	var buf := f.get_buffer(f.get_length())
+	f.close()
+	return buf
+
+## 把裸字节写进磁盘缓存（缺目录先建）。写失败静默（缓存只是加速，失败退化为每次下载）。
+func _cache_write(asset_hash: String, buf: PackedByteArray) -> void:
+	if asset_hash.is_empty() or buf.is_empty():
+		return
+	if not DirAccess.dir_exists_absolute(CACHE_DIR):
+		DirAccess.make_dir_recursive_absolute(CACHE_DIR)
+	var f := FileAccess.open(_cache_path(asset_hash), FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_buffer(buf)
+	f.close()
+
+## 按 magic bytes 把图像字节解码成 Texture2D：静态立绘是 PNG，idle 动画图集是 WebP（体积小），
+## 亦容 JPG。无法解码返回 null。（fetch_texture 与缓存命中路径共用，避免解码逻辑两处漂移。）
+func _decode_image(buf: PackedByteArray) -> Texture2D:
+	var img := Image.new()
+	var e := ERR_INVALID_DATA
+	if buf.size() >= 12 and buf[0] == 0x52 and buf[1] == 0x49 and buf[2] == 0x46 and buf[3] == 0x46 \
+			and buf[8] == 0x57 and buf[9] == 0x45 and buf[10] == 0x42 and buf[11] == 0x50:
+		e = img.load_webp_from_buffer(buf)
+	elif buf.size() >= 2 and buf[0] == 0xFF and buf[1] == 0xD8:
+		e = img.load_jpg_from_buffer(buf)
+	else:
+		e = img.load_png_from_buffer(buf)
+	if e != OK:
+		return null
+	return ImageTexture.create_from_image(img)
 
 ## 新建世界（后端会种入小神仙）。失败返回空字典。
 func create_world() -> Dictionary:
@@ -62,10 +113,21 @@ func post_json(path: String, body: Dictionary) -> Dictionary:
 	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
 	return data if typeof(data) == TYPE_DICTIONARY else {}
 
-## 拉取资源 hash → Texture2D（PNG）。失败返回 null。
+## 拉取资源 hash → Texture2D（PNG/WebP/JPG）。失败返回 null。
+## 三级取源：内存已解码缓存 → 磁盘缓存（免网络）→ 下载后落盘+进内存。资产内容寻址故缓存永不失效。
 func fetch_texture(asset_hash: String) -> Texture2D:
 	if asset_hash.is_empty():
 		return null
+	if _tex_mem.has(asset_hash):
+		return _tex_mem[asset_hash]
+	# 磁盘缓存命中：解码后进内存，直接返回，不发网络请求
+	var cached := _cache_read(asset_hash)
+	if not cached.is_empty():
+		var ctex := _decode_image(cached)
+		if ctex != null:
+			_tex_mem[asset_hash] = ctex
+			return ctex
+		# 缓存文件损坏（解码失败）：往下走重新下载覆盖
 	var http := HTTPRequest.new()
 	add_child(http)
 	var err := http.request(base + "/assets/" + asset_hash)
@@ -77,19 +139,12 @@ func fetch_texture(asset_hash: String) -> Texture2D:
 	if int(res[1]) != 200:
 		return null
 	var buf := res[3] as PackedByteArray
-	var img := Image.new()
-	var e := ERR_INVALID_DATA
-	# 按 magic bytes 分派：静态立绘是 PNG，idle 动画图集是 WebP（体积小得多）。
-	if buf.size() >= 12 and buf[0] == 0x52 and buf[1] == 0x49 and buf[2] == 0x46 and buf[3] == 0x46 \
-			and buf[8] == 0x57 and buf[9] == 0x45 and buf[10] == 0x42 and buf[11] == 0x50:
-		e = img.load_webp_from_buffer(buf)
-	elif buf.size() >= 2 and buf[0] == 0xFF and buf[1] == 0xD8:
-		e = img.load_jpg_from_buffer(buf)
-	else:
-		e = img.load_png_from_buffer(buf)
-	if e != OK:
+	var tex := _decode_image(buf)
+	if tex == null:
 		return null
-	return ImageTexture.create_from_image(img)
+	_cache_write(asset_hash, buf) # 落盘供下次免下载（内容寻址，永久有效）
+	_tex_mem[asset_hash] = tex
+	return tex
 
 ## 轮询立绘 idle 动画状态。返回 { status, animAsset?, meta? }；
 ## status: none(未触发)/pending(生成中)/ready(带 animAsset 图集 hash + meta)/failed。
@@ -115,6 +170,14 @@ func fetch_audio(asset_hash: String) -> Dictionary:
 	var empty := { "bytes": PackedByteArray(), "rate": 16000 }
 	if asset_hash.is_empty():
 		return empty
+	# 磁盘缓存命中：裸 PCM 无自带采样率，rate 存在同名 .rate 旁文件里，两者齐备才算命中
+	var cached := _cache_read(asset_hash)
+	if not cached.is_empty():
+		var rate_buf := _cache_read(asset_hash + ".rate")
+		if not rate_buf.is_empty():
+			var cr := int(rate_buf.get_string_from_utf8())
+			if cr > 0:
+				return { "bytes": cached, "rate": cr }
 	var http := HTTPRequest.new()
 	add_child(http)
 	var err := http.request(base + "/assets/" + asset_hash)
@@ -135,4 +198,7 @@ func fetch_audio(asset_hash: String) -> Dictionary:
 				if parsed > 0:
 					rate = parsed
 			break
-	return { "bytes": res[3] as PackedByteArray, "rate": rate }
+	var buf := res[3] as PackedByteArray
+	_cache_write(asset_hash, buf) # 落盘 PCM
+	_cache_write(asset_hash + ".rate", str(rate).to_utf8_buffer()) # 采样率旁文件
+	return { "bytes": buf, "rate": rate }
