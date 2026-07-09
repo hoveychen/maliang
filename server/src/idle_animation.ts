@@ -48,3 +48,29 @@ export function triggerIdleAnimation(
   if (existing && (existing.status === 'pending' || existing.status === 'ready')) return;
   void generateIdleAnimation(adapters, store, spriteHash, toSpriteSheet);
 }
+
+/**
+ * 存量回填：遍历所有世界的所有角色，凡其静态立绘「尚无任何 idle 动画记录」（status none）的，
+ * fire-and-forget 触发一次生成。已有记录（pending/ready/failed）一律跳过——failed 不重试，避免坏立绘
+ * 每次启动反复烧钱。用于把「造角色流程上线前就预种进世界的村民」补上动画，之后走 anim 优先只拉图集。
+ * 同一立绘 hash 多角色共用时只触发一次。服务启动跑一次（buildServer 的 backfillOnBoot），返回触发条数。
+ */
+export function backfillIdleAnimations(
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  toSpriteSheet?: ToSpriteSheet,
+): number {
+  let triggered = 0;
+  const seen = new Set<string>();
+  for (const w of store.listWorlds()) {
+    for (const c of store.listCharacters(w.id)) {
+      const hash = c.appearance?.spriteAsset;
+      if (!hash || seen.has(hash)) continue;
+      seen.add(hash);
+      if (store.getSpriteAnim(hash)) continue; // 已有记录（含 failed）→ 跳过，只补从未尝试过的
+      triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
+      triggered++;
+    }
+  }
+  return triggered;
+}
