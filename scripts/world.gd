@@ -1548,7 +1548,9 @@ func _update_voice_wave(delta: float) -> void:
 func _char_top(npc: PaperCharacter) -> float:
 	if npc.texture == null:
 		return 3.2
-	return float(npc.texture.get_height()) * npc.pixel_size
+	# 可见单格高度：动画图集角色的 texture 是整张图集(rows×cellH)，直接用会算高 rows 倍
+	# → 对话构图距离暴涨、头顶气泡飘太高。visible_height 按 sprite-sheet cellH 归一。
+	return npc.visible_height()
 
 func _update_hud() -> void:
 	var t := WorldGrid.to_tile(player["logical"] if not player.is_empty() else focus_logical)
