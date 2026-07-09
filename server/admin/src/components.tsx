@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError, assetUrl, getToken, setToken } from './api.ts';
+import type { SpriteAnimMeta, SpriteAnimRecord } from './types.ts';
 
 /** 页头：面包屑 + 宋体大标题 + 计数 + 说明。 */
 export function PageHead(props: { crumbs?: ReactNode; title: ReactNode; count?: number; desc?: string; right?: ReactNode }) {
@@ -49,11 +50,98 @@ export function Fallback(props: { loading: boolean; error: ApiError | null; onRe
   );
 }
 
-/** 立绘缩略图：无资产给占位格。 */
+/** 图集帧动画播放器：canvas 按 meta 逐帧画 cell，fps 驱动循环。 */
+function SheetPlayer(props: { src: string; meta: SpriteAnimMeta }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const { src, meta } = props;
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const img = new Image();
+    img.src = src;
+    let raf = 0;
+    let start = 0;
+    const draw = (t: number) => {
+      if (!start) start = t;
+      const frame = Math.floor(((t - start) / 1000) * meta.fps) % meta.frameCount;
+      const col = frame % meta.cols;
+      const row = Math.floor(frame / meta.cols);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, col * meta.cellW, row * meta.cellH, meta.cellW, meta.cellH, 0, 0, canvas.width, canvas.height);
+      raf = requestAnimationFrame(draw);
+    };
+    img.onload = () => { raf = requestAnimationFrame(draw); };
+    return () => cancelAnimationFrame(raf);
+  }, [src, meta]);
+  return <canvas ref={ref} width={320} height={320} className="sprite-canvas" />;
+}
+
+/** 立绘放大预览遮罩：左静态大图；/sprite-anim/:hash 就绪则右侧播 idle 动画。ESC/点遮罩关闭。 */
+function SpriteLightbox(props: { hash: string; alt: string; onClose: () => void }) {
+  const [anim, setAnim] = useState<SpriteAnimRecord | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(`/sprite-anim/${props.hash}`)
+      .then((r) => r.json())
+      .then((d: SpriteAnimRecord) => { if (alive) setAnim(d); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [props.hash]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') props.onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [props.onClose]);
+  const ready = anim?.status === 'ready' && !!anim.animAsset && !!anim.meta;
+  return (
+    <div className="lightbox" onClick={(e) => { e.stopPropagation(); props.onClose(); }}>
+      <div className="lightbox-body" onClick={(e) => e.stopPropagation()}>
+        <div className="lightbox-row">
+          <figure>
+            <img src={assetUrl(props.hash)} alt={props.alt} />
+            <figcaption>静态立绘</figcaption>
+          </figure>
+          {ready && anim.animAsset && anim.meta && (
+            <figure>
+              <SheetPlayer src={assetUrl(anim.animAsset)} meta={anim.meta} />
+              <figcaption>idle 动画 · {anim.meta.frameCount} 帧 @{anim.meta.fps}fps</figcaption>
+            </figure>
+          )}
+        </div>
+        <div className="lightbox-foot">
+          <span className="mono">{props.hash}</span>
+          {anim && !ready && (
+            <span className="badge">
+              {anim.status === 'none' ? '无动画' : anim.status === 'pending' ? '动画生成中' : '动画失败'}
+            </span>
+          )}
+          <button className="plain" onClick={props.onClose}>关闭</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 立绘缩略图：无资产给占位格；有资产可点击放大（含 idle 动画预览）。 */
 export function Sprite(props: { hash: string; large?: boolean; alt?: string }) {
+  const [open, setOpen] = useState(false);
   const cls = props.large ? 'sprite-lg' : 'sprite-thumb';
   if (!props.hash) return <div className={`${cls} sprite-ph`}>无立绘</div>;
-  return <img className={cls} src={assetUrl(props.hash)} alt={props.alt ?? ''} loading="lazy" />;
+  return (
+    <>
+      <img
+        className={`${cls} sprite-click`}
+        src={assetUrl(props.hash)}
+        alt={props.alt ?? ''}
+        loading="lazy"
+        title="点击放大"
+        onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+      />
+      {open && <SpriteLightbox hash={props.hash} alt={props.alt ?? ''} onClose={() => setOpen(false)} />}
+    </>
+  );
 }
 
 /** 可点击整行跳转的 <tr>。 */

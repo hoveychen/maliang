@@ -124,11 +124,28 @@ export interface Character {
   relationships: Record<string, string>;
 }
 
+/** 图集动画 meta（与 server sprite_sheet.ts SpriteSheetMeta 对齐）。 */
+export interface SpriteAnimMeta {
+  cols: number;
+  rows: number;
+  frameCount: number;
+  fps: number;
+  cellW: number;
+  cellH: number;
+}
+
+/** /sprite-anim/:hash 的返回（none/pending/ready/failed）。 */
+export interface SpriteAnimRecord {
+  status: string;
+  animAsset?: string;
+  meta?: SpriteAnimMeta;
+}
+
 export interface CharacterDetail {
   character: Character;
   memories: MemoryItem[];
   chatTurns: ChatTurn[];
-  spriteAnim: { status: string; animAsset?: string; meta?: { cols: number; rows: number; frameCount: number; fps: number } };
+  spriteAnim: SpriteAnimRecord;
 }
 
 /** 贴纸 id → emoji（与 server/src/types.ts STICKERS 对齐；后台展示用）。 */
