@@ -1886,7 +1886,9 @@ func _halt_npc(d: Dictionary) -> void:
 
 func _resume_stopped_npc() -> void:
 	if not _stopped.is_empty() and not _stopped.get("is_fairy", false) \
-			and is_instance_valid(_stopped.get("node")):
+			and is_instance_valid(_stopped.get("node")) \
+			and not _has_executor_for(_stopped):
+		# 已有执行器（如刚下发的立去系指令）就别用闲逛覆盖它，让它把指令走完。
 		var fid := String(_stopped.get("resume_follow", ""))
 		if not fid.is_empty():
 			_stopped.erase("resume_follow")
@@ -2520,6 +2522,10 @@ func _on_character_response(data: Dictionary) -> void:
 			_run_behavior(performer, script)
 		elif selected != null:
 			_run_behavior(selected, script)
+			# 立去系指令（去某地/跟随/找人聊/带话）：正在对话的角色要走开办事 → 关对话，
+			# 让它独自走去（否则麦开着、相机锁着，看着像「回了好的却不动」）。就地动作(do_action)不关。
+			if _is_leave_command(script):
+				_exit_interaction()
 	if bool(data.get("ttsStreaming", false)):
 		_start_tts_stream(_parse_rate(String(data.get("ttsMime", "")), 24000))
 	else:
@@ -2793,6 +2799,15 @@ func _end_npc_chat(n: Dictionary, partner: Dictionary) -> void:
 		_start_ambient_wander(partner)
 
 ## 在角色上执行行为脚本（移动等）。新脚本替换该角色进行中的行为（防双执行器同驱）。
+## 立去系指令：会让角色离开当前位置去别处（去某地/跟随/找人聊天/带话）。
+## 这类指令下发后要退出近身对话，让角色独自走去；就地动作(do_action)、停跟(stop_follow)不算。
+const _LEAVE_COMMANDS := ["move_to", "follow", "chat_with", "deliver_message"]
+func _is_leave_command(script: Dictionary) -> bool:
+	for c in script.get("commands", []):
+		if typeof(c) == TYPE_DICTIONARY and String((c as Dictionary).get("type", "")) in _LEAVE_COMMANDS:
+			return true
+	return false
+
 func _run_behavior(npc: PaperCharacter, script: Dictionary) -> void:
 	var dict := _find_npc_dict(npc)
 	if dict.is_empty():
