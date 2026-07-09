@@ -35,7 +35,7 @@ func _tick() -> void:
 	frame += 1
 	match frame:
 		20:
-			scene.call("_on_prop_created", { "id": "p1", "spec": SPEC })
+			scene.call("_on_prop_created", { "prop": { "id": "p1", "spec": SPEC } })
 			print("[qa] f20 造物落地 tile=", (scene.get("world_props") as Dictionary).get("p1", {}).get("tile"))
 		60:
 			_pickup() # 长按拾起：悬空拎起
