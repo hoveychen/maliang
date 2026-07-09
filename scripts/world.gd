@@ -2405,8 +2405,6 @@ func _bootstrap() -> void:
 			_boot_sub = float(i + 1) / float(total) if total > 0 else 1.0
 		_boot_status = "布置世界…"
 		_restore_world_props(world.get("props", []))
-	else:
-		_boot_status = "离线模式"
 		# 玩家搬到小神仙旁边降生，相机跟着玩家过去
 		var fairy := _find_fairy()
 		if not fairy.is_empty():
@@ -2415,6 +2413,8 @@ func _bootstrap() -> void:
 				var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
 				player["logical"] = spot
 				OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	else:
+		_boot_status = "离线模式"
 	_boot_stage = 2 # 角色/props 就位、玩家已落到最终位——引导侧全部完成
 	_boot_sub = 1.0
 	_boot_status = "就绪"
