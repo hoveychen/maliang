@@ -547,6 +547,7 @@ func _start_ambient_wander(npc_dict: Dictionary) -> void:
 		],
 		"loop": true,
 	})
+	ex.ambient = true  # 自主闲逛：不算脚本任务，「主动看你」可在其上叠加打招呼
 	_executors.append(ex)
 
 ## 玩家角色：称呼来自 onboarding 档案；先占位形象（粉色 critter），
@@ -1881,11 +1882,17 @@ static func notice_ready(dist: float, walk: float, busy: bool, cd: float) -> boo
 func _update_npc_notice(delta: float) -> void:
 	if player.is_empty():
 		return
+	# 已弹出的气泡永远继续 pop/淡出/跟头顶（即便随后暂停触发，也让它自然收尾）
+	for n in npcs:
+		_animate_notice_bubble(n, delta)
+	# 有脚本化互动进行中（送信/跑腿/靠近对话等非 ambient 执行器）时暂停触发新的打招呼，
+	# 让脚本场景读得干净、不被随机挥手污染演出与信号。
+	if _executors.any(func(e: BehaviorExecutor) -> bool: return not e.ambient):
+		return
 	var pl: Vector2 = player["logical"]
 	for n in npcs:
 		if n.get("is_fairy", false):
 			continue
-		_animate_notice_bubble(n, delta)  # 已弹出的小表情气泡继续 pop/淡出/跟头顶
 		if not n.has("notice_cd"):  # 首次见到：随机初始冷却，天然错峰
 			n["notice_cd"] = randf_range(NOTICE_CD_MIN, NOTICE_CD_MAX)
 		var cd := float(n["notice_cd"]) - delta
