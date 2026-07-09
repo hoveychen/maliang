@@ -23,6 +23,10 @@ function characterSummary(store: WorldStore, c: Character) {
     abilities: c.abilities,
     memoryCount: store.listMemories(c.id).length,
     chatTurnCount: store.listChatTurns(c.id).length,
+    // 世界角色表一眼看出谁还没动画（详情页有完整 spriteAnim 记录）
+    spriteAnimStatus: c.appearance.spriteAsset
+      ? (store.getSpriteAnim(c.appearance.spriteAsset)?.status ?? 'none')
+      : 'none',
   };
 }
 
@@ -108,7 +112,14 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
         if (turns.length > 0) chats.push({ worldId: w.id, characterId: c.id, characterName: c.name, turns });
       }
     }
-    return { player, visits, memories, chats };
+    return {
+      player,
+      visits,
+      memories,
+      chats,
+      // 玩家形象的 idle 动画状态（形象在设备档案，动画按 spriteAsset hash 绑定）
+      spriteAnim: player.spriteAsset ? (store.getSpriteAnim(player.spriteAsset) ?? { status: 'none' }) : { status: 'none' },
+    };
   });
 
   // 世界列表（计数摘要）
