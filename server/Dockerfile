@@ -39,6 +39,9 @@ COPY --from=admin-build /admin/dist ./admin/dist
 ENV PORT=8080
 ENV MALIANG_DATA_DIR=/workspace/data
 ENV VOICE_MODELS_DIR=/workspace/models
+# 构建时注入 git commit sha（GHA 传 --build-arg），/health 回显部署版本，便于验证 auto-deploy
+ARG GIT_SHA=dev
+ENV GIT_SHA=$GIT_SHA
 EXPOSE 8080
 
 # 模型缺失时先拉取（幂等，秒级跳过），再起服务
