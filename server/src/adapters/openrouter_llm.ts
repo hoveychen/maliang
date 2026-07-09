@@ -6,13 +6,17 @@ import {
   stickerGlyph,
   type BehaviorScript,
   type CharacterSpec,
+  type CreationCategory,
+  type CreationState,
   type ExtractedMemory,
+  type GuideCreationResult,
   type IntentContext,
   type IntentResult,
   type MemoryExtractionContext,
   type MemoryKind,
 } from '../types.ts';
 import { describeTask } from '../tasks.ts';
+import { findOption, optionsByCategory } from '../creation_options.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
 import { fallbackSdfPropSpec, validateSdfPropSpec, type SdfPropSpec } from '../sdf_prop.ts';
 
@@ -233,6 +237,67 @@ ${abilityLines}
       if (performer && performer !== ctx.characterName) result.performerName = performer;
     }
     if (raw.offerTask === true && ctx.taskCandidate) result.offerTask = true;
+    return result;
+  }
+
+  async guideCreation(state: CreationState, childInput: string): Promise<GuideCreationResult> {
+    const a = state.attrs;
+    const known = [
+      a.kind && `类型=${a.kind}`, a.color && `颜色=${a.color}`, a.size && `大小=${a.size}`,
+      a.traits.length > 0 && `特点=${a.traits.join('、')}`, a.personality && `性格=${a.personality}`, a.name && `名字=${a.name}`,
+    ].filter(Boolean).join('，') || '（还什么都不知道）';
+    // 各类别的候选项（喂给 LLM 选，name 无图标走语音）
+    const catLines = (['kind', 'color', 'size', 'trait', 'personality'] as CreationCategory[])
+      .map((c) => `${c}: ${optionsByCategory(c).map((o) => `${o.id}(${o.label})`).join(' ')}`).join('\n');
+    const system = `你是幼儿游戏里温柔的小神仙，正在按小朋友的想法一步步造一个新伙伴。
+已知道的属性：${known}。
+你要么再问一个还不知道的属性（一次只问一个，配 2-4 个选项图标），要么信息够了就开始造。
+可选的属性类别与图标（选项用 id）：
+${catLines}
+名字(name)没有图标：想问名字时 category 填 "name"、optionIds 留空，小朋友会用语音说。
+判断规则：至少知道 类型 + （颜色或一个特点）就可以造了；小朋友说「就这样/够了」也立刻造。
+严格只输出 JSON：{"replyText":"你要对小朋友说的话(中文,温暖童趣,≤两句,若在问就把问题和选项自然念出来)","done":true或false,"description":"done时:把所有属性汇成一句给设计师的中文描述","question":"done=false时的问题","category":"done=false时问的类别","optionIds":["done=false时的选项id"],"updatedAttrs":{"kind":"","color":"","size":"","traits":[""],"personality":"","name":""}}
+updatedAttrs 只填这轮从小朋友输入里新解析出的属性（没有就省略字段）。绝不包含暴力、恐怖、武器、成人内容。`;
+    const content = await this.#client.chatText(
+      this.#model,
+      [{ role: 'system', content: system }, { role: 'user', content: childInput }],
+      { jsonObject: true },
+    );
+    let raw: Record<string, unknown> = {};
+    try {
+      raw = JSON.parse(stripFences(content)) as Record<string, unknown>;
+    } catch {
+      raw = {};
+    }
+    const done = raw.done === true;
+    const result: GuideCreationResult = {
+      replyText: str(raw.replyText, done ? '好呀，我这就变出来！' : '你想要什么样的小伙伴呀？'),
+      done,
+    };
+    if (done) {
+      result.description = str(raw.description, childInput);
+    } else {
+      const cat = typeof raw.category === 'string' ? raw.category as CreationCategory : 'kind';
+      result.category = cat;
+      result.question = str(raw.question, result.replyText);
+      // 只保留图标库里真实存在、且属于该类别的 id，兜住 LLM 幻觉
+      const ids = Array.isArray(raw.optionIds) ? raw.optionIds.map(String) : [];
+      result.optionIds = cat === 'name' ? [] : ids.filter((id) => findOption(id)?.category === cat).slice(0, 4);
+      if (cat !== 'name' && result.optionIds.length === 0) {
+        result.optionIds = optionsByCategory(cat).slice(0, 4).map((o) => o.id); // LLM 没给有效选项 → 兜底取该类前几个
+      }
+    }
+    if (raw.updatedAttrs && typeof raw.updatedAttrs === 'object') {
+      const u = raw.updatedAttrs as Record<string, unknown>;
+      const upd: GuideCreationResult['updatedAttrs'] = {};
+      if (typeof u.kind === 'string' && u.kind) upd.kind = u.kind;
+      if (typeof u.color === 'string' && u.color) upd.color = u.color;
+      if (typeof u.size === 'string' && u.size) upd.size = u.size;
+      if (typeof u.personality === 'string' && u.personality) upd.personality = u.personality;
+      if (typeof u.name === 'string' && u.name) upd.name = u.name;
+      if (Array.isArray(u.traits)) upd.traits = u.traits.map(String).filter(Boolean);
+      if (Object.keys(upd).length > 0) result.updatedAttrs = upd;
+    }
     return result;
   }
 

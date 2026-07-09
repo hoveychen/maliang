@@ -3,11 +3,15 @@ import {
   BASE_ABILITIES,
   STICKER_NAMES,
   type CharacterSpec,
+  type CreationCategory,
+  type CreationState,
   type ExtractedMemory,
+  type GuideCreationResult,
   type IntentContext,
   type IntentResult,
   type MemoryExtractionContext,
 } from '../types.ts';
+import { CREATION_OPTIONS, optionsByCategory } from '../creation_options.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
 
 // 1x1 透明 PNG，作为生图占位。（须是合法 PNG：Godot 客户端会真解码，CRC 错会拒收；
@@ -18,6 +22,26 @@ const PNG_1x1 =
 function pngStub(): ImageBlob {
   return { bytes: Uint8Array.from(Buffer.from(PNG_1x1, 'base64')), mime: 'image/png' };
 }
+
+// ── 引导式造角色 mock 启发式 ────────────────────────────────────────────────
+/** 把累积属性汇成给 designCharacter 的中文描述。 */
+function composeCreationDesc(a: { kind?: string; color?: string; size?: string; traits: string[]; personality?: string; name?: string }): string {
+  const head = `一只${a.color ?? ''}${a.size ?? ''}的${a.kind ?? '小动物'}`;
+  const parts = [head];
+  if (a.traits.length > 0) parts.push(a.traits.join('、'));
+  if (a.personality) parts.push(`性格${a.personality}`);
+  if (a.name) parts.push(`叫${a.name}`);
+  return parts.join('，');
+}
+/** 追问每个类别的问法（mock 固定文案；真实由 LLM 按个性生成）。 */
+const CREATION_ASK: Record<CreationCategory, string> = {
+  kind: '你想要什么样的小伙伴呀？',
+  color: '它是什么颜色的呢？',
+  size: '要大大的还是小小的？',
+  trait: '它有什么特别的本领吗？',
+  personality: '它是什么性格的呀？',
+  name: '给它起个名字吧，你想叫它什么？',
+};
 
 const ANIMALS = ['兔', '猫', '狗', '熊', '龙', '鸟', '鱼', '象', '鹿', '羊'];
 
@@ -189,6 +213,39 @@ export function createMockAdapters(): ServiceAdapters {
           };
         }
         return { kind: 'chat', replyText: `（mock 回应）你说的是「${transcript}」对吗？`, emotion: 'happy' };
+      },
+      async guideCreation(state: CreationState, childInput: string): Promise<GuideCreationResult> {
+        // mock：从输入里按图标 label 认属性；name 类别问过后自由文本当名字。凑够 kind+(color|trait) 或超轮即造。
+        const attrs = { ...state.attrs, traits: [...state.attrs.traits] };
+        const updated: { kind?: string; color?: string; size?: string; traits?: string[]; personality?: string; name?: string } = {};
+        const text = childInput.trim();
+        const lastAsked = state.askedCategories.at(-1) as CreationCategory | undefined;
+        // 名字优先：上一轮问的是名字，且输入不是某个已知图标 label → 当名字
+        const isKnownLabel = CREATION_OPTIONS.some((o) => text.includes(o.label));
+        if (lastAsked === 'name' && text && !isKnownLabel && !attrs.name) {
+          attrs.name = text; updated.name = text;
+        } else {
+          for (const o of CREATION_OPTIONS) {
+            if (!text.includes(o.label)) continue;
+            if (o.category === 'kind' && !attrs.kind) { attrs.kind = o.label; updated.kind = o.label; }
+            else if (o.category === 'color' && !attrs.color) { attrs.color = o.label; updated.color = o.label; }
+            else if (o.category === 'size' && !attrs.size) { attrs.size = o.label; updated.size = o.label; }
+            else if (o.category === 'personality' && !attrs.personality) { attrs.personality = o.label; updated.personality = o.label; }
+            else if (o.category === 'trait' && !attrs.traits.includes(o.label)) { attrs.traits.push(o.label); updated.traits = [...attrs.traits]; }
+          }
+        }
+        // 提前造：小朋友说「就这样/好了/够了」
+        const early = /(就这样|好了|够了|够啦|可以了)/.test(text);
+        const enough = !!attrs.kind && (!!attrs.color || attrs.traits.length > 0);
+        const forced = state.turnCount >= 5;
+        if (early || enough || forced) {
+          const desc = composeCreationDesc(attrs);
+          return { replyText: `好呀，我这就变出${desc}！`, done: true, description: desc, updatedAttrs: updated };
+        }
+        // 追问下一个缺失类别（kind→color→trait→name）
+        const next: CreationCategory = !attrs.kind ? 'kind' : !attrs.color ? 'color' : attrs.traits.length === 0 ? 'trait' : 'name';
+        const optionIds = next === 'name' ? [] : optionsByCategory(next).slice(0, 4).map((o) => o.id);
+        return { replyText: CREATION_ASK[next], done: false, question: CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
       },
       async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
         // mock：确定性地扫整段会话的每轮「我叫X」「我喜欢X」抽要点并分类，去重后返回（真实接 LLM 自由判断）

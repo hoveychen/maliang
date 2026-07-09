@@ -254,3 +254,50 @@ export interface ExtractedMemory {
   text: string;
   kind: MemoryKind;
 }
+
+// ── 引导式造角色（多轮会话，见 docs/guided-creation-design.md）──────────────
+
+/** 引导式造角色累积的属性（幼儿逐轮填；traits 可多个）。 */
+export interface CreationAttrs {
+  kind?: string;        // 类型：猫/狗/龙/精灵…
+  color?: string;       // 颜色
+  size?: string;        // 大小
+  traits: string[];     // 特点：会飞/毛茸茸/发光…
+  personality?: string; // 性格
+  name?: string;        // 名字（语音说，无图标）
+}
+
+/** 造角色会话状态：连接级（一个孩子一条连接），挂在 VoiceSession 上。 */
+export interface CreationState {
+  active: boolean;
+  attrs: CreationAttrs;
+  askedCategories: string[]; // 已问过的类别，避免重复问
+  turnCount: number;         // 兜底：超上限强制造
+}
+
+/** 造角色属性类别（图标库按此组织；name 无图标走语音）。 */
+export type CreationCategory = 'kind' | 'color' | 'size' | 'trait' | 'personality' | 'name';
+
+/** 图标库里的一个候选项。iconAsset 由 P3 图标生成填入（/assets/:hash），未生成为空串。 */
+export interface CreationOption {
+  id: string;
+  category: CreationCategory;
+  label: string;
+  iconAsset: string;
+}
+
+/** guideCreation 一轮的产物：要么继续追问（question+options），要么攒够去造（done+description）。 */
+export interface GuideCreationResult {
+  replyText: string;                 // 仙子这轮说的话（TTS 念出，含问题与选项口播）
+  done: boolean;
+  description?: string;              // done：汇总属性给 designCharacter 的中文描述
+  question?: string;                // done=false：追问的问题
+  category?: CreationCategory;      // done=false：本轮问的类别
+  optionIds?: string[];            // done=false：候选项 id（2–4）
+  updatedAttrs?: Partial<CreationAttrs>; // 从本轮输入解析出的属性更新（含 traits 增量）
+}
+
+/** 造角色会话的初始空状态。 */
+export function newCreationState(): CreationState {
+  return { active: true, attrs: { traits: [] }, askedCategories: [], turnCount: 0 };
+}
