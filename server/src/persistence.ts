@@ -2,9 +2,48 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Visit, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Visit, Wallet, WorldProp } from './types.ts';
+import { INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
+
+/** 初始钱包（冷启动/旧档迁移）：预置初始小红花，零盖章进度。 */
+function freshWallet(): Wallet {
+  return { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0 };
+}
+
+/**
+ * 把持久化里读到的原始值归一成 Wallet。
+ * 真 Wallet（对象且有数值 flowers 键）→ 夹紧字段直接用（migrated=false）；
+ * 其它（旧贴纸背包 {stickerId:count}、空 {}、非法）→ 方案 A 换初始小红花（migrated=true，供上层写回固化）。
+ */
+function coerceWallet(raw: unknown): { wallet: Wallet; migrated: boolean } {
+  if (raw && typeof raw === 'object' && typeof (raw as { flowers?: unknown }).flowers === 'number') {
+    const r = raw as { flowers: number; stampProgress?: unknown; stampsTotal?: unknown };
+    const flowers = Math.max(0, Math.min(MAX_FLOWERS, Math.floor(r.flowers)));
+    const stampProgress = Math.max(0, Math.min(STAMPS_PER_FLOWER, Math.floor(Number(r.stampProgress) || 0)));
+    const stampsTotal = Math.max(0, Math.floor(Number(r.stampsTotal) || 0));
+    return { wallet: { flowers, stampProgress, stampsTotal }, migrated: false };
+  }
+  return { wallet: freshWallet(), migrated: true };
+}
+
+/**
+ * 结算钱包：每满 STAMPS_PER_FLOWER 章换 1 花，直到不满或花达 MAX_FLOWERS。返回是否升了花。
+ * 满 9 溢出：一组已满（stampProgress===STAMPS_PER_FLOWER）却无格子时停住不清零、不再多攒——
+ * 等 spendFlower 腾出格子后本函数再跑一次立即补升，不浪费小朋友攒的章（decision：暂停升花）。
+ */
+function settleWallet(w: Wallet): boolean {
+  let gained = false;
+  while (w.stampProgress >= STAMPS_PER_FLOWER && w.flowers < MAX_FLOWERS) {
+    w.flowers += 1;
+    w.stampProgress -= STAMPS_PER_FLOWER;
+    gained = true;
+  }
+  // 满 9 溢出：最多把一组已满的章留作待兑换（停在 STAMPS_PER_FLOWER），多出来的丢弃，避免无限累积。
+  if (w.stampProgress > STAMPS_PER_FLOWER) w.stampProgress = STAMPS_PER_FLOWER;
+  return gained;
+}
 
 /**
  * 立绘 idle 动画记录，按源立绘 hash 键控（fairy/player/NPC 统一）。
@@ -19,8 +58,8 @@ export interface SpriteAnimRecord {
 export interface World {
   id: string;
   characters: Map<string, Character>;
-  /** 玩家的贴纸收集册：贴纸 id → 数量（委托奖励累积，可转赠扣减）。 */
-  inventory: Record<string, number>;
+  /** 玩家钱包：小红花代币 + 集邮盖章进度（复用旧 inventory 列存 Wallet JSON，见 types.Wallet）。 */
+  wallet: Wallet;
   /** 进行中的 NPC 委托（至多一个，见 types.ActiveTask）。 */
   activeTask: ActiveTask | null;
   /** 语音生成的 SDF 物件（id → WorldProp，tile 为落位回报）。 */
@@ -163,9 +202,10 @@ export class WorldStore {
       }>;
     };
     for (const w of data.worlds ?? []) {
+      // 方案 A：旧贴纸背包整体废弃，一次性置初始小红花（inventory 列改存 Wallet JSON）。
       this.#db
         .prepare('INSERT INTO worlds (id, inventory, active_task) VALUES (?, ?, ?)')
-        .run(w.id, JSON.stringify(w.inventory ?? {}), w.activeTask ? JSON.stringify(w.activeTask) : null);
+        .run(w.id, JSON.stringify(freshWallet()), w.activeTask ? JSON.stringify(w.activeTask) : null);
       const insChar = this.#db.prepare('INSERT INTO characters (id, world_id, data) VALUES (?, ?, ?)');
       for (const c of w.characters ?? []) insChar.run(c.id, w.id, JSON.stringify(c));
       const insProp = this.#db.prepare('INSERT INTO props (id, world_id, data) VALUES (?, ?, ?)');
@@ -213,15 +253,16 @@ export class WorldStore {
   }
 
   createWorld(id: string = randomUUID()): World {
+    // 冷启动初始送小红花（decision：新档预置 INITIAL_FLOWERS 朵）。
     this.#db
       .prepare('INSERT OR IGNORE INTO worlds (id, inventory, active_task) VALUES (?, ?, ?)')
-      .run(id, '{}', null);
-    return { id, characters: new Map(), inventory: {}, activeTask: null, props: new Map() };
+      .run(id, JSON.stringify(freshWallet()), null);
+    return { id, characters: new Map(), wallet: this.getWallet(id), activeTask: null, props: new Map() };
   }
 
   getWorld(id: string): World | undefined {
-    const row = this.#db.prepare('SELECT id, inventory, active_task FROM worlds WHERE id = ?').get(id) as
-      | { id: string; inventory: string; active_task: string | null }
+    const row = this.#db.prepare('SELECT id, active_task FROM worlds WHERE id = ?').get(id) as
+      | { id: string; active_task: string | null }
       | undefined;
     if (!row) return undefined;
     const characters = new Map<string, Character>();
@@ -231,7 +272,7 @@ export class WorldStore {
     return {
       id: row.id,
       characters,
-      inventory: JSON.parse(row.inventory) as Record<string, number>,
+      wallet: this.getWallet(id),
       activeTask: row.active_task ? (JSON.parse(row.active_task) as ActiveTask) : null,
       props,
     };
@@ -330,39 +371,64 @@ export class WorldStore {
     return this.#locations.get(worldId) ?? [];
   }
 
-  // ── 奖赏系统：玩家贴纸背包 + 进行中委托 ──────────────────────────────────
+  // ── 奖赏系统：小红花钱包（复用 inventory 列存 Wallet JSON）+ 进行中委托 ────────────────
 
-  #getInventoryRow(worldId: string): Record<string, number> | undefined {
+  #setWallet(worldId: string, w: Wallet): void {
+    this.#db.prepare('UPDATE worlds SET inventory = ? WHERE id = ?').run(JSON.stringify(w), worldId);
+  }
+
+  /**
+   * 读钱包。旧存档（贴纸背包 JSON 或空）或非法值一律按方案 A 迁移成初始小红花，并写回持久化（懒迁移）。
+   * 世界不存在返回一个空钱包（不写库）。
+   */
+  getWallet(worldId: string): Wallet {
     const row = this.#db.prepare('SELECT inventory FROM worlds WHERE id = ?').get(worldId) as
       | { inventory: string }
       | undefined;
-    return row ? (JSON.parse(row.inventory) as Record<string, number>) : undefined;
+    if (!row) return { flowers: 0, stampProgress: 0, stampsTotal: 0 };
+    let raw: unknown;
+    try {
+      raw = JSON.parse(row.inventory);
+    } catch {
+      raw = null;
+    }
+    const { wallet, migrated } = coerceWallet(raw);
+    if (migrated && this.#worldExists(worldId)) this.#setWallet(worldId, wallet); // 懒迁移：旧贴纸档首次读到即固化成初始花
+    return wallet;
   }
 
-  #setInventory(worldId: string, inv: Record<string, number>): void {
-    this.#db.prepare('UPDATE worlds SET inventory = ? WHERE id = ?').run(JSON.stringify(inv), worldId);
+  /**
+   * 盖 1 章：stampsTotal++，攒满 STAMPS_PER_FLOWER 结算 1 花（受 MAX_FLOWERS 上限；满 9 溢出见 settleWallet）。
+   * 返回是否因此升了花 + 结算后的钱包。世界不存在则 flowerGained=false。
+   */
+  addStamp(worldId: string): { flowerGained: boolean; wallet: Wallet } {
+    if (!this.#worldExists(worldId)) return { flowerGained: false, wallet: { flowers: 0, stampProgress: 0, stampsTotal: 0 } };
+    const w = this.getWallet(worldId);
+    w.stampsTotal += 1;
+    w.stampProgress += 1;
+    const flowerGained = settleWallet(w);
+    this.#setWallet(worldId, w);
+    return { flowerGained, wallet: w };
   }
 
-  getInventory(worldId: string): Record<string, number> {
-    return this.#getInventoryRow(worldId) ?? {};
-  }
-
-  /** 发贴纸（委托奖励）。 */
-  addSticker(worldId: string, stickerId: string, n = 1): void {
-    const inv = this.#getInventoryRow(worldId);
-    if (!inv) return;
-    inv[stickerId] = (inv[stickerId] ?? 0) + n;
-    this.#setInventory(worldId, inv);
-  }
-
-  /** 扣贴纸（转赠/gift 委托）。不够扣返回 false 且不动账。 */
-  removeSticker(worldId: string, stickerId: string, n = 1): boolean {
-    const inv = this.#getInventoryRow(worldId);
-    if (!inv || (inv[stickerId] ?? 0) < n) return false;
-    inv[stickerId] = (inv[stickerId] ?? 0) - n;
-    if (inv[stickerId] === 0) delete inv[stickerId];
-    this.#setInventory(worldId, inv);
+  /** 花 n 朵小红花（造物/造角色）。够扣则扣、腾出格子后立即补升满 9 溢出的待兑换组，返回 true；不够返回 false 且不动账。 */
+  spendFlower(worldId: string, n = 1): boolean {
+    if (!this.#worldExists(worldId)) return false;
+    const w = this.getWallet(worldId);
+    if (w.flowers < n) return false;
+    w.flowers -= n;
+    settleWallet(w); // 满 9 溢出停在待兑换的那一组，腾出格子后立即补升
+    this.#setWallet(worldId, w);
     return true;
+  }
+
+  /** 退还/补发 n 朵小红花（造失败退款，受 MAX_FLOWERS 上限，多余丢弃）。返回结算后的钱包。 */
+  refundFlower(worldId: string, n = 1): Wallet {
+    const w = this.getWallet(worldId);
+    if (!this.#worldExists(worldId)) return w;
+    w.flowers = Math.min(MAX_FLOWERS, w.flowers + n);
+    this.#setWallet(worldId, w);
+    return w;
   }
 
   getActiveTask(worldId: string): ActiveTask | null {
@@ -540,16 +606,15 @@ export class WorldStore {
 
   // ── 只读观测（P6 调试后台；不改状态，直连查询）────────────────────────────
 
-  /** 列出所有世界（含背包/进行中委托）。 */
-  listWorlds(): { id: string; inventory: Record<string, number>; activeTask: ActiveTask | null }[] {
-    const rows = this.#db.prepare('SELECT id, inventory, active_task FROM worlds ORDER BY id').all() as {
+  /** 列出所有世界（含钱包/进行中委托）。 */
+  listWorlds(): { id: string; wallet: Wallet; activeTask: ActiveTask | null }[] {
+    const rows = this.#db.prepare('SELECT id, active_task FROM worlds ORDER BY id').all() as {
       id: string;
-      inventory: string;
       active_task: string | null;
     }[];
     return rows.map((r) => ({
       id: r.id,
-      inventory: JSON.parse(r.inventory) as Record<string, number>,
+      wallet: this.getWallet(r.id),
       activeTask: r.active_task ? (JSON.parse(r.active_task) as ActiveTask) : null,
     }));
   }

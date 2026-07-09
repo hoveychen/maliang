@@ -32,7 +32,7 @@ function seed(store: WorldStore): void {
     state: 'placed',
   };
   store.addProp('w1', prop);
-  store.addSticker('w1', 'flower', 2);
+  store.addStamp('w1'); // 盖 1 章：stampProgress=1（初始 3 花不变）
   store.setLocations('w1', ['小池塘']);
   const v1 = store.startVisit('w1', 'p1', 1000);
   store.endVisit(v1, 2000);
@@ -107,7 +107,8 @@ test('GET /debug/api/worlds 与 /debug/api/worlds/:id：列表计数摘要，详
     assert.equal(w1.propCount, 1);
     assert.equal(w1.visitCount, 2);
     assert.equal(w1.activeVisitCount, 1);
-    assert.equal(w1.inventory.flower, 2);
+    assert.equal(w1.wallet.flowers, 3);
+    assert.equal(w1.wallet.stampProgress, 1);
     assert.deepEqual(w1.locations, ['小池塘']);
 
     const detail = await app.inject({ method: 'GET', url: '/debug/api/worlds/w1' });

@@ -3,7 +3,7 @@
 // 门禁与 /debug 同一套 admin token（authed 由 server.ts 注入）。
 import type { FastifyInstance } from 'fastify';
 import type { WorldStore } from './persistence.ts';
-import type { Character } from './types.ts';
+import type { Character, Wallet } from './types.ts';
 
 type AuthedFn = (req: { headers: Record<string, unknown>; query: unknown }) => boolean;
 
@@ -31,12 +31,12 @@ function characterSummary(store: WorldStore, c: Character) {
 }
 
 /** 世界列表页摘要。 */
-function worldSummary(store: WorldStore, w: { id: string; inventory: Record<string, number>; activeTask: unknown }) {
+function worldSummary(store: WorldStore, w: { id: string; wallet: Wallet; activeTask: unknown }) {
   const visits = store.listVisits(w.id);
   const characters = store.listCharacters(w.id);
   return {
     id: w.id,
-    inventory: w.inventory,
+    wallet: w.wallet,
     activeTask: w.activeTask,
     locations: store.getLocations(w.id),
     characterCount: characters.length,
@@ -128,13 +128,13 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
     return { worlds: store.listWorlds().map((w) => worldSummary(store, w)) };
   });
 
-  // 世界详情：背包/委托/地点 + 角色摘要 + 物品 + 会话（事件页 = 会话 + 委托）
+  // 世界详情：钱包/委托/地点 + 角色摘要 + 物品 + 会话（事件页 = 会话 + 委托）
   app.get<{ Params: { id: string } }>('/debug/api/worlds/:id', async (req, reply) => {
     if (!guard(req, reply)) return reply;
     const world = store.getWorld(req.params.id);
     if (!world) return reply.code(404).send({ error: 'world not found' });
     return {
-      ...worldSummary(store, { id: world.id, inventory: world.inventory, activeTask: world.activeTask }),
+      ...worldSummary(store, { id: world.id, wallet: world.wallet, activeTask: world.activeTask }),
       characters: store.listCharacters(world.id).map((c) => characterSummary(store, c)),
       props: store.listProps(world.id),
       visits: store.listVisits(world.id),
