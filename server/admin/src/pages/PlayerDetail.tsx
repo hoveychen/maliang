@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { fmtTs, useApi } from '../api.ts';
 import { MEMORY_KIND_LABELS, type PlayerDetail } from '../types.ts';
-import { Fallback, PageHead, Sprite } from '../components.tsx';
+import { AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, Sprite } from '../components.tsx';
 
 export function PlayerDetailPage() {
   const { id = '' } = useParams();
@@ -17,7 +17,15 @@ export function PlayerDetailPage() {
       {data && (
         <>
           <div className="panel panel-row">
-            <Sprite hash={data.player.spriteAsset} large alt={data.player.name} />
+            <div>
+              <Sprite hash={data.player.spriteAsset} large alt={data.player.name} />
+              {data.player.spriteAsset && (
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <AnimStatusBadge status={data.spriteAnim.status} />
+                  <AnimGenerateButton spriteHash={data.player.spriteAsset} status={data.spriteAnim.status} onChanged={reload} />
+                </div>
+              )}
+            </div>
             <dl className="kv" style={{ flex: 1, minWidth: 260 }}>
               <dt>id</dt><dd className="mono">{data.player.id}</dd>
               <dt>名字</dt><dd>{data.player.name || '—'}</dd>

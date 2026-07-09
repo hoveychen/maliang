@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ApiError, assetUrl, getToken, setToken } from './api.ts';
+import { ApiError, apiPost, assetUrl, getToken, setToken } from './api.ts';
 import type { SpriteAnimMeta, SpriteAnimRecord } from './types.ts';
 
 /** 页头：面包屑 + 宋体大标题 + 计数 + 说明。 */
@@ -140,6 +140,52 @@ export function Sprite(props: { hash: string; large?: boolean; alt?: string }) {
         onClick={(e) => { e.stopPropagation(); setOpen(true); }}
       />
       {open && <SpriteLightbox hash={props.hash} alt={props.alt ?? ''} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/** 动画状态徽章（none/pending/ready/failed 统一样式，角色表/详情页共用）。 */
+export function AnimStatusBadge(props: { status: string }) {
+  if (props.status === 'ready') return <span className="badge pine">动画就绪</span>;
+  if (props.status === 'pending') return <span className="badge">生成中</span>;
+  if (props.status === 'failed') return <span className="badge seal">动画失败</span>;
+  return <span className="badge">无动画</span>;
+}
+
+/**
+ * 补动画按钮：调 POST /admin/sprite-anim/:hash/generate 线上生成（已 ready 走 force 且先确认——烧钱）。
+ * pending 期间禁用并每 5s 自动 onChanged 轮询刷新，直到 ready/failed。
+ */
+export function AnimGenerateButton(props: { spriteHash: string; status: string; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const pending = props.status === 'pending';
+  const { onChanged } = props;
+  useEffect(() => {
+    if (!pending) return;
+    const t = setInterval(onChanged, 5000);
+    return () => clearInterval(t);
+  }, [pending, onChanged]);
+  if (!props.spriteHash) return null;
+  const trigger = async () => {
+    if (props.status === 'ready' && !window.confirm('已有动画。重新生成会调视频模型（约 $0.05/次），确定？')) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await apiPost(`/admin/sprite-anim/${props.spriteHash}/generate${props.status === 'ready' ? '?force=true' : ''}`);
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <button className="plain" disabled={busy || pending} onClick={trigger}>
+        {pending ? '生成中…' : props.status === 'ready' ? '重新生成动画' : '补生成动画'}
+      </button>
+      {err && <span className="badge seal" title={err}>触发失败</span>}
     </>
   );
 }
