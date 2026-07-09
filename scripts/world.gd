@@ -1715,6 +1715,9 @@ func _process(delta: float) -> void:
 	# 语音链路占用时压低 BGM，给人声让路（与开放麦闭麦判定同一组信号）
 	game_audio.set_ducked(_recording or thinking_label.visible or _tts_player.playing \
 			or _tts_pending or (fairy_voice != null and fairy_voice.is_playing()))
+	# 录音期直接静音 BGM（比 duck 更狠）：外放 BGM 会被无 AEC 的麦克风回灌，
+	# 低电平间歇声不断把 VAD 静音计数打回 0，说完话断不了句、拖到 12s 硬顶（真机 logcat 实锤）。
+	game_audio.set_music_muted(_recording)
 	tp = _prof_lap(tp, "duck")
 	_step_hop(delta)  # 进对话时玩家跳向站位（在焦点/摆位之前推进，相机随之贴合）
 	_step_phone_ui(delta)

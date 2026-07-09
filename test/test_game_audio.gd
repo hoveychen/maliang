@@ -85,6 +85,21 @@ func _run(ga: GameAudio) -> void:
 		ga._advance(1.0 / 30.0)
 	_fails += _check("解除 duck 回常态", absf(active.volume_db - GameAudio.MUSIC_DB) < 1.0, true)
 
+	# 静音(录音期压 BGM 防回灌 VAD)：目标降到 MUTE_DB，且盖过 duck
+	ga.set_music_muted(true)
+	for i in 90:
+		ga._advance(1.0 / 30.0)
+	_fails += _check("静音后音量压到 MUTE_DB 以下", active.volume_db <= -60.0, true)
+	ga.set_ducked(true) # 静音应盖过 duck，仍在 -60 以下
+	for i in 30:
+		ga._advance(1.0 / 30.0)
+	_fails += _check("静音盖过 duck", active.volume_db <= -60.0, true)
+	ga.set_music_muted(false)
+	ga.set_ducked(false)
+	for i in 90:
+		ga._advance(1.0 / 30.0)
+	_fails += _check("解除静音回常态", absf(active.volume_db - GameAudio.MUSIC_DB) < 1.0, true)
+
 	# 单段模式：永不换段
 	ga.start_bgm([GameAudio.BGM_STEPS[0]])
 	_wait_bgm(ga)
