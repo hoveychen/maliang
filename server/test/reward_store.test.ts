@@ -1,11 +1,12 @@
-// 奖赏系统数据层：贴纸背包加扣、委托状态、SQLite 持久化回读与旧档迁移兼容。
+// 奖赏系统数据层：小红花钱包（盖章累加/满3升花/满9溢出/扣费不足/退还）、
+// 委托状态、SQLite 持久化回读、旧贴纸档方案 A 迁移。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WorldStore } from '../src/persistence.ts';
-import { STICKERS, stickerGlyph, type ActiveTask } from '../src/types.ts';
+import { INITIAL_FLOWERS, MAX_FLOWERS, type ActiveTask } from '../src/types.ts';
 
 const TASK: ActiveTask = {
   id: 't1',
@@ -14,57 +15,113 @@ const TASK: ActiveTask = {
   npcName: '小蓝',
   targetName: '小黄',
   message: '今天别忘了浇花',
-  rewardId: 'flower',
+  stampStyle: 'star',
 };
 
-test('贴纸目录：id 唯一、glyph 兜底', () => {
-  assert.equal(new Set(STICKERS.map((s) => s.id)).size, STICKERS.length, '贴纸 id 不应重复');
-  assert.equal(stickerGlyph('flower'), '🌸');
-  assert.equal(stickerGlyph('不存在'), '⭐', '未知 id 用 ⭐ 兜底');
-});
-
-test('背包：发贴纸累积、扣贴纸不够不动账、扣到零清 key', () => {
+test('新档冷启动：预置初始小红花、零盖章进度', () => {
   const store = new WorldStore();
   store.createWorld('w1');
-  store.addSticker('w1', 'flower');
-  store.addSticker('w1', 'flower');
-  store.addSticker('w1', 'star');
-  assert.deepEqual(store.getInventory('w1'), { flower: 2, star: 1 });
-  assert.equal(store.removeSticker('w1', 'gem'), false, '没有的贴纸扣不动');
-  assert.equal(store.removeSticker('w1', 'flower', 3), false, '不够扣不动账');
-  assert.deepEqual(store.getInventory('w1'), { flower: 2, star: 1 });
-  assert.equal(store.removeSticker('w1', 'star'), true);
-  assert.deepEqual(store.getInventory('w1'), { flower: 2 }, '扣到零应清 key');
+  assert.deepEqual(store.getWallet('w1'), { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0 });
 });
 
-test('委托状态：设置/读取/清除', () => {
+test('盖章：纯累加，每满 3 章换 1 花，stampsTotal 只增', () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  let r = store.addStamp('w1');
+  assert.equal(r.flowerGained, false);
+  assert.deepEqual(r.wallet, { flowers: INITIAL_FLOWERS, stampProgress: 1, stampsTotal: 1 });
+  r = store.addStamp('w1');
+  assert.equal(r.flowerGained, false);
+  assert.equal(r.wallet.stampProgress, 2);
+  r = store.addStamp('w1'); // 第 3 章 → 升 1 花，进度归零
+  assert.equal(r.flowerGained, true);
+  assert.deepEqual(r.wallet, { flowers: INITIAL_FLOWERS + 1, stampProgress: 0, stampsTotal: 3 });
+});
+
+test('满 9 溢出：停在待兑换组不清零、不再多攒；花掉低于 9 立即补升', () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  // 先花掉初始 3 花，再狂盖章把花攒到 9（9 花 = 27 章）
+  assert.equal(store.spendFlower('w1', INITIAL_FLOWERS), true);
+  for (let i = 0; i < MAX_FLOWERS * 3; i++) store.addStamp('w1');
+  let w = store.getWallet('w1');
+  assert.equal(w.flowers, MAX_FLOWERS, '应攒到上限 9 花');
+  assert.equal(w.stampProgress, 0);
+  // 满 9 后再盖 3 章：不升花，进度停在满组（=3）待兑换，多的丢弃
+  store.addStamp('w1');
+  store.addStamp('w1');
+  const r = store.addStamp('w1');
+  assert.equal(r.flowerGained, false, '满 9 不升花');
+  assert.equal(r.wallet.flowers, MAX_FLOWERS);
+  assert.equal(r.wallet.stampProgress, 3, '一组已满停住待兑换');
+  store.addStamp('w1'); // 再盖也不再多攒
+  assert.equal(store.getWallet('w1').stampProgress, 3, '溢出不无限累积');
+  // 花掉 1 朵 → 立即补升那组待兑换（回到 9 花、进度归零）
+  assert.equal(store.spendFlower('w1'), true);
+  w = store.getWallet('w1');
+  assert.equal(w.flowers, MAX_FLOWERS, '花掉后待兑换组立即补升回 9');
+  assert.equal(w.stampProgress, 0);
+});
+
+test('扣费：够扣返回 true 并扣账，不够返回 false 且不动账', () => {
+  const store = new WorldStore();
+  store.createWorld('w1'); // 初始 3 花
+  assert.equal(store.spendFlower('w1', 2), true);
+  assert.equal(store.getWallet('w1').flowers, 1);
+  assert.equal(store.spendFlower('w1', 2), false, '不够扣不动账');
+  assert.equal(store.getWallet('w1').flowers, 1);
+  assert.equal(store.spendFlower('w1'), true);
+  assert.equal(store.getWallet('w1').flowers, 0);
+  assert.equal(store.spendFlower('w1'), false, '0 花扣不动');
+});
+
+test('退还：补花受上限约束，多余丢弃', () => {
+  const store = new WorldStore();
+  store.createWorld('w1'); // 初始 3 花
+  assert.equal(store.spendFlower('w1'), true); // 2 花
+  assert.equal(store.refundFlower('w1').flowers, 3, '退 1 朵回到 3');
+  assert.equal(store.refundFlower('w1', 100).flowers, MAX_FLOWERS, '补到上限封顶 9');
+});
+
+test('委托状态：设置/读取/清除，stampStyle 随委托持久', () => {
   const store = new WorldStore();
   store.createWorld('w1');
   assert.equal(store.getActiveTask('w1'), null);
   store.setActiveTask('w1', TASK);
-  assert.equal(store.getActiveTask('w1')!.rewardId, 'flower');
+  assert.equal(store.getActiveTask('w1')!.stampStyle, 'star');
   store.setActiveTask('w1', null);
   assert.equal(store.getActiveTask('w1'), null);
 });
 
-test('持久化：背包与委托随 worlds.json 落盘并回读', () => {
+test('持久化：钱包与委托落盘并回读', () => {
   const dir = mkdtempSync(join(tmpdir(), 'maliang-reward-'));
   const store = new WorldStore(dir);
   store.createWorld('w1');
-  store.addSticker('w1', 'candy', 3);
+  store.addStamp('w1');
+  store.spendFlower('w1');
   store.setActiveTask('w1', TASK);
   const reloaded = new WorldStore(dir);
-  assert.deepEqual(reloaded.getInventory('w1'), { candy: 3 });
+  assert.deepEqual(reloaded.getWallet('w1'), { flowers: INITIAL_FLOWERS - 1, stampProgress: 1, stampsTotal: 1 });
   assert.equal(reloaded.getActiveTask('w1')!.type, 'deliver');
 });
 
-test('旧档兼容：worlds.json 没有背包/委托字段 → 默认空背包无委托', () => {
+test('方案 A 迁移：旧贴纸背包 worlds.json → 清空换初始小红花，写回固化', () => {
   const dir = mkdtempSync(join(tmpdir(), 'maliang-legacy-'));
-  writeFileSync(join(dir, 'worlds.json'), JSON.stringify({ worlds: [{ id: 'old', characters: [] }] }));
+  writeFileSync(
+    join(dir, 'worlds.json'),
+    JSON.stringify({ worlds: [{ id: 'old', characters: [], inventory: { flower: 2, star: 5 } }] }),
+  );
   const store = new WorldStore(dir);
-  assert.deepEqual(store.getInventory('old'), {});
-  assert.equal(store.getActiveTask('old'), null);
-  // 落盘一次后新字段应持久化：新实例读回可见（旧 worlds.json 迁移后已改名 .migrated）
-  store.addSticker('old', 'shell');
-  assert.deepEqual(new WorldStore(dir).getInventory('old'), { shell: 1 });
+  // 旧贴纸清空，置初始花
+  assert.deepEqual(store.getWallet('old'), { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0 });
+  // 迁移后动一动账，新实例读回可见（旧 worlds.json 已改名 .migrated）
+  store.spendFlower('old', INITIAL_FLOWERS);
+  assert.equal(new WorldStore(dir).getWallet('old').flowers, 0);
+});
+
+test('旧档无 inventory 字段：迁移路径也置初始花', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'maliang-empty-'));
+  writeFileSync(join(dir, 'worlds.json'), JSON.stringify({ worlds: [{ id: 'e', characters: [] }] }));
+  const store = new WorldStore(dir);
+  assert.equal(store.getWallet('e').flowers, INITIAL_FLOWERS, '无 inventory 字段的旧档也置初始花');
 });

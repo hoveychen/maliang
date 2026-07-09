@@ -21,46 +21,38 @@ export interface BehaviorScript {
  * 存量角色 abilities 里可能只有旧的两项，意图 prompt 按「基础集 ∪ 角色自带」取并集，免数据迁移。 */
 export const BASE_ABILITIES = ['move_to', 'follow', 'stop_follow', 'do_action', 'chat_with', 'deliver_message'];
 
-// ── 奖赏系统：贴纸收集册 + NPC 委托 ────────────────────────────────────────
+// ── 奖赏系统：小红花代币 + 集邮盖章（替换旧的 8 种贴纸 + give 转赠，见 docs/reward-flower-design.md）──
 
-/** 贴纸目录：委托奖励的收集品（去文字化，大 emoji 图标）。id 稳定入存档，glyph 供客户端展示。 */
-export const STICKERS: readonly { id: string; glyph: string }[] = [
-  { id: 'flower', glyph: '🌸' },
-  { id: 'apple', glyph: '🍎' },
-  { id: 'star', glyph: '⭐' },
-  { id: 'shell', glyph: '🐚' },
-  { id: 'ladybug', glyph: '🐞' },
-  { id: 'candy', glyph: '🍬' },
-  { id: 'clover', glyph: '🍀' },
-  { id: 'gem', glyph: '💎' },
-];
+/** 小红花上限（3×3 格）。 */
+export const MAX_FLOWERS = 9;
+/** 每满 N 个盖章换 1 朵小红花。 */
+export const STAMPS_PER_FLOWER = 3;
+/** 冷启动/旧档迁移初始赠送的小红花数（够造一次物+一次角色还剩一朵试错）。 */
+export const INITIAL_FLOWERS = 3;
 
-export function stickerGlyph(id: string): string {
-  return STICKERS.find((s) => s.id === id)?.glyph ?? '⭐';
+/**
+ * 玩家钱包：唯一货币「小红花」+ 集邮盖章进度。随世界持久化（复用旧 inventory 列，存 Wallet JSON）。
+ * 经济：完成任一委托盖 1 章；每满 3 章换 1 朵花（纯累加，不因中断清零）；造物/造角色各扣 1 朵。
+ */
+export interface Wallet {
+  /** 小红花，0..MAX_FLOWERS。造物/造角色消费出口。 */
+  flowers: number;
+  /**
+   * 当前未结算的盖章数，常态 0..STAMPS_PER_FLOWER-1。
+   * 满 9 花溢出时可短暂停在 STAMPS_PER_FLOWER（=一组已满待兑换），等花被花掉腾出格子立即补升（见 settleWallet）。
+   */
+  stampProgress: number;
+  /** 累计盖过的章数（只增，集邮簿/成就展示用）。 */
+  stampsTotal: number;
 }
 
-/** 贴纸 id → 中文叫法（表扬/致谢台词用，emoji 进 TTS 念不出来）。 */
-export function stickerName(id: string): string {
-  for (const [cn, sid] of Object.entries(STICKER_NAMES)) if (sid === id) return cn;
-  return '贴纸';
-}
+/** 集邮盖章款式目录：完成委托时随机挑一款（纯演出，不影响经济）。id 稳定入存档，客户端映射到 AIGC 盖章图（P5）。 */
+export const STAMP_STYLES: readonly string[] = ['star', 'smile', 'paw', 'medal', 'heart'];
 
-/** 贴纸的中文叫法 → id（意图 prompt 词汇表与 mock 解析共用；小朋友说「把花送给小蓝」）。 */
-export const STICKER_NAMES: Record<string, string> = {
-  花: 'flower',
-  苹果: 'apple',
-  星星: 'star',
-  贝壳: 'shell',
-  瓢虫: 'ladybug',
-  糖果: 'candy',
-  四叶草: 'clover',
-  宝石: 'gem',
-};
+/** 委托类型：完成判定全部是客户端确定性事件（送达回调/相邻/到点），不靠 LLM 猜。 */
+export type TaskType = 'deliver' | 'bring' | 'visit';
 
-/** 委托类型：完成判定全部是客户端确定性事件（送达回调/相邻/到点/交接），不靠 LLM 猜。 */
-export type TaskType = 'deliver' | 'bring' | 'visit' | 'gift';
-
-/** 进行中的委托。同一时刻至多一个（幼儿单任务心智，完成判定也无歧义）。 */
+/** 进行中的委托。同一时刻至多一个（幼儿单任务心智，完成判定也无歧义）。完成 = 盖 1 章。 */
 export interface ActiveTask {
   id: string;
   type: TaskType;
@@ -68,9 +60,8 @@ export interface ActiveTask {
   npcName: string;
   targetName?: string; // deliver/bring：对象角色名
   locationName?: string; // visit：地点名（客户端 POI 判定）
-  itemId?: string; // gift：要送给委托人的贴纸 id
   message?: string; // deliver：要带的话
-  rewardId: string; // 完成奖励的贴纸 id
+  stampStyle: string; // 完成时盖的章款式 id（STAMP_STYLES 之一，纯演出）
 }
 
 /** LLM 从玩家意图产出的角色设定（落地前）。 */
@@ -148,8 +139,6 @@ export interface IntentContext {
   activeTask?: ActiveTask;
   /** 可发起的委托候选（无进行中委托时服务端生成）：LLM 觉得时机合适就用自己口吻发起并置 offerTask。 */
   taskCandidate?: ActiveTask;
-  /** 玩家的贴纸背包（id→数量）：give 的词汇依据；空背包时对送贴纸请求温柔说明还没有。 */
-  inventory?: Record<string, number>;
   /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing，命中 prompt cache。 */
   cacheKey?: string;
 }
