@@ -9,7 +9,7 @@ import { createCharacter, generateSprite, ModerationError } from './orchestrator
 import { triggerIdleAnimation } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
-import { handleVoice, respondToTranscript, flushMemory } from './voice.ts';
+import { handleVoice, respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { stickerGlyph, type ActiveTask, type Character, type Player, type VoiceResponse, type WorldProp } from './types.ts';
@@ -759,6 +759,28 @@ export async function handleWsMessage(
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
+    } finally {
+      gate.release();
+    }
+    return;
+  }
+
+  // 进对话对方先开口：客户端进近身、站位就绪后发 voice_greeting，服务端按角色招呼风格随机选一句、
+  // 用该角色 voiceId 走流式 TTS 出声（与 respondToTranscript 同一 character_response+tts_chunk 通道）。
+  // 招呼是可选点缀：被限流或失败都静默跳过，绝不打断进对话（玩家仍可直接开口）。
+  if (msg.type === 'voice_greeting') {
+    const gate = limiter.tryAcquire(connKey, Date.now());
+    if (!gate.ok) return;
+    try {
+      const ttsHooks = {
+        onResponse: (r: VoiceResponse) => socket.send(JSON.stringify({ type: 'character_response', ...r })),
+        onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
+        onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
+      };
+      const response = await greetCharacter(msg.worldId ?? '', msg.characterId ?? '', adapters, store, ttsHooks);
+      if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
+    } catch (err) {
+      console.warn(`招呼失败（静默跳过，不打断进对话）：${String(err)}`);
     } finally {
       gate.release();
     }
