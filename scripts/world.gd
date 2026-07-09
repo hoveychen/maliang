@@ -2476,6 +2476,10 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2) -> void:
 		npc.pixel_size = 6.0 / h
 		npc.offset = Vector2(0.0, h / 2.0)
 		BlobShadow.attach(npc, clampf(float(tex.get_width()) * npc.pixel_size * 0.38, 0.4, 1.4))
+		# 村民真图就绪后，后台轮询 idle 动画，就绪则静态切动画（与玩家/仙子同一条链路）。
+		# 相位按 id 错开，避免整村同帧起跳的机械感（31帧/8fps 循环约 3.9s）。
+		var anim_phase := float(String(c.get("id", c.get("name", ""))).hash() % 256) / 256.0 * 3.9
+		_poll_idle_anim(npc, asset, 6.0, anim_phase)
 	var logical := at_logical
 	if logical == Vector2.INF:
 		# 小世界：忽略后端旧坐标(原 1000×1000 的 tile 500)，统一放到村庄中心(chunk2 = world 中心)
