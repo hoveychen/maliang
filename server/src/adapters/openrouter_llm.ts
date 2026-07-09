@@ -2,8 +2,6 @@ import type { LLMAdapter } from './types.ts';
 import {
   BASE_ABILITIES,
   MEMORY_KINDS,
-  STICKER_NAMES,
-  stickerGlyph,
   type BehaviorScript,
   type CharacterSpec,
   type CreationCategory,
@@ -145,7 +143,6 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     // 能力 = 基础交互集 ∪ 角色自带（存量角色只存了旧两项，取并集免迁移）
     const abilities = [...new Set([...BASE_ABILITIES, ...ctx.abilities])];
     const abilityLines = abilities.map((a) => `- ${ABILITY_DESC[a] ?? a}`).join('\n');
-    const vocab = Object.entries(STICKER_NAMES).map(([cn, id]) => `${cn}${stickerGlyph(id)}=${id}`).join('、');
 
     // 造角色规则只对有该能力的角色（小仙子）出现，免得普通村民误以为自己能造。
     // 依赖角色能力（稳定），放进 staticSystem 前缀不影响 prompt cache。
@@ -158,32 +155,26 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
 小朋友对你说了一句话，判断这是「闲聊」还是「让你（或别的角色）做一件会做的事」。
 会做的事(abilities)：
 ${abilityLines}
-贴纸的叫法：${vocab}。
 严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","offerTask":true或省略,"behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - 小朋友说「告诉X…」「帮我跟X说…」是带话：用 deliver_message（to=X，message=要带的话），不要用 move_to——光走过去话就丢了。
-- follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。
-- 小朋友说要把贴纸送给谁（如「把花送给小蓝」）→ kind=command，behaviorScript 里一条 {"type":"give","params":{"character_name":"小蓝","item":"flower"}}（item 用贴纸叫法表里的 id；背包没有就 chat 温柔说明）。${createLine}
+- follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。${createLine}
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
 - 绝不包含暴力、恐怖、成人内容。`;
 
-    // ── 动态后缀（每轮可变，不进缓存前缀）：花名册 / 地点 / 背包 / 委托 / 分组记忆 ──
+    // ── 动态后缀（每轮可变，不进缓存前缀）：花名册 / 地点 / 委托 / 分组记忆 ──
     const rosterLine = ctx.worldCharacters && ctx.worldCharacters.length > 0
       ? `\n世界里的其他角色：${ctx.worldCharacters.map((c) => c.name).join('、')}。指令里出现角色名时必须用这些名字（口音/识别不准时对应到最像的一个）。`
       : '';
     const locationLine = ctx.locations && ctx.locations.length > 0
       ? `\n世界里的地点：${ctx.locations.join('、')}。move_to 的 location_name 优先归一到这些名字（说「有风车的地方」就填「风车」）。`
       : '';
-    const invItems = Object.entries(ctx.inventory ?? {}).filter(([, n]) => n > 0);
-    const inventoryLine = invItems.length > 0
-      ? `\n小朋友现在的贴纸背包：${invItems.map(([id, n]) => `${stickerGlyph(id)}x${n}`).join('、')}。`
-      : `\n小朋友的贴纸背包现在是空的（说要送贴纸时温柔告诉他先帮大家做点小事赢贴纸）。`;
     const taskLine = ctx.activeTask
-      ? `\n进行中的小任务：${describeTask(ctx.activeTask)}（委托人是${ctx.activeTask.npcName}，完成有贴纸奖励）。小朋友问起就温柔提醒，不要重复发起新任务。`
+      ? `\n进行中的小任务：${describeTask(ctx.activeTask)}（委托人是${ctx.activeTask.npcName}，完成能盖一个小红花集邮章）。小朋友问起就温柔提醒，不要重复发起新任务。`
       : ctx.taskCandidate
-        ? `\n当下没有进行中的任务。时机合适时（小朋友问「有什么要帮忙的」，或聊天里自然接得上），你可以发起这个小委托：${describeTask(ctx.taskCandidate)}，奖励一个${stickerGlyph(ctx.taskCandidate.rewardId)}贴纸。若这句回应里发起了它，输出 "offerTask": true 并用你的口吻把请求和奖励说出来；不合适就别硬塞。`
+        ? `\n当下没有进行中的任务。时机合适时（小朋友问「有什么要帮忙的」，或聊天里自然接得上），你可以发起这个小委托：${describeTask(ctx.taskCandidate)}，完成能盖一个集邮章、集满三个换一朵小红花。若这句回应里发起了它，输出 "offerTask": true 并用你的口吻把请求说出来；不合适就别硬塞。`
         : '';
     // 记忆按 kind 分组注入（memoryLine 分组注入）
     const mem = ctx.memory ?? [];
@@ -196,7 +187,7 @@ ${abilityLines}
       }
       memoryLine = `\n你还记得关于这个小朋友的事：\n${groups.join('\n')}\n回应时自然地体现你记得这些。`;
     }
-    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + inventoryLine + taskLine + memoryLine;
+    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + taskLine + memoryLine;
 
     // 把近 N 轮历史按角色映射成对话消息，让回应有上下文
     const historyMsgs = (ctx.recentHistory ?? []).map((t) => ({

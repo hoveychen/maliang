@@ -16,9 +16,9 @@ import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, stickerGlyph, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type WorldProp } from './types.ts';
+import { newCreationState, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
-import { completeTaskOnEvent, praiseLine, thanksLine } from './tasks.ts';
+import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -68,7 +68,7 @@ export function buildDebugState(store: WorldStore) {
     players: store.listPlayers(),
     worlds: store.listWorlds().map((w) => ({
       id: w.id,
-      inventory: w.inventory,
+      wallet: w.wallet,
       activeTask: w.activeTask,
       characters: store.listCharacters(w.id).map((c) => ({
         id: c.id,
@@ -138,7 +138,7 @@ function render(s){
     : '<p class="empty">（无玩家）</p>';
   for(const w of s.worlds){
     h += '<div class="world"><div class="wid">世界 '+esc(w.id)+'</div>';
-    h += '<div class="mono">背包 '+esc(JSON.stringify(w.inventory))+' · 委托 '+esc(w.activeTask?w.activeTask.type+'('+w.activeTask.npcName+')':'无')+'</div>';
+    h += '<div class="mono">钱包 '+esc(JSON.stringify(w.wallet))+' · 委托 '+esc(w.activeTask?w.activeTask.type+'('+w.activeTask.npcName+')':'无')+'</div>';
     h += '<h4 style="margin:10px 0 2px">角色 ('+w.characters.length+')</h4>'+ (w.characters.map(charBlock).join('')||'<span class="empty">（无角色）</span>');
     h += '<h4 style="margin:10px 0 2px">物件 ('+w.props.length+') · Visit ('+w.visits.length+')</h4>';
     h += '<div class="mono">'+w.visits.slice(0,10).map(v => v.playerId.slice(0,8)+' '+new Date(v.startedAt).toLocaleString()+(v.endedAt?' → 已结束':' · 进行中')).join('<br>')+'</div>';
@@ -505,16 +505,70 @@ export async function endSessionVisit(
   await Promise.all(jobs);
 }
 
-/** 得奖语音表扬：委托人音色念表扬词，合成好推 praise_tts（尽力而为，失败不影响主流程）。 */
+/** 得奖语音表扬：委托人音色念表扬词（含盖章/升花反馈），合成好推 praise_tts（尽力而为，失败不影响主流程）。 */
 async function pushPraiseTts(
   socket: { send: (data: string) => void },
   adapters: ServiceAdapters,
   store: WorldStore,
   worldId: string,
   task: ActiveTask,
+  settle: { flowerGained: boolean; wallet: Wallet },
 ): Promise<void> {
   const npc = store.getCharacter(worldId, task.npcId);
-  await pushLineTts(socket, adapters, store, praiseLine(task), npc?.voiceId ?? 'cn-child-default');
+  await pushLineTts(socket, adapters, store, praiseLine(task, settle), npc?.voiceId ?? 'cn-child-default');
+}
+
+/** 造物/造角色余额检查：至少 1 朵小红花才放行。 */
+function hasFlower(store: WorldStore, worldId: string): boolean {
+  return store.getWallet(worldId).flowers >= 1;
+}
+
+/**
+ * 小红花用完拦截：下发拒绝消息（带引导语文本 + 仙子语音 + 最新钱包），客户端据此让仙子引导去攒花。
+ * kind=prop → prop_denied；kind=character → gen_denied（与生图失败的 gen_failed 区分开）。
+ */
+async function denyForNoFlowers(
+  socket: { send: (data: string) => void },
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  worldId: string,
+  kind: 'prop' | 'character',
+): Promise<void> {
+  const line = flowerDeniedLine();
+  const fairy = store.listCharacters(worldId).find((c) => c.isFairy);
+  let ttsAsset = '';
+  if (fairy) {
+    try {
+      ttsAsset = store.putAsset(await adapters.tts.synthesize(line, fairy.voiceId));
+    } catch (err) {
+      console.warn(`小红花引导语 TTS 合成失败（不阻塞）：${String(err)}`);
+    }
+  }
+  socket.send(JSON.stringify({
+    type: kind === 'prop' ? 'prop_denied' : 'gen_denied',
+    reason: 'no_flowers',
+    message: line,
+    ttsAsset,
+    wallet: store.getWallet(worldId),
+  }));
+}
+
+/** 造角色引导会话入口：先卡余额（0 花不进会话，仙子引导），够花再开会话推进第一轮。 */
+async function openCreationSession(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  fairyId: string,
+  request: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+): Promise<void> {
+  if (!hasFlower(store, worldId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, 'character');
+    return;
+  }
+  session.creation = newCreationState();
+  await advanceCreation(socket, session, worldId, fairyId, request, adapters, store);
 }
 
 async function pushLineTts(
@@ -532,7 +586,8 @@ async function pushLineTts(
   }
 }
 
-/** create_prop 异步落地：审核 → LLM 设计 spec → 校验 → 持久化 → prop_created 推送（失败推 prop_failed）。 */
+/** create_prop 异步落地：扣 1 花 → 审核 → LLM 设计 spec → 校验 → 持久化 → prop_created 推送。
+ *  0 花拦截推 prop_denied；任何失败（审核/校验/异常）都退还那朵花并推 prop_failed。 */
 export async function createPropAsync(
   socket: { send: (data: string) => void },
   worldId: string,
@@ -540,6 +595,11 @@ export async function createPropAsync(
   adapters: ServiceAdapters,
   store: WorldStore,
 ): Promise<void> {
+  if (!store.spendFlower(worldId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, 'prop');
+    return;
+  }
+  let created = false;
   try {
     const check = await adapters.moderation.moderateText(description);
     if (!check.allowed) {
@@ -554,9 +614,12 @@ export async function createPropAsync(
     }
     const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed' };
     store.addProp(worldId, prop);
-    socket.send(JSON.stringify({ type: 'prop_created', worldId, prop }));
+    created = true;
+    socket.send(JSON.stringify({ type: 'prop_created', worldId, prop, wallet: store.getWallet(worldId) }));
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
+  } finally {
+    if (!created) store.refundFlower(worldId); // 造失败/被审核挡：退还，别让孩子白花一朵
   }
 }
 
@@ -571,7 +634,12 @@ export async function createCharacterAsync(
   store: WorldStore,
   toSpriteSheet?: ToSpriteSheet,
 ): Promise<void> {
+  if (!store.spendFlower(worldId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, 'character');
+    return;
+  }
   const requestId = randomUUID();
+  let created = false;
   try {
     const character = await createCharacter(
       { worldId, intentText: description, byFairy: true },
@@ -579,7 +647,8 @@ export async function createCharacterAsync(
       store,
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
     );
-    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character }));
+    created = true;
+    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId) }));
     // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     if (character.appearance.spriteAsset) {
       triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
@@ -587,6 +656,8 @@ export async function createCharacterAsync(
   } catch (err) {
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
+  } finally {
+    if (!created) store.refundFlower(worldId); // 造失败：退还，别让孩子白花一朵
   }
 }
 
@@ -720,13 +791,10 @@ export async function handleWsMessage(
     format?: string;
     transcript?: string; // voice_transcript：端侧 ASR 已识别的文本
     locations?: unknown; // world_info：世界地点名清单
-    // 奖赏系统：task_event 完成事件 / give_item 转赠
+    // 奖赏系统：task_event 完成事件（匹配进行中委托则盖章）
     kind?: string;
     targetName?: string;
     locationName?: string;
-    npcId?: string;
-    itemId?: string;
-    toCharacterId?: string;
     propId?: string; // prop_place：语音生成物件的落位回报
     tileX?: number;
     tileY?: number;
@@ -781,7 +849,7 @@ export async function handleWsMessage(
     startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now());
     socket.send(JSON.stringify({
       type: 'world_state',
-      inventory: store.getInventory(worldId),
+      wallet: store.getWallet(worldId),
       activeTask: store.getActiveTask(worldId),
     }));
     return;
@@ -794,59 +862,25 @@ export async function handleWsMessage(
     return;
   }
 
-  // 委托完成事件（客户端确定性判定后上报）：匹配进行中委托则发奖+清任务
+  // 委托完成事件（客户端确定性判定后上报）：匹配进行中委托则盖 1 章（满 3 升 1 花）+ 清任务
   if (msg.type === 'task_event') {
     const worldId = msg.worldId ?? '';
     const done = completeTaskOnEvent(worldId, {
       kind: msg.kind ?? '',
       targetName: msg.targetName,
       locationName: msg.locationName,
-      npcId: msg.npcId,
-      itemId: msg.itemId,
     }, store);
     if (done) {
       socket.send(JSON.stringify({
         type: 'task_complete',
-        task: done,
-        rewardId: done.rewardId,
-        rewardGlyph: stickerGlyph(done.rewardId),
-        inventory: store.getInventory(worldId),
+        task: done.task,
+        stampStyle: done.task.stampStyle,
+        flowerGained: done.flowerGained,
+        wallet: done.wallet,
       }));
-      void pushPraiseTts(socket, adapters, store, worldId, done); // 委托人音色的语音表扬（后台合成，不卡庆祝）
+      void pushPraiseTts(socket, adapters, store, worldId, done.task, done); // 委托人音色的语音表扬（后台合成，不卡庆祝）
     }
     return; // 不匹配静默忽略（迟到/重复上报无副作用）
-  }
-
-  // 转赠贴纸给 NPC：扣背包 + 写进对方长期记忆；若正好是 gift 委托则顺带完成发奖
-  if (msg.type === 'give_item') {
-    const worldId = msg.worldId ?? '';
-    const itemId = msg.itemId ?? '';
-    const ok = store.removeSticker(worldId, itemId);
-    if (ok) {
-      const npc = store.getCharacter(worldId, msg.toCharacterId ?? '');
-      if (npc) {
-        const line = `小朋友送过我一个${stickerGlyph(itemId)}`;
-        if (!npc.memory.includes(line)) {
-          npc.memory.push(line);
-          store.saveCharacter(npc);
-        }
-      }
-      const done = completeTaskOnEvent(worldId, { kind: 'gift_done', npcId: msg.toCharacterId, itemId }, store);
-      if (done) {
-        socket.send(JSON.stringify({
-          type: 'task_complete',
-          task: done,
-          rewardId: done.rewardId,
-          rewardGlyph: stickerGlyph(done.rewardId),
-          inventory: store.getInventory(worldId),
-        }));
-        void pushPraiseTts(socket, adapters, store, worldId, done); // 委托达成：表扬已含致谢，不再另发
-      } else if (npc) {
-        void pushLineTts(socket, adapters, store, thanksLine(itemId), npc.voiceId); // 普通转赠：受赠者致谢
-      }
-    }
-    socket.send(JSON.stringify({ type: 'give_result', ok, itemId, inventory: store.getInventory(worldId) }));
-    return;
   }
 
   if (msg.type === 'create_character_request') {
@@ -914,8 +948,7 @@ export async function handleWsMessage(
       const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store);
       // 造角色入口：开引导会话，不发普通回应。
       if (response.characterRequest) {
-        session.creation = newCreationState();
-        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store);
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store);
         return;
       }
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
@@ -967,8 +1000,7 @@ export async function handleWsMessage(
       );
       // 造角色入口：respondToTranscript 识别到 create_character 意图但没出声，这里开引导会话，不发普通回应。
       if (response.characterRequest) {
-        session.creation = newCreationState();
-        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store);
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store);
         return;
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
@@ -1061,8 +1093,7 @@ export async function handleWsMessage(
       const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks);
       // 造角色入口：开引导会话，不发普通回应。
       if (response.characterRequest) {
-        session.creation = newCreationState();
-        await advanceCreation(socket, session, worldId, characterId, response.characterRequest, adapters, store);
+        await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store);
         return;
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));

@@ -1,7 +1,6 @@
 import type { ServiceAdapters, ImageBlob, AudioBlob, VideoBlob } from './types.ts';
 import {
   BASE_ABILITIES,
-  STICKER_NAMES,
   type CharacterSpec,
   type CreationCategory,
   type CreationState,
@@ -176,26 +175,11 @@ export function createMockAdapters(): ServiceAdapters {
             emotion: 'happy',
           };
         }
-        // 转赠贴纸：「把花送给小蓝」→ give（玩家亲自走过去送，item 用词汇表 id）
-        const giveM = /送/.test(transcript)
-          ? Object.keys(STICKER_NAMES).find((cn) => transcript.includes(cn))
-          : undefined;
-        if (giveM && named) {
-          return {
-            kind: 'command',
-            replyText: `哇，${named.name}一定会喜欢的！`,
-            behaviorScript: {
-              commands: [{ type: 'give', params: { character_name: named.name, item: STICKER_NAMES[giveM]! } }],
-              loop: false,
-            },
-            emotion: 'happy',
-          };
-        }
         // 委托发起：有候选且小朋友问「有什么要帮忙的」→ offerTask
         if (ctx.taskCandidate && /(帮忙|任务|做什么|帮你)/.test(transcript)) {
           return {
             kind: 'chat',
-            replyText: `帮我个小忙好不好？完成有贴纸奖励哦！`,
+            replyText: `帮我个小忙好不好？完成能盖一个小红花集邮章哦！`,
             emotion: 'happy',
             offerTask: true,
           };

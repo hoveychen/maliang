@@ -95,6 +95,11 @@ export function praiseLine(task: ActiveTask, result: { flowerGained: boolean; wa
   return `${intro}这个盖章送给你！再帮${remain}个小伙伴，就能换一朵小红花啦！`;
 }
 
+/** 小红花用完时的仙子引导语（造物/造角色被拦时说）。 */
+export function flowerDeniedLine(): string {
+  return '你的小红花用完啦！去帮小伙伴完成心愿，集满盖章换到小红花，就能再造一个新朋友或新玩具啦！';
+}
+
 /** 客户端上报的完成事件。 */
 export interface TaskEvent {
   kind: string; // deliver_done | bring_done | visit_done

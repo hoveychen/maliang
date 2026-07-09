@@ -87,7 +87,6 @@ export async function respondToTranscript(
     locations: store.getLocations(worldId),
     activeTask,
     taskCandidate,
-    inventory: store.getInventory(worldId),
     // 稳定缓存键：绑 world×角色×玩家，做 OpenRouter sticky routing 命中 prompt cache（同一对话连续命中）。
     cacheKey: `${worldId}:${characterId}:${playerId}`,
   });
