@@ -7,16 +7,17 @@ signal character_response(data: Dictionary)
 signal tts_chunk(pcm: PackedByteArray)
 signal tts_end
 signal gen_progress(stage: String)
-signal gen_complete(character: Dictionary)
+signal gen_complete(data: Dictionary)      ## 含 character + 最新 wallet
+signal gen_denied(data: Dictionary)        ## 小红花不足，未进造角色（reason=no_flowers + 引导语 + wallet）
 ## 引导式造角色：小仙子追问一轮（含图标选项 + 仙子问句 TTS 资源）
 signal creation_prompt(data: Dictionary)
-signal prop_created(prop: Dictionary)
+signal prop_created(data: Dictionary)      ## 含 prop + 最新 wallet
+signal prop_denied(data: Dictionary)       ## 小红花不足，未造物（reason=no_flowers + 引导语 + wallet）
 signal prop_failed(reason: String)
 signal failed(reason: String)
-# 奖赏系统：world_info 后的状态同步 / 委托完成发奖 / 转赠结果
+# 奖赏系统：world_info 后的状态同步 / 委托完成盖章升花
 signal world_state(data: Dictionary)
 signal task_complete(data: Dictionary)
-signal give_result(data: Dictionary)
 signal praise_tts(asset: String)
 ## 出站消息观测（连接未开也发射）：headless 测试/调试用，正常逻辑不要依赖它
 signal sent(msg: Dictionary)
@@ -91,15 +92,11 @@ func send_world_info(world_id: String, locations: Array, profile := {}) -> void:
 		msg["profile"] = profile
 	_send(msg)
 
-## 委托完成事件（客户端确定性判定：送达/带到/到点）。服务端匹配进行中委托则回 task_complete。
+## 委托完成事件（客户端确定性判定：送达/带到/到点）。服务端匹配进行中委托则盖 1 章，回 task_complete。
 func send_task_event(world_id: String, kind: String, extra := {}) -> void:
 	var msg := { "type": "task_event", "worldId": world_id, "kind": kind }
 	msg.merge(extra)
 	_send(msg)
-
-## 转赠贴纸给 NPC（走到对方旁交接后调用）。服务端扣背包+写受赠记忆，回 give_result。
-func send_give_item(world_id: String, to_character_id: String, item_id: String) -> void:
-	_send({ "type": "give_item", "worldId": world_id, "toCharacterId": to_character_id, "itemId": item_id })
 
 ## 语音生成物件的落位回报：客户端就近找到空位后上报 tile，服务端持久化供重载恢复。
 func send_prop_place(world_id: String, prop_id: String, tile: Vector2i) -> void:
@@ -156,19 +153,21 @@ func _dispatch(data: Dictionary) -> void:
 		"gen_progress":
 			gen_progress.emit(String(data.get("stage", "")))
 		"gen_complete":
-			gen_complete.emit(data.get("character", {}))
+			gen_complete.emit(data)
+		"gen_denied":
+			gen_denied.emit(data)
 		"creation_prompt":
 			creation_prompt.emit(data)
 		"world_state":
 			world_state.emit(data)
 		"task_complete":
 			task_complete.emit(data)
-		"give_result":
-			give_result.emit(data)
 		"praise_tts":
 			praise_tts.emit(String(data.get("ttsAsset", "")))
 		"prop_created":
-			prop_created.emit(data.get("prop", {}))
+			prop_created.emit(data)
+		"prop_denied":
+			prop_denied.emit(data)
 		"prop_failed":
 			prop_failed.emit(String(data.get("reason", "")))
 		"gen_failed", "voice_failed", "error":

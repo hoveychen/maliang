@@ -61,7 +61,7 @@ func _run(scene: Node) -> void:
 	var fixed_w := album_panel.custom_minimum_size.x
 	var fixed_h := album_panel.custom_minimum_size.y
 	var pages: Dictionary = scene.get("_album_pages")
-	for id in ["stickers", "items", "settings"]:
+	for id in ["flowers", "items", "settings"]:
 		scene._open_app(id)
 		_check(String(scene.get("_phone_open_app")) == id, "打开 app: %s" % id)
 		_check(appview.visible and not home.visible, "%s：app 视图显示、主屏隐藏" % id)
@@ -73,6 +73,24 @@ func _run(scene: Node) -> void:
 	scene._close_phone_app()
 	_check(home.visible and not appview.visible, "返回主屏")
 	_check(String(scene.get("_phone_open_app")) == "", "返回后 open_app 清空")
+
+	# 小红花/集邮 app：服务端钱包驱动 3×3 花格点亮 + 盖章进度点
+	scene.set("wallet", { "flowers": 2, "stampProgress": 1, "stampsTotal": 7 })
+	scene._refresh_album()
+	var fcells: Array = scene.get("_flower_cells")
+	_check(fcells.size() == 9, "小红花 3×3 = 9 格")
+	var lit := 0
+	for c in fcells:
+		if (c as TextureRect).modulate == Color.WHITE:
+			lit += 1
+	_check(lit == 2, "flowers=2 → 点亮 2 格花")
+	var dots: Array = scene.get("_stamp_dots")
+	var dlit := 0
+	for d in dots:
+		if (d as TextureRect).modulate == Color.WHITE:
+			dlit += 1
+	_check(dlit == 1, "stampProgress=1 → 点亮 1 个盖章进度点")
+	_check(scene._red_flower_count() == 2, "banner 小红花数=钱包 flowers")
 
 	scene._update_phone_banner()
 	var clock: Label = scene.get("_phone_clock")

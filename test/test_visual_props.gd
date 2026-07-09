@@ -39,7 +39,7 @@ func _tick() -> void:
 	match frame:
 		3:
 			# 语音造物：玩家旁就近落位 + prop_place 回报 + world_props 登记
-			scene.call("_on_prop_created", { "id": "p1", "spec": SPEC })
+			scene.call("_on_prop_created", { "prop": { "id": "p1", "spec": SPEC } })
 			var pl := _last_of("prop_place")
 			_check("prop_place reported", String(pl.get("propId", "")), "p1")
 			origin = Vector2i(int(pl.get("tileX", -1)), int(pl.get("tileY", -1)))

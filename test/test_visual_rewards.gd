@@ -1,10 +1,9 @@
 extends SceneTree
-## 奖赏系统 world 层集成断言：world_state 同步与任务 chip / 三类完成判定钩子
-## （送达=近身对话目标、带到=相邻轮询、到点=距离轮询）/ task_complete 庆祝与收集册 /
-## give 玩家走位交接。离线 demo 世界，注入服务端回包（与真实 WS 同路），
-## 出站消息经 Backend.sent 信号捕获。
+## 奖赏系统 world 层集成断言：world_state 同步钱包与任务 chip / 三类完成判定钩子
+## （送达=近身对话目标、带到=相邻轮询、到点=距离轮询）/ task_complete 盖章升花庆祝。
+## 离线 demo 世界，注入服务端回包（与真实 WS 同路），出站消息经 Backend.sent 信号捕获。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 10 \
-##       --quit-after 260 --script res://test/test_visual_rewards.gd
+##       --quit-after 120 --script res://test/test_visual_rewards.gd
 
 const DT := 0.1
 
@@ -14,7 +13,6 @@ var fails := 0
 var blue: Dictionary = {}
 var green: Dictionary = {}
 var sent: Array = []
-var give_done := 0
 
 func _initialize() -> void:
 	# TEST_SEED 固定全局 RNG（NPC 漫游/相位都吃它）：偶发失败可用同种子确定性复跑
@@ -28,7 +26,7 @@ func _initialize() -> void:
 func _task(type: String, over := {}) -> Dictionary:
 	var t := {
 		"id": "t_%s" % type, "type": type, "npcId": String(green.get("id", "")),
-		"npcName": "小绿", "rewardId": "star",
+		"npcName": "小绿", "stampStyle": "star",
 	}
 	t.merge(over, true)
 	return t
@@ -48,8 +46,8 @@ func _tick() -> void:
 		return
 	match frame:
 		3:
-			# world_state 同步：背包+进行中委托 → chip 可见、收集册亮起
-			scene.call("_on_world_state", { "inventory": { "flower": 2 },
+			# world_state 同步：钱包+进行中委托 → chip 可见、小红花计数亮起
+			scene.call("_on_world_state", { "wallet": { "flowers": 2, "stampProgress": 1, "stampsTotal": 4 },
 				"activeTask": _task("deliver", { "targetName": "小蓝", "message": "hi" }) })
 			var chip := scene.get("task_chip") as HBoxContainer
 			_check("task chip visible", chip.visible, true)
@@ -61,10 +59,10 @@ func _tick() -> void:
 				elif c is TextureRect:
 					chip_icons += 1
 			_check("task chip shows goal", chip_text.contains("小蓝"), true)
-			_check("task chip shows target+reward icons", chip_icons >= 2, true)
-			_check("inventory synced", int((scene.get("inventory") as Dictionary).get("flower", 0)), 2)
+			_check("task chip shows target+stamp icons", chip_icons >= 2, true)
+			_check("wallet flowers synced", scene.call("_red_flower_count"), 2)
 			scene.call("_toggle_album")
-			_check("album opens", (scene.get("album_panel") as PanelContainer).visible, true)
+			_check("phone opens", (scene.get("album_panel") as PanelContainer).visible, true)
 			scene.call("_toggle_album")
 		5:
 			# deliver 判定：亲自走到目标角色旁开始对话 = 送达
@@ -73,13 +71,13 @@ func _tick() -> void:
 			_check("deliver_done sent on meeting target", String(ev.get("kind", "")), "deliver_done")
 			scene.call("_exit_interaction")
 		8:
-			# task_complete：清 chip、进背包、委托人跳跃庆祝、小仙子欢呼（预制台词）
+			# task_complete（未升花）：清 chip、更新钱包盖章进度、委托人跳跃庆祝、小仙子欢呼
 			var fv := scene.get("fairy_voice") as FairyVoice
 			_check("fairy has reward cheer lines", fv.can_play("reward"), true)
-			scene.call("_on_task_complete", { "task": _task("deliver"), "rewardId": "star",
-				"rewardGlyph": "⭐", "inventory": { "flower": 2, "star": 1 } })
+			scene.call("_on_task_complete", { "task": _task("deliver"), "stampStyle": "star",
+				"flowerGained": false, "wallet": { "flowers": 2, "stampProgress": 2, "stampsTotal": 5 } })
 			_check("chip cleared on complete", (scene.get("task_chip") as HBoxContainer).visible, false)
-			_check("reward in inventory", int((scene.get("inventory") as Dictionary).get("star", 0)), 1)
+			_check("stamp progress synced", int((scene.get("wallet") as Dictionary).get("stampProgress", 0)), 2)
 			_check("quest giver celebrates (jump)", String(green.get("paper_action", "")), "jump")
 			_check("fairy cheers on reward", fv.is_playing(), true)
 		12:
@@ -102,51 +100,20 @@ func _tick() -> void:
 			var ev := _last_of("task_event")
 			_check("visit_done sent near location", String(ev.get("kind", "")), "visit_done")
 			scene.call("_set_active_task", null)
-		70:
-			# give：语音 give 指令 → 玩家走位到受赠者旁交接（拦截不进 NPC 执行器）。
-			# 玩家先传送回小蓝附近（从池塘走回去太远且隔水，不是本断言要验的东西）。
-			# 先冻结全部 NPC 漫游（同产线 _halt_npc 对受赠者的语义）：本断言只考走位交接，
-			# 旁观 NPC 随机游走曾偶发把走位终点挤到到达阈值外→give 被静默放弃→f240 误报
-			# （复现诊断:d(player,blue)=18.31 pending=false，受赠者恢复漫游后越走越远）。
-			for ex in (scene.get("_executors") as Array):
-				(ex as BehaviorExecutor).cancel()
-			var player: Dictionary = scene.get("player")
-			player["logical"] = WorldGrid.wrap_pos((blue["logical"] as Vector2) + Vector2(7.0, 0.0))
-			OccupancyMap.char_register(String(player["id"]), player["logical"], int(player["span"]))
-			scene.call("_on_character_response", { "transcript": "把花送给小蓝", "replyText": "好呀",
-				"emotion": "happy", "behaviorScript": { "commands": [
-					{ "type": "give", "params": { "character_name": "小蓝", "item": "flower" } }], "loop": false } })
-		71:
-			_check("give not instant when far", _last_of("give_item").is_empty(), true)
-			_check("blue not driven by give script", scene.call("_has_executor_for", blue), false)
-		240:
-			if give_done == 0: # 失败自诊断：定位是走位没到、被放弃、还是执行器没跑完
-				var player: Dictionary = scene.get("player")
-				var pend: Dictionary = scene.get("_pending_give")
-				var ex: Variant = scene.get("_player_executor")
-				var d := WorldGrid.shortest_delta(player["logical"], blue["logical"]).length()
-				printerr("  DIAG give stuck: d(player,blue)=%.2f pending=%s exec=%s done=%s" % [
-					d, str(not pend.is_empty()),
-					str(ex != null), str(ex != null and (ex as BehaviorExecutor).is_done())])
-			_check("give completed after walk", give_done > 0, true)
-		250:
+		68:
+			# task_complete（升花）：集满盖章换到 1 朵小红花 → 计数+1、横幅报喜
+			scene.call("_on_task_complete", { "task": _task("visit", { "locationName": "池塘" }),
+				"stampStyle": "medal", "flowerGained": true,
+				"wallet": { "flowers": 3, "stampProgress": 0, "stampsTotal": 6 } })
+			_check("flower count up on flowerGained", scene.call("_red_flower_count"), 3)
+			var banner := scene.get("banner") as Label
+			_check("banner announces flower", banner.text.contains("小红花"), true)
+		72:
 			if fails == 0:
 				print("visual_rewards PASS")
 			else:
 				printerr("visual_rewards FAILED: %d" % fails)
 			quit(fails)
-	# give 交接时刻不定（走位耗时随距离/绕障）：轮询到 give_item 出现那一帧立即断言演出与记账
-	if frame > 71 and give_done == 0:
-		var gv := _last_of("give_item")
-		if not gv.is_empty():
-			give_done = frame
-			_check("give_item payload", String(gv.get("itemId", "")), "flower")
-			_check("give recipient correct", String(gv.get("toCharacterId", "")), String(blue.get("id", "")))
-			_check("inventory pre-deducted", int((scene.get("inventory") as Dictionary).get("flower", 0)), 1)
-			_check("recipient acks with nod", String(blue.get("paper_action", "")), "nod")
-			var player: Dictionary = scene.get("player")
-			var d := WorldGrid.shortest_delta(player["logical"], blue["logical"]).length()
-			_check("giver adjacent on handoff (d=%.1f)" % d, d <= 3.4, true)
 
 func _last_of(type: String) -> Dictionary:
 	for i in range(sent.size() - 1, -1, -1):
