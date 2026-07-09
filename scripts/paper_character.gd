@@ -87,6 +87,16 @@ func play_idle(atlas: Texture2D, meta: Dictionary, world_height: float, phase :=
 	texture = atlas
 	BlobShadow.attach(self, clampf(cw * pixel_size * 0.38, 0.4, 1.4))
 
+## 可见世界高度（米）：动画图集按单格 cellH 算，静态整图按贴图高算。
+## 头顶挂饰定位/相机构图都按这个——整张图集高度是 rows×cellH，会把动画角色算高 rows 倍。
+func visible_height() -> float:
+	if texture == null:
+		return 0.0
+	var th := float(texture.get_height())
+	if not _sheet.is_empty():
+		th = float(_sheet.get("cellH", th))
+	return th * pixel_size
+
 func _refresh_geometry() -> void:
 	if texture == null:
 		return
