@@ -61,6 +61,7 @@ export async function respondToTranscript(
   adapters: ServiceAdapters,
   store: WorldStore,
   hooks?: TTSStreamHooks,
+  clientTts = false,
 ): Promise<VoiceResponse> {
   const character = store.getCharacter(worldId, characterId);
   if (!character) throw new CharacterNotFoundError(worldId, characterId);
@@ -101,6 +102,7 @@ export async function respondToTranscript(
     replyText,
     ttsAsset: '',
     emotion: intent.emotion,
+    voiceId: character.voiceId,
   };
   if (intent.kind === 'command' && intent.behaviorScript) {
     // create_prop 不是客户端执行器能力：从脚本里摘走，交给 WS 层异步造物（prop_created 推送）。
@@ -143,6 +145,12 @@ export async function respondToTranscript(
     response.task = taskCandidate;
   } else if (activeTask) {
     response.task = activeTask; // 已有委托随回应带下去（客户端断线重连后也能补提示）
+  }
+
+  // clientTts：客户端自己合成（edge-tts），服务端只出文本+voiceId，不落 TTS 资产。
+  if (clientTts) {
+    finishTurn(store, character, playerId, transcript, replyText);
+    return response;
   }
 
   const streamFn = adapters.tts.synthesizeStream?.bind(adapters.tts);
@@ -190,6 +198,7 @@ export async function greetCharacter(
   store: WorldStore,
   hooks?: TTSStreamHooks,
   rng: () => number = Math.random,
+  clientTts = false,
 ): Promise<VoiceResponse> {
   const character = store.getCharacter(worldId, characterId);
   if (!character) throw new CharacterNotFoundError(worldId, characterId);
@@ -202,7 +211,11 @@ export async function greetCharacter(
     ttsAsset: '',
     emotion: 'wave', // 招呼配挥手情绪（VoiceResponse.emotion 必填）
     greeting: true, // 客户端据此跳过「没听清」提示（招呼不是玩家发起的一轮）
+    voiceId: character.voiceId,
   };
+
+  // clientTts：客户端自己合成，服务端只出招呼文本+voiceId。
+  if (clientTts) return response;
 
   const streamFn = adapters.tts.synthesizeStream?.bind(adapters.tts);
   if (hooks && streamFn) {
