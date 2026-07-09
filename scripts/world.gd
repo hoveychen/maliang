@@ -2939,6 +2939,10 @@ func _request_create(intent: String) -> void:
 ## 桌面/编辑器没有该单例 → _asr_local 保持 null，一切走服务端识别（原路径）。
 func _setup_local_asr() -> void:
 	if not Engine.has_singleton("MaliangAsr"):
+		# Android 上没有单例 = 导出漏带 ASR 的 AAR（坏包），硬报错拒进游戏；
+		# 桌面/编辑器天然没有该单例，合法走服务端识别。
+		if AsrGuard.is_fatal(OS.get_name(), false):
+			AsrGuard.block(get_tree(), AsrGuard.MSG_MISSING)
 		return
 	_asr_local = Engine.get_singleton("MaliangAsr")
 	_asr_local.connect("final_result", _on_local_asr_final)
@@ -2958,8 +2962,12 @@ func _on_local_asr_final(text: String) -> void:
 	backend.send_voice_transcript(world_id, _selected_id(), t)
 
 func _on_local_asr_error(msg: String) -> void:
-	push_warning("端侧 ASR 出错，本次运行回落服务端识别: %s" % msg)
 	_local_asr_session = false
+	# Android 上端侧 ASR 是硬依赖：初始化/识别失败即模型问题，硬报错，绝不静默回落服务端。
+	if AsrGuard.is_fatal(OS.get_name(), false):
+		AsrGuard.block(get_tree(), AsrGuard.MSG_INIT_FAILED % msg)
+		return
+	push_warning("端侧 ASR 出错，本次运行回落服务端识别: %s" % msg)
 	_asr_local = null
 
 # ── 近身对话开放麦（VAD 自动断句：开口即录、说完即发，零按钮零模式）─────────

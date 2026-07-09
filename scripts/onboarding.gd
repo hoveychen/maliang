@@ -91,12 +91,19 @@ func _ready() -> void:
 ## 端侧 ASR（与 world.gd 同路由策略：插件就绪走本地，否则整段 PCM 上传）。
 func _setup_local_asr() -> void:
 	if not Engine.has_singleton("MaliangAsr"):
+		# Android 上没有单例 = 导出漏带 ASR 的 AAR（坏包），硬报错拒进游戏；桌面/编辑器合法走服务端。
+		if AsrGuard.is_fatal(OS.get_name(), false):
+			AsrGuard.block(get_tree(), AsrGuard.MSG_MISSING)
 		return
 	_asr_local = Engine.get_singleton("MaliangAsr")
 	_asr_local.connect("final_result", _on_local_final)
-	_asr_local.connect("asr_error", func(_msg: String) -> void:
-		_asr_local = null
-		_local_session = false)
+	_asr_local.connect("asr_error", func(msg: String) -> void:
+		_local_session = false
+		# Android：端侧 ASR 硬依赖，失败即报错，绝不静默回落。
+		if AsrGuard.is_fatal(OS.get_name(), false):
+			AsrGuard.block(get_tree(), AsrGuard.MSG_INIT_FAILED % msg)
+			return
+		_asr_local = null)
 	_asr_local.initialize()
 
 func _exit_tree() -> void:
