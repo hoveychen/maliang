@@ -55,23 +55,23 @@ export const ICON_PROMPTS: Record<string, string> = {
   blue: 'a single glossy droplet of bright blue paint, no face', purple: 'a single glossy droplet of bright purple paint, no face',
   pink: 'a single glossy droplet of bright pink paint, no face', white: 'a single glossy droplet of white paint, no face',
   black: 'a single glossy droplet of black paint, no face',
-  // size → 大小对比记号（一大一小圆,当前尺寸高亮上色,另一个灰色轮廓,无脸）
-  small: 'a size comparison icon: a small bright orange circle next to a big gray outline circle, the small one highlighted, no face',
-  medium: 'a size comparison icon: three circles in a row small medium large, only the middle medium circle is bright orange the others gray outline, no face',
-  big: 'a size comparison icon: a big bright orange circle next to a small gray outline circle, the big one highlighted, no face',
-  // trait → 象征物（clean symbol,无身体无脸）
-  fly: 'a pair of white feathery angel wings, symbol only, no body no face',
-  swim: 'a single blue water droplet with little wave ripples, symbol only, no face',
-  fluffy: 'a soft fluffy white cloud of fur, symbol only, no face',
-  glow: 'a bright glowing yellow star with sparkles, symbol only, no face',
+  // size → 体型剪影（瘦/正常/胖,虚线勾边,一眼看懂大小）
+  small: 'a minimal icon of a thin skinny slim body figure silhouette drawn with a dashed dotted outline, front view, no face',
+  medium: 'a minimal icon of a normal average body figure silhouette drawn with a dashed dotted outline, front view, no face',
+  big: 'a minimal icon of a big fat round chubby body figure silhouette drawn with a dashed dotted outline, front view, no face',
+  // trait → 象征物（clean symbol,无身体无脸;会飞/会游泳要动感）
+  fly: 'a dynamic action icon of a bird soaring upward with curved speed motion lines showing flight, symbol only, no face',
+  swim: 'a dynamic action icon of a fish diving through curvy water waves with splash and motion lines showing swimming, symbol only, no face',
+  fluffy: 'a round fuzzy furball completely covered in soft fur with many little fur tufts and spikes sticking out all around the edge, NOT a cloud, symbol only, no face',
+  glow: 'a bright glowing yellow star with radiating sparkles, symbol only, no face',
   horn: 'a single spiral unicorn horn, symbol only, no body no face',
   wings: 'a pair of colorful butterfly wings, symbol only, no body no face',
-  // personality → 表情丸脸（这类就是脸,合适）
-  lively: 'a round face with a big open laughing smile and sparkly eyes',
-  gentle: 'a round face with a soft gentle warm smile and calm eyes',
-  brave: 'a round face with a determined confident brave expression',
-  shy: 'a round blushing face with a shy little smile looking away',
-  smiley: 'a round face with a simple big happy smile',
+  // personality → 极简统一的圆脸表情符号（同一套扁平线条脸,只表情不同）
+  lively: 'a minimal flat simple round emoji face, clean thin line style, big open grin with sparkle eyes',
+  gentle: 'a minimal flat simple round emoji face, clean thin line style, soft closed-eye gentle smile',
+  brave: 'a minimal flat simple round emoji face, clean thin line style, determined straight eyebrows and confident smile',
+  shy: 'a minimal flat simple round emoji face, clean thin line style, two round blush cheeks and a small wavy shy smile',
+  smiley: 'a minimal flat simple round emoji face, clean thin line style, two dot eyes and a simple curved smile',
 };
 
 /** 取某选项的生图 prompt（未知回退到 label 兜底）。 */
