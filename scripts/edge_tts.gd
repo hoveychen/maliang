@@ -42,6 +42,9 @@ const _VOICE_MAP := {
 const _VOICE_POOL := ["zh-CN-XiaoyiNeural", "zh-CN-YunxiaNeural", "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural"]
 
 static func map_voice(voice_id: String) -> String:
+	# 服务端音色目录（voice_catalog.ts）直接下发 edge 原生音色名：直通不映射
+	if voice_id.begins_with("zh-"):
+		return voice_id
 	if _VOICE_MAP.has(voice_id):
 		return _VOICE_MAP[voice_id]
 	if voice_id.begins_with("zf_"):

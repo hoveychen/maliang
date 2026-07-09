@@ -53,6 +53,12 @@ func _run_once() -> void:
 	fails += _check("ssml escaped", ssml.contains("小猫 &amp; &lt;朋友&gt;"), true)
 	fails += _check("ssml no raw angle", ssml.contains("<朋友>"), false)
 
+	# ── 音色映射：edge 原生名直通、legacy 映射、未知稳定哈希 ──
+	fails += _check("map passthrough", EdgeTts.map_voice("zh-CN-YunjianNeural"), "zh-CN-YunjianNeural")
+	fails += _check("map tw passthrough", EdgeTts.map_voice("zh-TW-HsiaoChenNeural"), "zh-TW-HsiaoChenNeural")
+	fails += _check("map fairy legacy", EdgeTts.map_voice("mock-voice-cn-fairy"), "zh-CN-XiaoyiNeural")
+	fails += _check("map unknown stable", EdgeTts.map_voice("weird-id"), EdgeTts.map_voice("weird-id"))
+
 	# ── HTTP Date（RFC 2616）→ unix 秒 ──
 	fails += _check("http date", EdgeTts.parse_http_date("Thu, 09 Jul 2026 08:14:00 GMT"), 1783584840)
 	fails += _check("http date with prefix space", EdgeTts.parse_http_date(" Thu, 09 Jul 2026 08:14:00 GMT"), 1783584840)
