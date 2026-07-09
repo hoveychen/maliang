@@ -31,8 +31,7 @@ const LAND_TIME := 0.45   ## world_ready 后仙子冲刺到终点（_prog→1）
 const PORTAL_W := 200.0    ## 传送门屏上宽（竖椭圆——门一般是竖着的，非正圆）
 const PORTAL_H := 280.0    ## 传送门屏上高
 const PORTAL_TEX := 240    ## 传送门贴图分辨率（程序化生成方形，靠 STRETCH_SCALE 拉成椭圆）
-const PORTAL_SPIN := 0.6   ## 传送门漩涡自转角速度（弧度/秒）
-const REACT_DUR := 0.7     ## 点击屏幕后小仙子反应动作（转圈+上蹿+放大）时长
+const REACT_DUR := 0.7     ## 点击屏幕后小仙子纸片翻转反应时长
 
 var _fade_root: Control    ## 淡出目标（背景+三点挂它下面，改 modulate:a 剥离）
 var _portal: TextureRect   ## 航道终点的传送门（挂 CanvasLayer 上、盖过 _fade_root，单独转场）
@@ -134,7 +133,7 @@ func _make_portal_tex(size: int) -> ImageTexture:
 				continue
 			var ang := atan2(dy, dx)
 			var ring := exp(-pow((r - 0.80) / 0.13, 2.0))         # 紧亮环带
-			var swirl := 0.68 + 0.32 * sin(ang * 6.0 + r * 16.0)  # 角向螺旋
+			var swirl := 0.85 + 0.15 * sin(ang * 3.0 + r * 8.0)   # 轻柔螺旋（门静止，弱化免成风车）
 			var glow := pow(1.0 - r, 1.6)                          # 门心辉光填充
 			var a := clampf(ring * (0.85 + 0.15 * swirl) + glow * 0.55 * swirl, 0.0, 1.0)
 			var col: Color
@@ -190,39 +189,35 @@ func _layout_fairy() -> void:
 	var bob := sin(_t * 2.1) * 26.0 + sin(_t * 4.7) * 7.0 # 大摆叠小颤，忽上忽下
 	var tilt := sin(_t * 2.1) * 0.10                       # 随起伏轻微摆头
 	var s := 1.0 + sin(_t * 2.6) * 0.05
-	if _react_t > 0.0: # 点击反应：欢快转一圈 + 上蹿再落 + 放大再收
-		var k := _react_t / REACT_DUR # 1→0
-		tilt += TAU * k
-		bob -= sin((1.0 - k) * PI) * 46.0
-		s += sin((1.0 - k) * PI) * 0.22
+	var flip := 1.0
+	if _react_t > 0.0: # 点击反应：纸片翻转一圈（scale.x 过 0＝立起来翻面）+ 轻微上蹿
+		var prog := 1.0 - _react_t / REACT_DUR # 0→1
+		flip = cos(prog * TAU)                 # 1→-1→1，一次纸片翻转
+		bob -= sin(prog * PI) * 20.0
+		s += sin(prog * PI) * 0.10
 	var base_y := vp.y * 0.40
 	_fairy.offset_left = x
 	_fairy.offset_right = x + FAIRY_W
 	_fairy.offset_top = base_y + bob
 	_fairy.offset_bottom = base_y + FAIRY_H + bob
 	_fairy.rotation = tilt
-	_fairy.scale = Vector2(s, s)
+	_fairy.scale = Vector2(s * flip, s) # x 方向翻转做纸片翻面
 
 ## 仙子飞行终点＝门心（_prog=1 时仙子框中心），转场里仙子被吸入此处。
 func _finish_center() -> Vector2:
 	var vp := _fade_root.size
 	return Vector2(vp.x - FLY_MARGIN - FAIRY_W * 0.5, vp.y * 0.40 + FAIRY_H * 0.5)
 
-## 传送门定位：始终自转（漩涡流动），未转场时钉在航道终点并轻微呼吸；
-## 转场开始后位置/缩放交给 tween，这里只保留自转。
+## 传送门定位：静止的竖椭圆门（像 Portal——门本身不转不动），钉在航道终点；
+## 转场开始后位置/缩放交给 tween。
 func _layout_portal() -> void:
-	if _portal == null:
-		return
-	_portal.rotation = _t * PORTAL_SPIN
-	if _transitioning or _fade_root == null:
+	if _portal == null or _transitioning or _fade_root == null:
 		return
 	var pc := _finish_center()
 	_portal.offset_left = pc.x - PORTAL_W * 0.5
 	_portal.offset_top = pc.y - PORTAL_H * 0.5
 	_portal.offset_right = pc.x + PORTAL_W * 0.5
 	_portal.offset_bottom = pc.y + PORTAL_H * 0.5
-	var ps := 1.0 + sin(_t * 2.2) * 0.05
-	_portal.scale = Vector2(ps, ps)
 
 ## 加载等待时点屏幕：小仙子做个欢快反应（_layout_fairy 里的转圈+上蹿），点处冒颗小星星——
 ## 让等待的小朋友有事可干。转场开始后不再响应（别打断穿越）。
