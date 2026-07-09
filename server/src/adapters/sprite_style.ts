@@ -19,6 +19,24 @@ export function buildSpritePrompt(visualDescription: string): string {
 }
 
 /**
+ * 图标画风（引导式造角色的选项卡，见 docs/guided-creation-design.md §4）：
+ * 保留纸片马里奥贴纸感（扁平上色 + 粗黑描边），但**不套角色框**——不要 chibi 大头小身、
+ * 不要脸/手脚、不要全身朝右。只画「一个居中的简单符号/物体」，抽象概念别拟人化。
+ * 白色 die-cut 贴纸边不靠模型画（模型不稳），交给 addStickerBorder 程序后期描。
+ */
+export const ICON_STYLE_SUFFIX =
+  'flat 2D sticker icon, a single centered simple subject, bold clean black outline, ' +
+  'flat cel shading with bright solid colors, minimal and iconic, thick and chunky shapes, ' +
+  'NOT a character illustration, do NOT add a face, eyes, arms or legs unless the subject itself is a face or creature, ' +
+  'no full-body pose, no 3/4 view, front-facing flat, ' +
+  'on a pure solid chroma-green #00FF00 background, no shadow, no ground, no text, no watermark';
+
+export function buildIconPrompt(visualDescription: string): string {
+  const subject = visualDescription.trim().replace(/[.。，,]+$/, '');
+  return `${subject}. ${ICON_STYLE_SUFFIX}`;
+}
+
+/**
  * 小神仙（引导精灵）的形象主体：娜薇式发光小仙子——迷你仙子女孩 + 青蓝光晕 +
  * 透明虫翅 + 星尘，游戏内按头部大小悬浮渲染。统一画风后缀仍由 buildSpritePrompt 拼接。
  */

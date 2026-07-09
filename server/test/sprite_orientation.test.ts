@@ -102,6 +102,10 @@ function adaptersWithFacing(facings: SpriteFacing[], onImageCall?: () => void) {
       onImageCall?.();
       return redBluePng();
     },
+    async generateIcon(_desc: string) {
+      onImageCall?.();
+      return redBluePng();
+    },
   };
   let i = 0;
   adapters.orientation = {

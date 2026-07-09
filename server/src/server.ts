@@ -8,7 +8,7 @@ import type { ServiceAdapters, ASRStream } from './adapters/types.ts';
 import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
-import { createCharacter, generateSprite, ModerationError } from './orchestrator.ts';
+import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
 import { triggerIdleAnimation } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
@@ -354,10 +354,11 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
     return { icons: store.listCreationIcons() };
   });
-  app.post<{ Querystring: { force?: string } }>('/admin/creation-icons', async (req, reply) => {
+  app.post<{ Querystring: { force?: string; only?: string } }>('/admin/creation-icons', async (req, reply) => {
     if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
     const force = req.query.force === '1' || req.query.force === 'true';
-    const result = await generateCreationIcons(adapters, store, { force });
+    const only = (req.query.only ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    const result = await generateCreationIcons(adapters, store, { force, only });
     return { ...result, icons: store.listCreationIcons() };
   });
 
@@ -558,25 +559,28 @@ export async function createCharacterAsync(
 }
 
 /**
- * 引导式造角色图标批量生成（P3）：遍历图标库每个选项，复用角色立绘管线 generateSprite
- * （生图→抠图→朝向兜底→putAsset）出一张图，存「option id→asset hash」映射。
- * 幂等：已生成的跳过，除非 force。返回生成/跳过/失败清单。绝不抛（单项失败不影响其它）。
+ * 引导式造角色图标批量生成（P3）：遍历图标库每个选项，走图标专用管线 generateIconAsset
+ * （图标画风生图→抠图→程序加白 die-cut 边→putAsset）出一张图，存「option id→asset hash」映射。
+ * 幂等：已生成的跳过，除非 force。opts.only 限定只生成指定 id（低成本验证画风）。
+ * 返回生成/跳过/失败清单。绝不抛（单项失败不影响其它）。
  */
 export async function generateCreationIcons(
   adapters: ServiceAdapters,
   store: WorldStore,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; only?: string[] } = {},
 ): Promise<{ generated: string[]; skipped: string[]; failed: string[] }> {
   const generated: string[] = [];
   const skipped: string[] = [];
   const failed: string[] = [];
+  const onlySet = opts.only && opts.only.length > 0 ? new Set(opts.only) : null;
   for (const o of CREATION_OPTIONS) {
+    if (onlySet && !onlySet.has(o.id)) continue;
     if (!opts.force && store.getCreationIcon(o.id)) {
       skipped.push(o.id);
       continue;
     }
     try {
-      const hash = await generateSprite(adapters, iconPrompt(o.id), store);
+      const hash = await generateIconAsset(adapters, iconPrompt(o.id), store);
       store.setCreationIcon(o.id, hash);
       generated.push(o.id);
     } catch (err) {
