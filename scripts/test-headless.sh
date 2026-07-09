@@ -42,6 +42,7 @@ UNIT_TESTS=(
   test_player_profile
   test_backend_player_id
   test_webp_load
+  test_loading_progress
   test_dialog_camera
   test_phone_menu
 )

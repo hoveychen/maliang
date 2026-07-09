@@ -20,11 +20,20 @@ const FADE_TIME := 0.45   ## 揭开淡出时长
 const MIN_SHOW_MS := 600  ## 最短显示：避免过场一闪而过（世界瞬间就绪时也留个照面）
 const DOT_COUNT := 3
 
+const FAIRY_W := 260.0    ## 仙子精灵框宽/高（横飞时按框定位）
+const FAIRY_H := 178.0
+const FLY_MARGIN := 44.0  ## 飞行航道左右留白
+const PROG_FOLLOW := 2.5  ## 显示进度追真进度的速度（每秒）：真里程碑落地时仙子快速前冲
+const PROG_CREEP := 0.035 ## 真进度停滞时的慢爬（每秒），朝 0.9 渐近但永不到顶——到顶只由 world_ready 触发
+const CREEP_CEIL := 0.9   ## 慢爬封顶：网络久等时仙子最多爬到 90%，留最后一截给「真就绪」
+const LAND_TIME := 0.5    ## world_ready 后仙子冲刺到终点（_prog→1）的时长
+
 var _fade_root: Control    ## 淡出目标（整层视觉挂它下面，改 modulate:a）
 var _fairy: TextureRect
 var _dots: Array[ColorRect] = []
 var _t := 0.0
-var _fairy_base_y := 0.0
+var _prog := 0.0           ## 显示进度 [0,1]：驱动仙子横向位置；真进度来自 _world.ready_progress()
+var _landing := false      ## world_ready 后接管 _prog（tween 冲到 1.0），_process 不再跟随真进度
 var _shown_at := 0
 var _world: Node = null
 var _revealing := false    ## 已开始揭开（防重复 spawn/reveal）
@@ -53,21 +62,18 @@ func _build_overlay() -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_fade_root.add_child(bg)
 
-	# 居中飘动的小仙子（bob + 呼吸，见 _process）——「小仙子正在布置世界」的无字表达
+	# 横飞的小仙子（bob + 呼吸 + 随就绪进度从左飞到右，见 _process）——把等待可视化成
+	# 「小仙子布置世界，飞到尽头就绪」，让慢网也有进度感、且揭幕严格等仙子飞到头。
+	# 锚到左上角：offset 即绝对像素，_process 每帧按 _prog 摆 X。
 	_fairy = TextureRect.new()
 	_fairy.texture = load("res://assets/fairy.png")
 	_fairy.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_fairy.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_fairy.set_anchors_preset(Control.PRESET_CENTER)
-	_fairy.custom_minimum_size = Vector2(260.0, 178.0)
-	_fairy.offset_left = -130.0
-	_fairy.offset_right = 130.0
-	_fairy.offset_top = -140.0
-	_fairy.offset_bottom = 38.0
-	_fairy.pivot_offset = Vector2(130.0, 89.0)
+	_fairy.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_fairy.custom_minimum_size = Vector2(FAIRY_W, FAIRY_H)
+	_fairy.pivot_offset = Vector2(FAIRY_W * 0.5, FAIRY_H * 0.5) # 呼吸缩放绕框心
 	_fairy.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fade_root.add_child(_fairy)
-	_fairy_base_y = _fairy.offset_top
 
 	# 三点脉动：不识字也懂的「处理中」信号（奶油白圆点，顺序呼吸）
 	var dot_size := 22.0
@@ -90,11 +96,8 @@ func _build_overlay() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
-	if _fairy != null:
-		_fairy.offset_top = _fairy_base_y + sin(_t * 1.6) * 12.0
-		_fairy.offset_bottom = _fairy_base_y + 178.0 + sin(_t * 1.6) * 12.0
-		var s := 1.0 + sin(_t * 2.0) * 0.04
-		_fairy.scale = Vector2(s, s)
+	_advance_progress(delta)
+	_layout_fairy()
 	# 三点顺序脉动（相位错开），alpha 在 0.35~1.0 之间呼吸
 	for i in range(_dots.size()):
 		var a := 0.35 + 0.65 * (0.5 + 0.5 * sin(_t * 4.0 - i * 0.9))
@@ -106,6 +109,35 @@ func _process(delta: float) -> void:
 	_frames += 1
 	if _frames >= 2:
 		_spawn_world()
+
+## 推进显示进度：真进度领先就快速追上（里程碑落地→仙子前冲）；真进度停滞则慢爬向
+## CREEP_CEIL 渐近但不到顶。_landing 后由 tween 独占 _prog（冲刺到终点），这里让路。
+func _advance_progress(delta: float) -> void:
+	if _landing:
+		return
+	var real := 0.0
+	if _world != null and _world.has_method("ready_progress"):
+		real = _world.ready_progress()
+	if real > _prog:
+		_prog = move_toward(_prog, real, PROG_FOLLOW * delta)
+	else:
+		_prog = move_toward(_prog, CREEP_CEIL, PROG_CREEP * delta)
+
+## 按 _prog 把仙子从左飞到右，叠竖直 bob 与呼吸缩放。锚在左上角，offset 即绝对像素。
+func _layout_fairy() -> void:
+	if _fairy == null or _fade_root == null:
+		return
+	var vp := _fade_root.size
+	var travel := maxf(vp.x - FAIRY_W - 2.0 * FLY_MARGIN, 0.0)
+	var x := FLY_MARGIN + travel * clampf(_prog, 0.0, 1.0)
+	var bob := sin(_t * 1.6) * 12.0
+	var base_y := vp.y * 0.40
+	_fairy.offset_left = x
+	_fairy.offset_right = x + FAIRY_W
+	_fairy.offset_top = base_y + bob
+	_fairy.offset_bottom = base_y + FAIRY_H + bob
+	var s := 1.0 + sin(_t * 2.0) * 0.04
+	_fairy.scale = Vector2(s, s)
 
 func _spawn_world() -> void:
 	_revealing = true # 只此一次，之后只等 world_ready
@@ -130,6 +162,12 @@ func _on_world_ready() -> void:
 	var elapsed := Time.get_ticks_msec() - _shown_at
 	if elapsed < MIN_SHOW_MS:
 		await get_tree().create_timer((MIN_SHOW_MS - elapsed) / 1000.0).timeout
+	# 「飞到头 = 真就绪」：先让仙子冲刺到航道终点（_prog→1），再淡出交还世界。
+	# _landing 接管 _prog，_advance_progress 让路，避免与 tween 抢值。
+	_landing = true
+	var land := create_tween()
+	land.tween_property(self, "_prog", 1.0, LAND_TIME)
+	await land.finished
 	var tw := create_tween()
 	tw.tween_property(_fade_root, "modulate:a", 0.0, FADE_TIME)
 	await tw.finished

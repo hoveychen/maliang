@@ -5,6 +5,11 @@ extends Node
 ## 默认指向 muvee 生产后端；本地开发用 MALIANG_API_BASE 环境变量覆盖。
 @export var base := "https://maliang-api.muveeai.com"
 
+## 引导世界的网络超时。必须严格 < World.READY_TIMEOUT_SEC，保证慢网也在 loading 揭幕前定音
+## （成功走正常路径 / 超时走离线），杜绝「揭幕后 get_world 才返回、玩家被硬拽到仙子旁」的启动瞬移。
+## 该不变量由 test_loading_progress 守护。
+const GET_WORLD_TIMEOUT_SEC := 18.0
+
 func _ready() -> void:
 	var env := OS.get_environment("MALIANG_API_BASE")
 	if not env.is_empty():
@@ -28,6 +33,7 @@ func create_world() -> Dictionary:
 ## 拉取指定世界状态（含角色）。失败返回空字典。
 func get_world(id: String) -> Dictionary:
 	var http := HTTPRequest.new()
+	http.timeout = GET_WORLD_TIMEOUT_SEC # 超时 → request_completed 带 res[1]!=200 → 返回 {} 走离线（见常量注释）
 	add_child(http)
 	var err := http.request(base + "/worlds/" + id)
 	if err != OK:
