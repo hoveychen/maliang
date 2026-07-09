@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMockAdapters } from '../src/adapters/mock.ts';
-import { newCreationState, type CreationState, type GuideCreationResult } from '../src/types.ts';
+import { INITIAL_FLOWERS, newCreationState, type CreationState, type GuideCreationResult } from '../src/types.ts';
 import { CREATION_OPTIONS, findOption, optionsByCategory } from '../src/creation_options.ts';
 import { buildServer, handleWsMessage, newVoiceSession, type VoiceSession } from '../src/server.ts';
 import { WorldStore } from '../src/persistence.ts';
@@ -160,6 +160,41 @@ test('快捷方式：一句说全 → 入口首轮即 done，不发 creation_pro
     assert.equal(sent.some((m) => m.type === 'creation_prompt'), false, '快捷路径不追问');
     assert.ok(sent.some((m) => m.type === 'gen_complete'));
     assert.equal(store.listCharacters('default').length, before + 1);
+  } finally {
+    await close();
+  }
+});
+
+test('小红花扣费：引导造角色 done → 恰扣 1 朵花，gen_complete 带最新钱包', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    assert.equal(store.getWallet('default').flowers, INITIAL_FLOWERS, '新世界初始 3 花');
+    // 快捷路径：一句说全 → 首轮即 done → createCharacterAsync 扣 1 朵
+    const sent = await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只会飞的红色小猫' });
+    const done = sent.find((m) => m.type === 'gen_complete')!;
+    assert.ok(done, '应 gen_complete');
+    assert.equal(store.getWallet('default').flowers, INITIAL_FLOWERS - 1, '造角色恰扣 1 朵(不重复扣)');
+    assert.equal((done.wallet as { flowers: number }).flowers, INITIAL_FLOWERS - 1, 'gen_complete 带扣费后钱包');
+  } finally {
+    await close();
+  }
+});
+
+test('小红花门槛：0 花时造角色被拦 → gen_denied，不开会话不入库', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    store.spendFlower('default', INITIAL_FLOWERS); // 花光
+    const session = newVoiceSession();
+    const before = store.listCharacters('default').length;
+    const sent = await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只小猫' });
+    const denied = sent.find((m) => m.type === 'gen_denied');
+    assert.ok(denied, '0 花应回 gen_denied');
+    assert.equal(denied!.reason, 'no_flowers');
+    assert.equal(session.creation, null, '0 花不开引导会话');
+    assert.equal(sent.some((m) => m.type === 'gen_complete'), false, '不应造出角色');
+    assert.equal(store.listCharacters('default').length, before, '角色数不变');
+    assert.equal(store.getWallet('default').flowers, 0, '拦截不动账');
   } finally {
     await close();
   }
