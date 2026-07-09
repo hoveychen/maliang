@@ -2393,6 +2393,7 @@ func _on_failed(reason: String) -> void:
 ## _bootstrapping 全程置位，无论在线/离线都在收尾清零——world_ready 就绪判定据此知道引导已结束。
 func _bootstrap() -> void:
 	_bootstrapping = true
+	_boot_status = "连接精灵世界…"
 	_apply_player_sprite() # 档案形象替换占位（并行拉取，不阻塞世界引导）
 	# 加载固定的 default 世界（含预生成村民），不再每次新建
 	var world: Dictionary = await api.get_world("default")
@@ -2408,8 +2409,14 @@ func _bootstrap() -> void:
 			(n["node"] as Node).queue_free() # 清掉离线占位
 		npcs.clear()
 		var chars: Array = world.get("characters", [])
-		for c in chars:
-			await _spawn_server_character(c as Dictionary, Vector2.INF)
+		# 逐个村民推进 boot 子进度：这段（逐个下载/解码立绘）是引导里最耗时的长尾，
+		# 每落一个村民就把 _boot_sub 往前推一格，loading 仙子据此持续前行，不再停门前干等。
+		var total := chars.size()
+		for i in range(total):
+			_boot_status = "唤醒村民 %d/%d" % [i + 1, total]
+			await _spawn_server_character(chars[i] as Dictionary, Vector2.INF)
+			_boot_sub = float(i + 1) / float(total) if total > 0 else 1.0
+		_boot_status = "布置世界…"
 		_restore_world_props(world.get("props", []))
 		# 玩家搬到小神仙旁边降生，相机跟着玩家过去
 		var fairy := _find_fairy()
@@ -2419,7 +2426,11 @@ func _bootstrap() -> void:
 				var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
 				player["logical"] = spot
 				OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	else:
+		_boot_status = "离线模式"
 	_boot_stage = 2 # 角色/props 就位、玩家已落到最终位——引导侧全部完成
+	_boot_sub = 1.0
+	_boot_status = "就绪"
 	_bootstrapping = false
 
 ## 首屏就绪守望：等首屏 chunk 全 skin 完 && 引导结束，最短 READY_MIN_SEC、最长 READY_TIMEOUT_SEC，
@@ -2427,15 +2438,31 @@ func _bootstrap() -> void:
 ## 计时累加帧 delta（仿真时间）而非墙钟：headless 下帧比真机快得多，墙钟会让最短门永不满足。
 var _bootstrapping := false
 var _boot_stage := 0 ## 引导里程碑：0=网络进行中，1=get_world 已定音，2=角色/props/玩家全就位（见 _bootstrap）
+var _boot_sub := 0.0  ## stage 1 内的细粒度子进度 [0,1]：逐个村民就位时推进（消除长尾期仙子停顿）
+var _boot_status := "" ## 当前引导阶段的人读文案；loading debug 浮层轮询 ready_status() 显示（release 不显示）
 var _world_ready_sent := false
 
 ## 世界就绪进度 [0,1)：loading 过场用它驱动仙子横向飞行。两条并行推进——
 ## 首屏 chunk 铺设 与 在线引导里程碑——各占一半；封顶 0.95，真正的 1.0（落地揭幕）
 ## 由 world_ready 信号触达，保证「飞到头」= 真就绪，而非到点硬放行。
+## boot 段细粒度：stage0=0；stage1 期间 0.4→1.0 随村民逐个就位（_boot_sub）平滑推进；stage2=1.0——
+## 把最耗时的「逐村民下载立绘」长尾摊成连续进度，仙子据此持续前行而非卡在门前。
 func ready_progress() -> float:
 	var chunk_f := chunk_manager.skinned_fraction() if chunk_manager != null else 0.0
-	var boot_f := clampf(float(_boot_stage) / 2.0, 0.0, 1.0)
+	var boot_f := 0.0
+	if _boot_stage >= 2:
+		boot_f = 1.0
+	elif _boot_stage == 1:
+		boot_f = 0.4 + 0.6 * clampf(_boot_sub, 0.0, 1.0)
 	return clampf(0.08 + 0.46 * chunk_f + 0.46 * boot_f, 0.0, 0.95)
+
+## 当前就绪阶段的人读文案（loading debug 浮层轮询显示；release 构建不显示，见 loading.gd）。
+## 引导文案就绪前（极早期）回落到首屏铺设百分比，让 debug 浮层从头到尾都有信息。
+func ready_status() -> String:
+	if not _boot_status.is_empty():
+		return _boot_status
+	var chunk_f := chunk_manager.skinned_fraction() if chunk_manager != null else 0.0
+	return "铺草地 %d%%" % int(chunk_f * 100.0)
 
 func _watch_world_ready() -> void:
 	var elapsed := 0.0

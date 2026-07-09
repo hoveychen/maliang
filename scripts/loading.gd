@@ -43,6 +43,7 @@ var _fade_root: Control    ## 淡出目标（背景+三点挂它下面，改 mod
 var _portal: TextureRect   ## 航道终点的传送门（挂 CanvasLayer 上、盖过 _fade_root，单独转场）
 var _fairy: TextureRect
 var _fairy_atlas: AtlasTexture ## 仙子动画图集的取帧窗口（每帧移 region 播 idle 动画）
+var _status_label: Label   ## 调试浮层：当前加载阶段文案+进度百分比（仅 debug 构建，release 不建，见 _build_overlay）
 var _dots: Array[ColorRect] = []
 var _t := 0.0
 var _prog := 0.0           ## 显示进度 [0,1]：驱动仙子横向位置；真进度来自 _world.ready_progress()
@@ -129,6 +130,21 @@ func _build_overlay() -> void:
 	_portal.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(_portal)
 
+	# 调试状态浮层（仅 debug 构建，与世界里的 FPS/坐标调试信息同门控 OS.is_debug_build()）：
+	# 左上角小字显示当前在加载什么资源+进度百分比，方便知道慢在哪。release 构建不建，纯三点画风。
+	if OS.is_debug_build():
+		_status_label = Label.new()
+		_status_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		_status_label.offset_left = 16.0
+		_status_label.offset_top = 12.0
+		_status_label.add_theme_font_size_override("font_size", 20)
+		_status_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.85))
+		_status_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+		_status_label.add_theme_constant_override("outline_size", 4)
+		_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_status_label.text = "启动中…"
+		_fade_root.add_child(_status_label) # 挂 _fade_root：随过场一起淡出
+
 ## 程序化生成发光漩涡传送门：紧亮的高斯环带（r≈0.80）+ 门心径向辉光填充 + 角向螺旋
 ## （自转即漩涡流动）。门心留半透发光（青→白），既能透出飞入的仙子，放大时又用魔法光
 ## 水满屏撑起 zoom 吞屏。颜色内→外：近白青→青→紫。返回 ImageTexture，无外部素材依赖。
@@ -173,6 +189,7 @@ func _process(delta: float) -> void:
 	for i in range(_dots.size()):
 		var a := 0.35 + 0.65 * (0.5 + 0.5 * sin(_t * 4.0 - i * 0.9))
 		_dots[i].modulate.a = a
+	_update_status_label()
 
 	if _revealing:
 		return
@@ -194,6 +211,15 @@ func _advance_progress(delta: float) -> void:
 	else:
 		_prog = move_toward(_prog, CREEP_CEIL, PROG_CREEP * delta)
 
+## 刷新调试状态浮层（仅 debug 构建存在）：显示世界当前引导阶段文案 + 显示进度百分比。
+func _update_status_label() -> void:
+	if _status_label == null:
+		return
+	var stage := "启动中…"
+	if _world != null and _world.has_method("ready_status"):
+		stage = String(_world.call("ready_status"))
+	_status_label.text = "%s   %d%%" % [stage, int(clampf(_prog, 0.0, 1.0) * 100.0)]
+
 ## 按 _prog 把仙子从左飞到右：分层上下起伏（大摆+小颤）+ 随起伏轻微倾角，飞得更活泼；
 ## 叠加点击反应（转圈+上蹿+放大）。锚在左上角，offset 即绝对像素，绕框心旋转/缩放。
 func _layout_fairy() -> void:
@@ -201,7 +227,13 @@ func _layout_fairy() -> void:
 		return
 	var vp := _fade_root.size
 	var travel := maxf(vp.x - FAIRY_W - 2.0 * FLY_MARGIN, 0.0)
-	var x := FLY_MARGIN + travel * clampf(_prog, 0.0, 1.0)
+	# 缓入映射（pow>1）：等待/慢爬期仙子停在航道中段而非一冲就挤到门前，只有真就绪（_prog→1）才抵达门口。
+	# 端点不变（eased(0)=0, eased(1)=1），_finish_center 的落点一致。
+	var eased := pow(clampf(_prog, 0.0, 1.0), 1.6)
+	# 持续横向漂移：即便 _prog 停滞，仙子也一直左右飘（配合上下起伏＝四处飞着布置世界），永不定住；
+	# 随接近门口(eased→1)渐隐，保证落点精准。这是「让仙子一直在动」的关键。
+	var flit := sin(_t * 1.3) * 16.0 * (1.0 - eased)
+	var x := FLY_MARGIN + travel * eased + flit
 	var bob := sin(_t * 2.1) * 26.0 + sin(_t * 4.7) * 7.0 # 大摆叠小颤，忽上忽下
 	var tilt := sin(_t * 2.1) * 0.10                       # 随起伏轻微摆头
 	var s := 1.0 + sin(_t * 2.6) * 0.05
