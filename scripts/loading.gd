@@ -139,7 +139,8 @@ func _make_portal_tex(size: int) -> ImageTexture:
 func _process(delta: float) -> void:
 	_t += delta
 	_advance_progress(delta)
-	_layout_fairy()
+	if not _transitioning: # 转场后仙子交给吸入 tween，别再被逐帧布局覆盖 scale/位置
+		_layout_fairy()
 	_layout_portal()
 	# 三点顺序脉动（相位错开），alpha 在 0.35~1.0 之间呼吸
 	for i in range(_dots.size()):
@@ -226,13 +227,35 @@ func _on_world_ready() -> void:
 	var elapsed := Time.get_ticks_msec() - _shown_at
 	if elapsed < MIN_SHOW_MS:
 		await get_tree().create_timer((MIN_SHOW_MS - elapsed) / 1000.0).timeout
-	# 「飞到头 = 真就绪」：先让仙子冲刺到航道终点（_prog→1），再淡出交还世界。
-	# _landing 接管 _prog，_advance_progress 让路，避免与 tween 抢值。
+
+	# ① 仙子冲刺飞到航道终点（＝门心）。_landing 接管 _prog，_advance_progress 让路。
 	_landing = true
 	var land := create_tween()
-	land.tween_property(self, "_prog", 1.0, LAND_TIME)
+	land.tween_property(self, "_prog", 1.0, LAND_TIME).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	await land.finished
-	var tw := create_tween()
-	tw.tween_property(_fade_root, "modulate:a", 0.0, FADE_TIME)
-	await tw.finished
+
+	# ② 仙子被吸入门：缩到门心并淡出。_transitioning 接管门（位置/缩放交给 tween）。
+	_transitioning = true
+	var suck := create_tween().set_parallel(true)
+	suck.tween_property(_fairy, "scale", Vector2(0.05, 0.05), 0.26).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	suck.tween_property(_fairy, "modulate:a", 0.0, 0.26)
+	await suck.finished
+
+	# ③ 门居中 + zoom in 放大吞屏，同时背景（水彩+三点）剥离淡出——门后的游戏世界随之透出。
+	var vp := _fade_root.size
+	var ctr := vp * 0.5
+	var zoom_max := (maxf(vp.x, vp.y) / PORTAL_SIZE) * 2.6 # 保证放大后铺满屏幕
+	var zoom := create_tween().set_parallel(true)
+	zoom.tween_property(_portal, "offset_left", ctr.x - PORTAL_SIZE * 0.5, 0.55).set_trans(Tween.TRANS_SINE)
+	zoom.tween_property(_portal, "offset_top", ctr.y - PORTAL_SIZE * 0.5, 0.55).set_trans(Tween.TRANS_SINE)
+	zoom.tween_property(_portal, "offset_right", ctr.x + PORTAL_SIZE * 0.5, 0.55).set_trans(Tween.TRANS_SINE)
+	zoom.tween_property(_portal, "offset_bottom", ctr.y + PORTAL_SIZE * 0.5, 0.55).set_trans(Tween.TRANS_SINE)
+	zoom.tween_property(_portal, "scale", Vector2(zoom_max, zoom_max), 0.7).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	zoom.tween_property(_fade_root, "modulate:a", 0.0, 0.5)
+	await zoom.finished
+
+	# ④ 门 fade out → 游戏世界完全淡入（整层过场移除）。
+	var out := create_tween()
+	out.tween_property(_portal, "modulate:a", 0.0, 0.3)
+	await out.finished
 	queue_free() # 过场移除，世界成为唯一场景
