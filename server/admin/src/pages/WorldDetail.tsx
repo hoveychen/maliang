@@ -1,7 +1,7 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { fmtTs, useApi } from '../api.ts';
 import { STICKER_GLYPHS, TASK_TYPE_LABELS, type WorldDetail } from '../types.ts';
-import { Fallback, PageHead, RowLink, ShortId, Sprite, Stats } from '../components.tsx';
+import { AnimStatusBadge, Fallback, PageHead, RowLink, ShortId, Sprite, Stats } from '../components.tsx';
 
 const TABS = [
   { key: 'characters', label: '角色' },
@@ -60,13 +60,14 @@ export function WorldDetailPage() {
             data.characters.length === 0 ? <div className="empty">没有角色</div> : (
               <table className="grid">
                 <thead>
-                  <tr><th>立绘</th><th>名字</th><th>状态</th><th>位置</th><th>性格</th><th>记忆</th><th>对话</th><th>音色</th><th>id</th></tr>
+                  <tr><th>立绘</th><th>名字</th><th>动画</th><th>状态</th><th>位置</th><th>性格</th><th>记忆</th><th>对话</th><th>音色</th><th>id</th></tr>
                 </thead>
                 <tbody>
                   {data.characters.map((c) => (
                     <RowLink to={`/worlds/${id}/characters/${c.id}`} key={c.id}>
                       <td><Sprite hash={c.spriteAsset} alt={c.name} /></td>
                       <td><b>{c.name}</b>{c.isFairy && <span className="badge seal" style={{ marginLeft: 6 }}>仙</span>}</td>
+                      <td><AnimStatusBadge status={c.spriteAnimStatus} /></td>
                       <td><span className="badge">{c.state}</span></td>
                       <td className="mono">({c.position.tileX},{c.position.tileY})</td>
                       <td style={{ maxWidth: 260 }}>{c.personality.length > 40 ? c.personality.slice(0, 40) + '…' : c.personality}</td>

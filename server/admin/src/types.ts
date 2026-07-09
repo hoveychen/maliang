@@ -53,6 +53,7 @@ export interface PlayerDetail {
   visits: Visit[];
   memories: { worldId: string; characterId: string; characterName: string; items: MemoryItem[] }[];
   chats: { worldId: string; characterId: string; characterName: string; turns: ChatTurn[] }[];
+  spriteAnim: SpriteAnimRecord;
 }
 
 export interface ActiveTask {
@@ -93,6 +94,7 @@ export interface CharacterSummary {
   abilities: string[];
   memoryCount: number;
   chatTurnCount: number;
+  spriteAnimStatus: string;
 }
 
 export interface WorldProp {

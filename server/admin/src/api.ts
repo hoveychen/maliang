@@ -28,6 +28,14 @@ export async function api<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** 管理写操作（补动画等触发类端点）：POST 带 admin token，返回 JSON。 */
+export async function apiPost<T>(path: string): Promise<T> {
+  const token = getToken();
+  const res = await fetch(path, { method: 'POST', headers: token ? { 'x-admin-token': token } : {} });
+  if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  return res.json() as Promise<T>;
+}
+
 export function assetUrl(hash: string): string {
   return `/assets/${hash}`;
 }

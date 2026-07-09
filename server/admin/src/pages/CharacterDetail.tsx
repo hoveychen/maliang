@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { assetUrl, fmtTs, useApi } from '../api.ts';
 import { MEMORY_KIND_LABELS, type CharacterDetail, type MemoryItem } from '../types.ts';
-import { Fallback, PageHead, ShortId, Sprite } from '../components.tsx';
+import { AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, ShortId, Sprite } from '../components.tsx';
 
 function groupByKind(items: MemoryItem[]): [string, MemoryItem[]][] {
   const by = new Map<string, MemoryItem[]>();
@@ -32,16 +32,15 @@ export function CharacterDetailPage() {
           <div className="panel panel-row">
             <div>
               <Sprite hash={c.appearance.spriteAsset} large alt={c.name} />
-              {data.spriteAnim.status === 'ready' && data.spriteAnim.animAsset && (
-                <div style={{ marginTop: 8 }}>
-                  <span className="badge pine">动画就绪</span>
-                  <a className="mono" style={{ marginLeft: 8 }} href={assetUrl(data.spriteAnim.animAsset)} target="_blank" rel="noreferrer">
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <AnimStatusBadge status={data.spriteAnim.status} />
+                {data.spriteAnim.status === 'ready' && data.spriteAnim.animAsset && (
+                  <a className="mono" href={assetUrl(data.spriteAnim.animAsset)} target="_blank" rel="noreferrer">
                     图集 {data.spriteAnim.meta ? `${data.spriteAnim.meta.frameCount}帧@${data.spriteAnim.meta.fps}fps` : ''}
                   </a>
-                </div>
-              )}
-              {data.spriteAnim.status === 'pending' && <div style={{ marginTop: 8 }}><span className="badge">动画生成中</span></div>}
-              {data.spriteAnim.status === 'failed' && <div style={{ marginTop: 8 }}><span className="badge seal">动画失败</span></div>}
+                )}
+                <AnimGenerateButton spriteHash={c.appearance.spriteAsset} status={data.spriteAnim.status} onChanged={reload} />
+              </div>
             </div>
             <dl className="kv" style={{ flex: 1, minWidth: 280 }}>
               <dt>id</dt><dd className="mono">{c.id}</dd>

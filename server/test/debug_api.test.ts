@@ -127,6 +127,37 @@ test('GET /debug/api/worlds 与 /debug/api/worlds/:id：列表计数摘要，详
   }
 });
 
+test('角色摘要 spriteAnimStatus 与玩家详情 spriteAnim：无立绘 none，有动画 ready', async () => {
+  const store = new WorldStore();
+  seed(store);
+  const app = await buildServer({ adapters: createMockAdapters(), store });
+  try {
+    // 无立绘 → none（角色表 + 玩家详情都兜底）
+    const before = await app.inject({ method: 'GET', url: '/debug/api/worlds/w1' });
+    assert.equal(before.json().characters.find((c: { id: string }) => c.id === 'c1').spriteAnimStatus, 'none');
+    const pBefore = await app.inject({ method: 'GET', url: '/debug/api/players/p1' });
+    assert.equal(pBefore.json().spriteAnim.status, 'none');
+
+    // 给角色/玩家挂上立绘并置动画 ready → 状态透出
+    const meta = { cols: 2, rows: 2, frameCount: 3, fps: 8, cellW: 20, cellH: 30, width: 40, height: 60 };
+    const sprite = store.putAsset({ bytes: Uint8Array.from([1]), mime: 'image/png' });
+    const c1 = store.getCharacter('w1', 'c1')!;
+    c1.appearance.spriteAsset = sprite;
+    store.saveCharacter(c1);
+    store.setSpriteAnimReady(sprite, 'atlasA', meta);
+    const p1 = store.getPlayer('p1')!;
+    store.upsertPlayer({ ...p1, spriteAsset: sprite });
+
+    const after = await app.inject({ method: 'GET', url: '/debug/api/worlds/w1' });
+    assert.equal(after.json().characters.find((c: { id: string }) => c.id === 'c1').spriteAnimStatus, 'ready');
+    const pAfter = await app.inject({ method: 'GET', url: '/debug/api/players/p1' });
+    assert.equal(pAfter.json().spriteAnim.status, 'ready');
+    assert.equal(pAfter.json().spriteAnim.animAsset, 'atlasA');
+  } finally {
+    await app.close();
+  }
+});
+
 test('GET /debug/api/worlds/:id/characters/:cid：完整角色 + 记忆 + 对话 + 动画状态', async () => {
   const app = await makeApp();
   try {
