@@ -1,4 +1,5 @@
 import type { ServiceAdapters, ImageBlob, AudioBlob, VideoBlob } from './types.ts';
+import { fallbackVoice } from '../voice_catalog.ts';
 import {
   BASE_ABILITIES,
   type CharacterSpec,
@@ -75,7 +76,7 @@ export function createMockAdapters(): ServiceAdapters {
           name,
           personality: `一个友好、好奇的${name}，喜欢和小朋友玩。`,
           visualDescription: `Paper Mario 动漫风格的可爱${name}，圆润、色彩明亮、儿童友好，纯绿色背景`,
-          voiceId: 'mock-voice-cn-child',
+          voiceId: fallbackVoice(name), // 确定性落主力池（同名同声），与真实路径同兜底
           scale: 1.0,
           abilities: [...BASE_ABILITIES],
         };
