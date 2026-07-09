@@ -1,7 +1,7 @@
 extends SceneTree
 ## 临时视觉验证（不进回测，服务人眼 QA）：奖赏系统演出截帧。
-## 编排（--fixed-fps 8）：1s 委托 chip 亮起 → 2s 委托完成（小绿跳+🎉+⭐飞入收集册按钮）→
-## 5s 打开收集册（亮/暗剪影+数量）→ 8s 关册 → 9s 把🌸送给小蓝（玩家走位交接+贴纸飞头顶+点头）→ 20s 结束。
+## 编排（--fixed-fps 8）：1s 委托 chip 亮起 → 2s 委托完成（小绿跳+🎉+盖章飞入手机按钮）→
+## 5s 打开手机小红花 app（3×3 花格+盖章进度）→ 8s 关 → 10s 委托升花（换到小红花）→ 20s 结束。
 ## 环境变量：PITCH/DIST 调相机。
 ## 运行: godot --write-movie <目录>/f.png --fixed-fps 8 --quit-after 160 \
 ##       --script res://test/test_visual_rewards_shot.gd
@@ -47,18 +47,16 @@ func _tick() -> void:
 		return
 	match frame:
 		8:
-			scene.call("_on_world_state", { "inventory": { "flower": 1 }, "activeTask": {
-				"id": "t", "type": "deliver", "npcId": String(green.get("id", "")),
-				"npcName": "小绿", "targetName": "小蓝", "message": "你好呀", "rewardId": "star" } })
+			scene.call("_on_world_state", { "wallet": { "flowers": 2, "stampProgress": 2, "stampsTotal": 5 },
+				"activeTask": {
+					"id": "t", "type": "deliver", "npcId": String(green.get("id", "")),
+					"npcName": "小绿", "targetName": "小蓝", "message": "你好呀", "stampStyle": "star" } })
 		16:
 			scene.call("_on_task_complete", { "task": { "id": "t", "type": "deliver",
-				"npcId": String(green.get("id", "")), "npcName": "小绿" },
-				"rewardId": "star", "rewardGlyph": "⭐", "inventory": { "flower": 1, "star": 1 } })
+				"npcId": String(green.get("id", "")), "npcName": "小绿", "stampStyle": "medal" },
+				"stampStyle": "medal", "flowerGained": true,
+				"wallet": { "flowers": 3, "stampProgress": 0, "stampsTotal": 6 } })
 		40:
 			scene.call("_toggle_album")
 		64:
 			scene.call("_toggle_album")
-		72:
-			scene.call("_on_character_response", { "transcript": "把花送给小蓝", "replyText": "小蓝一定很开心！",
-				"emotion": "happy", "behaviorScript": { "commands": [
-					{ "type": "give", "params": { "character_name": "小蓝", "item": "flower" } }], "loop": false } })
