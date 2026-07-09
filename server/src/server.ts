@@ -9,7 +9,7 @@ import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
-import { triggerIdleAnimation } from './idle_animation.ts';
+import { generateIdleAnimation, triggerIdleAnimation, type ToSpriteSheet } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
@@ -23,6 +23,8 @@ import { completeTaskOnEvent, praiseLine, thanksLine } from './tasks.ts';
 export interface ServerDeps {
   adapters?: ServiceAdapters;
   store?: WorldStore;
+  /** 视频→图集转换缝（缺省真实 ffmpeg；测试注入假实现以免依赖网络/ffmpeg）。 */
+  toSpriteSheet?: ToSpriteSheet;
 }
 
 /** 按 magic bytes 识别图片 mime（上传的图集可能是 PNG 或 WebP）。 */
@@ -157,6 +159,7 @@ load();
 export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstance> {
   const adapters = deps.adapters ?? createAdapters(loadConfig());
   const store = deps.store ?? new WorldStore(process.env.MALIANG_DATA_DIR ?? './data');
+  const toSpriteSheet = deps.toSpriteSheet;
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   await app.register(websocket);
 
@@ -202,7 +205,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     fairy.appearance.visualDescription = FAIRY_VISUAL_DESC;
     store.saveCharacter(fairy);
     // 试点：静态立绘先返回，idle 动画后台异步补（客户端轮询 /sprite-anim/:hash）
-    triggerIdleAnimation(adapters, store, hash);
+    triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
     return { id: fairy.id, spriteAsset: hash, regenerated: true };
   });
 
@@ -237,7 +240,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
     const hash = await generateSprite(adapters, desc, store);
     // 试点：玩家形象静态先返回，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
-    triggerIdleAnimation(adapters, store, hash);
+    triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
     return { spriteAsset: hash };
   });
 
@@ -318,6 +321,30 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const animAsset = store.putAsset({ bytes, mime: sniffImageMime(bytes) });
     store.setSpriteAnimReady(req.params.hash, animAsset, meta);
     return { spriteHash: req.params.hash, animAsset, meta, status: 'ready' };
+  });
+
+  // 管理端点：主动触发线上生成 idle 图集（Seedance→图集→入库整条管线原样跑），与上面的
+  // 本地上传互补——存量立绘不用线下跑好再传，直接让线上补。烧钱——必须配 MALIANG_ADMIN_TOKEN。
+  // 幂等：pending 一律不打断（防同 hash 并发双跑烧钱）；已 ready 默认跳过，?force=true 强制重生成。
+  // fire-and-forget：立即返回，之后照旧轮询 GET /sprite-anim/:hash 等 ready。
+  app.post<{
+    Params: { hash: string };
+    Querystring: { force?: string };
+  }>('/admin/sprite-anim/:hash/generate', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    if (!store.getAsset(req.params.hash)) {
+      return reply.code(404).send({ error: 'sprite asset not found' });
+    }
+    const force = req.query.force === 'true' || req.query.force === '1';
+    const existing = store.getSpriteAnim(req.params.hash);
+    if (existing?.status === 'pending' || (existing?.status === 'ready' && !force)) {
+      return { spriteHash: req.params.hash, status: existing.status, triggered: false };
+    }
+    void generateIdleAnimation(adapters, store, req.params.hash, toSpriteSheet);
+    return { spriteHash: req.params.hash, status: 'pending', triggered: true };
   });
 
   // 只读状态后台（P6）：/debug/state 出 JSON 全量快照，/debug 出单页 dashboard 渲染它。
@@ -542,6 +569,7 @@ export async function createCharacterAsync(
   description: string,
   adapters: ServiceAdapters,
   store: WorldStore,
+  toSpriteSheet?: ToSpriteSheet,
 ): Promise<void> {
   const requestId = randomUUID();
   try {
@@ -552,6 +580,10 @@ export async function createCharacterAsync(
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
     );
     socket.send(JSON.stringify({ type: 'gen_complete', requestId, character }));
+    // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
+    if (character.appearance.spriteAsset) {
+      triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
+    }
   } catch (err) {
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
