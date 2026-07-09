@@ -163,7 +163,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   await app.register(websocket);
 
-  app.get('/health', async () => ({ ok: true, service: 'maliang-server' }));
+  app.get('/health', async () => ({ ok: true, service: 'maliang-server', version: process.env.GIT_SHA ?? 'dev' }));
 
   // 新建世界（种入小神仙）
   app.post('/worlds', async () => {
