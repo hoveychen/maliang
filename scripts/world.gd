@@ -184,8 +184,16 @@ var _phone_signal: Control          ## 状态栏信号格（绿=WS 在线、灰=
 var _phone_playpie: PlayTimePie     ## 桌面 widget 可玩时间饼图（闹钟+饼，剩余可玩时间可视化）
 var _phone_flowers: Label           ## 桌面 widget 小红花数（代笔占位，见 _red_flower_count）
 var _phone_open_app := ""           ## 当前打开的 app id（空=停在主页）
-var _play_start_ms := 0             ## 本次进入世界的起始 ticks_msec（算已游玩时间）
 var _phone_ui_t := 0.0              ## banner 刷新节流计时
+# —— 可玩时间预算（真强制冷却，跨会话持久化，见 tick/reconcile_play_budget + PlayerProfile.*_play_budget）——
+var _play_used_sec := 0.0           ## 本轮已累计活跃游玩秒数
+var _play_cooldown_until := 0.0     ## 冷却结束 unix 时间戳（0=不在冷却）
+var _play_blocked := false          ## 当前是否被冷却拦截（拦世界交互 + 弹冷却遮罩）
+var _play_remaining_frac := 1.0     ## 可玩剩余比例（喂桌面 widget 饼图）
+var _play_cooldown_frac := 0.0      ## 冷却进度比例（喂冷却遮罩饼图）
+var _play_save_t := 0.0             ## 预算落盘节流计时
+var _cooldown_overlay: Control      ## 冷却期全屏拦截遮罩（挡世界交互 + 闹钟饼图倒计时 + 文案）
+var _cooldown_pie: PlayTimePie      ## 遮罩上的大闹钟饼图（冷却进度）
 # —— 手机开合的遮罩/相机态/图标分页 ——
 var _phone_scrim: Control           ## 手机开着时的全屏透明遮罩：吞掉手机外的点击→收起手机（不当移动指令）
 var _phone_cam := false             ## 手机近身相机态（开手机 true，收手机 false）
@@ -724,7 +732,7 @@ func _setup_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_hud_layer = layer
-	_play_start_ms = Time.get_ticks_msec() # 已游玩时间从进入世界起算（手机 banner 用）
+	_load_play_budget() # 恢复跨会话可玩时间预算（隔会话对账：冷却已过/长休息则刷新）
 
 	coord_label = Label.new()
 	coord_label.position = Vector2(16.0, 12.0)
@@ -1099,6 +1107,11 @@ func _setup_hud() -> void:
 	_npc_chat_bubble = UiAssets.bubble_sprite("ic_note", 1.7)
 	add_child(_npc_chat_bubble)
 
+	# 冷却拦截遮罩：可玩时间用尽后弹出（挡整屏世界交互）；闹钟饼图倒计时，冷却结束自动收起。
+	# 末位入层→盖在其余 HUD 之上，MOUSE_FILTER_STOP 吞掉所有点击。
+	_cooldown_overlay = _build_cooldown_overlay()
+	layer.add_child(_cooldown_overlay)
+
 func _style_label(l: Label, size: int) -> void:
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", Color.WHITE)
@@ -1444,12 +1457,9 @@ func _update_phone_banner() -> void:
 		return
 	var t := Time.get_time_dict_from_system()
 	_phone_clock.text = "%02d:%02d" % [int(t.get("hour", 0)), int(t.get("minute", 0))]
-	var secs := 0
-	if _play_start_ms > 0:
-		secs = int((Time.get_ticks_msec() - _play_start_ms) / 1000)
 	if _phone_playpie != null:
-		var ps := _play_state(secs)
-		_phone_playpie.set_state(ps["remaining"], ps["cooldown"], ps["cooldown_frac"])
+		# 桌面 widget 饼图：可玩阶段显示绿色剩余、冷却阶段显示蓝色进度（值由 _step_play_budget 每帧更新）。
+		_phone_playpie.set_state(_play_remaining_frac, _play_blocked, _play_cooldown_frac)
 	if _phone_flowers != null:
 		_phone_flowers.text = "x%d" % _red_flower_count()
 	# 信号格：WS 在线→绿、离线→灰（每秒随 _step_phone_ui 刷新）
@@ -1459,15 +1469,113 @@ func _update_phone_banner() -> void:
 		for bar in _phone_signal.get_children():
 			(bar as ColorRect).color = col
 
-## 可玩时间状态（纯函数，便于回测）：本次已玩 elapsed 秒 → {remaining(0..1), cooldown(bool), cooldown_frac(0..1)}。
-## 每轮可玩 PLAY_BUDGET_SEC、之后冷却 PLAY_COOLDOWN_SEC，循环往复（widget 闹钟饼图据此渲染）。
-func _play_state(elapsed: int) -> Dictionary:
-	var e := maxi(0, elapsed)
-	var cycle := PLAY_BUDGET_SEC + PLAY_COOLDOWN_SEC
-	var pos := e % cycle
-	if pos < PLAY_BUDGET_SEC:
-		return { "remaining": 1.0 - float(pos) / float(PLAY_BUDGET_SEC), "cooldown": false, "cooldown_frac": 0.0 }
-	return { "remaining": 0.0, "cooldown": true, "cooldown_frac": float(pos - PLAY_BUDGET_SEC) / float(PLAY_COOLDOWN_SEC) }
+## 可玩时间每帧推进（静态纯函数，便于回测）：
+## 冷却中→到点则重置(used=0、解锁)，否则维持并算冷却进度；否则累计 delta，满预算则进冷却。
+## 返回 {used, cooldown_until, blocked, remaining_frac, cooldown_frac}。
+static func tick_play_budget(used: float, cooldown_until: float, now: float, delta: float,
+		budget: float, cooldown: float) -> Dictionary:
+	if cooldown_until > 0.0:
+		if now >= cooldown_until:
+			return { "used": 0.0, "cooldown_until": 0.0, "blocked": false, "remaining_frac": 1.0, "cooldown_frac": 0.0 }
+		var cdf := clampf(1.0 - (cooldown_until - now) / cooldown, 0.0, 1.0)
+		return { "used": used, "cooldown_until": cooldown_until, "blocked": true, "remaining_frac": 0.0, "cooldown_frac": cdf }
+	var nu := used + maxf(0.0, delta)
+	if nu >= budget:
+		return { "used": budget, "cooldown_until": now + cooldown, "blocked": true, "remaining_frac": 0.0, "cooldown_frac": 0.0 }
+	return { "used": nu, "cooldown_until": 0.0, "blocked": false, "remaining_frac": 1.0 - nu / budget, "cooldown_frac": 0.0 }
+
+## 进世界时对持久化预算「隔会话对账」（静态纯函数）：冷却已过则清零；未冷却但离开够久(≥cooldown)＝自然休息，刷新预算。
+static func reconcile_play_budget(used: float, cooldown_until: float, last_active: float,
+		now: float, cooldown: float) -> Dictionary:
+	if cooldown_until > 0.0:
+		if now >= cooldown_until:
+			return { "used": 0.0, "cooldown_until": 0.0 }
+		return { "used": used, "cooldown_until": cooldown_until }
+	if last_active > 0.0 and (now - last_active) >= cooldown:
+		return { "used": 0.0, "cooldown_until": 0.0 }
+	return { "used": used, "cooldown_until": cooldown_until }
+
+## 进世界：读持久化预算 + 隔会话对账（冷却期内重进仍被拦、冷却已过/长休息则刷新）。
+func _load_play_budget() -> void:
+	var pb := PlayerProfile.load_play_budget()
+	var now := Time.get_unix_time_from_system()
+	var rec := reconcile_play_budget(float(pb["used_sec"]), float(pb["cooldown_until"]),
+			float(pb["last_active"]), now, float(PLAY_COOLDOWN_SEC))
+	_play_used_sec = float(rec["used"])
+	_play_cooldown_until = float(rec["cooldown_until"])
+
+## 每帧推进可玩时间预算：累计活跃游玩、到点进冷却、冷却到点解锁；同步 widget/遮罩，节流落盘。
+func _step_play_budget(delta: float) -> void:
+	var now := Time.get_unix_time_from_system()
+	var was_blocked := _play_blocked
+	var st := tick_play_budget(_play_used_sec, _play_cooldown_until, now, delta,
+			float(PLAY_BUDGET_SEC), float(PLAY_COOLDOWN_SEC))
+	_play_used_sec = float(st["used"])
+	_play_cooldown_until = float(st["cooldown_until"])
+	_play_blocked = bool(st["blocked"])
+	_play_remaining_frac = float(st["remaining_frac"])
+	_play_cooldown_frac = float(st["cooldown_frac"])
+	if _play_blocked != was_blocked:
+		_apply_cooldown_block(_play_blocked) # 进/出冷却的一次性动作（弹/收遮罩、收手机断对话）
+	if _cooldown_overlay != null and _cooldown_overlay.visible and _cooldown_pie != null:
+		_cooldown_pie.set_state(0.0, true, _play_cooldown_frac)
+	# 节流落盘（每 5s + 状态切换即存），关 App 也不丢
+	_play_save_t -= delta
+	if _play_save_t <= 0.0 or _play_blocked != was_blocked:
+		_play_save_t = 5.0
+		PlayerProfile.save_play_budget(_play_used_sec, _play_cooldown_until, now)
+
+## 进/出冷却的一次性副作用：进冷却→弹全屏遮罩、收手机、断当前对话；出冷却→收遮罩。
+func _apply_cooldown_block(blocked: bool) -> void:
+	if _cooldown_overlay != null:
+		_cooldown_overlay.visible = blocked
+	if blocked:
+		_close_phone()
+		if _locked != null:
+			_exit_interaction() # 断开近身对话，回自由视角（冷却期不许交互）
+
+## 冷却拦截遮罩：半透明暗底 + 居中卡片（大闹钟饼图倒计时 + 文案）。整屏 STOP 吞点击，冷却期挡住世界。
+func _build_cooldown_overlay() -> Control:
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	root.visible = false
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0.10, 0.07, 0.03, 0.72)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UiAssets.card_style(26.0, 1.0))
+	center.add_child(card)
+	var pad := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		pad.add_theme_constant_override(side, 28)
+	card.add_child(pad)
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 16)
+	pad.add_child(col)
+	_cooldown_pie = PlayTimePie.new()
+	_cooldown_pie.custom_minimum_size = Vector2(140.0, 140.0)
+	_cooldown_pie.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	col.add_child(_cooldown_pie)
+	var title := Label.new()
+	title.text = "玩得好开心！"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_card_label(title, 34)
+	col.add_child(title)
+	var msg := Label.new()
+	msg.text = "先休息一下，\n等小闹钟转满就能再来玩啦~"
+	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_style_card_label(msg, 24)
+	col.add_child(msg)
+	return root
 
 ## 小红花数：代笔占位——真实小红花系统未接入前，先用已收集贴纸总数当占位读数。
 ## TODO(小红花): 接入真实小红花来源后替换本函数。
@@ -1580,6 +1688,7 @@ func _process(delta: float) -> void:
 	_step_hop(delta)  # 进对话时玩家跳向站位（在焦点/摆位之前推进，相机随之贴合）
 	_step_phone_ui(delta)
 	_step_phone_pager(delta)
+	_step_play_budget(delta)
 	tp = _prof_lap(tp, "phoneui")
 	# 视角缓动（跟随 ↔ lock 的 pitch/dist 过渡）
 	var t := minf(1.0, CAM_EASE * delta)

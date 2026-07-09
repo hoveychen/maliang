@@ -78,16 +78,23 @@ func _run(scene: Node) -> void:
 	var clock: Label = scene.get("_phone_clock")
 	_check(clock != null and String(clock.text).length() == 5 and String(clock.text).contains(":"), "banner 时钟 HH:MM")
 
-	# 可玩时间：_play_state 纯函数（每轮 45min 可玩→10min 冷却，循环），widget 闹钟饼图据此渲染。
-	_check(int(scene.get("_play_start_ms")) > 0, "_play_start_ms 已初始化")
-	var s0: Dictionary = scene._play_state(0)
-	_check(is_equal_approx(float(s0["remaining"]), 1.0) and not bool(s0["cooldown"]), "0s：满格可玩、不冷却")
-	var s_mid: Dictionary = scene._play_state(1350) # 45min 的一半
-	_check(is_equal_approx(float(s_mid["remaining"]), 0.5) and not bool(s_mid["cooldown"]), "1350s(半程)：剩 50%")
-	var s_cd: Dictionary = scene._play_state(2700 + 300) # 进冷却 5min（冷却 10min 的一半）
-	_check(bool(s_cd["cooldown"]) and is_equal_approx(float(s_cd["cooldown_frac"]), 0.5), "45min 后：冷却中、进度 50%")
+	# 可玩时间真强制状态机（tick/reconcile 纯函数，budget=100s、cooldown=60s、now=1000）
+	var t1: Dictionary = scene.tick_play_budget(0.0, 0.0, 1000.0, 40.0, 100.0, 60.0)
+	_check(is_equal_approx(float(t1["used"]), 40.0) and not bool(t1["blocked"]) \
+			and is_equal_approx(float(t1["remaining_frac"]), 0.6), "累计 40/100：剩 60%、不拦")
+	var t2: Dictionary = scene.tick_play_budget(95.0, 0.0, 1000.0, 10.0, 100.0, 60.0)
+	_check(bool(t2["blocked"]) and is_equal_approx(float(t2["cooldown_until"]), 1060.0), "满 100 → 进冷却(至 now+60)")
+	var t3: Dictionary = scene.tick_play_budget(100.0, 1060.0, 1030.0, 1.0, 100.0, 60.0)
+	_check(bool(t3["blocked"]) and is_equal_approx(float(t3["cooldown_frac"]), 0.5), "冷却中：拦、进度 50%")
+	var t4: Dictionary = scene.tick_play_budget(100.0, 1060.0, 1060.0, 1.0, 100.0, 60.0)
+	_check(not bool(t4["blocked"]) and is_equal_approx(float(t4["used"]), 0.0), "冷却到点 → 解锁、清零")
+	var r1: Dictionary = scene.reconcile_play_budget(100.0, 1060.0, 1000.0, 1030.0, 60.0)
+	_check(is_equal_approx(float(r1["cooldown_until"]), 1060.0), "隔会话：冷却期内重进仍锁")
+	var r2: Dictionary = scene.reconcile_play_budget(80.0, 0.0, 1000.0, 1060.0, 60.0)
+	_check(is_equal_approx(float(r2["used"]), 0.0), "隔会话：长休息(≥冷却)刷新预算")
 	var pie = scene.get("_phone_playpie")
 	_check(pie != null and pie is PlayTimePie, "widget 可玩时间饼图存在(PlayTimePie)")
+	_check(scene.get("_cooldown_overlay") != null, "冷却拦截遮罩存在")
 	# _step_phone_ui：手机开着时按节流刷新一次不崩
 	scene.set("_phone_ui_t", 0.0)
 	scene._step_phone_ui(1.0)

@@ -40,6 +40,26 @@ static func avatar_description(p: Dictionary) -> String:
 		who, String(p.get("color", "彩色")),
 		String(p.get("likes", "小兔子")), String(p.get("interest", "玩耍"))]
 
+## 可玩时间预算持久化（跨会话强制冷却用）：
+##   used_sec       — 本轮已累计的活跃游玩秒数（到 45min 触发冷却）
+##   cooldown_until — 冷却结束的 unix 时间戳（>0 且 now< 它 = 冷却中，跨会话/关 App 照样倒计时）
+##   last_active    — 上次活跃的 unix 时间戳（离开够久＝自然休息，下次进世界刷新预算）
+static func load_play_budget() -> Dictionary:
+	var p := load_profile()
+	var pb: Variant = p.get("play_budget", {})
+	if typeof(pb) != TYPE_DICTIONARY:
+		return { "used_sec": 0.0, "cooldown_until": 0.0, "last_active": 0.0 }
+	return {
+		"used_sec": float(pb.get("used_sec", 0.0)),
+		"cooldown_until": float(pb.get("cooldown_until", 0.0)),
+		"last_active": float(pb.get("last_active", 0.0)),
+	}
+
+static func save_play_budget(used_sec: float, cooldown_until: float, last_active: float) -> void:
+	var p := load_profile()
+	p["play_budget"] = { "used_sec": used_sec, "cooldown_until": cooldown_until, "last_active": last_active }
+	save_profile(p)
+
 ## 确保档案里有稳定玩家 id：设备端「开始新游戏」时生成的 UUID（面向未来 MMO / QR 换机迁移）。
 ## 首次调用生成并写盘；已有则原样返回。无鉴权——这个 UUID 就是玩家唯一身份。
 static func ensure_player_id() -> String:
