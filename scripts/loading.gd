@@ -23,17 +23,32 @@ const DOT_COUNT := 3
 const FAIRY_W := 260.0    ## 仙子精灵框宽/高（横飞时按框定位）
 const FAIRY_H := 178.0
 const FLY_MARGIN := 44.0  ## 飞行航道左右留白
+# 仙子 idle 动画图集（服务端生成、WebP 打包本地供离线用；6×6 网格 31 帧 8fps，cell 216×160）
+const FAIRY_SHEET_COLS := 6
+const FAIRY_SHEET_FRAMES := 31
+const FAIRY_SHEET_FPS := 8.0
+const FAIRY_CELL_W := 216
+const FAIRY_CELL_H := 160
 const PROG_FOLLOW := 2.5  ## 显示进度追真进度的速度（每秒）：真里程碑落地时仙子快速前冲
 const PROG_CREEP := 0.035 ## 真进度停滞时的慢爬（每秒），朝 0.9 渐近但永不到顶——到顶只由 world_ready 触发
 const CREEP_CEIL := 0.9   ## 慢爬封顶：网络久等时仙子最多爬到 90%，留最后一截给「真就绪」
-const LAND_TIME := 0.5    ## world_ready 后仙子冲刺到终点（_prog→1）的时长
+const LAND_TIME := 0.45   ## world_ready 后仙子冲刺到终点（_prog→1）的时长
 
-var _fade_root: Control    ## 淡出目标（整层视觉挂它下面，改 modulate:a）
+const PORTAL_W := 200.0    ## 传送门屏上宽（竖椭圆——门一般是竖着的，非正圆）
+const PORTAL_H := 280.0    ## 传送门屏上高
+const PORTAL_TEX := 240    ## 传送门贴图分辨率（程序化生成方形，靠 STRETCH_SCALE 拉成椭圆）
+const REACT_DUR := 0.7     ## 点击屏幕后小仙子纸片翻转反应时长
+
+var _fade_root: Control    ## 淡出目标（背景+三点挂它下面，改 modulate:a 剥离）
+var _portal: TextureRect   ## 航道终点的传送门（挂 CanvasLayer 上、盖过 _fade_root，单独转场）
 var _fairy: TextureRect
+var _fairy_atlas: AtlasTexture ## 仙子动画图集的取帧窗口（每帧移 region 播 idle 动画）
 var _dots: Array[ColorRect] = []
 var _t := 0.0
 var _prog := 0.0           ## 显示进度 [0,1]：驱动仙子横向位置；真进度来自 _world.ready_progress()
 var _landing := false      ## world_ready 后接管 _prog（tween 冲到 1.0），_process 不再跟随真进度
+var _react_t := 0.0        ## >0 时仙子正做点击反应（欢快转圈+上蹿+放大），给等待的小朋友找事做
+var _transitioning := false ## 传送门转场已接管（门的位置/缩放交给 tween，_process 只保留自转）
 var _shown_at := 0
 var _world: Node = null
 var _revealing := false    ## 已开始揭开（防重复 spawn/reveal）
@@ -66,7 +81,15 @@ func _build_overlay() -> void:
 	# 「小仙子布置世界，飞到尽头就绪」，让慢网也有进度感、且揭幕严格等仙子飞到头。
 	# 锚到左上角：offset 即绝对像素，_process 每帧按 _prog 摆 X。
 	_fairy = TextureRect.new()
-	_fairy.texture = load("res://assets/fairy.png")
+	# idle 动画图集：AtlasTexture 每帧移 region 播（见 _update_fairy_frame）；缺失则回落静态立绘
+	var sheet := load("res://assets/fairy_idle.webp") as Texture2D
+	if sheet != null:
+		_fairy_atlas = AtlasTexture.new()
+		_fairy_atlas.atlas = sheet
+		_fairy_atlas.region = Rect2(0, 0, FAIRY_CELL_W, FAIRY_CELL_H)
+		_fairy.texture = _fairy_atlas
+	else:
+		_fairy.texture = load("res://assets/fairy.png")
 	_fairy.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_fairy.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_fairy.set_anchors_preset(Control.PRESET_TOP_LEFT)
@@ -94,10 +117,58 @@ func _build_overlay() -> void:
 		_fade_root.add_child(d)
 		_dots.append(d)
 
+	# 航道终点的传送门：挂在 CanvasLayer 上、盖过 _fade_root（故仙子飞近时被门遮住＝飞入感）。
+	# 转场时单独动它（居中+放大+淡出），不随背景 _fade_root 一起淡。程序化生成，无素材依赖。
+	_portal = TextureRect.new()
+	_portal.texture = _make_portal_tex(PORTAL_TEX)
+	_portal.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_portal.stretch_mode = TextureRect.STRETCH_SCALE # 方形辉光拉成竖椭圆
+	_portal.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_portal.custom_minimum_size = Vector2(PORTAL_W, PORTAL_H)
+	_portal.pivot_offset = Vector2(PORTAL_W * 0.5, PORTAL_H * 0.5) # 自转/缩放绕门心
+	_portal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(_portal)
+
+## 程序化生成发光漩涡传送门：紧亮的高斯环带（r≈0.80）+ 门心径向辉光填充 + 角向螺旋
+## （自转即漩涡流动）。门心留半透发光（青→白），既能透出飞入的仙子，放大时又用魔法光
+## 水满屏撑起 zoom 吞屏。颜色内→外：近白青→青→紫。返回 ImageTexture，无外部素材依赖。
+func _make_portal_tex(size: int) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var c := float(size) * 0.5
+	var hot := Color(0.85, 0.99, 1.0)  # 门心近白青
+	var mid := Color(0.40, 0.82, 1.0)  # 青
+	var rim := Color(0.60, 0.42, 1.0)  # 紫环缘
+	for y in size:
+		for x in size:
+			var dx := (float(x) - c) / c
+			var dy := (float(y) - c) / c
+			var r := sqrt(dx * dx + dy * dy)
+			if r > 1.0:
+				img.set_pixel(x, y, Color(0, 0, 0, 0))
+				continue
+			var ang := atan2(dy, dx)
+			var ring := exp(-pow((r - 0.80) / 0.13, 2.0))         # 紧亮环带
+			var swirl := 0.85 + 0.15 * sin(ang * 3.0 + r * 8.0)   # 轻柔螺旋（门静止，弱化免成风车）
+			var glow := pow(1.0 - r, 1.6)                          # 门心辉光填充
+			var a := clampf(ring * (0.85 + 0.15 * swirl) + glow * 0.55 * swirl, 0.0, 1.0)
+			var col: Color
+			if r < 0.55:
+				col = hot.lerp(mid, r / 0.55)
+			else:
+				col = mid.lerp(rim, (r - 0.55) / 0.45)
+			col = col * (0.9 + 0.5 * ring) # 环处提亮
+			img.set_pixel(x, y, Color(col.r, col.g, col.b, a))
+	return ImageTexture.create_from_image(img)
+
 func _process(delta: float) -> void:
 	_t += delta
+	if _react_t > 0.0:
+		_react_t = maxf(0.0, _react_t - delta)
+	_update_fairy_frame()
 	_advance_progress(delta)
-	_layout_fairy()
+	if not _transitioning: # 转场后仙子交给吸入 tween，别再被逐帧布局覆盖 scale/位置
+		_layout_fairy()
+	_layout_portal()
 	# 三点顺序脉动（相位错开），alpha 在 0.35~1.0 之间呼吸
 	for i in range(_dots.size()):
 		var a := 0.35 + 0.65 * (0.5 + 0.5 * sin(_t * 4.0 - i * 0.9))
@@ -123,21 +194,96 @@ func _advance_progress(delta: float) -> void:
 	else:
 		_prog = move_toward(_prog, CREEP_CEIL, PROG_CREEP * delta)
 
-## 按 _prog 把仙子从左飞到右，叠竖直 bob 与呼吸缩放。锚在左上角，offset 即绝对像素。
+## 按 _prog 把仙子从左飞到右：分层上下起伏（大摆+小颤）+ 随起伏轻微倾角，飞得更活泼；
+## 叠加点击反应（转圈+上蹿+放大）。锚在左上角，offset 即绝对像素，绕框心旋转/缩放。
 func _layout_fairy() -> void:
 	if _fairy == null or _fade_root == null:
 		return
 	var vp := _fade_root.size
 	var travel := maxf(vp.x - FAIRY_W - 2.0 * FLY_MARGIN, 0.0)
 	var x := FLY_MARGIN + travel * clampf(_prog, 0.0, 1.0)
-	var bob := sin(_t * 1.6) * 12.0
+	var bob := sin(_t * 2.1) * 26.0 + sin(_t * 4.7) * 7.0 # 大摆叠小颤，忽上忽下
+	var tilt := sin(_t * 2.1) * 0.10                       # 随起伏轻微摆头
+	var s := 1.0 + sin(_t * 2.6) * 0.05
+	var flip := 1.0
+	if _react_t > 0.0: # 点击反应：纸片翻转一圈（scale.x 过 0＝立起来翻面）+ 轻微上蹿
+		var prog := 1.0 - _react_t / REACT_DUR # 0→1
+		flip = cos(prog * TAU)                 # 1→-1→1，一次纸片翻转
+		bob -= sin(prog * PI) * 20.0
+		s += sin(prog * PI) * 0.10
 	var base_y := vp.y * 0.40
 	_fairy.offset_left = x
 	_fairy.offset_right = x + FAIRY_W
 	_fairy.offset_top = base_y + bob
 	_fairy.offset_bottom = base_y + FAIRY_H + bob
-	var s := 1.0 + sin(_t * 2.0) * 0.04
-	_fairy.scale = Vector2(s, s)
+	_fairy.rotation = tilt
+	_fairy.scale = Vector2(s * flip, s) # x 方向翻转做纸片翻面
+
+## 播 idle 动画：按 _t 与 fps 取当前帧，移动 AtlasTexture 的 region 到对应网格格子。
+func _update_fairy_frame() -> void:
+	if _fairy_atlas == null:
+		return
+	var f := int(_t * FAIRY_SHEET_FPS) % FAIRY_SHEET_FRAMES
+	var col := f % FAIRY_SHEET_COLS
+	@warning_ignore("integer_division")
+	var row := f / FAIRY_SHEET_COLS
+	_fairy_atlas.region = Rect2(col * FAIRY_CELL_W, row * FAIRY_CELL_H, FAIRY_CELL_W, FAIRY_CELL_H)
+
+## 仙子飞行终点＝门心（_prog=1 时仙子框中心），转场里仙子被吸入此处。
+func _finish_center() -> Vector2:
+	var vp := _fade_root.size
+	return Vector2(vp.x - FLY_MARGIN - FAIRY_W * 0.5, vp.y * 0.40 + FAIRY_H * 0.5)
+
+## 传送门定位：静止的竖椭圆门（像 Portal——门本身不转不动），钉在航道终点；
+## 转场开始后位置/缩放交给 tween。
+func _layout_portal() -> void:
+	if _portal == null or _transitioning or _fade_root == null:
+		return
+	var pc := _finish_center()
+	_portal.offset_left = pc.x - PORTAL_W * 0.5
+	_portal.offset_top = pc.y - PORTAL_H * 0.5
+	_portal.offset_right = pc.x + PORTAL_W * 0.5
+	_portal.offset_bottom = pc.y + PORTAL_H * 0.5
+
+## 加载等待时点屏幕：小仙子做个欢快反应（_layout_fairy 里的转圈+上蹿），点处冒颗小星星——
+## 让等待的小朋友有事可干。转场开始后不再响应（别打断穿越）。
+func _input(event: InputEvent) -> void:
+	if _transitioning or _fairy == null:
+		return
+	var pos := Vector2.INF
+	if event is InputEventScreenTouch and event.pressed:
+		pos = event.position
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		pos = event.position
+	if pos != Vector2.INF:
+		_react_t = REACT_DUR
+		_spawn_tap_star(pos)
+
+## 点击处冒一颗小星星：放大弹出 + 上浮淡出后自销。
+func _spawn_tap_star(pos: Vector2) -> void:
+	if _fade_root == null:
+		return
+	var sz := 64.0
+	var star := TextureRect.new()
+	star.texture = UiAssets.tex("st_star")
+	star.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	star.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	star.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	star.custom_minimum_size = Vector2(sz, sz)
+	star.pivot_offset = Vector2(sz * 0.5, sz * 0.5)
+	star.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	star.offset_left = pos.x - sz * 0.5
+	star.offset_right = pos.x + sz * 0.5
+	star.offset_top = pos.y - sz * 0.5
+	star.offset_bottom = pos.y + sz * 0.5
+	star.scale = Vector2(0.3, 0.3)
+	_fade_root.add_child(star)
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(star, "scale", Vector2(1.2, 1.2), 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(star, "offset_top", pos.y - sz * 0.5 - 42.0, 0.5)
+	tw.tween_property(star, "offset_bottom", pos.y + sz * 0.5 - 42.0, 0.5)
+	tw.tween_property(star, "modulate:a", 0.0, 0.5).set_delay(0.12)
+	tw.chain().tween_callback(star.queue_free)
 
 func _spawn_world() -> void:
 	_revealing = true # 只此一次，之后只等 world_ready
@@ -162,13 +308,40 @@ func _on_world_ready() -> void:
 	var elapsed := Time.get_ticks_msec() - _shown_at
 	if elapsed < MIN_SHOW_MS:
 		await get_tree().create_timer((MIN_SHOW_MS - elapsed) / 1000.0).timeout
-	# 「飞到头 = 真就绪」：先让仙子冲刺到航道终点（_prog→1），再淡出交还世界。
-	# _landing 接管 _prog，_advance_progress 让路，避免与 tween 抢值。
+
+	# ① 仙子冲刺飞到航道终点（＝门心）。_landing 接管 _prog，_advance_progress 让路。
 	_landing = true
 	var land := create_tween()
-	land.tween_property(self, "_prog", 1.0, LAND_TIME)
+	land.tween_property(self, "_prog", 1.0, LAND_TIME).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	await land.finished
-	var tw := create_tween()
-	tw.tween_property(_fade_root, "modulate:a", 0.0, FADE_TIME)
-	await tw.finished
+
+	# ② 仙子被吸入门：缩到门心并淡出。_transitioning 接管门（位置/缩放交给 tween）。
+	_transitioning = true
+	var suck := create_tween().set_parallel(true)
+	suck.tween_property(_fairy, "scale", Vector2(0.05, 0.05), 0.26).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	suck.tween_property(_fairy, "modulate:a", 0.0, 0.26)
+	await suck.finished
+
+	# ③a 门先滑到屏幕中心（尺寸略微放大预备），此时还不吞屏——先居中、后放大，层次分明。
+	var vp := _fade_root.size
+	var ctr := vp * 0.5
+	var recenter := create_tween().set_parallel(true)
+	recenter.tween_property(_portal, "offset_left", ctr.x - PORTAL_W * 0.5, 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	recenter.tween_property(_portal, "offset_top", ctr.y - PORTAL_H * 0.5, 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	recenter.tween_property(_portal, "offset_right", ctr.x + PORTAL_W * 0.5, 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	recenter.tween_property(_portal, "offset_bottom", ctr.y + PORTAL_H * 0.5, 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	recenter.tween_property(_portal, "scale", Vector2(1.35, 1.35), 0.45).set_trans(Tween.TRANS_SINE)
+	await recenter.finished
+
+	# ③b 再 zoom in 放大吞屏，同时背景（水彩+三点）剥离淡出——门后的游戏世界随之透出。
+	var zoom_max := maxf(vp.x / PORTAL_W, vp.y / PORTAL_H) * 2.6 # 保证放大后铺满屏幕
+	var zoom := create_tween().set_parallel(true)
+	zoom.tween_property(_portal, "scale", Vector2(zoom_max, zoom_max), 0.6).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	zoom.tween_property(_fade_root, "modulate:a", 0.0, 0.45)
+	await zoom.finished
+
+	# ④ 门 fade out → 游戏世界完全淡入（整层过场移除）。
+	var out := create_tween()
+	out.tween_property(_portal, "modulate:a", 0.0, 0.3)
+	await out.finished
 	queue_free() # 过场移除，世界成为唯一场景
