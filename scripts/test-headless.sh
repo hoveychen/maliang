@@ -50,6 +50,7 @@ UNIT_TESTS=(
   test_loading_progress
   test_dialog_camera
   test_phone_menu
+  test_asr_guard
 )
 fails=0
 
