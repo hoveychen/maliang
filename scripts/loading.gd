@@ -23,6 +23,12 @@ const DOT_COUNT := 3
 const FAIRY_W := 260.0    ## 仙子精灵框宽/高（横飞时按框定位）
 const FAIRY_H := 178.0
 const FLY_MARGIN := 44.0  ## 飞行航道左右留白
+# 仙子 idle 动画图集（服务端生成、WebP 打包本地供离线用；6×6 网格 31 帧 8fps，cell 216×160）
+const FAIRY_SHEET_COLS := 6
+const FAIRY_SHEET_FRAMES := 31
+const FAIRY_SHEET_FPS := 8.0
+const FAIRY_CELL_W := 216
+const FAIRY_CELL_H := 160
 const PROG_FOLLOW := 2.5  ## 显示进度追真进度的速度（每秒）：真里程碑落地时仙子快速前冲
 const PROG_CREEP := 0.035 ## 真进度停滞时的慢爬（每秒），朝 0.9 渐近但永不到顶——到顶只由 world_ready 触发
 const CREEP_CEIL := 0.9   ## 慢爬封顶：网络久等时仙子最多爬到 90%，留最后一截给「真就绪」
@@ -36,6 +42,7 @@ const REACT_DUR := 0.7     ## 点击屏幕后小仙子纸片翻转反应时长
 var _fade_root: Control    ## 淡出目标（背景+三点挂它下面，改 modulate:a 剥离）
 var _portal: TextureRect   ## 航道终点的传送门（挂 CanvasLayer 上、盖过 _fade_root，单独转场）
 var _fairy: TextureRect
+var _fairy_atlas: AtlasTexture ## 仙子动画图集的取帧窗口（每帧移 region 播 idle 动画）
 var _dots: Array[ColorRect] = []
 var _t := 0.0
 var _prog := 0.0           ## 显示进度 [0,1]：驱动仙子横向位置；真进度来自 _world.ready_progress()
@@ -74,7 +81,15 @@ func _build_overlay() -> void:
 	# 「小仙子布置世界，飞到尽头就绪」，让慢网也有进度感、且揭幕严格等仙子飞到头。
 	# 锚到左上角：offset 即绝对像素，_process 每帧按 _prog 摆 X。
 	_fairy = TextureRect.new()
-	_fairy.texture = load("res://assets/fairy.png")
+	# idle 动画图集：AtlasTexture 每帧移 region 播（见 _update_fairy_frame）；缺失则回落静态立绘
+	var sheet := load("res://assets/fairy_idle.webp") as Texture2D
+	if sheet != null:
+		_fairy_atlas = AtlasTexture.new()
+		_fairy_atlas.atlas = sheet
+		_fairy_atlas.region = Rect2(0, 0, FAIRY_CELL_W, FAIRY_CELL_H)
+		_fairy.texture = _fairy_atlas
+	else:
+		_fairy.texture = load("res://assets/fairy.png")
 	_fairy.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_fairy.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_fairy.set_anchors_preset(Control.PRESET_TOP_LEFT)
@@ -149,6 +164,7 @@ func _process(delta: float) -> void:
 	_t += delta
 	if _react_t > 0.0:
 		_react_t = maxf(0.0, _react_t - delta)
+	_update_fairy_frame()
 	_advance_progress(delta)
 	if not _transitioning: # 转场后仙子交给吸入 tween，别再被逐帧布局覆盖 scale/位置
 		_layout_fairy()
@@ -202,6 +218,16 @@ func _layout_fairy() -> void:
 	_fairy.offset_bottom = base_y + FAIRY_H + bob
 	_fairy.rotation = tilt
 	_fairy.scale = Vector2(s * flip, s) # x 方向翻转做纸片翻面
+
+## 播 idle 动画：按 _t 与 fps 取当前帧，移动 AtlasTexture 的 region 到对应网格格子。
+func _update_fairy_frame() -> void:
+	if _fairy_atlas == null:
+		return
+	var f := int(_t * FAIRY_SHEET_FPS) % FAIRY_SHEET_FRAMES
+	var col := f % FAIRY_SHEET_COLS
+	@warning_ignore("integer_division")
+	var row := f / FAIRY_SHEET_COLS
+	_fairy_atlas.region = Rect2(col * FAIRY_CELL_W, row * FAIRY_CELL_H, FAIRY_CELL_W, FAIRY_CELL_H)
 
 ## 仙子飞行终点＝门心（_prog=1 时仙子框中心），转场里仙子被吸入此处。
 func _finish_center() -> Vector2:
