@@ -2,6 +2,7 @@ import type { ServiceAdapters, AudioBlob } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, VoiceResponse } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
+import { pickGreeting } from './greetings.ts';
 
 export interface VoiceInput {
   worldId: string;
@@ -171,6 +172,60 @@ export async function respondToTranscript(
   const tts = await adapters.tts.synthesize(replyText, character.voiceId);
   response.ttsAsset = store.putAsset(tts);
   finishTurn(store, character, playerId, transcript, replyText);
+  return response;
+}
+
+/**
+ * 进对话时对方先开口：按角色招呼风格随机选一句招呼词，用该角色自己的 voiceId 走流式 TTS 出声。
+ * 与 respondToTranscript 同一 TTS 路径（onStart 发 character_response、onChunk 推分片），但不过 LLM、
+ * 不记忆、不算对话轮（招呼不是玩家发起的一轮）。transcript 留空表示这是主动招呼而非对某句的回应。
+ * rng 可注入做测试确定性。
+ */
+export async function greetCharacter(
+  worldId: string,
+  characterId: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  hooks?: TTSStreamHooks,
+  rng: () => number = Math.random,
+): Promise<VoiceResponse> {
+  const character = store.getCharacter(worldId, characterId);
+  if (!character) throw new CharacterNotFoundError(worldId, characterId);
+
+  const line = pickGreeting(character, rng);
+  const response: VoiceResponse = {
+    characterId: character.id,
+    transcript: '', // 主动招呼，无玩家话语
+    replyText: line,
+    ttsAsset: '',
+    greeting: true, // 客户端据此跳过「没听清」提示（招呼不是玩家发起的一轮）
+  };
+
+  const streamFn = adapters.tts.synthesizeStream?.bind(adapters.tts);
+  if (hooks && streamFn) {
+    let responded = false;
+    try {
+      const full = await streamFn(line, character.voiceId, {
+        onStart: (mime) => {
+          response.ttsStreaming = true;
+          response.ttsMime = mime;
+          responded = true;
+          hooks.onResponse(response);
+        },
+        onChunk: hooks.onChunk,
+      });
+      hooks.onEnd(store.putAsset(full));
+      return response;
+    } catch (err) {
+      if (responded) throw err;
+      console.warn(`招呼流式 TTS 未出声即失败，回落整段路径：${String(err)}`);
+      response.ttsStreaming = undefined;
+      response.ttsMime = undefined;
+    }
+  }
+
+  const tts = await adapters.tts.synthesize(line, character.voiceId);
+  response.ttsAsset = store.putAsset(tts);
   return response;
 }
 

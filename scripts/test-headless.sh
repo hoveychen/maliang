@@ -78,6 +78,7 @@ run_test test_visual_water         --fixed-fps 10 --quit-after 60
 run_test test_visual_camera_gesture --fixed-fps 10 --quit-after 160
 run_test test_visual_dialog_stage  --fixed-fps 10 --quit-after 60
 run_test test_visual_dialog_stage_blocked --fixed-fps 10 --quit-after 30
+run_test test_visual_greeting      --fixed-fps 10 --quit-after 60
 run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
 run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
 run_test test_visual_props         --fixed-fps 10 --quit-after 120

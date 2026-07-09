@@ -53,6 +53,11 @@ func send_voice_cancel() -> void:
 func send_voice_transcript(world_id: String, character_id: String, transcript: String) -> void:
 	_send({ "type": "voice_transcript", "worldId": world_id, "characterId": character_id, "transcript": transcript })
 
+## 进对话对方先开口：服务端按角色招呼风格随机选一句、用其 voiceId 走流式 TTS，
+## 回 character_response(+tts_chunk) 与普通回复同路。招呼失败服务端静默跳过，不打断进对话。
+func send_greeting(world_id: String, character_id: String) -> void:
+	_send({ "type": "voice_greeting", "worldId": world_id, "characterId": character_id })
+
 func send_create_character(world_id: String, intent_text: String) -> void:
 	_send({ "type": "create_character_request", "worldId": world_id, "intentText": intent_text, "byFairy": true })
 

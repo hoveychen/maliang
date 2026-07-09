@@ -1909,6 +1909,21 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	_mic.start()
 	_vad = VoiceVad.new()
 	_unmute_t = 0.0
+	_greet_on_enter(d) # 对方先开口打招呼（播放期间 _step_voice 自动闭麦，说完再放开）
+
+## 进对话对方先打招呼：小仙子走预制语音（离线可用、零延迟），普通 NPC 走服务端招呼
+## （按角色风格选词、用其 voiceId 流式 TTS，回 character_response 走 _on_character_response 播放）。
+## 招呼是可选点缀：仙子无预制词/NPC 离线或服务端静默跳过时，直接进开放麦，玩家仍可开口。
+func _greet_on_enter(d: Dictionary) -> void:
+	if d.is_empty():
+		return
+	if d.get("is_fairy", false):
+		if fairy_voice != null:
+			fairy_voice.try_play("greet")
+		return
+	var id := String(d.get("id", ""))
+	if not id.is_empty() and backend != null:
+		backend.send_greeting(world_id, id)
 
 func _exit_interaction() -> void:
 	game_audio.play_sfx("exit")
@@ -2419,14 +2434,17 @@ func _on_character_response(data: Dictionary) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
 	thinking_label.visible = false
-	var transcript := String(data.get("transcript", ""))
-	if transcript.is_empty():
-		heard_label.text = "没听清，再说一次试试"
-		game_audio.play_sfx("oops")
-	else:
-		heard_label.text = "听到：%s" % transcript
-		game_audio.play_sfx("bell")
-	heard_label.visible = true
+	# 主动招呼（对方先开口）：不是玩家发起的一轮，跳过「听到/没听清」提示，只放招呼台词+TTS
+	var is_greeting := bool(data.get("greeting", false))
+	if not is_greeting:
+		var transcript := String(data.get("transcript", ""))
+		if transcript.is_empty():
+			heard_label.text = "没听清，再说一次试试"
+			game_audio.play_sfx("oops")
+		else:
+			heard_label.text = "听到：%s" % transcript
+			game_audio.play_sfx("bell")
+		heard_label.visible = true
 	banner.text = String(data.get("replyText", ""))
 	banner.visible = true
 	_show_emotion(String(data.get("emotion", "happy")))
