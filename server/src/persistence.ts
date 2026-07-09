@@ -112,7 +112,35 @@ export class WorldStore {
         ts INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_chat_char_player ON chat_turns(character_id, player_id, id);
+      CREATE TABLE IF NOT EXISTS creation_icons (
+        option_id TEXT PRIMARY KEY,
+        asset_hash TEXT NOT NULL
+      );
     `);
+  }
+
+  /** 引导式造角色：某选项 id 已生成图标的资产 hash（未生成返回空串）。 */
+  getCreationIcon(optionId: string): string {
+    const row = this.#db.prepare('SELECT asset_hash FROM creation_icons WHERE option_id = ?').get(optionId) as
+      | { asset_hash: string }
+      | undefined;
+    return row?.asset_hash ?? '';
+  }
+
+  /** 记录/更新某选项的图标资产 hash。 */
+  setCreationIcon(optionId: string, assetHash: string): void {
+    this.#db
+      .prepare('INSERT INTO creation_icons (option_id, asset_hash) VALUES (?, ?) ON CONFLICT(option_id) DO UPDATE SET asset_hash = excluded.asset_hash')
+      .run(optionId, assetHash);
+  }
+
+  /** 全部已生成图标映射（option id → asset hash）。 */
+  listCreationIcons(): Record<string, string> {
+    const rows = this.#db.prepare('SELECT option_id, asset_hash FROM creation_icons').all() as
+      { option_id: string; asset_hash: string }[];
+    const out: Record<string, string> = {};
+    for (const r of rows) out[r.option_id] = r.asset_hash;
+    return out;
   }
 
   #assetsDir(): string {

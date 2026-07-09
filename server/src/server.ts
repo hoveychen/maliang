@@ -13,7 +13,7 @@ import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { newCreationState, stickerGlyph, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type WorldProp } from './types.ts';
-import { findOption } from './creation_options.ts';
+import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, praiseLine, thanksLine } from './tasks.ts';
 
 export interface ServerDeps {
@@ -333,6 +333,19 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return reply.header('content-type', 'text/html; charset=utf-8').send(DEBUG_DASHBOARD_HTML);
   });
 
+  // 引导式造角色图标（P3）：GET 看当前映射；POST 批量生成（幂等，?force=1 全量重生）。
+  // 与 /debug 同一 admin token 门禁。生成走服务端的 image adapter（prod 有真 key）。
+  app.get('/admin/creation-icons', async (req, reply) => {
+    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    return { icons: store.listCreationIcons() };
+  });
+  app.post<{ Querystring: { force?: string } }>('/admin/creation-icons', async (req, reply) => {
+    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    const force = req.query.force === '1' || req.query.force === 'true';
+    const result = await generateCreationIcons(adapters, store, { force });
+    return { ...result, icons: store.listCreationIcons() };
+  });
+
   // 昂贵操作限流：每连接 N/分钟 + 全局并发上限（防刷付费 API）
   const limiter = new RateLimiter(
     Number(process.env.RATE_PER_MIN ?? 8),
@@ -530,6 +543,36 @@ export async function createCharacterAsync(
 }
 
 /**
+ * 引导式造角色图标批量生成（P3）：遍历图标库每个选项，复用角色立绘管线 generateSprite
+ * （生图→抠图→朝向兜底→putAsset）出一张图，存「option id→asset hash」映射。
+ * 幂等：已生成的跳过，除非 force。返回生成/跳过/失败清单。绝不抛（单项失败不影响其它）。
+ */
+export async function generateCreationIcons(
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  opts: { force?: boolean } = {},
+): Promise<{ generated: string[]; skipped: string[]; failed: string[] }> {
+  const generated: string[] = [];
+  const skipped: string[] = [];
+  const failed: string[] = [];
+  for (const o of CREATION_OPTIONS) {
+    if (!opts.force && store.getCreationIcon(o.id)) {
+      skipped.push(o.id);
+      continue;
+    }
+    try {
+      const hash = await generateSprite(adapters, iconPrompt(o.id), store);
+      store.setCreationIcon(o.id, hash);
+      generated.push(o.id);
+    } catch (err) {
+      console.warn(`造角色图标生成失败（${o.id}，跳过）：${String(err)}`);
+      failed.push(o.id);
+    }
+  }
+  return { generated, skipped, failed };
+}
+
+/**
  * 引导式造角色一轮（见 docs/guided-creation-design.md）：
  * guideCreation 判断 → 累积属性 → 要么 done→createCharacterAsync 收尾，要么发 creation_prompt 继续追问。
  * childInput = 幼儿这轮的输入（点的选项 label 或说的话）；fairyId 用来取仙子音色合成问句 TTS。
@@ -577,7 +620,7 @@ export async function advanceCreation(
   const options = (r.optionIds ?? [])
     .map((id) => findOption(id))
     .filter((o): o is NonNullable<typeof o> => !!o)
-    .map((o) => ({ id: o.id, label: o.label, iconAsset: o.iconAsset }));
+    .map((o) => ({ id: o.id, label: o.label, iconAsset: store.getCreationIcon(o.id) }));
   let ttsAsset = '';
   try {
     const fairy = store.getCharacter(worldId, fairyId);

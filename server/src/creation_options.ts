@@ -39,6 +39,37 @@ export const CREATION_OPTIONS: readonly CreationOption[] = [
   opt('brave', 'personality', '勇敢'), opt('shy', 'personality', '害羞'), opt('smiley', 'personality', '爱笑'),
 ];
 
+/**
+ * 每个选项的生图主体描述（英文；P3 图标生成用）。走 generateSprite 管线——它会统一追加
+ * 动森纸片画风+绿幕背景并抠图，所以这里只描述「画什么主体」。抽象类别(颜色/大小/特点/性格)
+ * 映射成一个具体可画的东西:颜色→彩色气球、大小→不同大小的生物、特点→象征物、性格→表情脸。
+ */
+export const ICON_PROMPTS: Record<string, string> = {
+  // kind
+  cat: 'a cute kitten', dog: 'a cute puppy', rabbit: 'a cute bunny rabbit',
+  dragon: 'a cute friendly baby dragon', bird: 'a cute little bird', fish: 'a cute goldfish',
+  bear: 'a cute teddy bear', person: 'a cute cartoon child kid', sprite: 'a cute magical fairy sprite',
+  // color → 彩色气球（颜色一眼可辨，抠图后仍是纯色主体）
+  red: 'a bright red balloon', orange: 'a bright orange balloon', yellow: 'a bright yellow balloon',
+  green: 'a bright green balloon', blue: 'a bright blue balloon', purple: 'a bright purple balloon',
+  pink: 'a bright pink balloon', white: 'a white balloon', black: 'a black balloon',
+  // size → 不同大小的生物（抠图归一后靠体型/比例暗示，不完美但可辨）
+  small: 'a tiny baby chick', medium: 'a medium-sized puppy', big: 'a giant elephant',
+  // trait → 象征物
+  fly: 'a pair of white feathery angel wings', swim: 'a cute fish with water splash',
+  fluffy: 'a fluffy ball of soft fur', glow: 'a glowing shiny yellow star',
+  horn: 'a single magical unicorn horn', wings: 'a pair of colorful butterfly wings',
+  // personality → 表情脸
+  lively: 'a happy laughing cartoon face', gentle: 'a gentle warm smiling face',
+  brave: 'a brave confident face with a superhero cape', shy: 'a shy blushing cartoon face',
+  smiley: 'a big cheerful smiley face',
+};
+
+/** 取某选项的生图 prompt（未知回退到 label 兜底）。 */
+export function iconPrompt(id: string): string {
+  return ICON_PROMPTS[id] ?? `a cute ${id}`;
+}
+
 const BY_ID = new Map(CREATION_OPTIONS.map((o) => [o.id, o]));
 const BY_LABEL = new Map(CREATION_OPTIONS.map((o) => [o.label, o]));
 
