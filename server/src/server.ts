@@ -12,6 +12,7 @@ import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
+import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, stickerGlyph, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, praiseLine, thanksLine } from './tasks.ts';
@@ -328,6 +329,8 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
     return buildDebugState(store);
   });
+  // 资源化只读 API（/debug/api/*）：React 多页面后台分资源拉取（见 debug_api.ts）。
+  registerDebugApi(app, store, debugAuthed);
   app.get('/debug', async (req, reply) => {
     if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
     return reply.header('content-type', 'text/html; charset=utf-8').send(DEBUG_DASHBOARD_HTML);
