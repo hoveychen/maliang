@@ -49,6 +49,10 @@ func _tick() -> void:
 		113:
 			_test_speak_bob_active()
 		116:
+			_test_command_move_exits_chat()
+		120:
+			_test_command_action_keeps_chat()
+		124:
 			if fails == 0:
 				print("visual_click_move PASS")
 			else:
@@ -154,6 +158,24 @@ func _test_speak_bob_active() -> void:
 	var node := npc_node as Node3D
 	_check("speaking bob squashes sprite", node != null and node.scale.y != 1.0, true)
 	(scene.get("_tts_player") as AudioStreamPlayer).stop()
+
+## 立去系指令（move_to）：派发后应「关对话」——退出近身交互（selected 清空），NPC 独自走去。
+func _test_command_move_exits_chat() -> void:
+	scene.call("_enter_interaction", npc_node)
+	_check("re-entered interaction before move cmd", scene.get("selected") == npc_node, true)
+	scene.call("_on_character_response", { "transcript": "去池塘", "replyText": "好的！",
+		"emotion": "happy", "behaviorScript": { "commands": [
+			{ "type": "move_to", "params": { "location_name": "池塘" } }], "loop": false } })
+	_check("move_to command closes chat (selected cleared)", scene.get("selected"), null)
+
+## 就地动作（do_action）：不该关对话——挥手完还能继续跟它说话（selected 保持）。
+func _test_command_action_keeps_chat() -> void:
+	scene.call("_enter_interaction", npc_node)
+	_check("re-entered interaction before action cmd", scene.get("selected") == npc_node, true)
+	scene.call("_on_character_response", { "transcript": "挥挥手", "replyText": "好呀！",
+		"emotion": "wave", "behaviorScript": { "commands": [
+			{ "type": "do_action", "params": { "action": "wave" } }], "loop": false } })
+	_check("do_action keeps chat open (selected stays)", scene.get("selected") == npc_node, true)
 
 func _silence_pcm(ms: int) -> PackedByteArray:
 	var out := PackedByteArray()
