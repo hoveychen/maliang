@@ -28,6 +28,28 @@ signal _synth_done(ok: bool)
 
 ## ── 纯函数（单测覆盖）─────────────────────────────────────────────
 
+## 服务端 voiceId → edge 音色。取值域：仙子 mock-voice-cn-fairy、LLM 造的角色 cn-child-default、
+## 手配的 MiniMax 名（lovely_girl 等）、Kokoro zf_*/zm_*；未知按稳定哈希落池（同一 id 永远同声）。
+const _VOICE_MAP := {
+	"mock-voice-cn-fairy": "zh-CN-XiaoyiNeural", # 仙子：活泼女声（老板试听样本）
+	"cn-child-default": "zh-CN-YunxiaNeural", # 默认角色：小孩音
+	"lovely_girl": "zh-CN-XiaoyiNeural",
+	"cute_boy": "zh-CN-YunxiaNeural",
+	"clever_boy": "zh-CN-YunxiNeural",
+	"cartoon_pig": "zh-CN-YunxiaNeural",
+	"female-tianmei": "zh-CN-XiaoxiaoNeural",
+}
+const _VOICE_POOL := ["zh-CN-XiaoyiNeural", "zh-CN-YunxiaNeural", "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural"]
+
+static func map_voice(voice_id: String) -> String:
+	if _VOICE_MAP.has(voice_id):
+		return _VOICE_MAP[voice_id]
+	if voice_id.begins_with("zf_"):
+		return "zh-CN-XiaoxiaoNeural"
+	if voice_id.begins_with("zm_"):
+		return "zh-CN-YunxiNeural"
+	return _VOICE_POOL[voice_id.hash() % _VOICE_POOL.size()]
+
 ## Sec-MS-GEC：Windows 文件时间（unix+纪元差）向下取整到 5 分钟 → 100ns tick → 拼 token 走 SHA256 大写。
 ## 整数运算与 Python 参考实现逐位一致（乘积有效位 <2^53，float 路径也精确，见 test_edge_tts 参考值）。
 static func gen_sec_ms_gec(unix_time: float) -> String:

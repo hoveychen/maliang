@@ -265,6 +265,12 @@ var _tts_stream_pcm := PackedByteArray()
 var _tts_gen_playback: AudioStreamGeneratorPlayback = null
 var _tts_ending := false  ## 已收到 tts_end：积压排空+缓冲播完后主动 stop（generator 不会自己停）
 var _tts_gen_capacity := 0 ## generator 空缓冲容量（开播时实测，播完判定的基准）
+# clientTts：edge-tts 本地合成（设计见 docs/edge-tts-client-design.md）
+var edge_tts: EdgeTts
+var _tts_pending := false ## 本地合成/降级请求进行中：视同「角色在说话」（闭麦/压 BGM/相机），防 300ms 空窗漏麦
+var _tts_pending_deadline := 0.0 ## pending 兜底超时（降级也石沉大海时放开麦）
+var _edge_reprobe_t := 0.0 ## edge 失败后的重探倒计时
+const EDGE_REPROBE_SEC := 60.0
 
 func _ready() -> void:
 	critter_tex = load("res://assets/critter.png")
@@ -305,6 +311,9 @@ func _setup_audio() -> void:
 	add_child(_mic)
 	_tts_player = AudioStreamPlayer.new()
 	add_child(_tts_player)
+	edge_tts = EdgeTts.new()
+	edge_tts.name = "EdgeTts"
+	add_child(edge_tts) # 探活由 _step_edge_tts 首帧触发（available 初始 false）
 	game_audio = GameAudio.new()
 	game_audio.name = "GameAudio"
 	add_child(game_audio)
@@ -441,7 +450,7 @@ static func compute_dialog_cam(center: Vector2, speaker_logical: Vector2, base_h
 ## 对话中判定「谁在说话」：NPC 的 TTS 或（对仙子时）仙子语音在播 = npc；思考中 = idle（构图归中）；
 ## 其余（录音中 / 静待玩家开口）= player。焦点/距离据此朝对应角色偏移（见 _process 焦点块）。
 func _dialog_speaker() -> String:
-	if _tts_player.playing:
+	if _tts_player.playing or _tts_pending:
 		return "npc"
 	var fairy := _find_fairy()
 	if not fairy.is_empty() and selected == fairy.get("node") \
@@ -654,7 +663,7 @@ func _check_poi(delta: float) -> void:
 	if _poi_check_t > 0.0:
 		return
 	_poi_check_t = 2.0
-	if selected != null or _recording or thinking_label.visible or _tts_player.playing:
+	if selected != null or _recording or thinking_label.visible or _tts_player.playing or _tts_pending:
 		return
 	for poi in POIS:
 		var pp := TerrainMap.tile_center(poi["tile"])
@@ -671,7 +680,7 @@ func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
 	if fairy_voice == null:
 		return
 	_update_fairy_bubble(fairy)
-	if selected != null or _recording or thinking_label.visible or _tts_player.playing:
+	if selected != null or _recording or thinking_label.visible or _tts_player.playing or _tts_pending:
 		return
 	_fairy_chat_t -= delta
 	if _fairy_chat_t > 0.0:
@@ -1684,10 +1693,11 @@ func _process(delta: float) -> void:
 	_update_fairy(delta)
 	tp = _prof_lap(tp, "fairy")
 	_step_voice(delta)
+	_step_edge_tts(delta)
 	tp = _prof_lap(tp, "voice")
 	# 语音链路占用时压低 BGM，给人声让路（与开放麦闭麦判定同一组信号）
 	game_audio.set_ducked(_recording or thinking_label.visible or _tts_player.playing \
-			or (fairy_voice != null and fairy_voice.is_playing()))
+			or _tts_pending or (fairy_voice != null and fairy_voice.is_playing()))
 	tp = _prof_lap(tp, "duck")
 	_step_hop(delta)  # 进对话时玩家跳向站位（在焦点/摆位之前推进，相机随之贴合）
 	_step_phone_ui(delta)
@@ -2363,6 +2373,9 @@ func _setup_backend() -> void:
 	# 残余积压由 _drain_tts_stream 排空；generator 不会自己停，标记后播完主动 stop
 	# （否则 _tts_player.playing 永真 → 开放麦永久闭麦、小仙子永久闭嘴）
 	backend.tts_end.connect(func() -> void: _tts_ending = true)
+	# tts_request 降级流：tts_start 开流并解除 pending；tts_failed 静默放弃本句（只解除 pending）
+	backend.tts_start.connect(_on_tts_start)
+	backend.tts_failed.connect(func() -> void: _tts_pending = false)
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.creation_prompt.connect(_on_creation_prompt)
@@ -2765,7 +2778,7 @@ func _step_voice(delta: float) -> void:
 	if _vad == null:
 		return
 	var pcm := _mic.drain_pcm16k() # 闭麦期间也持续排空采集缓冲，恢复聆听时不会吃到角色的声音
-	if thinking_label.visible or _tts_player.playing \
+	if thinking_label.visible or _tts_player.playing or _tts_pending \
 			or (fairy_voice != null and fairy_voice.is_playing()):
 		if _recording:
 			_utterance_cancel() # 时序兜底：闭麦瞬间还在录 → 静默丢弃
@@ -2895,6 +2908,9 @@ func _on_character_response(data: Dictionary) -> void:
 		var asset := String(data.get("ttsAsset", ""))
 		if not asset.is_empty():
 			_play_tts(asset)
+		else:
+			# clientTts：服务端只给文本+voiceId，本地 edge 合成（失败内部降级 tts_request）
+			_speak_line(String(data.get("replyText", "")), String(data.get("voiceId", "")))
 
 ## 引导式造角色：小仙子追问一轮 —— 念出问句(TTS) + 弹出图标选项卡；小朋友点卡或直接说都行。
 func _on_creation_prompt(data: Dictionary) -> void:
@@ -2909,6 +2925,9 @@ func _on_creation_prompt(data: Dictionary) -> void:
 	var asset := String(data.get("ttsAsset", ""))
 	if not asset.is_empty():
 		_play_tts(asset) # 仙子把问题和选项念出来（幼儿不识字）
+	else:
+		# clientTts：仙子问句本地 edge 合成（幼儿不识字，念不出来就降级服务端）
+		_speak_line(String(data.get("replyText", data.get("question", ""))), String(data.get("voiceId", "")))
 
 ## 造一排选项卡：图标就绪(iconAsset 非空)显示图标，否则先显示中文 label。点一下即答复小仙子。
 func _build_creation_cards(options: Array) -> void:
@@ -3028,6 +3047,48 @@ func _play_tts(asset: String) -> void:
 	wav.data = bytes
 	_tts_player.stream = wav
 	_tts_player.play()
+
+## clientTts 主路径：edge-tts 本地合成优先（≈300ms 整句），失败逐句降级服务端 tts_request。
+## pending 期间视同出声（闭麦/压 BGM），防合成空窗漏进角色自己的声音。
+func _speak_line(text: String, voice_id: String) -> void:
+	if text.strip_edges().is_empty() or voice_id.is_empty():
+		return
+	_tts_pending = true
+	_tts_pending_deadline = Time.get_ticks_msec() / 1000.0 + 8.0
+	if edge_tts != null and edge_tts.available:
+		var mp3: PackedByteArray = await edge_tts.synthesize(text, EdgeTts.map_voice(voice_id))
+		if not mp3.is_empty():
+			_play_tts_mp3(mp3)
+			_tts_pending = false
+			return
+		_edge_reprobe_t = EDGE_REPROBE_SEC # 失败进退避，别每句都撞一次 4s 超时
+	# 降级：服务端流式合成；tts_start 到达开流并解 pending（见 _on_tts_start），彻底没回音走 deadline 兜底
+	backend.send_tts_request(text, voice_id)
+
+func _play_tts_mp3(bytes: PackedByteArray) -> void:
+	_tts_gen_playback = null # 切整段路径时停掉流式排空（与 _play_tts 同款复位）
+	_tts_ending = false
+	var mp3 := AudioStreamMP3.new()
+	mp3.data = bytes
+	_tts_player.stream = mp3
+	_tts_player.play()
+
+func _on_tts_start(mime: String) -> void:
+	_tts_pending = false
+	_start_tts_stream(_parse_rate(mime, 24000))
+
+## edge 探活/退避重探 + pending 兜底超时。available 初始 false，首帧即触发第一次探活。
+func _step_edge_tts(delta: float) -> void:
+	if _tts_pending and Time.get_ticks_msec() / 1000.0 > _tts_pending_deadline:
+		_tts_pending = false # 降级也石沉大海（离线）：放开麦，别把孩子闷住
+	if OS.get_environment("MALIANG_EDGE_TTS") == "0":
+		return # 回测隔离：headless 套件离线约定，不打真网探活
+	if edge_tts == null or edge_tts.available:
+		return
+	_edge_reprobe_t -= delta
+	if _edge_reprobe_t <= 0.0:
+		_edge_reprobe_t = EDGE_REPROBE_SEC
+		edge_tts.probe()
 
 ## 情绪气泡：AIGC 表情贴纸（3 岁不识字友好）+ 弹出过冲动画，数秒后淡出。
 func _show_emotion(emotion: String) -> void:
@@ -3306,11 +3367,16 @@ func _on_give_result(data: Dictionary) -> void:
 	inventory = data.get("inventory", inventory)
 	_refresh_album()
 
-## 得奖语音表扬（委托人音色，服务端后台合成推来）：正在出声就不打断——表扬是锦上添花。
-func _on_praise_tts(asset: String) -> void:
-	if asset.is_empty() or _tts_player.playing:
+## 得奖语音表扬（委托人音色）：正在出声就不打断——表扬是锦上添花。
+## 老路径服务端合成给 ttsAsset；clientTts 给 text+voiceId 本地合成。
+func _on_praise_tts(data: Dictionary) -> void:
+	if _tts_player.playing or _tts_pending:
 		return
-	_play_tts(asset)
+	var asset := String(data.get("ttsAsset", ""))
+	if not asset.is_empty():
+		_play_tts(asset)
+	else:
+		_speak_line(String(data.get("text", "")), String(data.get("voiceId", "")))
 
 ## 庆祝演出：委托人跳跃+头顶拉炮爆点+小仙子欢呼（预制台词），奖励贴纸飞进左下角收集册按钮。
 func _celebrate_reward(reward_id: String, task: Dictionary) -> void:

@@ -17,6 +17,8 @@ GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 
 # 离线模式：指向一个必然连不上的地址，世界走本地占位逻辑，不依赖后端。
 export MALIANG_API_BASE="${MALIANG_API_BASE:-http://127.0.0.1:1}"
+# 回测离线约定：关掉 edge-tts 真网探活（协议单测/真网冒烟见 test_edge_tts.gd）。
+export MALIANG_EDGE_TTS="${MALIANG_EDGE_TTS:-0}"
 
 echo "== import（刷新类缓存）=="
 "$GODOT" --headless --import --path "$ROOT" >/dev/null 2>&1

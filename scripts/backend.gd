@@ -17,7 +17,10 @@ signal failed(reason: String)
 signal world_state(data: Dictionary)
 signal task_complete(data: Dictionary)
 signal give_result(data: Dictionary)
-signal praise_tts(asset: String)
+signal praise_tts(data: Dictionary)
+## tts_request 降级流（客户端 edge-tts 失败求服务端合成）：tts_start 带 mime，随后 tts_chunk/tts_end 同一通道
+signal tts_start(mime: String)
+signal tts_failed
 ## 出站消息观测（连接未开也发射）：headless 测试/调试用，正常逻辑不要依赖它
 signal sent(msg: Dictionary)
 
@@ -36,7 +39,12 @@ func connect_to_server() -> void:
 	# 默认入站缓冲 64KB：慢帧场景（录屏/低端机）下一帧间隔内的 TTS 分片突发
 	# 会撑爆缓冲直接断连，后续推送（如 prop_created）全部丢失——调大到 2MB。
 	_ws.inbound_buffer_size = 2 * 1024 * 1024
-	_ws.connect_to_url(url)
+	_ws.connect_to_url(full_url())
+
+## 连接 URL 带 clientTts=1 能力声明：服务端全程跳过 TTS 合成只发文本+voiceId，
+## 客户端 edge-tts 本地合成；edge 不通时逐句 send_tts_request 降级（服务端仍保留全套 TTS）。
+func full_url() -> String:
+	return url + ("&" if url.contains("?") else "?") + "clientTts=1"
 
 func send_voice(world_id: String, character_id: String, audio_b64: String, fmt := "audio/wav") -> void:
 	_send({ "type": "voice_input", "worldId": world_id, "characterId": character_id, "audio": audio_b64, "format": fmt })
@@ -90,6 +98,10 @@ func send_world_info(world_id: String, locations: Array, profile := {}) -> void:
 	if not profile.is_empty():
 		msg["profile"] = profile
 	_send(msg)
+
+## edge-tts 本地合成失败的逐句降级：文本+voiceId 交服务端合成，回 tts_start(mime)+tts_chunk+tts_end。
+func send_tts_request(text: String, voice_id: String) -> void:
+	_send({ "type": "tts_request", "text": text, "voiceId": voice_id })
 
 ## 委托完成事件（客户端确定性判定：送达/带到/到点）。服务端匹配进行中委托则回 task_complete。
 func send_task_event(world_id: String, kind: String, extra := {}) -> void:
@@ -166,7 +178,11 @@ func _dispatch(data: Dictionary) -> void:
 		"give_result":
 			give_result.emit(data)
 		"praise_tts":
-			praise_tts.emit(String(data.get("ttsAsset", "")))
+			praise_tts.emit(data)
+		"tts_start":
+			tts_start.emit(String(data.get("ttsMime", "")))
+		"tts_failed":
+			tts_failed.emit()
 		"prop_created":
 			prop_created.emit(data.get("prop", {}))
 		"prop_failed":
