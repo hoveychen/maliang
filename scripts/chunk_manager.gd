@@ -138,6 +138,17 @@ func all_skinned() -> bool:
 			return false
 	return true
 
+## 首屏铺设进度 [0,1]：已 skin 槽位 / 总槽位。loading 过场用它驱动仙子飞行进度。
+## 未建槽（_ready 未跑）返回 0；全铺完返回 1（此时 all_skinned 亦为 true）。
+func skinned_fraction() -> float:
+	if _slots.is_empty():
+		return 0.0
+	var n := 0
+	for s in _slots:
+		if s["skinned"]:
+			n += 1
+	return float(n) / float(_slots.size())
+
 ## 恒等索引：wrapped → 槽位（_ready 的创建顺序 x*边长+z）。
 func _slot_of(wrapped: Vector2i) -> Dictionary:
 	return _slots[wrapped.x * CHUNKS_PER_SIDE + wrapped.y]

@@ -8,7 +8,9 @@ extends Node3D
 ## loading.gd 收到即淡出过场交还世界。断网时 _bootstrap 提前返回，超时也会兜底放行。
 signal world_ready
 
-const READY_TIMEOUT_SEC := 8.0    ## 就绪硬超时：网络慢/卡时最迟 8s 也放行，不让加载画面永挂
+const READY_TIMEOUT_SEC := 25.0   ## 就绪硬超时：仅防卡死兜底。必须 > api.get_world 的网络超时（GET_WORLD_TIMEOUT_SEC=18），
+                                  ## 保证「慢但成功」的 get_world 在揭幕前返回（走正常路径、玩家已就位），
+                                  ## 而不是揭幕后才返回把玩家硬拽到仙子旁——那正是启动瞬移的成因。
 const READY_MIN_SEC := 0.4        ## 最短等待：首屏 chunk 至少铺一轮，避免 world_ready 抢在铺设前发出
 const PLAYER_SPEED := 8.0         ## 方向键直接驱动玩家的速度（与 BehaviorExecutor.SPEED 一致）
 const GOD_PITCH_DEG := 47.0       ## 默认跟随视角：地平线落屏幕 ~4/5 高度（约 20% 天空）
@@ -2103,6 +2105,7 @@ func _bootstrap() -> void:
 	_apply_player_sprite() # 档案形象替换占位（并行拉取，不阻塞世界引导）
 	# 加载固定的 default 世界（含预生成村民），不再每次新建
 	var world: Dictionary = await api.get_world("default")
+	_boot_stage = 1 # 网络已定音（成功或离线），loading 进度推进到中段
 	if not world.is_empty():
 		online = true
 		world_id = String(world.get("id", "default"))
@@ -2125,13 +2128,24 @@ func _bootstrap() -> void:
 				var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
 				player["logical"] = spot
 				OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	_boot_stage = 2 # 角色/props 就位、玩家已落到最终位——引导侧全部完成
 	_bootstrapping = false
 
 ## 首屏就绪守望：等首屏 chunk 全 skin 完 && 引导结束，最短 READY_MIN_SEC、最长 READY_TIMEOUT_SEC，
 ## 然后发 world_ready。每帧让出（await process_frame）确保 _process→chunk_manager.update 推进铺设。
 ## 计时累加帧 delta（仿真时间）而非墙钟：headless 下帧比真机快得多，墙钟会让最短门永不满足。
 var _bootstrapping := false
+var _boot_stage := 0 ## 引导里程碑：0=网络进行中，1=get_world 已定音，2=角色/props/玩家全就位（见 _bootstrap）
 var _world_ready_sent := false
+
+## 世界就绪进度 [0,1)：loading 过场用它驱动仙子横向飞行。两条并行推进——
+## 首屏 chunk 铺设 与 在线引导里程碑——各占一半；封顶 0.95，真正的 1.0（落地揭幕）
+## 由 world_ready 信号触达，保证「飞到头」= 真就绪，而非到点硬放行。
+func ready_progress() -> float:
+	var chunk_f := chunk_manager.skinned_fraction() if chunk_manager != null else 0.0
+	var boot_f := clampf(float(_boot_stage) / 2.0, 0.0, 1.0)
+	return clampf(0.08 + 0.46 * chunk_f + 0.46 * boot_f, 0.0, 0.95)
+
 func _watch_world_ready() -> void:
 	var elapsed := 0.0
 	while true:
