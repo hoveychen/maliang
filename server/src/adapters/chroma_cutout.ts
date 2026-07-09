@@ -73,6 +73,46 @@ export function addStickerBorder(input: ImageBlob, radius?: number): ImageBlob {
   return { bytes: encodePng({ width: w, height: h, data: d }), mime: 'image/png' };
 }
 
+/**
+ * 裁到「不透明内容」的包围盒 + 四周留 pad 边（px）。
+ * 生图模型吐的是大画布（实测 1408×768 横图），抠绿后角色只占其中一小块、四周大片透明；
+ * 客户端按整张贴图高度归一化（paper_character.gd），留白会吃掉尺寸预算让角色显小。
+ * 存库前裁到贴身盒，角色即占满显示框。只裁透明边、不改角色像素本身，故对存量原地覆盖也安全。
+ * 全透明（找不到内容）时原样返回；已贴身（无可裁）时也原样返回免重新编码。
+ * alphaThresh：视为不透明的最低 alpha。与 sprite_sheet.unionCropFrames 的 bbox 判定同源（单图版）。
+ */
+export function trimToContent(input: ImageBlob, pad = 8, alphaThresh = 8): ImageBlob {
+  const { width: w, height: h, data: d } = decode(input.bytes);
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (d[(y * w + x) * 4 + 3]! >= alphaThresh) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX) return input; // 全透明，无从裁
+  minX = Math.max(0, minX - pad);
+  minY = Math.max(0, minY - pad);
+  maxX = Math.min(w - 1, maxX + pad);
+  maxY = Math.min(h - 1, maxY + pad);
+  const cw = maxX - minX + 1;
+  const ch = maxY - minY + 1;
+  if (cw === w && ch === h) return input; // 已贴身，免重新编码
+  const out = new Uint8Array(cw * ch * 4);
+  for (let y = 0; y < ch; y++) {
+    const src = ((minY + y) * w + minX) * 4;
+    out.set(d.subarray(src, src + cw * 4), y * cw * 4);
+  }
+  return { bytes: encodePng({ width: cw, height: ch, data: out }), mime: 'image/png' };
+}
+
 /** 水平镜像（朝左的立绘翻成朝右）。输出统一 PNG（保 alpha）。 */
 export function flipHorizontal(input: ImageBlob): ImageBlob {
   const { width: w, height: h, data: d } = decode(input.bytes);

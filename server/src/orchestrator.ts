@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ImageBlob, ServiceAdapters } from './adapters/types.ts';
-import { flipHorizontal, addStickerBorder } from './adapters/chroma_cutout.ts';
+import { flipHorizontal, addStickerBorder, trimToContent } from './adapters/chroma_cutout.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, CharacterSpec, CreateCharacterInput, GenStage } from './types.ts';
 
@@ -86,7 +86,8 @@ export async function generateSprite(
 ): Promise<string> {
   const cut = await generateCut(adapters, visualDescription);
   const upright = await ensureFacingRight(adapters, visualDescription, cut);
-  return store.putAsset(upright);
+  // 裁到贴身盒：生图是大画布、角色周围大片透明，裁掉后角色占满显示框（见 trimToContent）
+  return store.putAsset(trimToContent(upright));
 }
 
 /**
@@ -135,7 +136,8 @@ export async function createCharacter(
 
   // 图片不再单独审核：生图模型自带安全门（见 docs）。文字审核仍保留。
   onProgress('persist');
-  const assetHash = store.putAsset(upright);
+  // 裁到贴身盒：生图是大画布、角色周围大片透明，裁掉后角色占满显示框（见 trimToContent）
+  const assetHash = store.putAsset(trimToContent(upright));
   const character = buildCharacter(spec, input, assetHash);
   store.addCharacter(character);
   return character;
