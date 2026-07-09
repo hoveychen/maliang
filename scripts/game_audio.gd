@@ -32,6 +32,7 @@ const SFX_GAP := 0.08          # 同名音效最小间隔，防连点刷屏
 const MUSIC_DB := -14.0        # 音乐常态音量：垫在语音下面
 const SFX_DB := -6.0
 const DUCK_DB := -12.0         # duck 时在常态上再压这么多
+const MUTE_DB := -80.0         # 静音(录音时)：等效关掉，防外放 BGM 回灌麦克风把 VAD 顶到 12s
 const DUCK_LERP := 6.0         # duck 渐变速率(每秒 dB 权重)
 const SECTION_SECS := 19.2     # 多段模式下每段播这么久后轮换（单条模式不生效）
 const CROSSFADE_SECS := 1.2
@@ -48,7 +49,7 @@ var _active_is_a := true       # 正在出声的是 a 还是 b
 var _section_left := 0.0       # 距下次换段剩余秒
 var _fade_left := 0.0          # 交叉淡化剩余秒
 var ducked := false
-
+var muted := false             # 录音期静音 BGM（盖过 duck），录完恢复
 static func _ensure_bus(bus_name: String) -> void:
 	if AudioServer.get_bus_index(bus_name) == -1:
 		var idx := AudioServer.bus_count
@@ -147,6 +148,10 @@ func stop_bgm() -> void:
 func set_ducked(on: bool) -> void:
 	ducked = on
 
+## 录音期静音 BGM（盖过 duck）：断掉外放回灌，让 VAD 能听到「说完后的真静音」。
+func set_music_muted(on: bool) -> void:
+	muted = on
+
 func _process(delta: float) -> void:
 	_advance(delta)
 
@@ -161,7 +166,7 @@ func _advance(delta: float) -> void:
 		_section_left -= delta
 		if _section_left <= 0.0:
 			_begin_crossfade()
-	var target := MUSIC_DB + (DUCK_DB if ducked else 0.0)
+	var target := MUTE_DB if muted else MUSIC_DB + (DUCK_DB if ducked else 0.0)
 	var active := _music_a if _active_is_a else _music_b
 	var fading := _music_b if _active_is_a else _music_a
 	if _fade_left > 0.0:
