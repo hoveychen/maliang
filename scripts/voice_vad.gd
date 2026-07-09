@@ -35,6 +35,7 @@ var _speaking := false
 var _voiced_ms := 0               ## 静默期：连续有声累计
 var _silence_ms := 0              ## 说话期：连续静音累计
 var _speech_ms := 0               ## 说话期：本段总时长
+var _last_threshold := 0.0        ## 最近一帧触发阈值（诊断上报用）
 
 ## 喂增量 PCM（16k 单声道 PCM16LE，任意长度），返回事件数组（可能为空）。
 func feed(pcm: PackedByteArray) -> Array:
@@ -65,6 +66,7 @@ func _step_frame(frame: PackedByteArray, events: Array) -> void:
 	var alpha := 0.1 if rms < _noise else (0.002 if _speaking else 0.02)
 	_noise = _noise * (1.0 - alpha) + rms * alpha
 	var threshold := clampf(_noise * MARGIN, ABS_MIN, 0.5)
+	_last_threshold = threshold
 	if _speaking:
 		_step_speaking(frame, rms, threshold, events)
 	else:
@@ -103,11 +105,33 @@ func _step_speaking(frame: PackedByteArray, rms: float, threshold: float, events
 		_silence_ms += FRAME_MS
 	if _silence_ms >= END_SILENCE_MS or _speech_ms >= MAX_UTTERANCE_MS:
 		var voiced := _speech_ms - _silence_ms
-		events.append({ "type": "end" if voiced >= MIN_SPEECH_MS else "cancel" })
+		# reason=silence 正常静音收尾；reason=cap 静音判定始终没触发、撞 12s 硬顶
+		# （持续背景声灌满麦克风的指纹）。诊断字段随事件带出，供 world.gd 打 logcat。
+		var reason := "silence" if _silence_ms >= END_SILENCE_MS else "cap"
+		events.append({
+			"type": "end" if voiced >= MIN_SPEECH_MS else "cancel",
+			"reason": reason,
+			"speech_ms": _speech_ms,
+			"silence_ms": _silence_ms,
+			"noise": _noise,
+			"threshold": _last_threshold,
+		})
 		_speaking = false
 		_voiced_ms = 0
 		_silence_ms = 0
 		_speech_ms = 0
+
+## 调试快照：当前噪声底/阈值/静音累计/语音累计/是否说话/响度。
+## world.gd 在录音期周期性打 logcat 用，看 silence_ms 是否始终涨不上去（背景声灌满）。
+func debug_stats() -> Dictionary:
+	return {
+		"noise": _noise,
+		"threshold": clampf(_noise * MARGIN, ABS_MIN, 0.5),
+		"silence_ms": _silence_ms,
+		"speech_ms": _speech_ms,
+		"speaking": _speaking,
+		"level": level,
+	}
 
 ## 帧 RMS（PCM16LE → 归一化 0..1）。
 func _rms(frame: PackedByteArray) -> float:

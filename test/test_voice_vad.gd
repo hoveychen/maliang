@@ -10,6 +10,7 @@ func _initialize() -> void:
 	fails += _test_short_burst_cancels()
 	fails += _test_reset_drops_segment()
 	fails += _test_level_exposed()
+	fails += _test_cap_reason()
 	if fails == 0:
 		print("voice_vad tests PASS")
 	else:
@@ -36,6 +37,9 @@ func _test_normal_utterance() -> int:
 	fails += _check("one start", starts.size(), 1)
 	fails += _check("one end", ends.size(), 1)
 	fails += _check("no cancel", cancels.size(), 0)
+	if ends.size() == 1:
+		# 正常说完（900ms 静音判定收尾）应标 reason=silence，区别于 12s 硬顶
+		fails += _check("normal end reason=silence", ends[0].get("reason", ""), "silence")
 	if starts.size() == 1:
 		var head := starts[0]["pcm"] as PackedByteArray
 		# 预录 300ms + 触发帧 90ms：start 携带的头块应覆盖开口前后（>= 300ms 字节量）
@@ -81,6 +85,15 @@ func _test_level_exposed() -> int:
 	_feed_chunked(vad, _silence(120))
 	fails += _check("level falls in silence", vad.level < 0.05, true)
 	return fails
+
+## 持续 13s 不间断有声（模拟外放 BGM/环境噪声灌满麦克风）：静音判定永不触发，
+## 只能靠 MAX_UTTERANCE 硬顶收尾 → reason=cap。这正是真机「一直不结束」的指纹，
+## 收尾事件必须能把它和正常 silence 收尾区分开，否则日志会把我们带偏。
+func _test_cap_reason() -> int:
+	var vad := VoiceVad.new()
+	var events := _feed_chunked(vad, _voice(13000))
+	var capped := events.filter(func(e: Dictionary) -> bool: return e.get("reason", "") == "cap")
+	return _check("continuous sound ends via cap", capped.size() >= 1, true)
 
 ## ── 合成 PCM 工具 ────────────────────────────────────────────────────────
 
