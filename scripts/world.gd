@@ -162,10 +162,12 @@ const PHONE_APPS := [
 	["settings", "设置", "app_settings"],
 ]
 ## app 图标占位：AIGC 专属图标未落盘前，先借现有风格一致的图标顶上。
-const PHONE_APP_FALLBACK := { "flowers": "st_flower", "items": "ic_gift", "settings": "ic_gear" }
+const PHONE_APP_FALLBACK := { "flowers": "reward_flower", "items": "ic_gift", "settings": "ic_gear" }
 ## 小红花经济常量（与 server/src/types.ts 对齐）。
 const MAX_FLOWERS := 9              ## 小红花上限（3×3 格）
 const STAMPS_PER_FLOWER := 3        ## 每满 3 章换 1 朵花
+## 盖章款式 id（与 server STAMP_STYLES 对齐）→ 图标 stamp_<style>（AIGC 集邮章）。
+const STAMP_STYLES := ["star", "smile", "paw", "medal", "heart"]
 const PHONE_GRID_COLS := 3          ## 主屏图标网格列数（3x3）
 const PHONE_PAGE_SLOTS := 9         ## 每页图标格数（3x3）
 const PHONE_HEIGHT_RATIO := 0.9     ## 机身高占视口比（贴右侧、竖向居中）
@@ -1295,7 +1297,7 @@ func _build_phone_widget() -> PanelContainer:
 	fl_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	fl_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	fl_box.add_theme_constant_override("separation", 6)
-	fl_box.add_child(UiAssets.icon_rect("st_flower", 34.0))
+	fl_box.add_child(UiAssets.icon_rect("reward_flower", 34.0))
 	_phone_flowers = Label.new()
 	_style_card_label(_phone_flowers, 26)
 	fl_box.add_child(_phone_flowers)
@@ -3349,8 +3351,12 @@ func _update_task_chip() -> void:
 			task_chip.add_child(_chip_icon(UiAssets.tex("ic_pin")))
 			task_chip.add_child(_chip_label(String(active_task.get("locationName", ""))))
 	task_chip.add_child(_chip_label("⇒"))
-	task_chip.add_child(_chip_icon(UiAssets.tex("st_star"))) # 奖励=盖一个集邮章
+	task_chip.add_child(_chip_icon(UiAssets.tex(_stamp_icon(String(active_task.get("stampStyle", "star")))))) # 奖励=盖这款集邮章
 	task_chip.visible = true
+
+## 盖章款式 id → 图标名（stamp_<style>，未知款式回退 stamp_star）。
+func _stamp_icon(style: String) -> String:
+	return "stamp_%s" % style if STAMP_STYLES.has(style) else "stamp_star"
 
 ## 委托完成：盖 1 章（满 3 升 1 花）、更新钱包、收起 chip、庆祝演出。
 func _on_task_complete(data: Dictionary) -> void:
@@ -3386,7 +3392,7 @@ func _celebrate_reward(flower_gained: bool, task: Dictionary) -> void:
 		fairy_voice.try_play("reward") # 身边的小仙子先欢呼，1~2 秒后委托人的表扬语音跟上
 	if game_audio != null:
 		game_audio.play_sfx("enter")
-	_fly_reward_to_album("st_flower" if flower_gained else "st_star")
+	_fly_reward_to_album("reward_flower" if flower_gained else _stamp_icon(String(task.get("stampStyle", "star"))))
 
 ## 拉炮贴纸在角色头顶弹出过冲后淡出（临时 Sprite3D，不占用全局情绪气泡）。
 func _spawn_burst(npc: PaperCharacter) -> void:
@@ -3544,7 +3550,7 @@ func _build_flowers_page() -> Control:
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_flower_cells.clear()
 	for _i in MAX_FLOWERS:
-		var cell := UiAssets.icon_rect("st_flower", 44.0)
+		var cell := UiAssets.icon_rect("reward_flower", 44.0)
 		grid.add_child(cell)
 		_flower_cells.append(cell)
 	page.add_child(grid)
@@ -3554,7 +3560,7 @@ func _build_flowers_page() -> Control:
 	stamp_row.add_theme_constant_override("separation", 10)
 	_stamp_dots.clear()
 	for _i in STAMPS_PER_FLOWER:
-		var dot := UiAssets.icon_rect("st_star", 34.0)
+		var dot := UiAssets.icon_rect("stamp_star", 34.0)
 		stamp_row.add_child(dot)
 		_stamp_dots.append(dot)
 	page.add_child(stamp_row)
@@ -3562,7 +3568,7 @@ func _build_flowers_page() -> Control:
 	var total_row := HBoxContainer.new()
 	total_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	total_row.add_theme_constant_override("separation", 6)
-	total_row.add_child(UiAssets.icon_rect("st_star", 26.0))
+	total_row.add_child(UiAssets.icon_rect("stamp_star", 26.0))
 	_stamps_total_label = Label.new()
 	_style_card_label(_stamps_total_label, 22)
 	total_row.add_child(_stamps_total_label)
