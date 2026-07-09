@@ -1525,7 +1525,7 @@ func _step_play_budget(delta: float) -> void:
 		_play_save_t = 5.0
 		PlayerProfile.save_play_budget(_play_used_sec, _play_cooldown_until, now)
 
-## 进/出冷却的一次性副作用：进冷却→弹全屏遮罩、收手机、断当前对话；出冷却→收遮罩。
+## 进/出冷却的一次性副作用：进冷却→弹全屏遮罩、收手机、断当前对话、小仙子语音提示；出冷却→收遮罩+语音。
 func _apply_cooldown_block(blocked: bool) -> void:
 	if _cooldown_overlay != null:
 		_cooldown_overlay.visible = blocked
@@ -1533,6 +1533,10 @@ func _apply_cooldown_block(blocked: bool) -> void:
 		_close_phone()
 		if _locked != null:
 			_exit_interaction() # 断开近身对话，回自由视角（冷却期不许交互）
+		if fairy_voice != null:
+			fairy_voice.try_play("cooldown_start") # 小仙子语音提示：该休息啦
+	elif fairy_voice != null:
+		fairy_voice.try_play("cooldown_end") # 冷却结束：休息好啦，继续玩
 
 ## 冷却拦截遮罩：半透明暗底 + 居中卡片（大闹钟饼图倒计时 + 文案）。整屏 STOP 吞点击，冷却期挡住世界。
 func _build_cooldown_overlay() -> Control:

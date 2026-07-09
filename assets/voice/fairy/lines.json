@@ -102,6 +102,24 @@
       "trigger": "reward",
       "cooldown": 5,
       "text": "你好厉害呀，继续加油哦！"
+    },
+    {
+      "id": "fairy_cooldown_start_1",
+      "trigger": "cooldown_start",
+      "cooldown": 5,
+      "text": "今天玩得好开心呀！先歇一歇，等小闹钟转满，我们再一起玩，好不好？"
+    },
+    {
+      "id": "fairy_cooldown_start_2",
+      "trigger": "cooldown_start",
+      "cooldown": 5,
+      "text": "玩了好久啦，眼睛要休息一下下哦，一会儿再来找我玩呀！"
+    },
+    {
+      "id": "fairy_cooldown_end_1",
+      "trigger": "cooldown_end",
+      "cooldown": 5,
+      "text": "休息好啦！我们继续一起玩吧！"
     }
   ]
 }
