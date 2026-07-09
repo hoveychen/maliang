@@ -23,10 +23,31 @@ uniform int sheet_frames = 0;
 uniform float sheet_fps = 8.0;
 uniform float sheet_phase = 0.0;
 
-// 穿透观感调参
-uniform vec4 xray_tint : source_color = vec4(0.55, 0.85, 1.0, 0.0); // rgb=着色, a=着色混入比(0=保留原色)
-uniform float xray_alpha = 0.42;   // 剪影不透明度
-uniform float xray_bias = 0.06;    // 自遮挡防抖（米）：小于此深度差视作角色自身，不画
+// 蓝白「透视魔法」观感：发光描边 + 淡填充，不保留角色本色。
+uniform vec4 xray_edge : source_color = vec4(0.85, 0.95, 1.0, 1.0); // 描边亮蓝白
+uniform vec4 xray_fill : source_color = vec4(0.45, 0.75, 1.0, 1.0); // 填充柔蓝
+uniform float xray_edge_alpha = 0.9;   // 描边不透明度
+uniform float xray_fill_alpha = 0.18;  // 内部填充不透明度（保留剪影形状，弱于描边）
+uniform float xray_edge_px = 2.0;      // 描边宽度（纹素）
+uniform float xray_bias = 0.06;        // 自遮挡防抖（米）：小于此深度差视作角色自身，不画
+
+// base UV(0..1 网格) → 图集 UV（分格模式映射到当前动画格；静态整图直接返回）
+vec2 sheet_uv(vec2 base) {
+	if (sheet_frames <= 0) {
+		return base;
+	}
+	int f = int(mod(floor((TIME + sheet_phase) * sheet_fps), float(sheet_frames)));
+	int col = f % sheet_cols;
+	int row = f / sheet_cols;
+	vec2 grid = vec2(float(sheet_cols), float(sheet_rows));
+	vec2 texel = 0.5 / vec2(textureSize(albedo_tex, 0));
+	vec2 cell = clamp(base, texel * grid, vec2(1.0) - texel * grid);
+	return (vec2(float(col), float(row)) + cell) / grid;
+}
+
+float sample_alpha(vec2 base) {
+	return texture(albedo_tex, sheet_uv(base)).a;
+}
 
 void vertex() {
 	float xn = VERTEX.x / max(quad_size.x * 0.5, 0.001);
@@ -47,22 +68,26 @@ void fragment() {
 		discard;
 	}
 
-	// 2) 用立绘 alpha 裁出角色轮廓（复制主 pass 的分格 UV）
-	vec2 uv = UV;
-	if (sheet_frames > 0) {
-		int f = int(mod(floor((TIME + sheet_phase) * sheet_fps), float(sheet_frames)));
-		int col = f % sheet_cols;
-		int row = f / sheet_cols;
-		vec2 grid = vec2(float(sheet_cols), float(sheet_rows));
-		vec2 texel = 0.5 / vec2(textureSize(albedo_tex, 0));
-		vec2 cell = clamp(UV, texel * grid, vec2(1.0) - texel * grid);
-		uv = (vec2(float(col), float(row)) + cell) / grid;
-	}
-	vec4 c = texture(albedo_tex, uv);
-	if (c.a < 0.5) {
+	// 2) 用立绘 alpha 裁出角色轮廓，超出即丢弃
+	if (sample_alpha(UV) < 0.5) {
 		discard;
 	}
 
-	ALBEDO = mix(c.rgb, xray_tint.rgb, xray_tint.a);
-	ALPHA = xray_alpha;
+	// 3) 描边检测：本像素在形内、若邻域出现形外像素则为轮廓边缘。
+	// 步长按「基 UV 下的纹素」算（分格模式一格占 1/grid，故乘 grid 还原到整图纹素）。
+	vec2 grid = (sheet_frames > 0) ? vec2(float(sheet_cols), float(sheet_rows)) : vec2(1.0);
+	vec2 step_uv = xray_edge_px * grid / vec2(textureSize(albedo_tex, 0));
+	float outside =
+		  (1.0 - step(0.5, sample_alpha(UV + vec2( step_uv.x, 0.0))))
+		+ (1.0 - step(0.5, sample_alpha(UV + vec2(-step_uv.x, 0.0))))
+		+ (1.0 - step(0.5, sample_alpha(UV + vec2(0.0,  step_uv.y))))
+		+ (1.0 - step(0.5, sample_alpha(UV + vec2(0.0, -step_uv.y))))
+		+ (1.0 - step(0.5, sample_alpha(UV + step_uv)))
+		+ (1.0 - step(0.5, sample_alpha(UV - step_uv)))
+		+ (1.0 - step(0.5, sample_alpha(UV + vec2( step_uv.x, -step_uv.y))))
+		+ (1.0 - step(0.5, sample_alpha(UV + vec2(-step_uv.x,  step_uv.y))));
+	float edge = clamp(outside, 0.0, 1.0); // 邻域有形外像素 => 边缘
+
+	ALBEDO = mix(xray_fill.rgb, xray_edge.rgb, edge);
+	ALPHA = mix(xray_fill_alpha, xray_edge_alpha, edge);
 }

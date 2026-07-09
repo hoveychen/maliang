@@ -62,13 +62,13 @@ func _tick() -> void:
 	var boxside := imgc.get_pixel(cx + int(w * 0.08), cy)   # 方块内、角色红轮廓外侧（应为纯灰）
 	var boxonly := imgc.get_pixel(cx - int(w * 0.08), cy)   # 对侧纯灰方块
 	print("[xray] size=%dx%d behind=%s boxside=%s boxonly=%s" % [w, h, behind, boxside, boxonly])
-	# 断言：被遮挡处应带红色调（剪影混入原色）；方块两侧纯方块处红分量应很低
-	var behind_reddish := behind.r > behind.b + 0.08
+	# 断言：被遮挡处应带蓝色调（蓝白透视剪影）；方块两侧纯方块处应为中性灰
+	var behind_bluish := behind.b > behind.r + 0.08
 	var boxside_plain := boxside.r < 0.55 and absf(boxside.r - boxside.b) < 0.12
-	print("[xray] behind_reddish=%s boxside_plain=%s" % [behind_reddish, boxside_plain])
+	print("[xray] behind_bluish=%s boxside_plain=%s" % [behind_bluish, boxside_plain])
 	var fails := 0
-	if not behind_reddish:
-		print("  FAIL 被遮挡区未见剪影红调"); fails += 1
+	if not behind_bluish:
+		print("  FAIL 被遮挡区未见蓝白剪影"); fails += 1
 	if not boxside_plain:
 		print("  FAIL 方块外侧非纯方块色（剪影溢出/未裁形）"); fails += 1
 	if fails == 0:
