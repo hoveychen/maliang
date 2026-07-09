@@ -21,6 +21,9 @@ const CHAT_DUR := 6.0 ## chat_with 到达后的聊天演出时长（world.gd 气
 var _target: Dictionary = {}
 var _commands: Array = []
 var _loop := false
+## true = 自主闲逛（wait/wander 循环），非脚本任务。world 的「主动看你」环境演出在有
+## 非 ambient（真实指令：送信/跑腿/靠近对话）执行器活跃时暂停，避免打断脚本化场景。
+var ambient := false
 var _idx := 0
 var _state := "idle" ## idle | move | wait | follow | done
 var _wait_t := 0.0
