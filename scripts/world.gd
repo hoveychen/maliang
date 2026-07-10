@@ -163,8 +163,8 @@ var _pending_leave: Dictionary = {}
 var active_task: Dictionary = {}   ## 进行中委托（空=无），见 _set_active_task
 var wallet: Dictionary = { "flowers": 0, "stampProgress": 0, "stampsTotal": 0 } ## 小红花钱包
 var task_chip: HBoxContainer       ## 右上角委托提示（目标图标+短名 ⇒ 盖章奖励图标）
-var _creation_cards: HBoxContainer ## 引导式造角色的图标选项卡（浮在横幅上方；平时隐藏）
-var _in_creation := false          ## 正在与小仙子引导式造角色（期间语音/点选都是造角色答复）
+var _creation_cards: HBoxContainer ## 引导式造角色/造物的图标选项卡（浮在横幅上方；平时隐藏）
+var _in_creation := false          ## 正在与小仙子引导式创造（造角色或造物；期间语音/点选都是这次会话的答复）
 var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
 var album_button: Button           ## 左下角手机启动器按钮（AIGC 手机图标）
@@ -4092,6 +4092,8 @@ func _on_character_response(data: Dictionary) -> void:
 			_speak_line(String(data.get("replyText", "")), String(data.get("voiceId", "")))
 
 ## 引导式造角色：小仙子追问一轮 —— 念出问句(TTS) + 弹出图标选项卡；小朋友点卡或直接说都行。
+# 引导式创造追问一轮（造角色或造物共用此路径）：仙子念问句 + 弹图标选项卡；孩子点卡或直接说都行。
+# 消息 goal-agnostic：客户端只管渲染服务端给的 options、回传 optionId，造的是角色还是物件由服务端 goal 决定。
 func _on_creation_prompt(data: Dictionary) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
