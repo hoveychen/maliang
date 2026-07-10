@@ -3194,6 +3194,17 @@ func _unload_scene() -> void:
 	_portals.clear() # 旧场景的出口不属于新场景；新场景的由 _apply_scene 重新下发
 	_clear_portal_markers()
 
+## 初载角色过滤：只留当前场景的角色（仙女恒随，与 enter_scene 同款约定）。get_world 回的是
+## 全库角色，不过滤会把别场景的角色全生在村里，positions_report 随后把它们拖成 village
+## （scene-drag-guard 实锤过：刚 seed 的森林村民被初载客户端整批拖空）。缺 sceneId 的存量按 village。
+func _filter_boot_characters(all: Array) -> Array:
+	var chars: Array = []
+	for c in all:
+		var cd := c as Dictionary
+		if bool(cd.get("isFairy", false)) or String(cd.get("sceneId", "village")) == _scene_id:
+			chars.append(cd)
+	return chars
+
 func _bootstrap() -> void:
 	_bootstrapping = true
 	_player_restore_pending = true
@@ -3213,7 +3224,7 @@ func _bootstrap() -> void:
 			OccupancyMap.char_unregister(String(n.get("id", "")))
 			(n["node"] as Node).queue_free() # 清掉离线占位
 		npcs.clear()
-		var chars: Array = world.get("characters", [])
+		var chars: Array = _filter_boot_characters(world.get("characters", []))
 		# 先并发预取所有角色素材（anim 优先，跳静态大图）：冷启动从「逐个立绘串行下载」的长尾
 		# 降到「最慢一个并发」，杜绝首次进世界接近 25s 揭幕硬超时、村民后补的观感。
 		var total := chars.size()
