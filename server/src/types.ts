@@ -265,9 +265,9 @@ export interface Player {
   color: string; // 喜欢的颜色名
   spriteAsset: string; // 形象资产 hash（内容寻址，服务端已有）
   createdAt: string; // ISO 时间；由前端 profile 带上，服务端不取墙上时钟
-  /** 最后所在 tile（positions_report 上报）。老档案无此字段 → 客户端按小神仙旁降生。 */
-  position?: TilePos;
 }
+// 注：玩家位置不在这里——它按 (world, scene, player) 存 player_positions 表。
+// 只按 playerId 存位置在多场景下毫无意义（同一 tile 在不同场景是不同地方）。
 
 /**
  * 一次会话（Visit）：一次「进世界到离开」，作会话结束批量抽记忆的边界（见 design §4）。

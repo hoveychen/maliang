@@ -107,6 +107,7 @@ export class WorldStore {
       this.#migrateFromJson();
       this.#migrateLegacyMemories();
       this.#migrateLegacyChatHistory();
+      this.#migrateLegacyPlayerPositions();
       this.#loadAssets();
       this.#loadSpriteAnims();
     }
@@ -177,6 +178,16 @@ export class WorldStore {
         player_id TEXT NOT NULL,
         data TEXT NOT NULL,
         PRIMARY KEY (world_id, player_id)
+      );
+      -- 玩家位置：必须带场景。只按 playerId 存位置在多场景下毫无意义——
+      -- 「小明在 (12,30)」是村庄的池塘边还是森林的空地？
+      CREATE TABLE IF NOT EXISTS player_positions (
+        world_id  TEXT NOT NULL,
+        scene_id  TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        tile_x    INTEGER NOT NULL,
+        tile_y    INTEGER NOT NULL,
+        PRIMARY KEY (world_id, scene_id, player_id)
       );
       -- 场景 = 世界里的一片区域（一张地图）。地形二进制存 assets 库，这里只记 hash。
       CREATE TABLE IF NOT EXISTS scenes (
@@ -609,13 +620,47 @@ export class WorldStore {
 
   // ── 玩家实体（面向 MMO；身份=设备端 UUID，无鉴权，见 types.Player）──────────
 
-  /** 玩家所在 tile 的落位回报。玩家档案未建（首次进世界还没上报 profile）→ false 不动账。 */
-  setPlayerTile(playerId: string, tile: TilePos): boolean {
-    const player = this.getPlayer(playerId);
-    if (!player) return false;
-    player.position = tile;
-    this.upsertPlayer(player);
+  /**
+   * 玩家在某世界某场景的落位回报。玩家档案未建（首次进世界还没上报 profile）→ false 不动账。
+   * 键必须是 (world, scene, player)：同一个 tile 坐标在不同场景是完全不同的地方。
+   */
+  setPlayerTile(worldId: string, sceneId: string, playerId: string, tile: TilePos): boolean {
+    if (!this.getPlayer(playerId)) return false;
+    this.#db
+      .prepare(
+        'INSERT INTO player_positions (world_id, scene_id, player_id, tile_x, tile_y) VALUES (?, ?, ?, ?, ?) ' +
+          'ON CONFLICT(world_id, scene_id, player_id) DO UPDATE SET tile_x = excluded.tile_x, tile_y = excluded.tile_y',
+      )
+      .run(worldId, sceneId, playerId, tile.tileX, tile.tileY);
     return true;
+  }
+
+  /** 玩家在某世界某场景的最后位置。没去过 → undefined（客户端按小神仙旁降生）。 */
+  getPlayerTile(worldId: string, sceneId: string, playerId: string): TilePos | undefined {
+    const row = this.#db
+      .prepare('SELECT tile_x, tile_y FROM player_positions WHERE world_id = ? AND scene_id = ? AND player_id = ?')
+      .get(worldId, sceneId, playerId) as { tile_x: number; tile_y: number } | undefined;
+    return row ? { tileX: row.tile_x, tileY: row.tile_y } : undefined;
+  }
+
+  /**
+   * 存量迁移：老档案把位置塞在 players.data.position（无世界、无场景）。
+   * 单场景时代那批坐标只可能属于 default 世界的 village 场景，一次性搬过去并清掉旧字段。幂等。
+   */
+  #migrateLegacyPlayerPositions(): void {
+    const rows = this.#db.prepare('SELECT id, data FROM players').all() as { id: string; data: string }[];
+    for (const r of rows) {
+      const p = JSON.parse(r.data) as Player & { position?: TilePos };
+      if (!p.position) continue;
+      const t = p.position;
+      if (Number.isInteger(t.tileX) && Number.isInteger(t.tileY)) {
+        this.#db
+          .prepare('INSERT OR IGNORE INTO player_positions (world_id, scene_id, player_id, tile_x, tile_y) VALUES (?, ?, ?, ?, ?)')
+          .run('default', 'village', p.id, t.tileX, t.tileY);
+      }
+      delete p.position;
+      this.#db.prepare('UPDATE players SET data = ? WHERE id = ?').run(JSON.stringify(p), r.id);
+    }
   }
 
   /** 登记/更新玩家档案（首见即建，再见即更）。整对象 UPSERT 一行。 */

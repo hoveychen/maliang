@@ -4,7 +4,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WorldStore } from '../src/persistence.ts';
-import { GRID_TILES, WORLD_CENTER_TILE, isValidTile, type Character, type Player } from '../src/types.ts';
+import { GRID_TILES, WORLD_CENTER_TILE, isValidTile, type Character } from '../src/types.ts';
 
 function char(worldId: string, id: string): Character {
   return {
@@ -14,10 +14,6 @@ function char(worldId: string, id: string): Character {
     behaviorScript: { commands: [], loop: false },
     position: WORLD_CENTER_TILE, abilities: [], relationships: {},
   };
-}
-
-function player(id: string): Player {
-  return { id, name: '小明', nickname: '明明', gender: 'boy', color: '蓝', spriteAsset: '', createdAt: '2026-01-01' };
 }
 
 function freshStore(tag: string): WorldStore {
@@ -65,26 +61,5 @@ test('setCharacterTile：角色不存在 → false 不动账', () => {
   assert.equal(s.setCharacterTile('w1', 'ghost', { tileX: 1, tileY: 1 }), false);
 });
 
-test('setPlayerTile：写入后读回；玩家不存在 → false', () => {
-  const s = freshStore('player');
-  assert.equal(s.setPlayerTile('nobody', { tileX: 3, tileY: 4 }), false);
-
-  s.upsertPlayer(player('p1'));
-  assert.equal(s.getPlayer('p1')?.position, undefined, '老档案无 position 字段');
-
-  assert.equal(s.setPlayerTile('p1', { tileX: 3, tileY: 4 }), true);
-  assert.deepEqual(s.getPlayer('p1')?.position, { tileX: 3, tileY: 4 });
-});
-
-test('upsertPlayer 重写档案不会抹掉已上报的 tile（world_info 重连路径）', () => {
-  const s = freshStore('upsert');
-  s.upsertPlayer(player('p1'));
-  s.setPlayerTile('p1', { tileX: 8, tileY: 9 });
-
-  // 模拟 server.ts world_info：从 profile 重建整个 Player，显式沿用旧 position
-  const rebuilt: Player = { ...player('p1'), nickname: '改名了', position: s.getPlayer('p1')?.position };
-  s.upsertPlayer(rebuilt);
-
-  assert.equal(s.getPlayer('p1')?.nickname, '改名了');
-  assert.deepEqual(s.getPlayer('p1')?.position, { tileX: 8, tileY: 9 }, 'profile 上报不该清空位置');
-});
+// 玩家位置的用例已搬到 player_position_scene.test.ts：位置按 (world, scene, player) 存，
+// 不再挂在 Player.position 上（只按 playerId 存位置在多场景下毫无意义）。

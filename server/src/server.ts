@@ -977,6 +977,8 @@ export async function handleWsMessage(
     // positions_report：客户端批量上报 tile（chars 只含本轮变化过的角色，player 可缺省）
     chars?: unknown;
     player?: unknown;
+    /** 玩家当前所在场景（缺省 village；老客户端不带）。 */
+    sceneId?: string;
     // 引导式造角色：creation_reply 幼儿点的图标 id / 说的话
     optionId?: string;
     spokenText?: string;
@@ -1016,8 +1018,6 @@ export async function handleWsMessage(
         color: String(p.color ?? ''),
         spriteAsset: String(p.spriteAsset ?? ''),
         createdAt: String(p.createdAt ?? ''),
-        // profile 不带位置：整对象 upsert 会抹掉已上报的 tile，显式沿用旧值。
-        position: store.getPlayer(msg.playerId)?.position,
       };
       store.upsertPlayer(player);
     }
@@ -1033,7 +1033,7 @@ export async function handleWsMessage(
       wallet: store.getWallet(worldId, session.playerId),
       activeTask: store.getActiveTask(worldId, session.playerId),
       // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
-      playerPos: session.playerId ? store.getPlayer(session.playerId)?.position : undefined,
+      playerPos: session.playerId ? store.getPlayerTile(worldId, msg.sceneId ?? DEFAULT_SCENE, session.playerId) : undefined,
     }));
     return;
   }
@@ -1362,6 +1362,7 @@ export async function handleWsMessage(
   // 静止时客户端不发；每拍只带 tile 变化过的角色。越界 tile 静默丢弃（单个坏条目不连坐整批）。
   if (msg.type === 'positions_report') {
     const worldId = msg.worldId ?? '';
+    const sceneId = (msg.sceneId ?? DEFAULT_SCENE) || DEFAULT_SCENE;
     const entries = Array.isArray(msg.chars) ? msg.chars : [];
     let applied = 0;
     for (const raw of entries) {
@@ -1376,7 +1377,7 @@ export async function handleWsMessage(
     if (typeof msg.player === 'object' && msg.player !== null && session.playerId) {
       const p = msg.player as { tileX?: unknown; tileY?: unknown };
       const tile: TilePos = { tileX: Number(p.tileX), tileY: Number(p.tileY) };
-      if (isValidTile(tile)) store.setPlayerTile(session.playerId, tile);
+      if (isValidTile(tile)) store.setPlayerTile(worldId, sceneId, session.playerId, tile);
     }
     // 成功无回包（与 prop_place 一致）；整批一个角色都没落地才回 error，便于客户端察觉世界/角色 id 错配。
     if (entries.length > 0 && applied === 0) {
