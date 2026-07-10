@@ -4,6 +4,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { WorldStore } from './persistence.ts';
 import type { Character } from './types.ts';
+import { DEFAULT_SCENE } from './types.ts';
 
 type AuthedFn = (req: { headers: Record<string, unknown>; query: unknown }) => boolean;
 
@@ -15,6 +16,8 @@ function characterSummary(store: WorldStore, c: Character) {
     isFairy: c.isFairy,
     state: c.state,
     position: c.position,
+    // 角色所在场景（存量缺省归 village）：后台地图按场景把角色画到对应场景上
+    sceneId: c.sceneId ?? DEFAULT_SCENE,
     personality: c.personality,
     spriteAsset: c.appearance.spriteAsset,
     scale: c.appearance.scale,
@@ -40,6 +43,7 @@ function worldSummary(store: WorldStore, w: { id: string }) {
     wallets: store.listWallets(w.id),
     activeTasks: store.listActiveTasks(w.id),
     locations: store.getLocations(w.id),
+    sceneCount: store.listScenes(w.id).length,
     characterCount: characters.length,
     fairyCount: characters.filter((c) => c.isFairy).length,
     propCount: store.listProps(w.id).length,
@@ -136,6 +140,8 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
     if (!world) return reply.code(404).send({ error: 'world not found' });
     return {
       ...worldSummary(store, { id: world.id }),
+      // 场景 = 世界里的每片区域（模型 B）：地形 hash/网格 + POI + 传送门，全结构透出给后台
+      scenes: store.listScenes(world.id),
       characters: store.listCharacters(world.id).map((c) => characterSummary(store, c)),
       props: store.listProps(world.id),
       visits: store.listVisits(world.id),

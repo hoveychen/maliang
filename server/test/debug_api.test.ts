@@ -35,6 +35,13 @@ function seed(store: WorldStore): void {
   store.addProp('w1', prop);
   store.addStamp('w1', ANON_PLAYER); // 盖 1 章：stampProgress=1（初始 3 花不变）
   store.setLocations('w1', ['小池塘']);
+  // 场景（模型 B）：debug 详情要能透出场景 + POI + 传送门的结构化数据
+  store.upsertScene({
+    worldId: 'w1', sceneId: 'village', name: '村庄',
+    terrainAsset: 'terrain-hash-abc', gridTiles: 75,
+    pois: [{ tile: [3, 4], radius: 2, trigger: 'pond', name: '小池塘', aliases: ['池塘', '水塘'] }],
+    portals: [{ tile: [10, 10], radius: 1, toScene: 'forest', toTile: [1, 1] }],
+  });
   const v1 = store.startVisit('w1', 'p1', 1000);
   store.endVisit(v1, 2000);
   store.startVisit('w1', 'p1', 3000); // 进行中
@@ -114,6 +121,7 @@ test('GET /debug/api/worlds 与 /debug/api/worlds/:id：列表计数摘要，详
     assert.equal(w1.wallets[0].wallet.flowers, 3);
     assert.equal(w1.wallets[0].wallet.stampProgress, 1);
     assert.deepEqual(w1.locations, ['小池塘']);
+    assert.equal(w1.sceneCount, 1, '列表摘要带场景数');
 
     const detail = await app.inject({ method: 'GET', url: '/debug/api/worlds/w1' });
     assert.equal(detail.statusCode, 200);
@@ -122,8 +130,24 @@ test('GET /debug/api/worlds 与 /debug/api/worlds/:id：列表计数摘要，详
     const c1 = d.characters.find((c: { id: string }) => c.id === 'c1');
     assert.equal(c1.memoryCount, 1);
     assert.equal(c1.chatTurnCount, 2);
+    assert.equal(c1.sceneId, 'village', '角色摘要带场景（存量缺省归 village），供后台地图按场景归位');
     assert.equal(d.props.length, 1);
     assert.equal(d.visits.length, 2);
+    // 场景 + POI + 传送门的结构化数据都要透出（此前 debug 只给拍平的 locations 名字）
+    assert.equal(d.scenes.length, 1);
+    const village = d.scenes[0];
+    assert.equal(village.sceneId, 'village');
+    assert.equal(village.name, '村庄');
+    assert.equal(village.terrainAsset, 'terrain-hash-abc');
+    assert.equal(village.gridTiles, 75);
+    assert.equal(village.pois.length, 1);
+    assert.equal(village.pois[0].name, '小池塘');
+    assert.deepEqual(village.pois[0].tile, [3, 4]);
+    assert.equal(village.pois[0].trigger, 'pond');
+    assert.deepEqual(village.pois[0].aliases, ['池塘', '水塘']);
+    assert.equal(village.portals.length, 1);
+    assert.equal(village.portals[0].toScene, 'forest');
+    assert.deepEqual(village.portals[0].toTile, [1, 1]);
 
     const missing = await app.inject({ method: 'GET', url: '/debug/api/worlds/nope' });
     assert.equal(missing.statusCode, 404);
