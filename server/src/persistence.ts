@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
@@ -464,7 +464,28 @@ export class WorldStore {
     return row ? (JSON.parse(row.data) as Character) : undefined;
   }
 
+  /**
+   * 角色所在 tile 的落位回报（positions_report）。空间权威在客户端，服务端只记最后位置供重载读回。
+   * 角色不存在 → false 不动账。tile 合法性由调用方（server.ts）先行校验。
+   */
+  setCharacterTile(worldId: string, characterId: string, tile: TilePos): boolean {
+    const character = this.getCharacter(worldId, characterId);
+    if (!character) return false;
+    character.position = tile;
+    this.saveCharacter(character);
+    return true;
+  }
+
   // ── 玩家实体（面向 MMO；身份=设备端 UUID，无鉴权，见 types.Player）──────────
+
+  /** 玩家所在 tile 的落位回报。玩家档案未建（首次进世界还没上报 profile）→ false 不动账。 */
+  setPlayerTile(playerId: string, tile: TilePos): boolean {
+    const player = this.getPlayer(playerId);
+    if (!player) return false;
+    player.position = tile;
+    this.upsertPlayer(player);
+    return true;
+  }
 
   /** 登记/更新玩家档案（首见即建，再见即更）。整对象 UPSERT 一行。 */
   upsertPlayer(player: Player): void {

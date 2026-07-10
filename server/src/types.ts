@@ -75,6 +75,26 @@ export interface CharacterSpec {
 }
 
 /** 落地后的完整角色。 */
+/**
+ * 环面世界的边长（tile 数），与客户端 WorldGrid.GRID_TILES 必须一致。
+ * 坐标上报的唯一合法域是 [0, GRID_TILES)²——早年 1000×1000 大世界留下的 tile 500 在此域外。
+ */
+export const GRID_TILES = 75;
+
+/** 世界正中心 tile：新角色/小神仙的降生点（客户端首次上报前的占位值）。 */
+export const WORLD_CENTER_TILE: TilePos = { tileX: Math.floor(GRID_TILES / 2), tileY: Math.floor(GRID_TILES / 2) };
+
+export interface TilePos {
+  tileX: number;
+  tileY: number;
+}
+
+/** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */
+export function isValidTile(tile: TilePos): boolean {
+  const inRange = (v: number) => Number.isInteger(v) && v >= 0 && v < GRID_TILES;
+  return inRange(tile.tileX) && inRange(tile.tileY);
+}
+
 export interface Character {
   id: string;
   worldId: string;
@@ -89,7 +109,8 @@ export interface Character {
   chatHistory: ChatTurn[];
   state: string;
   behaviorScript: BehaviorScript;
-  position: { tileX: number; tileY: number };
+  /** 环面 tile 坐标。空间权威在客户端：这里存的是客户端 positions_report 上报的最后位置，重载时读回。 */
+  position: TilePos;
   abilities: string[];
   relationships: Record<string, string>;
 }
@@ -103,7 +124,7 @@ export interface CreateCharacterInput {
   worldId: string;
   intentText: string; // M1 文字驱动；M2 由讯飞 ASR 产出
   byFairy: boolean;
-  position?: { tileX: number; tileY: number };
+  position?: TilePos;
 }
 
 export interface ModerationResult {
@@ -203,6 +224,8 @@ export interface Player {
   color: string; // 喜欢的颜色名
   spriteAsset: string; // 形象资产 hash（内容寻址，服务端已有）
   createdAt: string; // ISO 时间；由前端 profile 带上，服务端不取墙上时钟
+  /** 最后所在 tile（positions_report 上报）。老档案无此字段 → 客户端按小神仙旁降生。 */
+  position?: TilePos;
 }
 
 /**
