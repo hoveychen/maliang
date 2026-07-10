@@ -15,6 +15,7 @@ func _init() -> void:
 	fails += _test_empty_backoff()
 	fails += _test_music_muted()
 	fails += _test_leave_ready()
+	fails += _test_speaker_leaves()
 	if fails == 0:
 		print("interaction_fsm tests PASS")
 	else:
@@ -203,6 +204,33 @@ func _test_leave_ready() -> int:
 	# 兜底：TTS 石沉大海（一直"在说"）也不能把角色钉死
 	fails += _check("兜底超时 → 强制动身", InteractionFsm.leave_ready(true, true, 0.0, 0.0), true)
 	fails += _check("兜底优先于一切", InteractionFsm.leave_ready(false, true, 5.0, -0.1), true)
+	return fails
+
+## 「正在跟孩子说话的角色会不会走开」——决定说完这句要不要关对话。
+## 判据是「他会不会离开孩子面前」，不是「这条指令有没有副作用」：
+## stop_follow 改了状态却留在原地，do_action 演个动作也留在原地，都不关对话。
+func _test_speaker_leaves() -> int:
+	var fails := 0
+	# 立去系：角色要走开办事 → 说完再动身 + 关对话
+	for cmd in InteractionFsm.LEAVE_COMMANDS:
+		fails += _check("%s → 走开" % cmd, InteractionFsm.speaker_leaves([cmd], false, false), true)
+	# 留在原地：改了跟随状态也好、演个动作也好，孩子还看着他，对话继续
+	fails += _check("stop_follow → 不走开", InteractionFsm.speaker_leaves(["stop_follow"], false, false), false)
+	fails += _check("do_action → 不走开", InteractionFsm.speaker_leaves(["do_action"], false, false), false)
+	fails += _check("空脚本 → 不走开", InteractionFsm.speaker_leaves([], false, false), false)
+	# 多条指令里只要有一条立去系，人就走了
+	fails += _check("do_action+move_to → 走开", InteractionFsm.speaker_leaves(["do_action", "move_to"], false, false), true)
+
+	# ① 点名指派：对话对象要跑腿把指令带给别人（relay_command），无论带的是什么指令他都得走开。
+	#    「小蓝跳一下」——跳的是小蓝，但走开的是正在跟你说话的这个角色。
+	fails += _check("跑腿带 do_action → 走开", InteractionFsm.speaker_leaves(["do_action"], true, false), true)
+	fails += _check("跑腿带 move_to → 走开", InteractionFsm.speaker_leaves(["move_to"], true, false), true)
+
+	# ② 小仙子是随从（_run_behavior 对她早退，移动脚本一律丢弃）：她永远不会走开，
+	#    对话就不该被白白关掉。跑腿也一样——她压根不会去跑腿。
+	fails += _check("仙子吃 move_to → 不走开", InteractionFsm.speaker_leaves(["move_to"], false, true), false)
+	fails += _check("仙子吃 follow → 不走开", InteractionFsm.speaker_leaves(["follow"], false, true), false)
+	fails += _check("仙子被叫去跑腿 → 不走开", InteractionFsm.speaker_leaves(["do_action"], true, true), false)
 	return fails
 
 func _check(name: String, got: Variant, want: Variant) -> int:

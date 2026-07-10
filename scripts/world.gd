@@ -3951,19 +3951,15 @@ func _on_character_response(data: Dictionary) -> void:
 		# 点名指派（performerId）：不隔空遥控——正在对话的角色跑腿到执行者旁把指令带到，
 		# 对方点头应答才开始做（见 _relay_command）；没有说话者在场才直接下发。
 		var performer := _find_npc_by_id(String(data.get("performerId", "")))
-		if performer != null and selected != null and performer != selected:
-			_run_behavior(selected, { "commands": [{ "type": "relay_command",
-				"params": { "to": String(data.get("performerId", "")), "script": script } }], "loop": false })
+		var speaker_is_fairy := selected != null and bool(_find_npc_dict(selected).get("is_fairy", false))
+		if performer != null and selected != null and performer != selected and not speaker_is_fairy:
+			_dispatch_from_speaker(selected, { "commands": [{ "type": "relay_command",
+				"params": { "to": String(data.get("performerId", "")), "script": script } }], "loop": false }, true)
 		elif performer != null:
+			# 说话者不在场，或说话的是小仙子（她隔空施法、从不跑腿——让她跑腿等于把指令扔了）：直接下发。
 			_run_behavior(performer, script)
 		elif selected != null:
-			# 立去系指令（去某地/跟随/找人聊/带话）：角色要走开办事 → 说完这句再动身 + 关对话
-			# （缺陷 ④：此前立刻退出，横幅/相机在他开口前就没了，孩子看着他边走边说话）。
-			# 就地动作(do_action)不关对话，照旧立即执行。
-			if _is_leave_command(script):
-				_arm_pending_leave(selected, script)
-			else:
-				_run_behavior(selected, script)
+			_dispatch_from_speaker(selected, script, false)
 	if bool(data.get("ttsStreaming", false)):
 		_start_tts_stream(_parse_rate(String(data.get("ttsMime", "")), 24000))
 	else:
@@ -4324,16 +4320,24 @@ func _end_npc_chat(n: Dictionary, partner: Dictionary) -> void:
 			and (selected == null or partner.get("node") != selected):
 		_start_ambient_wander(partner)
 
-## 在角色上执行行为脚本（移动等）。新脚本替换该角色进行中的行为（防双执行器同驱）。
-## 立去系指令：会让角色离开当前位置去别处（去某地/跟随/找人聊天/带话）。
-## 这类指令下发后要退出近身对话，让角色独自走去；就地动作(do_action)、停跟(stop_follow)不算。
-const _LEAVE_COMMANDS := ["move_to", "follow", "chat_with", "deliver_message"]
-func _is_leave_command(script: Dictionary) -> bool:
-	for c in script.get("commands", []):
-		if typeof(c) == TYPE_DICTIONARY and String((c as Dictionary).get("type", "")) in _LEAVE_COMMANDS:
-			return true
-	return false
+## 从「正在跟孩子说话的角色」身上派发脚本。会让他走开的（去某地/跟随/找人聊/带话，或要跑腿传话），
+## 先把这句回应说完再动身、随后关对话（缺陷 ④：此前立刻退出，横幅/相机在他开口前就没了）；
+## 留在原地的（do_action/stop_follow）照旧立即执行，对话继续。判定见 InteractionFsm.speaker_leaves。
+func _dispatch_from_speaker(npc: PaperCharacter, script: Dictionary, relaying: bool) -> void:
+	var dict := _find_npc_dict(npc)
+	if InteractionFsm.speaker_leaves(_command_types(script), relaying, dict.get("is_fairy", false)):
+		_arm_pending_leave(npc, script)
+	else:
+		_run_behavior(npc, script)
 
+func _command_types(script: Dictionary) -> Array:
+	var types: Array = []
+	for c in script.get("commands", []):
+		if typeof(c) == TYPE_DICTIONARY:
+			types.append(String((c as Dictionary).get("type", "")))
+	return types
+
+## 在角色上执行行为脚本（移动等）。新脚本替换该角色进行中的行为（防双执行器同驱）。
 func _run_behavior(npc: PaperCharacter, script: Dictionary) -> void:
 	var dict := _find_npc_dict(npc)
 	if dict.is_empty():
