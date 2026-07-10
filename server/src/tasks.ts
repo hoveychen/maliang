@@ -25,10 +25,11 @@ function pick<T>(arr: readonly T[], rand: () => number): T {
 export function pickTaskCandidate(
   worldId: string,
   npcId: string,
+  playerId: string,
   store: WorldStore,
   rand: () => number = Math.random,
 ): ActiveTask | null {
-  if (store.getActiveTask(worldId)) return null;
+  if (store.getActiveTask(worldId, playerId)) return null;
   const npc = store.getCharacter(worldId, npcId);
   if (!npc || npc.isFairy) return null;
   const others = store.listCharacters(worldId).filter((c) => c.id !== npcId && !c.isFairy);
@@ -120,17 +121,18 @@ function sameName(got: string | undefined, want: string | undefined): boolean {
  */
 export function completeTaskOnEvent(
   worldId: string,
+  playerId: string,
   event: TaskEvent,
   store: WorldStore,
 ): { task: ActiveTask; flowerGained: boolean; wallet: Wallet } | null {
-  const task = store.getActiveTask(worldId);
+  const task = store.getActiveTask(worldId, playerId);
   if (!task) return null;
   const ok =
     (task.type === 'deliver' && event.kind === 'deliver_done' && sameName(event.targetName, task.targetName)) ||
     (task.type === 'bring' && event.kind === 'bring_done' && sameName(event.targetName, task.targetName)) ||
     (task.type === 'visit' && event.kind === 'visit_done' && sameName(event.locationName, task.locationName));
   if (!ok) return null;
-  const { flowerGained, wallet } = store.addStamp(worldId);
-  store.setActiveTask(worldId, null);
+  const { flowerGained, wallet } = store.addStamp(worldId, playerId);
+  store.setActiveTask(worldId, playerId, null);
   return { task, flowerGained, wallet };
 }

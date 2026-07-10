@@ -17,7 +17,7 @@ import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
@@ -72,8 +72,8 @@ export function buildDebugState(store: WorldStore) {
     players: store.listPlayers(),
     worlds: store.listWorlds().map((w) => ({
       id: w.id,
-      wallet: w.wallet,
-      activeTask: w.activeTask,
+      wallets: w.wallets,
+      activeTasks: w.activeTasks,
       characters: store.listCharacters(w.id).map((c) => ({
         id: c.id,
         name: c.name,
@@ -142,7 +142,10 @@ function render(s){
     : '<p class="empty">（无玩家）</p>';
   for(const w of s.worlds){
     h += '<div class="world"><div class="wid">世界 '+esc(w.id)+'</div>';
-    h += '<div class="mono">钱包 '+esc(JSON.stringify(w.wallet))+' · 委托 '+esc(w.activeTask?w.activeTask.type+'('+w.activeTask.npcName+')':'无')+'</div>';
+    const taskOf = pid => { const t = w.activeTasks.find(t => t.playerId === pid); return t ? t.task.type+'('+t.task.npcName+')' : '无'; };
+    const pname = pid => pid ? pid.slice(0,8) : '(匿名)';
+    h += w.wallets.length ? w.wallets.map(x => '<div class="mono">'+esc(pname(x.playerId))+' · 钱包 '+esc(JSON.stringify(x.wallet))+' · 委托 '+esc(taskOf(x.playerId))+'</div>').join('')
+      : '<div class="mono empty">（无玩家钱包）</div>';
     h += '<h4 style="margin:10px 0 2px">角色 ('+w.characters.length+')</h4>'+ (w.characters.map(charBlock).join('')||'<span class="empty">（无角色）</span>');
     h += '<h4 style="margin:10px 0 2px">物件 ('+w.props.length+') · Visit ('+w.visits.length+')</h4>';
     h += '<div class="mono">'+w.visits.slice(0,10).map(v => v.playerId.slice(0,8)+' '+new Date(v.startedAt).toLocaleString()+(v.endedAt?' → 已结束':' · 进行中')).join('<br>')+'</div>';
@@ -235,10 +238,12 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     },
   );
 
-  // 管理端点：把某世界的小红花数直接设为指定值（缺省 INITIAL_FLOWERS）。
-  // 共享 default 世界初始额度被造角色/造物花光后，用它补花便于测试（不改经济规则）。
+  // 管理端点：把小红花数直接设为指定值（缺省 INITIAL_FLOWERS）。补花用，不改经济规则。
+  // 钱包按 (worldId, playerId) 分：
+  //   body.playerId 给了 → 只补那个孩子（即便他还没建钱包，也会就地建出来）。
+  //   没给           → 补该世界所有已有钱包的玩家（含匿名键）；一个都没有则补匿名键。
   // 只动 flowers，盖章进度保留。必须配 MALIANG_ADMIN_TOKEN。
-  app.post<{ Params: { id: string }; Body: { flowers?: number } | null }>(
+  app.post<{ Params: { id: string }; Body: { flowers?: number; playerId?: string } | null }>(
     '/admin/worlds/:id/flowers',
     async (req, reply) => {
       const token = process.env.MALIANG_ADMIN_TOKEN;
@@ -251,8 +256,16 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       if (typeof n !== 'number' || !Number.isFinite(n)) {
         return reply.code(400).send({ error: 'flowers must be a number' });
       }
-      const wallet = store.setFlowers(req.params.id, n);
-      return { id: req.params.id, wallet };
+      const target = req.body?.playerId;
+      if (typeof target === 'string') {
+        return { id: req.params.id, wallets: [{ playerId: target, wallet: store.setFlowers(req.params.id, target, n) }] };
+      }
+      const existing = store.listWallets(req.params.id).map((w) => w.playerId);
+      const targets = existing.length > 0 ? existing : [ANON_PLAYER];
+      return {
+        id: req.params.id,
+        wallets: targets.map((pid) => ({ playerId: pid, wallet: store.setFlowers(req.params.id, pid, n) })),
+      };
     },
   );
 
@@ -595,8 +608,8 @@ async function pushPraiseTts(
 }
 
 /** 造物/造角色余额检查：至少 1 朵小红花才放行。 */
-function hasFlower(store: WorldStore, worldId: string): boolean {
-  return store.getWallet(worldId).flowers >= 1;
+function hasFlower(store: WorldStore, worldId: string, playerId: string): boolean {
+  return store.getWallet(worldId, playerId).flowers >= 1;
 }
 
 /**
@@ -608,6 +621,7 @@ async function denyForNoFlowers(
   adapters: ServiceAdapters,
   store: WorldStore,
   worldId: string,
+  playerId: string,
   kind: 'prop' | 'character',
   clientTts = false,
 ): Promise<void> {
@@ -627,7 +641,7 @@ async function denyForNoFlowers(
     message: line,
     ttsAsset,
     voiceId: fairy?.voiceId ?? '',
-    wallet: store.getWallet(worldId),
+    wallet: store.getWallet(worldId, playerId),
   }));
 }
 
@@ -642,8 +656,8 @@ async function openCreationSession(
   store: WorldStore,
   leadIn = '', // 入口那轮 routeIntent 生成的仙子应答句（缺陷 ②：此前被丢弃）
 ): Promise<void> {
-  if (!hasFlower(store, worldId)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, 'character', session.clientTts);
+  if (!hasFlower(store, worldId, session.playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, 'character', session.clientTts);
     return;
   }
   session.creation = newCreationState();
@@ -676,13 +690,14 @@ async function pushLineTts(
 export async function createPropAsync(
   socket: { send: (data: string) => void },
   worldId: string,
+  playerId: string,
   description: string,
   adapters: ServiceAdapters,
   store: WorldStore,
   clientTts = false,
 ): Promise<void> {
-  if (!store.spendFlower(worldId)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, 'prop', clientTts);
+  if (!store.spendFlower(worldId, playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
     return;
   }
   let created = false;
@@ -701,11 +716,11 @@ export async function createPropAsync(
     const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed' };
     store.addProp(worldId, prop);
     created = true;
-    socket.send(JSON.stringify({ type: 'prop_created', worldId, prop, wallet: store.getWallet(worldId) }));
+    socket.send(JSON.stringify({ type: 'prop_created', worldId, prop, wallet: store.getWallet(worldId, playerId) }));
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
   } finally {
-    if (!created) store.refundFlower(worldId); // 造失败/被审核挡：退还，别让孩子白花一朵
+    if (!created) store.refundFlower(worldId, playerId); // 造失败/被审核挡：退还，别让孩子白花一朵
   }
 }
 
@@ -715,14 +730,15 @@ export async function createPropAsync(
 export async function createCharacterAsync(
   socket: { send: (data: string) => void },
   worldId: string,
+  playerId: string,
   description: string,
   adapters: ServiceAdapters,
   store: WorldStore,
   toSpriteSheet?: ToSpriteSheet,
   clientTts = false,
 ): Promise<void> {
-  if (!store.spendFlower(worldId)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, 'character', clientTts);
+  if (!store.spendFlower(worldId, playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'character', clientTts);
     return;
   }
   const requestId = randomUUID();
@@ -735,7 +751,7 @@ export async function createCharacterAsync(
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
     );
     created = true;
-    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId) }));
+    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId, playerId) }));
     // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     if (character.appearance.spriteAsset) {
       triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
@@ -744,7 +760,7 @@ export async function createCharacterAsync(
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
   } finally {
-    if (!created) store.refundFlower(worldId); // 造失败：退还，别让孩子白花一朵
+    if (!created) store.refundFlower(worldId, playerId); // 造失败：退还，别让孩子白花一朵
   }
 }
 
@@ -816,7 +832,7 @@ export async function advanceCreation(
     console.warn(`guideCreation 失败，用现有属性兜底造：${String(err)}`);
     session.creation = null;
     if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
-    await createCharacterAsync(socket, worldId, describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
+    await createCharacterAsync(socket, worldId, session.playerId, describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
     return;
   }
   // 累积这轮解析出的增量
@@ -835,7 +851,7 @@ export async function advanceCreation(
     session.creation = null;
     // 快捷路径：一句说全、首轮即造。没有问句可以搭载，前置话语单独念出来，别吞掉。
     if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
-    await createCharacterAsync(socket, worldId, r.description || describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
+    await createCharacterAsync(socket, worldId, session.playerId, r.description || describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
     return;
   }
   // 追问：合成仙子问句 TTS（失败不阻塞；clientTts 时客户端自己合成）+ 下发图标选项卡
@@ -961,8 +977,8 @@ export async function handleWsMessage(
     startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now());
     socket.send(JSON.stringify({
       type: 'world_state',
-      wallet: store.getWallet(worldId),
-      activeTask: store.getActiveTask(worldId),
+      wallet: store.getWallet(worldId, session.playerId),
+      activeTask: store.getActiveTask(worldId, session.playerId),
       // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
       playerPos: session.playerId ? store.getPlayer(session.playerId)?.position : undefined,
     }));
@@ -979,7 +995,7 @@ export async function handleWsMessage(
   // 委托完成事件（客户端确定性判定后上报）：匹配进行中委托则盖 1 章（满 3 升 1 花）+ 清任务
   if (msg.type === 'task_event') {
     const worldId = msg.worldId ?? '';
-    const done = completeTaskOnEvent(worldId, {
+    const done = completeTaskOnEvent(worldId, session.playerId, {
       kind: msg.kind ?? '',
       targetName: msg.targetName,
       locationName: msg.locationName,
@@ -1004,7 +1020,7 @@ export async function handleWsMessage(
       return;
     }
     try {
-      await createCharacterAsync(socket, msg.worldId ?? '', msg.intentText ?? '', adapters, store, undefined, session.clientTts);
+      await createCharacterAsync(socket, msg.worldId ?? '', session.playerId, msg.intentText ?? '', adapters, store, undefined, session.clientTts);
     } finally {
       gate.release();
     }
@@ -1067,7 +1083,7 @@ export async function handleWsMessage(
       }
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
-        void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store, session.clientTts);
+        void createPropAsync(socket, msg.worldId ?? '', session.playerId, response.propRequest, adapters, store, session.clientTts);
       }
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -1120,7 +1136,7 @@ export async function handleWsMessage(
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
-        void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store, session.clientTts);
+        void createPropAsync(socket, msg.worldId ?? '', session.playerId, response.propRequest, adapters, store, session.clientTts);
       }
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -1246,7 +1262,7 @@ export async function handleWsMessage(
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
-        void createPropAsync(socket, worldId, response.propRequest, adapters, store, session.clientTts);
+        void createPropAsync(socket, worldId, session.playerId, response.propRequest, adapters, store, session.clientTts);
       }
       recordVisitTurn(session, worldId, playerId, characterId, response.transcript, response.replyText, adapters, store);
     } catch (err) {

@@ -3,7 +3,7 @@
 // 门禁与 /debug 同一套 admin token（authed 由 server.ts 注入）。
 import type { FastifyInstance } from 'fastify';
 import type { WorldStore } from './persistence.ts';
-import type { Character, Wallet } from './types.ts';
+import type { Character } from './types.ts';
 
 type AuthedFn = (req: { headers: Record<string, unknown>; query: unknown }) => boolean;
 
@@ -31,13 +31,14 @@ function characterSummary(store: WorldStore, c: Character) {
 }
 
 /** 世界列表页摘要。 */
-function worldSummary(store: WorldStore, w: { id: string; wallet: Wallet; activeTask: unknown }) {
+function worldSummary(store: WorldStore, w: { id: string }) {
   const visits = store.listVisits(w.id);
   const characters = store.listCharacters(w.id);
   return {
     id: w.id,
-    wallet: w.wallet,
-    activeTask: w.activeTask,
+    // 钱包与委托按玩家分：每个玩家各一条（匿名连接落在 playerId='' 上）
+    wallets: store.listWallets(w.id),
+    activeTasks: store.listActiveTasks(w.id),
     locations: store.getLocations(w.id),
     characterCount: characters.length,
     fairyCount: characters.filter((c) => c.isFairy).length,
@@ -134,7 +135,7 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
     const world = store.getWorld(req.params.id);
     if (!world) return reply.code(404).send({ error: 'world not found' });
     return {
-      ...worldSummary(store, { id: world.id, wallet: world.wallet, activeTask: world.activeTask }),
+      ...worldSummary(store, { id: world.id }),
       characters: store.listCharacters(world.id).map((c) => characterSummary(store, c)),
       props: store.listProps(world.id),
       visits: store.listVisits(world.id),
