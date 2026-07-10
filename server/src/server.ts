@@ -982,7 +982,7 @@ export async function handleWsMessage(
   // 委托完成事件（客户端确定性判定后上报）：匹配进行中委托则盖 1 章（满 3 升 1 花）+ 清任务
   if (msg.type === 'task_event') {
     const worldId = msg.worldId ?? '';
-    const done = completeTaskOnEvent(worldId, {
+    const done = completeTaskOnEvent(worldId, session.playerId, {
       kind: msg.kind ?? '',
       targetName: msg.targetName,
       locationName: msg.locationName,

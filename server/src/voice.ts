@@ -75,7 +75,7 @@ export async function respondToTranscript(
 
   // 委托：进行中的给 LLM 提醒；没有进行中的生成候选让 LLM 挑时机发起（模板池确定性生成）
   const activeTask = store.getActiveTask(worldId, ANON_PLAYER) ?? undefined;
-  const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, store) ?? undefined;
+  const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, playerId, store) ?? undefined;
 
   // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），带 kind 注入（分组）。
   const memories = store.getMemories(characterId, playerId).map((m) => ({ text: m.text, kind: m.kind }));

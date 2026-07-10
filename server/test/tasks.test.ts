@@ -45,7 +45,7 @@ test('pickTaskCandidate：按世界现状挑可行类型，字段齐全（无 gi
   const store = seedWorld();
   const types = new Set<string>();
   for (let i = 0; i < 60; i++) {
-    const t = pickTaskCandidate('w1', 'green', store)!;
+    const t = pickTaskCandidate('w1', 'green', ANON_PLAYER, store)!;
     assert.ok(t, '有村民有地点应能出候选');
     assert.equal(t.npcId, 'green');
     assert.equal(t.npcName, '小绿');
@@ -62,13 +62,13 @@ test('pickTaskCandidate：按世界现状挑可行类型，字段齐全（无 gi
 
 test('pickTaskCandidate：有进行中委托/委托人是小神仙/世界空 → 不出候选', () => {
   const store = seedWorld();
-  assert.equal(pickTaskCandidate('w1', 'fairy', store), null, '小神仙不发委托');
-  store.setActiveTask('w1', ANON_PLAYER, pickTaskCandidate('w1', 'green', store));
-  assert.equal(pickTaskCandidate('w1', 'green', store), null, '已有进行中委托不再出候选');
+  assert.equal(pickTaskCandidate('w1', 'fairy', ANON_PLAYER, store), null, '小神仙不发委托');
+  store.setActiveTask('w1', ANON_PLAYER, pickTaskCandidate('w1', 'green', ANON_PLAYER, store));
+  assert.equal(pickTaskCandidate('w1', 'green', ANON_PLAYER, store), null, '已有进行中委托不再出候选');
   const empty = new WorldStore();
   empty.createWorld('w2');
   seedChar(empty, 'w2', 'solo', '独苗');
-  assert.equal(pickTaskCandidate('w2', 'solo', empty), null, '没有其他村民/地点出不了任何类型');
+  assert.equal(pickTaskCandidate('w2', 'solo', ANON_PLAYER, empty), null, '没有其他村民/地点出不了任何类型');
 });
 
 test('respondToTranscript：LLM offerTask → 委托设为进行中并随回应下发', async () => {
@@ -98,20 +98,20 @@ test('completeTaskOnEvent：三类事件匹配盖章，错事件/错参数不动
   });
   // deliver：目标名模糊匹配 → 盖第 1 章（未升花）
   store.setActiveTask('w1', ANON_PLAYER, mk({ type: 'deliver', targetName: '小蓝', message: 'hi' }));
-  assert.equal(completeTaskOnEvent('w1', { kind: 'visit_done', locationName: '池塘' }, store), null, '错类型不完成');
-  assert.equal(completeTaskOnEvent('w1', { kind: 'deliver_done', targetName: '小黄' }, store), null, '错对象不完成');
-  const r1 = completeTaskOnEvent('w1', { kind: 'deliver_done', targetName: '小蓝呀' }, store)!;
+  assert.equal(completeTaskOnEvent('w1', ANON_PLAYER, { kind: 'visit_done', locationName: '池塘' }, store), null, '错类型不完成');
+  assert.equal(completeTaskOnEvent('w1', ANON_PLAYER, { kind: 'deliver_done', targetName: '小黄' }, store), null, '错对象不完成');
+  const r1 = completeTaskOnEvent('w1', ANON_PLAYER, { kind: 'deliver_done', targetName: '小蓝呀' }, store)!;
   assert.ok(r1, '模糊名应匹配');
   assert.equal(r1.flowerGained, false);
   assert.equal(r1.wallet.stampProgress, 1, '盖第 1 章');
   assert.equal(store.getActiveTask('w1', ANON_PLAYER), null, '完成清委托');
   // bring → 第 2 章
   store.setActiveTask('w1', ANON_PLAYER, mk({ type: 'bring', targetName: '小蓝' }));
-  const r2 = completeTaskOnEvent('w1', { kind: 'bring_done', targetName: '小蓝' }, store)!;
+  const r2 = completeTaskOnEvent('w1', ANON_PLAYER, { kind: 'bring_done', targetName: '小蓝' }, store)!;
   assert.equal(r2.wallet.stampProgress, 2);
   // visit → 第 3 章 → 升 1 花
   store.setActiveTask('w1', ANON_PLAYER, mk({ type: 'visit', locationName: '池塘' }));
-  const r3 = completeTaskOnEvent('w1', { kind: 'visit_done', locationName: '池塘' }, store)!;
+  const r3 = completeTaskOnEvent('w1', ANON_PLAYER, { kind: 'visit_done', locationName: '池塘' }, store)!;
   assert.equal(r3.flowerGained, true, '满 3 章升花');
   assert.equal(r3.wallet.flowers, INITIAL_FLOWERS + 1);
   assert.equal(r3.wallet.stampProgress, 0);
