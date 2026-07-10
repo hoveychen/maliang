@@ -79,10 +79,21 @@ export interface Wallet {
 export const MAX_FLOWERS = 9;
 export const STAMPS_PER_FLOWER = 3;
 
+/** 钱包/委托按 (worldId, playerId) 分（playerId='' 为匿名连接共用）。 */
+export interface WalletEntry {
+  playerId: string;
+  wallet: Wallet;
+}
+
+export interface ActiveTaskEntry {
+  playerId: string;
+  task: ActiveTask;
+}
+
 export interface WorldRow {
   id: string;
-  wallet: Wallet;
-  activeTask: ActiveTask | null;
+  wallets: WalletEntry[];
+  activeTasks: ActiveTaskEntry[];
   locations: string[];
   characterCount: number;
   fairyCount: number;
