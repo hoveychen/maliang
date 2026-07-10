@@ -8,7 +8,7 @@ render_mode cull_back, diffuse_lambert, specular_disabled, world_vertex_coords;
 //   亮度基调仍由 tint 决定），detail_strength 控制细节强度。
 // 弯曲：与 world_bend.gdshader 同一公式（世界空间位移，shadow pass 几何一致）。
 
-uniform sampler2D control_tex : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D control_tex : filter_linear_mipmap, repeat_disable;  // 控制图选域用，无需各向异性（老 Mali 上大覆盖面最贵的采样）
 uniform sampler2D grass_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D dirt_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D stone_tex : source_color, filter_linear_mipmap, repeat_enable;

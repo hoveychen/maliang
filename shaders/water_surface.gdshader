@@ -10,7 +10,7 @@ render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_lambert, specular_d
 // - 顶点微幅起伏（按 UV2 相位，非渲染坐标——避免玩家移动时波形游动）
 // 弯曲：与 world_bend.gdshader 同一公式。
 
-uniform sampler2D control_tex : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D control_tex : filter_linear_mipmap, repeat_disable;  // 控制图选域用，无需各向异性（老 Mali 上大覆盖面最贵的采样）
 uniform sampler2D water_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform vec3 water_mean : source_color = vec3(0.282, 0.478, 0.518);
 uniform vec3 shallow_color : source_color = vec3(0.42, 0.72, 0.88);
@@ -19,6 +19,8 @@ uniform vec3 foam_color : source_color = vec3(0.92, 0.975, 1.0);
 uniform vec3 sky_tint : source_color = vec3(0.62, 0.82, 0.97); // 与 world.gd SKY_HORIZON_COLOR 对齐
 uniform float tile_period = 10.0;
 uniform float detail_strength = 0.85;
+// AdaptiveQuality T2 弱机档：省掉第二层错速细节采样（同 terrain_ground.low_detail）
+uniform bool low_detail = false;
 uniform float curvature = 0.0015;
 
 void vertex() {
@@ -29,7 +31,7 @@ void vertex() {
 void fragment() {
 	vec2 wuv = UV2 / tile_period;
 	vec3 d1 = texture(water_tex, wuv + TIME * vec2(0.014, 0.009)).rgb / water_mean;
-	vec3 d2 = texture(water_tex, wuv * 1.7 - TIME * vec2(0.011, 0.016)).rgb / water_mean;
+	vec3 d2 = low_detail ? d1 : texture(water_tex, wuv * 1.7 - TIME * vec2(0.011, 0.016)).rgb / water_mean;
 	vec3 det = mix(vec3(1.0), (d1 + d2) * 0.5, detail_strength);
 	float depth01 = COLOR.r;
 	vec3 col = mix(shallow_color, deep_color, depth01) * det;

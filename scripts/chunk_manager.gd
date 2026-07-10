@@ -109,10 +109,13 @@ var _water_mat: ShaderMaterial = null
 ## wrapped 区块 → 已向 OccupancyMap 登记的占地 [[origin_tile, w, h], ...]，重刷时释放。
 var _claims: Dictionary = {}
 
-## AdaptiveQuality 低配档：地形省掉路/崖壁的第二张细节贴图采样（见 terrain_ground.gdshader）。
+## AdaptiveQuality 低配档：地形省掉路/崖壁的第二张细节贴图采样（见 terrain_ground.gdshader），
+## 水面省掉第二层错速细节采样（见 water_surface.gdshader）。
 func set_terrain_low_detail(on: bool) -> void:
 	if _ground_mat != null:
 		_ground_mat.set_shader_parameter("low_detail", on)
+	if _water_mat != null:
+		_water_mat.set_shader_parameter("low_detail", on)
 ## 语音生成的动态 SDF 物件（运行时登记，区块重刷幸存）：
 ## { "spec_data": Dictionary, "tile": Vector2i(全局), "yaw": float, "wander": float }
 var _dynamic_props: Array = []

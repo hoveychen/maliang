@@ -17,6 +17,18 @@ const SHELL_DENSITY := 0.6
 static var _snap_iters_main := 2 if OS.has_feature("mobile") else 4
 static var _snap_iters_outline := 1 if OS.has_feature("mobile") else 4
 
+## 描边 pass 开关（AdaptiveQuality T2 弱机档摘除——inverted-hull 让每个物件画两遍，
+## 且是全场景最重的逐顶点材质；桌面/T0/T1 恒开）。
+static var _outline_enabled := true
+
+static func set_outline_enabled(on: bool, tree: SceneTree) -> void:
+	_outline_enabled = on
+	for n in tree.get_nodes_in_group("perf_props"):
+		var p := n as SdfProp
+		if p == null or p._mats.size() < 2:
+			continue
+		p._mats[0].next_pass = p._mats[1] if on else null
+
 ## AdaptiveQuality 换档：作用于已存在（perf_props 组）与后续创建的所有物件。
 static func set_snap_iters(main_iters: int, outline_iters: int, tree: SceneTree) -> void:
 	_snap_iters_main = main_iters
@@ -88,8 +100,9 @@ func _setup(cfg: Dictionary) -> void:
 		outline.shader = _outline_shader
 		outline.set_shader_parameter("outline_width", cfg.outline)
 		outline.set_shader_parameter("snap_iters", _snap_iters_outline)
-		main.next_pass = outline
-		_mats.append(outline)
+		if _outline_enabled:
+			main.next_pass = outline
+		_mats.append(outline)  # 摘除态也保留引用，换档可再挂回
 	for m in _mats:
 		m.set_shader_parameter("prim_count", prims.size())
 		m.set_shader_parameter("blend_k", cfg.blend)
@@ -107,6 +120,19 @@ func _setup(cfg: Dictionary) -> void:
 	# SdfProp 节点未被 CPU 预弯（弯曲在自己 shader 里），blob 走 bend=true 档
 	var aabb := SdfMath.rest_aabb(prims)
 	BlobShadow.attach(self, clampf(maxf(aabb.size.x, aabb.size.z) * 0.4, 0.4, 2.2), true)
+	# 屏外挂起：视锥外（如相机背后）_process 整个停摆（游走/呼吸/uniform 上传全免），
+	# 回到视野自动恢复。AABB 用静止包围盒放宽动画余量，并向下延伸剔除边距（弯曲下压），
+	# 与渲染剔除同一保守口径——绝不会出现"渲染着却不动"的情况。
+	# headless 例外：假视口无渲染，可见性通知永不触发，挂了会把所有物件永久冻结
+	# （回测靠 _process 跑动画断言），故仅真渲染环境启用。
+	if DisplayServer.get_name() != "headless":
+		var enabler := VisibleOnScreenEnabler3D.new()
+		var box := aabb.grow(2.0)
+		box.position.y -= CULL_MARGIN
+		box.size.y += CULL_MARGIN
+		enabler.aabb = box
+		enabler.enable_node_path = NodePath("..")
+		add_child(enabler)
 
 ## 把当前基本体姿态打包进两个 pass 的 uniform（动画每帧调用）。
 func push_uniforms() -> void:
@@ -119,10 +145,14 @@ func push_uniforms() -> void:
 		var q := pr.xform.basis.get_rotation_quaternion()
 		rot.append(Vector4(q.x, q.y, q.z, q.w))
 		par.append(Vector4(pr.params.x, pr.params.y, pr.params.z, pr.blend))
-	for m in _mats:
-		m.set_shader_parameter("prim_pos", pos)
-		m.set_shader_parameter("prim_rot", rot)
-		m.set_shader_parameter("prim_params", par)
+	_mats[0].set_shader_parameter("prim_pos", pos)
+	_mats[0].set_shader_parameter("prim_rot", rot)
+	_mats[0].set_shader_parameter("prim_params", par)
+	# 描边被 T2 摘除时不给游离 pass 上传（省一半 uniform 流量）；重挂后下帧自然补上
+	if _mats.size() > 1 and _mats[0].next_pass != null:
+		_mats[1].set_shader_parameter("prim_pos", pos)
+		_mats[1].set_shader_parameter("prim_rot", rot)
+		_mats[1].set_shader_parameter("prim_params", par)
 
 ## 启用锚点游走：以当前局部位置为圆心、radius 为半径漫游（父空间为区块局部系，
 ## 跟随世界环面重定位）。seed 用于确定性行为（同一 tile 的物件每次表现一致）。
@@ -167,11 +197,18 @@ func _wander_step(delta: float) -> void:
 func _enter_tree() -> void:
 	add_to_group("perf_props")  # PerfSweep 分解扫频用（debug 诊断）
 
+var _upload_tick := 0
+
 func _process(delta: float) -> void:
 	if animator == null:
 		return
 	var t0 := Time.get_ticks_usec()
 	_wander_step(delta)
 	animator.advance(delta)
-	push_uniforms()
+	# 静止（仅呼吸）时 uniform 上传降到 1/3 帧率：呼吸是慢正弦，10~20Hz 步进不可见；
+	# 真位移（move_vel 非零，含蹦跳蓄力段）保持全帧率。旧版每物件每帧重建 3 个
+	# PackedVector4Array + 最多 6 次 set_shader_parameter，是待机 CPU/驱动开销大头。
+	_upload_tick += 1
+	if not animator.move_vel.is_zero_approx() or _upload_tick % 3 == 0:
+		push_uniforms()
 	ProcProf.add("sdfprop", Time.get_ticks_usec() - t0)
