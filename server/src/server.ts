@@ -22,6 +22,7 @@ import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts'
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
+import { StageDirector } from './stage_session.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -458,8 +459,9 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     Number(process.env.RATE_GLOBAL_MAX ?? 4),
   );
 
-  // 多人基座：world 维度的连接注册表（world_info 登记，leave_world/close 摘除）
+  // 多人基座：world 维度的连接注册表（world_info 登记，leave_world/close 摘除）+ 演出调度台
   const hub = new WorldHub();
+  const stages = new StageDirector(hub);
 
   // WebSocket：造角色请求 → 进度推送 → 完成/失败
   app.get('/ws', { websocket: true }, (socket, req) => {
@@ -468,13 +470,13 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     // 能力协商：客户端自带 TTS（edge-tts）时连接 URL 带 ?clientTts=1，本连接全程跳过服务端合成。
     session.clientTts = (req.query as { clientTts?: string } | undefined)?.clientTts === '1';
     socket.on('message', (raw: Buffer) => {
-      void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session, hub);
+      void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session, hub, stages);
     });
     // 连接断开时释放可能仍持有的限流名额（录到一半断线），并 flush 会话记忆兜底（前端没发 leave_world 就掉线）
     socket.on('close', () => {
       if (session.gate) { session.gate.release(); session.gate = null; }
       session.active = false;
-      notifyHubLeave(hub, connKey);
+      notifyHubLeave(hub, connKey, stages);
       void endSessionVisit(session, adapters, store, Date.now());
     });
   });
@@ -882,10 +884,12 @@ function describeCreationAttrs(state: CreationState): string {
   return parts.join('，');
 }
 
-/** 连接退场(leave_world/断连)时摘出 hub；若因此换了 host，通知新 host 接管 NPC 模拟。 */
-export function notifyHubLeave(hub: WorldHub, connKey: string): void {
+/** 连接退场(leave_world/断连)时摘出 hub；换 host 通知新 host，世界清空则杀掉进行中的演出。 */
+export function notifyHubLeave(hub: WorldHub, connKey: string, stages?: StageDirector): void {
   const left = hub.leave(connKey);
-  left?.newHost?.send({ type: 'world_host', isHost: true });
+  if (!left) return;
+  left.newHost?.send({ type: 'world_host', isHost: true });
+  if (stages && hub.membersIn(left.worldId).length === 0) stages.onWorldEmpty(left.worldId);
 }
 
 export async function handleWsMessage(
@@ -897,6 +901,7 @@ export async function handleWsMessage(
   connKey: string,
   session: VoiceSession,
   hub?: WorldHub,
+  stages?: StageDirector,
 ): Promise<void> {
   let msg: {
     type?: string;
@@ -925,6 +930,10 @@ export async function handleWsMessage(
     spokenText?: string;
     // time_sync：客户端发送时刻(客户端毫秒钟)，原样回带供其算偏移
     t0?: number;
+    // stage_event：舞台协议上行(kind 复用上面的字段: ack/abort/…)
+    cmdId?: number;
+    result?: Record<string, unknown>;
+    error?: string;
     // 玩家身份：每条消息可带 playerId（设备端稳定 UUID）；world_info 另带 profile 供首见建档。
     playerId?: string;
     profile?: {
@@ -949,6 +958,13 @@ export async function handleWsMessage(
   // 时间偏移握手：回带 t0 + 服务端毫秒钟。倒计时 HUD 双端读数一致、位置插值时间戳都靠它。
   if (msg.type === 'time_sync') {
     socket.send(JSON.stringify({ type: 'time_sync', t0: typeof msg.t0 === 'number' ? msg.t0 : 0, serverMs: Date.now() }));
+    return;
+  }
+
+  // 舞台协议上行：命令回执/终止请求，路由给该世界进行中的演出。
+  if (msg.type === 'stage_event') {
+    const worldId = hub?.worldOf(connKey) ?? msg.worldId ?? '';
+    stages?.handleStageEvent(worldId, { kind: msg.kind, cmdId: msg.cmdId, result: msg.result, error: msg.error });
     return;
   }
 
@@ -1002,7 +1018,7 @@ export async function handleWsMessage(
   // 离开世界（前端正常退出显式发）：会话结束，flush 批量抽记忆并收尾 Visit。掉线未发则靠 socket.close 兜底。
   if (msg.type === 'leave_world') {
     session.creation = null; // 离开世界：丢弃未完成的造角色会话
-    if (hub) notifyHubLeave(hub, connKey);
+    if (hub) notifyHubLeave(hub, connKey, stages);
     await endSessionVisit(session, adapters, store, Date.now());
     return;
   }
