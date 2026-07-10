@@ -3158,8 +3158,15 @@ func _on_scene_entered(data: Dictionary) -> void:
 func _unload_scene() -> void:
 	if selected != null:
 		_exit_interaction() # 交互中切场景：先干净退出（清麦/相机/HUD/选中态）
-	# 停掉所有 NPC 自主行为 + 玩家当前移动（都指向即将释放的节点）
+	# 停掉所有 NPC 自主行为 + 玩家当前移动（都指向即将释放的节点）。
+	# 必须先 cancel 再丢：cancel 把在途 A* 任务转孤儿交给集中回收；直接 clear() 的话任务
+	# 既没转孤儿也没人 wait，其绑定 Callable 攥着 GDScript 对象活到引擎关停，
+	# WorkerThreadPool 析构它时崩（退出期 exit 134/139，见 _exit_tree 与 flush_all_blocking）。
+	for ex in _executors:
+		(ex as BehaviorExecutor).cancel()
 	_executors.clear()
+	if _player_executor != null:
+		_player_executor.cancel()
 	_player_executor = null
 	_approach = {}
 	_stopped = {}

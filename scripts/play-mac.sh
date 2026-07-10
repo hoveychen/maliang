@@ -12,7 +12,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/build/maliang.app"
-BIN="$APP/Contents/MacOS/maliang"
 PORT=8090
 LOCAL=0
 BUILD=0
@@ -21,7 +20,7 @@ for a in "$@"; do
     --local)  LOCAL=1;;
     --remote) LOCAL=0;;
     --build)  BUILD=1;;
-    *) echo "未知参数：$a（支持 --local / --build）"; exit 1;;
+    *) echo "未知参数：${a}（支持 --local / --build）"; exit 1;;
   esac
 done
 
@@ -40,7 +39,7 @@ fi
 
 # 2a. 远程模式：双击式启动，连线上服务器，不起本地后端。
 if [ "$LOCAL" = 0 ]; then
-  echo "启动 $APP（连远程 maliang-api.muveeai.com）..."
+  echo "启动 ${APP}（连远程 maliang-api.muveeai.com）..."
   open -W "$APP"
   exit 0
 fi
@@ -87,5 +86,8 @@ trap cleanup EXIT INT TERM
 
 # 直接跑 app 内可执行文件：open 经 launchd 启动、不继承 shell 环境变量，无法传 MALIANG_API_BASE。
 # 直跑既能传环境变量、又能看到 stdout 日志，且前台阻塞到窗口关闭，随后触发上面的收尾。
-echo "启动 app（连本地 $API_BASE，关窗口或 Ctrl-C 收尾）..."
+# 可执行文件名跟着导出预设里的产品名走（现为「马良小世界」），别写死——从 Info.plist 读。
+BIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
+[ -x "$BIN" ] || { echo "找不到 app 可执行文件：$BIN"; exit 1; }
+echo "启动 app（连本地 ${API_BASE}，关窗口或 Ctrl-C 收尾）..."
 MALIANG_API_BASE="$API_BASE" "$BIN"

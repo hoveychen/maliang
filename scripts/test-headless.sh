@@ -90,6 +90,7 @@ for t in "${UNIT_TESTS[@]}"; do
   run_test "$t"
 done
 
+run_test test_scene_unload         --fixed-fps 10 --quit-after 40
 run_test test_visual_menu          --fixed-fps 10 --quit-after 60
 run_test test_visual_loading       --fixed-fps 10 --quit-after 90
 run_test test_visual_fairy         --fixed-fps 10 --quit-after 100
