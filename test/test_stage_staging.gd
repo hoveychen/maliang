@@ -55,6 +55,13 @@ func _after_begin() -> void:
 	_check("开演停掉了 1 号演员的闲逛", _has_ambient(_cast[0]), false)
 	_check("开演停掉了 2 号演员的闲逛", _has_ambient(_cast[1]), false)
 	_check("路人不受影响，照旧闲逛", _has_ambient(_bystander), true)
+	# 参演高亮：孩子要一眼看出谁在演
+	_check("1 号演员脚下挂了光环", _ring(_cast[0]) != null, true)
+	_check("2 号演员脚下挂了光环", _ring(_cast[1]) != null, true)
+	_check("路人不挂光环", _ring(_bystander) == null, true)
+	# 挂成角色的子节点：他走到哪光环跟到哪，不用每帧重摆
+	var r := _ring(_cast[0])
+	_check("光环是演员的子节点", r != null and r.get_parent() == _cast[0]["node"], true)
 
 func _check_drift() -> void:
 	# 开演到第一条舞台命令之间的那几秒：演员必须站在原地等调度
@@ -64,13 +71,27 @@ func _check_drift() -> void:
 	# 反证：闲逛执行器确实会让人走动，否则上面的断言是空的
 	_check("路人这段时间确实晃了",
 		WorldGrid.shortest_delta(_bystander["logical"], _bystander_pos).length() > DRIFT_EPS, true)
+	# 纸片角色每帧被设倾角（转身时还随 cos(fry) 反号）——光环必须始终平躺在地上
+	var node := _cast[0]["node"] as Node3D
+	_check("角色确实是倾着的（否则下面的断言是空的）", absf(node.global_basis.y.normalized().dot(Vector3.UP)) < 0.99, true)
+	var r := _ring(_cast[0]) as Node3D
+	_check("光环平躺在地上，没跟着角色歪",
+		r != null and r.global_basis.y.normalized().dot(Vector3.UP) > 0.999, true)
 	scene.call("stage_finish", {}, false, "")
 
 func _after_finish() -> void:
 	_check("收场恢复 1 号演员的闲逛", _has_ambient(_cast[0]), true)
 	_check("收场恢复 2 号演员的闲逛", _has_ambient(_cast[1]), true)
 	_check("玩家没被挂上闲逛执行器", _has_ambient(scene.get("player")), false)
+	_check("收场摘掉 1 号演员的光环", _ring(_cast[0]) == null, true)
+	_check("收场摘掉 2 号演员的光环", _ring(_cast[1]) == null, true)
 	_finish()
+
+## 角色脚下的参演光环节点（没挂返回 null）。
+func _ring(dict: Dictionary) -> Node:
+	if dict.is_empty():
+		return null
+	return (dict["node"] as Node3D).get_node_or_null("StageRing")
 
 ## 这个角色身上有没有**还活着**的自主闲逛执行器（cancel 过的要到下一帧才从表里摘掉）。
 func _has_ambient(dict: Dictionary) -> bool:

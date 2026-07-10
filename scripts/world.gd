@@ -2194,6 +2194,11 @@ func _place_char(n: Dictionary, lean: float, delta: float) -> void:
 	n["ry"] = ry
 	_place_on_bent_ground(node, Vector3(d.x, ry + float(n.get("hover", 0.0)), d.y))
 	_update_paper_motion(n, node as PaperCharacter, lean, delta)
+	# 参演光环寄生在角色节点下（跟着走位/弯曲），但纸片的倾角/摇摆/点头会把它一起掀起来，
+	# 转身时 lean 还随 cos(fry) 反号——直接钉死世界基，让它永远平躺在脚下。
+	var ring: Variant = n.get("stage_ring")
+	if ring != null and is_instance_valid(ring):
+		(ring as Node3D).global_basis = STAGE_RING_BASIS
 
 ## 纸片动作演出（每帧）：走路左右摇摆+下摆飘动 / 横向变向绕竖轴翻面 / 待机呼吸微卷。
 ## 朝向约定：立绘统一朝右（sprite_style.ts），ry=0 朝右、ry=PI 背面即水平镜像=朝左；
@@ -2362,6 +2367,11 @@ func _update_voice_wave(delta: float) -> void:
 		var shape := 0.5 + 0.5 * sin(_wave_t * 7.0 + float(i) * 0.8)
 		var amp := base * (0.4 + 0.6 * shape)
 		bar.offset_top = WAVE_BASE_Y - (WAVE_MIN_H + amp * (WAVE_MAX_H - WAVE_MIN_H))
+
+## 角色立绘的可见世界宽度（米）：quad 的宽就是单格立绘的宽（sprite-sheet 已按 cellW 归一）。
+func _char_quad_w(npc: PaperCharacter) -> float:
+	var q := npc.mesh as QuadMesh
+	return q.size.x if q != null and q.size.x > 0.0 else PaperCharacter.PLACEHOLDER_HEIGHT
 
 ## 角色立绘顶端相对节点原点（脚底）的高度——头顶挂饰（耳朵/气泡）按此定位，小仙子等小体型不悬空。
 func _char_top(npc: PaperCharacter) -> float:
@@ -4433,6 +4443,11 @@ var _stage_actor_ids: Array = []                  ## 本场演员 id 表（overv
 var _stage_cam: Dictionary = {}
 const STAGE_CAM_FOCUS_DIST := 20.0     ## 单人特写：比 god 态 ZOOM_MIN(16) 略远，人在画面中段
 const STAGE_CAM_FILL := 0.8            ## 全景构图：演员包围圆的直径占屏中间 80%（留一圈边，别贴着画框演）
+const STAGE_RING_NAME := "StageRing"   ## 参演高亮：演员脚下光环的节点名（挂在角色节点下）
+const STAGE_RING_COLOR := Color(1.0, 0.84, 0.32, 0.85)
+## 光环的世界基：不跟角色转，且把圆环压扁成贴地的一圈（而不是一个甜甜圈）
+const STAGE_RING_SQUASH := Vector3(1.0, 0.2, 1.0)
+static var STAGE_RING_BASIS := Basis().scaled(STAGE_RING_SQUASH)
 
 ## 环面上的中点（纯函数）：不能直接取算术平均——两点跨接缝时会算到地图对面去。
 static func torus_midpoint(a: Vector2, b: Vector2) -> Vector2:
@@ -4530,6 +4545,7 @@ func stage_begin(actors: Array) -> void:
 		_exit_interaction()
 	_cancel_player_move()
 	_stage_stop_ambient()
+	_stage_mark_actors(true)
 	banner.visible = false
 
 ## 开演即停掉参演角色的自主闲逛。_step_executors 在 _stage_active 时已不再补挂闲逛，
@@ -4543,9 +4559,48 @@ func _stage_stop_ambient() -> void:
 			if (ex as BehaviorExecutor).ambient and (ex as BehaviorExecutor).drives(d):
 				(ex as BehaviorExecutor).cancel()
 
+## 参演高亮：给演员脚下挂/摘一圈金色光环，孩子一眼看出台上是谁在演。
+## 光环挂成角色节点的子节点（与 BlobShadow 同一套寄生法）——他走到哪跟到哪，
+## 世界弯曲/走位/浮动原点全都不用管，也就不需要每帧重摆。
+## 悬空的小仙子跳过：她脚下没有地，光环会飘在半空。
+func _stage_mark_actors(on: bool) -> void:
+	for id in _stage_actor_ids:
+		var d := _stage_actor_dict(String(id))
+		if d.is_empty() or d.get("is_fairy", false):
+			continue
+		var node := d["node"] as PaperCharacter
+		var old := node.get_node_or_null(STAGE_RING_NAME)
+		if old != null:
+			old.queue_free()
+		d.erase("stage_ring")
+		if not on:
+			continue
+		var mi := MeshInstance3D.new()
+		mi.name = STAGE_RING_NAME
+		var ring := TorusMesh.new()
+		# 半径按立绘实际宽度（quad 宽）算，不按身高：光环要比身子宽一圈才看得见——
+		# 立绘是竖直纸片，圆环凡是落在身子后面的部分都会被它挡掉，只剩前面一道弧。
+		var r := clampf(_char_quad_w(node) * 0.55, 0.8, 2.2)
+		ring.outer_radius = r
+		ring.inner_radius = r * 0.84
+		ring.rings = 32        # 主圆的分段：给少了会画成菱形
+		ring.ring_segments = 4 # 截面的分段：反正 _place_char 里要压扁贴地，四段够了
+		mi.mesh = ring
+		mi.position.y = 0.22 # 抬离 BlobShadow(0.2) 一点，别打架（压扁与保持水平见 _place_char）
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = STAGE_RING_COLOR
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.extra_cull_margin = BendMat.CULL_MARGIN # 角色被 CPU 预下压，光环随之位移，防误剔除
+		node.add_child(mi)
+		d["stage_ring"] = mi # 缓存供 _place_char 每帧摆平（省掉逐帧 get_node_or_null）
+
 ## 收场（正常结束/异常终止）：解锁输入，停掉一切舞台驱动的执行器与念白，横幅圆场。
 func stage_finish(result: Dictionary, aborted: bool, reason: String) -> void:
 	_stage_active = false
+	_stage_mark_actors(false) # 摘光环必须赶在 _stage_actor_ids 清空之前——清了就找不到人了
 	_stage_player_actor_id = ""
 	_stage_actor_ids.clear()
 	_stage_cam = {} # 镜头交还玩家（收场后还锁在演员身上，孩子会以为卡死了）
