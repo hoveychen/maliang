@@ -497,6 +497,9 @@ func _on_page_shown(p: Dictionary) -> void:
 func _process(delta: float) -> void:
 	# 旁白/录音时压低 BGM，让位给人声
 	game_audio.set_ducked(_voice.playing or _intro_recording)
+	# 录音期直接静音 BGM（比 duck 更狠）：外放 BGM 会被无 AEC 的麦克风回灌，
+	# 污染端侧 ASR 对名字的识别。与 world.gd:1720 的录音期处理保持一致。
+	game_audio.set_music_muted(_intro_recording)
 	if _intro_recording:
 		_drain_intro() # 录音时持续排空采集缓冲（端侧喂插件/服务端攒整段）
 	if _story_auto_t > 0.0 and not _flipping:
