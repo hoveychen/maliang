@@ -252,6 +252,49 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     },
   );
 
+  // 管理端点：修数据用的角色 PATCH——sceneId / position / spriteAsset 按需改（scene-drag-guard P2）。
+  // positions_report 已拒绝跨场景拖拽，角色换场景（如把被拖走的森林村民搬回去）走这里；
+  // spriteAsset 用于把误 regen 的形象指回库里仍在的旧资产（regen-sprite 没有 undo）。
+  // 全部字段可选、逐项校验：sceneId 必须已入库，position 必须界内，spriteAsset 必须在资产库。
+  // 必须配 MALIANG_ADMIN_TOKEN。
+  app.patch<{
+    Params: { id: string; cid: string };
+    Body: { sceneId?: string; position?: { tileX?: number; tileY?: number }; spriteAsset?: string } | null;
+  }>('/admin/worlds/:id/characters/:cid', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const char = store.getCharacter(req.params.id, req.params.cid);
+    if (!char) return reply.code(404).send({ error: 'character not found' });
+    const b = req.body ?? {};
+    if (b.sceneId !== undefined) {
+      if (typeof b.sceneId !== 'string' || !store.getScene(req.params.id, b.sceneId)) {
+        return reply.code(400).send({ error: `scene not registered: ${String(b.sceneId)}` });
+      }
+      char.sceneId = b.sceneId;
+    }
+    if (b.position !== undefined) {
+      const tile: TilePos = { tileX: Number(b.position?.tileX), tileY: Number(b.position?.tileY) };
+      if (!isValidTile(tile)) return reply.code(400).send({ error: 'position out of bounds' });
+      char.position = tile;
+    }
+    if (b.spriteAsset !== undefined) {
+      if (typeof b.spriteAsset !== 'string' || !store.getAsset(b.spriteAsset)) {
+        return reply.code(400).send({ error: `asset not found: ${String(b.spriteAsset)}` });
+      }
+      char.appearance.spriteAsset = b.spriteAsset;
+    }
+    store.saveCharacter(char);
+    return {
+      id: char.id,
+      name: char.name,
+      sceneId: char.sceneId,
+      position: char.position,
+      spriteAsset: char.appearance.spriteAsset,
+    };
+  });
+
   // 管理端点：把小红花数直接设为指定值（缺省 INITIAL_FLOWERS）。补花用，不改经济规则。
   // 钱包按 (worldId, playerId) 分：
   //   body.playerId 给了 → 只补那个孩子（即便他还没建钱包，也会就地建出来）。
