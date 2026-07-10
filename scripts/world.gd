@@ -2153,18 +2153,25 @@ func _step_executors(delta: float) -> void:
 		return
 	for e in done:
 		for n in npcs:
-			if not (e as BehaviorExecutor).drives(n):
-				continue
-			if n.get("is_fairy", false) or n == _stopped or n.get("in_chat", false) \
-					or (selected != null and n.get("node") == selected) \
-					or _has_executor_for(n):
+			if (e as BehaviorExecutor).drives(n):
+				_resume_ambient(n)
 				break
-			_start_ambient_wander(n)
-			break
 
+## 恢复某角色的自主闲逛。玩家、小仙子、正被交互叫停（_stopped/selected/in_chat）、
+## 已有别的执行器在驱动的，都不动——避免用闲逛盖掉刚下发的指令。
+func _resume_ambient(n: Dictionary) -> void:
+	if n.is_empty() or n.get("id", "") == PLAYER_ID or n.get("is_fairy", false) \
+			or n == _stopped or n.get("in_chat", false) \
+			or (selected != null and n.get("node") == selected) \
+			or _has_executor_for(n):
+		return
+	_start_ambient_wander(n)
+
+## 有执行器**正在**驱动这个角色吗。cancel 过的（is_done）不算：它当帧还赖在 _executors 里
+## 等 _step_executors 回收，若算数就会挡住紧接着的闲逛恢复（收场时演员集体呆立）。
 func _has_executor_for(dict: Dictionary) -> bool:
 	for ex in _executors:
-		if (ex as BehaviorExecutor).drives(dict):
+		if not (ex as BehaviorExecutor).is_done() and (ex as BehaviorExecutor).drives(dict):
 			return true
 	return false
 
@@ -4522,7 +4529,19 @@ func stage_begin(actors: Array) -> void:
 	if selected != null:
 		_exit_interaction()
 	_cancel_player_move()
+	_stage_stop_ambient()
 	banner.visible = false
+
+## 开演即停掉参演角色的自主闲逛。_step_executors 在 _stage_active 时已不再补挂闲逛，
+## 但降生时挂的那个 loop wander 还活着——不停掉，演员就会在开场旁白和每段对白里各走各的。
+func _stage_stop_ambient() -> void:
+	for id in _stage_actor_ids:
+		var d := _stage_actor_dict(String(id))
+		if d.is_empty():
+			continue
+		for ex in _executors:
+			if (ex as BehaviorExecutor).ambient and (ex as BehaviorExecutor).drives(d):
+				(ex as BehaviorExecutor).cancel()
 
 ## 收场（正常结束/异常终止）：解锁输入，停掉一切舞台驱动的执行器与念白，横幅圆场。
 func stage_finish(result: Dictionary, aborted: bool, reason: String) -> void:
@@ -4536,6 +4555,10 @@ func stage_finish(result: Dictionary, aborted: bool, reason: String) -> void:
 	for ex in _stage_holds:
 		(ex as BehaviorExecutor).cancel() # 停掉持续 follow/flee（否则演员收场后还在追/逃）
 	_stage_holds.clear()
+	# 闲逛恢复要在上面两轮 cancel 之后：演员卸了妆回去自己晃悠，
+	# 顺带把演出期间跑完指令、被 _stage_active 挡住没能恢复的路人也一并放回去。
+	for n in npcs:
+		_resume_ambient(n)
 	_stage_speaks.clear() # 未完成念白的回执随收场丢弃（服务端已终场，不再需要 ack）
 	if _hud != null:
 		_hud.clear() # 移除计分板/倒计时/toast

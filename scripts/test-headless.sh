@@ -92,6 +92,7 @@ done
 
 run_test test_scene_unload         --fixed-fps 10 --quit-after 40
 run_test test_stage_camera        --fixed-fps 10 --quit-after 110
+run_test test_stage_staging       --fixed-fps 10 --quit-after 130
 run_test test_visual_menu          --fixed-fps 10 --quit-after 60
 run_test test_visual_loading       --fixed-fps 10 --quit-after 90
 run_test test_visual_fairy         --fixed-fps 10 --quit-after 100
