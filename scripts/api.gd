@@ -10,6 +10,11 @@ extends Node
 ## 该不变量由 test_loading_progress 守护。
 const GET_WORLD_TIMEOUT_SEC := 18.0
 
+## 其余请求（POST /onboarding/intro、拉 TTS 音频等）的超时。HTTPRequest.timeout 默认 0 = 无限，
+## 服务端 hang 住时界面会永远停在等待图标（onboarding 没有 world.gd 的 _think_timer 兜底）。
+## 超时 → request_completed 带非 200 → 调用方拿到空结果走既有的重试/降级路径。
+const REQUEST_TIMEOUT_SEC := 40.0
+
 ## 资产磁盘缓存目录。资产是内容寻址（hash 即内容摘要，永不变），故缓存永久有效、无需失效——
 ## 命中即免网络往返，重复进世界不再逐个村民重下贴图/音频。文件名 = hash（十六进制，天然文件名安全）。
 const CACHE_DIR := "user://asset_cache"
@@ -101,6 +106,7 @@ func get_world(id: String) -> Dictionary:
 func post_json(path: String, body: Dictionary) -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)
+	http.timeout = REQUEST_TIMEOUT_SEC # 服务端 hang 时不让界面永久转圈（见常量注释）
 	var err := http.request(base + path, PackedStringArray(["Content-Type: application/json"]),
 		HTTPClient.METHOD_POST, JSON.stringify(body))
 	if err != OK:
@@ -180,6 +186,7 @@ func fetch_audio(asset_hash: String) -> Dictionary:
 				return { "bytes": cached, "rate": cr }
 	var http := HTTPRequest.new()
 	add_child(http)
+	http.timeout = REQUEST_TIMEOUT_SEC # 同 post_json：拉音频卡住不能让确认页永久等待
 	var err := http.request(base + "/assets/" + asset_hash)
 	if err != OK:
 		http.queue_free()
