@@ -55,9 +55,9 @@ func _cache_write(asset_hash: String, buf: PackedByteArray) -> void:
 	f.store_buffer(buf)
 	f.close()
 
-## 按 magic bytes 把图像字节解码成 Texture2D：静态立绘是 PNG，idle 动画图集是 WebP（体积小），
+## 按 magic bytes 把图像字节解码成 Image：静态立绘是 PNG，idle 动画图集是 WebP（体积小），
 ## 亦容 JPG。无法解码返回 null。（fetch_texture 与缓存命中路径共用，避免解码逻辑两处漂移。）
-func _decode_image(buf: PackedByteArray) -> Texture2D:
+func _load_image_buf(buf: PackedByteArray) -> Image:
 	var img := Image.new()
 	var e := ERR_INVALID_DATA
 	if buf.size() >= 12 and buf[0] == 0x52 and buf[1] == 0x49 and buf[2] == 0x46 and buf[3] == 0x46 \
@@ -67,9 +67,24 @@ func _decode_image(buf: PackedByteArray) -> Texture2D:
 		e = img.load_jpg_from_buffer(buf)
 	else:
 		e = img.load_png_from_buffer(buf)
-	if e != OK:
-		return null
-	return ImageTexture.create_from_image(img)
+	return null if e != OK else img
+
+## 同步解码（测试/小图用）。
+func _decode_image(buf: PackedByteArray) -> Texture2D:
+	var img := _load_image_buf(buf)
+	return null if img == null else ImageTexture.create_from_image(img)
+
+## 异步解码：PNG/WebP 解码搬 WorkerThreadPool——大图集解码几十 ms 级，主线程做
+## 会在下载完成/缓存命中瞬间卡帧。线程里只做 Image 解码（线程安全），
+## ImageTexture.create_from_image 回主线程（涉及 RenderingServer 上传）。
+func _decode_image_async(buf: PackedByteArray) -> Texture2D:
+	var out: Array = [null]
+	var task := WorkerThreadPool.add_task(func() -> void: out[0] = _load_image_buf(buf))
+	while not WorkerThreadPool.is_task_completed(task):
+		await get_tree().process_frame
+	WorkerThreadPool.wait_for_task_completion(task)  # 完成后仍需 wait 回收任务句柄
+	var img: Image = out[0]
+	return null if img == null else ImageTexture.create_from_image(img)
 
 ## 新建世界（后端会种入小神仙）。失败返回空字典。
 func create_world() -> Dictionary:
@@ -151,7 +166,7 @@ func fetch_texture(asset_hash: String) -> Texture2D:
 	# 磁盘缓存命中：解码后进内存，直接返回，不发网络请求
 	var cached := _cache_read(asset_hash)
 	if not cached.is_empty():
-		var ctex := _decode_image(cached)
+		var ctex := await _decode_image_async(cached)
 		if ctex != null:
 			_tex_mem[asset_hash] = ctex
 			return ctex
@@ -167,7 +182,7 @@ func fetch_texture(asset_hash: String) -> Texture2D:
 	if int(res[1]) != 200:
 		return null
 	var buf := res[3] as PackedByteArray
-	var tex := _decode_image(buf)
+	var tex := await _decode_image_async(buf)
 	if tex == null:
 		return null
 	_cache_write(asset_hash, buf) # 落盘供下次免下载（内容寻址，永久有效）

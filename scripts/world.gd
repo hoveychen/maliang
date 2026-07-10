@@ -644,7 +644,11 @@ func _apply_player_sprite() -> void:
 func _poll_idle_anim(node: PaperCharacter, sprite_hash: String, world_height: float, phase: float) -> void:
 	if sprite_hash.is_empty():
 		return
-	for _i in 40: # 最多 ~2 分钟（3s×40），覆盖视频生成 60~90s + 排队
+	# 退避轮询：3→6→12s 封顶，总窗 ~2 分钟（覆盖视频生成 60~90s + 排队）。
+	# 旧版固定 3s×40：N 个角色 = N 条并发轮询，进世界头 2 分钟射频持续唤醒（平板发热）。
+	var wait := 3.0
+	var budget := 120.0
+	while true:
 		if not is_instance_valid(node):
 			return
 		var rec := await api.fetch_sprite_anim(sprite_hash)
@@ -657,7 +661,11 @@ func _poll_idle_anim(node: PaperCharacter, sprite_hash: String, world_height: fl
 			return
 		if status == "failed":
 			return
-		await get_tree().create_timer(3.0).timeout
+		if budget <= 0.0:
+			return
+		await get_tree().create_timer(wait).timeout
+		budget -= wait
+		wait = minf(wait * 2.0, 12.0)
 
 ## 离线模式的小仙子随从（在线时 _bootstrap 会清掉、换成服务端小神仙）。
 ## 悬浮飞行：不登记占用图、不走寻路，由 _update_fairy 驱动跟随玩家。
