@@ -1,0 +1,62 @@
+extends SceneTree
+## 把客户端 TerrainMap 确定性生成的地形导出成 .mltr 二进制，供 POST /admin/scenes 入库。
+##
+## 用法：
+##   godot --headless --path . --script res://tools/export_terrain.gd -- --out village.mltr
+##
+## 导出的字节与 TerrainMap 内存里的三个数组逐字节相同——这是「地形搬到服务端」那一步的
+## 验收标准：上线当天玩家看到的地图与今天完全一致，纯粹换了数据来源。
+##
+## 格式见 server/src/terrain.ts（两边必须同步改）：
+##   magic "MLTR" 4B | version u8 | gridW u8 | gridH u8 | tileSize f32(LE) | types | heights | depths
+
+const MAGIC := "MLTR"
+const VERSION := 1
+const HEADER_BYTES := 11
+
+func _init() -> void:
+	var out_path := _arg("--out", "village.mltr")
+	var buf := build_terrain_bytes()
+	var f := FileAccess.open(out_path, FileAccess.WRITE)
+	if f == null:
+		printerr("无法写入 ", out_path, "：", error_string(FileAccess.get_open_error()))
+		quit(1)
+		return
+	f.store_buffer(buf)
+	f.close()
+
+	var gz := buf.compress(FileAccess.COMPRESSION_GZIP)
+	print("导出 %s：%d B（gzip %d B）grid=%d×%d" % [
+		out_path, buf.size(), gz.size(), WorldGrid.GRID_TILES, WorldGrid.GRID_TILES])
+	quit(0)
+
+## 构建 .mltr 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。
+static func build_terrain_bytes() -> PackedByteArray:
+	var n := WorldGrid.GRID_TILES
+	var count := n * n
+	var buf := PackedByteArray()
+	buf.resize(HEADER_BYTES + 3 * count)
+
+	for i in range(4):
+		buf[i] = MAGIC.unicode_at(i)
+	buf[4] = VERSION
+	buf[5] = n
+	buf[6] = n
+	buf.encode_float(7, WorldGrid.TILE_SIZE) # 小端，与 DataView.setFloat32(.., true) 一致
+
+	# 行主序（y 外层、x 内层），与服务端 _idx = y*W + x 一致
+	for y in range(n):
+		for x in range(n):
+			var t := Vector2i(x, y)
+			var i := y * n + x
+			buf[HEADER_BYTES + i] = TerrainMap.tile_type(t)
+			buf[HEADER_BYTES + count + i] = TerrainMap.tile_height(t)
+			buf[HEADER_BYTES + 2 * count + i] = TerrainMap.tile_depth(t)
+	return buf
+
+static func _arg(name: String, fallback: String) -> String:
+	var args := OS.get_cmdline_user_args()
+	var i := args.find(name)
+	if i >= 0 and i + 1 < args.size():
+		return args[i + 1]
+	return fallback
