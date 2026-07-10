@@ -8,6 +8,7 @@ import type { OpenRouterClient, ChatMessage } from '../src/adapters/openrouter_c
 import { WorldStore } from '../src/persistence.ts';
 import { respondToTranscript } from '../src/voice.ts';
 import type { Character, IntentContext, IntentResult } from '../src/types.ts';
+import { effectiveAbilities } from '../src/types.ts';
 
 function seedChar(store: WorldStore, worldId: string, id: string, name: string, isFairy = false): Character {
   const c: Character = {
@@ -50,10 +51,13 @@ const CTX: IntentContext = {
   ],
 };
 
-test('routeIntent prompt：喂花名册 + 基础能力并集（存量角色只存旧两项也能用新能力）', async () => {
+// 能力并集（基础集 ∪ 角色自带）已从适配器上移到 voice.ts 的 effectiveAbilities——因为仙子要在
+// 那一层减去走动类能力，适配器若再并回 BASE_ABILITIES 就把减掉的又塞了回去。「存量角色只存旧两项
+// 也能用新能力」这条保证改由 respondToTranscript 层的用例端到端守（见文件末尾的村民用例）。
+test('routeIntent prompt：喂花名册 + 逐条渲染调用方给的能力', async () => {
   const captured: ChatMessage[][] = [];
   const llm = new OpenRouterLLMAdapter(fakeClient('{"kind":"chat","replyText":"你好呀"}', captured), 'm');
-  await llm.routeIntent('你好', CTX);
+  await llm.routeIntent('你好', { ...CTX, abilities: effectiveAbilities({ abilities: CTX.abilities, isFairy: false }) });
   const system = captured[0]![0]!.content;
   assert.ok(system.includes('小蓝') && system.includes('小黄'), '花名册应进 prompt');
   for (const a of ['follow', 'stop_follow', 'do_action', 'chat_with', 'move_to', 'deliver_message']) {
@@ -234,4 +238,77 @@ test('routeIntent prompt：点名指派必须带指令 + 带话用 deliver_messa
   const system = captured[0]![0]!.content;
   assert.ok(system.includes('指令绝不能省'), '点名指派需明示 behaviorScript 照常输出');
   assert.ok(system.includes('不要用 move_to——光走过去话就丢了'), '带话需明示用 deliver_message');
+});
+
+// ── 小仙子的能力集：她是贴身随从，不会走动 ────────────────────────────────
+// 客户端 _run_behavior 对 is_fairy 早返回，一切移动脚本原地丢弃。所以凡是「要走过去才能做的事」
+// 落到她身上都无法兑现：孩子听见「好呀」，人却纹丝不动。根治在源头——这些能力压根不进她的意图 prompt。
+
+test('respondToTranscript：小仙子的意图上下文不含任何需要走动的能力', async () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  const fairy = seedChar(store, 'w1', 'fairy', '小神仙', true);
+  fairy.abilities = ['move_to', 'deliver_message', 'create_character', 'create_prop'];
+  store.saveCharacter(fairy);
+  seedChar(store, 'w1', 'blue', '小蓝');
+
+  const base = createMockAdapters();
+  const ctxs: IntentContext[] = [];
+  const adapters = {
+    ...base,
+    llm: {
+      ...base.llm,
+      async routeIntent(t: string, ctx: IntentContext): Promise<IntentResult> {
+        ctxs.push(ctx);
+        return base.llm.routeIntent(t, ctx);
+      },
+    },
+  };
+  await respondToTranscript('w1', 'fairy', '', '你好呀', adapters, store);
+
+  const got = ctxs[0]!.abilities;
+  for (const a of ['move_to', 'follow', 'stop_follow', 'chat_with', 'deliver_message']) {
+    assert.ok(!got.includes(a), `小仙子不该有需要走动的能力 ${a}，实得 [${got.join(', ')}]`);
+  }
+  // 就地能做的 + 她的看家本领要留着
+  for (const a of ['do_action', 'create_character', 'create_prop']) {
+    assert.ok(got.includes(a), `小仙子应保留 ${a}`);
+  }
+});
+
+test('respondToTranscript：普通村民仍拿到基础能力并集（存量角色免迁移）', async () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  seedChar(store, 'w1', 'green', '小绿'); // abilities 只存了旧两项
+
+  const base = createMockAdapters();
+  const ctxs: IntentContext[] = [];
+  const adapters = {
+    ...base,
+    llm: {
+      ...base.llm,
+      async routeIntent(t: string, ctx: IntentContext): Promise<IntentResult> {
+        ctxs.push(ctx);
+        return base.llm.routeIntent(t, ctx);
+      },
+    },
+  };
+  await respondToTranscript('w1', 'green', '', '你好呀', adapters, store);
+
+  const got = ctxs[0]!.abilities;
+  for (const a of ['move_to', 'follow', 'stop_follow', 'do_action', 'chat_with', 'deliver_message']) {
+    assert.ok(got.includes(a), `村民应拿到基础能力 ${a}`);
+  }
+});
+
+test('routeIntent prompt：能力清单直接取自 ctx.abilities，不再擅自补回基础集', async () => {
+  const captured: ChatMessage[][] = [];
+  const llm = new OpenRouterLLMAdapter(fakeClient('{"kind":"chat","replyText":"好"}', captured), 'm');
+  // 仙子的能力集（已剔除走动类）进来，prompt 里就不该再冒出 move_to/follow
+  await llm.routeIntent('去风车那儿', { ...CTX, abilities: ['do_action', 'create_character', 'create_prop'] });
+  const system = captured[0]![0]!.content;
+  for (const a of ['move_to=', 'follow=', 'chat_with=', 'deliver_message=']) {
+    assert.ok(!system.includes(a), `prompt 不该出现走动能力说明 ${a}`);
+  }
+  assert.ok(system.includes('do_action='), 'do_action 应在 prompt 里');
 });

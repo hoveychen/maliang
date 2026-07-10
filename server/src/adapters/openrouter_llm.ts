@@ -145,8 +145,9 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
   }
 
   async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
-    // 能力 = 基础交互集 ∪ 角色自带（存量角色只存了旧两项，取并集免迁移）
-    const abilities = [...new Set([...BASE_ABILITIES, ...ctx.abilities])];
+    // 能力集已由调用方（voice.ts 的 effectiveAbilities）算好：基础集 ∪ 角色自带，仙子再减去走动类。
+    // 这里不能再擅自并回 BASE_ABILITIES——那会把仙子刚被摘掉的 move_to/follow 又塞回她的 prompt。
+    const abilities = ctx.abilities;
     const abilityLines = abilities.map((a) => `- ${ABILITY_DESC[a] ?? a}`).join('\n');
 
     // 造角色规则只对有该能力的角色（小仙子）出现，免得普通村民误以为自己能造。
