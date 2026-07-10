@@ -651,12 +651,18 @@ func _update_fairy(delta: float) -> void:
 	_fairy_drift_t += delta
 	var target: Vector2
 	var speed_min := 1.2
-	if not _fairy_poi.is_empty():
+	# 对话优先于 POI 提醒：小朋友正在跟她说话时，她必须停在原地听（缺陷 ③）。
+	# 仙子的位移直接改 fairy["logical"]、不走行为脚本，_halt_npc 取消执行器拦不住她，
+	# 所以只能在这里把「对话中」这一支提到 POI 之前。
+	# 顺手丢弃进行中的 POI：那个提醒点是进对话前算的，聊完早已过时；触发词未被 try_play 消耗，
+	# 离开对话后 _check_poi 会按当时位置重新提醒。
+	if selected == fairy.get("node"):
+		_fairy_poi = {}
+		target = fairy["logical"] # 对话中：停在原地听小朋友说话（仍轻微浮动）
+	elif not _fairy_poi.is_empty():
 		target = _fairy_poi["point"]
 		speed_min = 14.0 # 提醒飞行：果断飞过去
 		_step_fairy_poi(delta, fairy, target)
-	elif selected == fairy.get("node"):
-		target = fairy["logical"] # 对话中：停在原地听小朋友说话（仍轻微浮动）
 	else:
 		var drift := Vector2(cos(_fairy_drift_t * 0.6), sin(_fairy_drift_t * 0.45)) * 1.8
 		target = WorldGrid.wrap_pos(player["logical"] + Vector2(2.6, 1.8) + drift)
