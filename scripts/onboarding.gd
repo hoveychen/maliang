@@ -361,6 +361,14 @@ func _step_intro(delta: float) -> void:
 		_vad.reset()
 		_unmute_t = UNMUTE_GRACE # 旁白刚结束的残响尾音不算开口
 		return
+	# 自播音效外放会被无 AEC 的麦克风收回去，VAD 听成「孩子开口」（world.gd 同源，
+	# 那边 enter=212ms 实锤造出过空录音）。本页当前的开麦时刻恰好都在旁白播完之后——
+	# 那一刻没有音效在响——所以这是**对称加固**，不是现存缺陷的修复；一旦有人在开麦态
+	# 加音效，这道守卫兜住。录音中不屏蔽：那会吃掉孩子正在说的话（mic_on 的混音是已知取舍）。
+	if not _intro_recording and game_audio != null and game_audio.sfx_bleeding():
+		_vad.reset()
+		_unmute_t = UNMUTE_GRACE
+		return
 	if _unmute_t > 0.0:
 		_unmute_t -= delta
 		return

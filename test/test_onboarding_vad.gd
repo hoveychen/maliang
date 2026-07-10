@@ -85,6 +85,8 @@ func _run_once() -> void:
 	fails += _check("误触后麦克风仍开着", ob._vad != null, true)
 	fails += _check("误触后不在录音", ob._intro_recording, false)
 
+	fails += _test_sfx_guard()
+
 	ob._intro_close_mic()
 
 	if fails == 0:
@@ -92,6 +94,28 @@ func _run_once() -> void:
 	else:
 		printerr("onboarding_vad tests FAILED: %d" % fails)
 	quit(fails)
+
+## 自播音效外放会被无 AEC 的麦克风收回去（world.gd 同源，见 test_sfx_mic_guard）。
+## 绘本目前的开麦时刻恰好都在旁白播完之后（_step_intro 要求 not _voice.playing），
+## 那一刻没有音效在响——所以这是**对称加固**，不是现存缺陷的修复。这条断言把加固钉住：
+## 一旦有人在开麦态加音效（world.gd 就踩过 enter/bell），守卫兜住而不是误判开口。
+##
+## 注意必须驱动 _step_intro：既有断言都直接调 _feed_intro_pcm，绕过了所有门禁。
+func _test_sfx_guard() -> int:
+	var fails := 0
+	ob._intro_submitting = false
+	ob._intro_open_mic()
+	if ob._vad == null:
+		printerr("  FAIL sfx guard: 开麦失败")
+		return 1
+	ob._intro_recording = false # 未开口的聆听态（RECORDING 态不该屏蔽，会吃掉孩子的话）
+	ob._unmute_t = 0.0
+	fails += _check("前提:旁白没在播(否则屏蔽来自旁白,假绿)", ob._voice.playing, false)
+	ob.game_audio.play_sfx("confirm") # 290ms > VAD START_MS(90ms)
+	fails += _check("前提:音效记账为正在出声", ob.game_audio.sfx_bleeding(), true)
+	ob._step_intro(0.0)
+	fails += _check("开麦态播音效必须屏蔽 VAD", ob._unmute_t > 0.0, true)
+	return fails
 
 func _check(name: String, got: Variant, want: Variant) -> int:
 	if got == want:
