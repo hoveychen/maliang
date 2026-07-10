@@ -7,6 +7,7 @@
 // 设计: docs/script-runtime-design.md
 
 import { loadScreenplay, type ScreenplayName } from './screenplays.ts';
+import { DEFAULT_SCENE } from './types.ts';
 import type { WorldStore } from './persistence.ts';
 import type { WorldHub } from './world_hub.ts';
 import type { StageStartOpts } from './stage_session.ts';
@@ -21,20 +22,24 @@ export class DebutError extends Error {}
 /**
  * 为一个剧本组一份开演参数。角色/落点都取自世界现状，取不到就抛 DebutError（调用方转 4xx）。
  * 玩家演员的 id 约定即 playerId——服务端 near 求值和位置流都以它为键（见 stage_session.ts）。
+ *
+ * 演员和落点必须来自**同一个场景**（缺省村庄）：跨场景选角会让村庄的村民走向森林的地名，
+ * 客户端 _stage_move_params 解析不了，第一条 move_to 就 abort 整场。
  */
 export function buildDebut(
   store: WorldStore,
   hub: WorldHub,
   worldId: string,
   screenplay: ScreenplayName,
-  sceneId?: string,
+  sceneId: string = DEFAULT_SCENE,
 ): StageStartOpts {
-  const villagers = store.listCharacters(worldId).filter((c) => !c.isFairy);
+  // listCharacters 按场景过滤时恒带仙女（她跨场景跟随），照旧靠 isFairy 剔除。
+  const villagers = store.listCharacters(worldId, sceneId).filter((c) => !c.isFairy);
   const code = loadScreenplay(screenplay);
 
   if (screenplay === 'hide_and_seek') {
     const seeker = villagers[0];
-    if (!seeker) throw new DebutError('世界里一个村民都没有，没人当鬼');
+    if (!seeker) throw new DebutError(`场景「${sceneId}」里一个村民都没有，没人当鬼`);
     const kid = hub.membersIn(worldId).find((m) => m.playerId);
     if (!kid) throw new DebutError('世界里没有在线的小朋友，演给谁看');
     const actors: StageActorInfo[] = [
@@ -46,7 +51,7 @@ export function buildDebut(
   }
 
   if (villagers.length < PLAY_ROLES.length) {
-    throw new DebutError(`三幕小剧场要 ${PLAY_ROLES.length} 个村民，世界里只有 ${villagers.length} 个`);
+    throw new DebutError(`三幕小剧场要 ${PLAY_ROLES.length} 个村民，场景「${sceneId}」里只有 ${villagers.length} 个`);
   }
   const actors: StageActorInfo[] = PLAY_ROLES.map((role, i) => ({
     id: villagers[i].id,
@@ -68,8 +73,8 @@ function playerName(store: WorldStore, playerId: string): string {
  * 两个落点：从本场景的 POI 里挑。只有一个就两幕都用它（走位退化成原地，比解析失败强）。
  * moveTo 的落点名由客户端对 scenes.pois 解析（见 world.gd _stage_move_params）。
  */
-function pickSpots(store: WorldStore, worldId: string, sceneId?: string): [string, string] {
+function pickSpots(store: WorldStore, worldId: string, sceneId: string): [string, string] {
   const pois = store.getLocations(worldId, sceneId);
-  if (pois.length === 0) throw new DebutError('本场景没有任何地点名，演员不知道往哪走');
+  if (pois.length === 0) throw new DebutError(`场景「${sceneId}」没有任何地点名，演员不知道往哪走`);
   return [pois[0], pois[1] ?? pois[0]];
 }
