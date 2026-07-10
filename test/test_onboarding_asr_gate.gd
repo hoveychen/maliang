@@ -7,7 +7,7 @@ extends SceneTree
 var ob: Control
 var _ran := false
 
-## 假端侧 ASR：isReady 可控,记录是否被 startSession
+## 假端侧 ASR:isReady 可控,记录是否被 startSession
 class FakeAsr:
 	extends RefCounted
 	var ready := false
@@ -29,31 +29,45 @@ func _run_once() -> void:
 	var fails := 0
 	var fake := FakeAsr.new()
 	ob._asr_local = fake
-	# _intro_status 由 intro 页构建；测试直接跑 _intro_start,先补一个占位
 	if ob._intro_status == null:
 		ob._intro_status = TextureRect.new()
 		ob.add_child(ob._intro_status)
 
-	# ── Android + 模型未就绪 → 拒绝开麦 ──
+	# ── Android + 模型未就绪 → 拒绝开麦(不建 VAD、不采集) ──
 	ob._os_name = "Android"
 	fake.ready = false
-	ob._intro_start()
+	ob._intro_open_mic()
+	fails += _check("android/未就绪: 不开麦", ob._vad == null, true)
 	fails += _check("android/未就绪: 不进入录音", ob._intro_recording, false)
-	fails += _check("android/未就绪: 不开本地会话", fake.started, false)
 
-	# ── Android + 模型就绪 → 正常开麦走端侧 ──
+	# ── Android + 模型就绪 → 开麦(建 VAD),但尚未开口 ──
 	fake.ready = true
-	ob._intro_start()
-	fails += _check("android/已就绪: 进入录音", ob._intro_recording, true)
-	fails += _check("android/已就绪: 开本地会话", fake.started, true)
-	ob._intro_recording = false # 收尾,别让 _process 继续 drain
+	ob._intro_open_mic()
+	fails += _check("android/已就绪: 开麦", ob._vad != null, true)
+	fails += _check("android/已就绪: 未开口前不录音", ob._intro_recording, false)
+	fails += _check("android/已就绪: 未开口前不开会话", fake.started, false)
+
+	# ── VAD 判定开口 → 开本地会话,不上传 ──
+	ob._intro_begin(PackedByteArray())
+	fails += _check("开口: 进入录音", ob._intro_recording, true)
+	fails += _check("开口: 走端侧会话", fake.started, true)
+	fails += _check("开口: 端侧不攒服务端 PCM", ob._intro_pcm.is_empty(), true)
+
+	# ── 误触(说太短) → 取消,麦克风继续开着 ──
+	ob._intro_cancel()
+	fails += _check("误触取消: 退出录音", ob._intro_recording, false)
+	fails += _check("误触取消: 麦克风仍开着", ob._vad != null, true)
+
+	# ── 关麦 → VAD 置空 ──
+	ob._intro_close_mic()
+	fails += _check("关麦: VAD 置空", ob._vad == null, true)
 
 	# ── 桌面 + 无端侧单例 → 门禁不得误伤,允许开麦(走服务端) ──
 	ob._os_name = "macOS"
 	ob._asr_local = null
-	ob._intro_start()
-	fails += _check("macOS/无单例: 仍可开麦(服务端合法)", ob._intro_recording, true)
-	ob._intro_recording = false
+	ob._intro_open_mic()
+	fails += _check("macOS/无单例: 仍可开麦(服务端合法)", ob._vad != null, true)
+	ob._intro_close_mic()
 
 	if fails == 0:
 		print("onboarding_asr_gate tests PASS")
