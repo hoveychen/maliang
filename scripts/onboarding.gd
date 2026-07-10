@@ -4,9 +4,16 @@ extends Control
 ## 页面由 PAGES 声明式驱动；answers 收集到 PlayerProfile。
 ## kind: story(讲故事,点击/旁白结束后翻页) | question(图标选项) | intro(ASR 自我介绍,P5)
 ##       | generate(形象生成确认,P6)
+## intro 页是开放麦：旁白问完自动开麦，VoiceVad 判定开口/说完（与 world.gd 同一套端点检测），
+## 话筒图标只做状态指示，不可点。端侧模型未就绪时不开麦，绝不回落服务端上传 PCM。
 
 const VOICE_DIR := "res://assets/voice/onboarding"
 const FLIP_TIME := 0.35
+const UNMUTE_GRACE := 0.3         ## 旁白结束后的静默恢复期：残响尾音不算开口（同 world.gd）
+const CHUNK_FLUSH_SECS := 0.15    ## 分片喂 ASR 的节奏（同 world.gd，不每帧碎喂）
+const WAVE_BARS := 5              ## 声波条数量
+const WAVE_MIN_H := 12.0          ## 声波条静息高度
+const WAVE_MAX_H := 76.0          ## 声波条满幅高度
 
 ## 问题选项 value 直接入档案；art/icon 为 assets/ui 的 AIGC 素材名（UiAssets，替代 emoji）。
 const PAGES := [
@@ -48,7 +55,7 @@ var game_audio: GameAudio
 var _flipping := false
 var _story_auto_t := 0.0           ## story 页自动翻页倒计时（旁白结束后）
 
-# 自我介绍（intro 页）：按住说话 → 转写 → 名字确认，多轮重问
+# 自我介绍（intro 页）：开放麦 + VAD 断句 → 转写 → 名字确认，多轮重问
 const INTRO_MAX_TRIES := 3         ## 重问上限；仍没听到就先叫「小朋友」，进游戏后还能改
 var api: Api
 var mic: MicRecorder
@@ -60,6 +67,13 @@ var _intro_confirm: Control = null ## ✓/✗ 确认行
 var _pending := {}                 ## 待确认 {name, nickname, transcript}
 var _asr_local: Object = null      ## 端侧 ASR（Android MaliangAsr），null=服务端识别
 var _local_session := false
+var _os_name := OS.get_name()      ## 平台名（headless 测试可覆盖成 "Android" 验端侧门禁）
+var _vad: VoiceVad = null          ## intro 页开放麦期间非 null（关麦置空）
+var _unmute_t := 0.0               ## 闭麦恢复期剩余秒数（UNMUTE_GRACE 倒计时）
+var _intro_pending_pcm := PackedByteArray() ## 未 flush 的分片（攒够 150ms 再喂）
+var _chunk_accum := 0.0            ## 分片计时
+var _intro_submitting := false     ## 已提交、等识别/确认：不再开麦
+var _intro_wave: Control = null    ## 声波条（随 VAD 电平起伏）
 
 # 形象生成（generate 页）：intro 页起预取，✓采用 / ↻重生成
 var _gen_status: TextureRect = null
@@ -92,25 +106,38 @@ func _ready() -> void:
 func _setup_local_asr() -> void:
 	if not Engine.has_singleton("MaliangAsr"):
 		# Android 上没有单例 = 导出漏带 ASR 的 AAR（坏包），硬报错拒进游戏；桌面/编辑器合法走服务端。
-		if AsrGuard.is_fatal(OS.get_name(), false):
+		if AsrGuard.is_fatal(_os_name, false):
 			AsrGuard.block(get_tree(), AsrGuard.MSG_MISSING)
 		return
 	_asr_local = Engine.get_singleton("MaliangAsr")
 	_asr_local.connect("final_result", _on_local_final)
+	_asr_local.connect("asr_ready", _on_local_ready)
 	_asr_local.connect("asr_error", func(msg: String) -> void:
 		_local_session = false
 		# Android：端侧 ASR 硬依赖，失败即报错，绝不静默回落。
-		if AsrGuard.is_fatal(OS.get_name(), false):
+		if AsrGuard.is_fatal(_os_name, false):
 			AsrGuard.block(get_tree(), AsrGuard.MSG_INIT_FAILED % msg)
 			return
 		_asr_local = null)
 	_asr_local.initialize()
 
+## 模型异步加载完成（~秒级）。在此之前禁止开麦，图标停在「稍等」。
+func _on_local_ready() -> void:
+	if _intro_status != null and not _intro_recording:
+		_intro_status.texture = UiAssets.tex("ic_mic")
+
+## 端侧 ASR 是否可用于本次录音。Android 上未就绪即禁止开麦（绝不回落服务端上传 PCM）。
+func _asr_is_ready() -> bool:
+	return _asr_local != null and _asr_local.isReady()
+
 func _exit_tree() -> void:
-	# 场景切走时断开插件信号，防悬空回调
+	# 场景切走时关麦并断开插件信号：否则留一个开着的麦克风 + 未关的本地会话到节点释放为止
+	_intro_close_mic()
 	if _asr_local != null:
 		if _asr_local.is_connected("final_result", _on_local_final):
 			_asr_local.disconnect("final_result", _on_local_final)
+		if _asr_local.is_connected("asr_ready", _on_local_ready):
+			_asr_local.disconnect("asr_ready", _on_local_ready)
 
 func _setup_background() -> void:
 	# 水彩天空插画铺满（AIGC bg_onboarding，替代渐变）
@@ -272,28 +299,23 @@ func _on_option(p: Dictionary, opt: Dictionary, btn: Button) -> void:
 	tw.tween_interval(0.5)
 	tw.tween_callback(_next_page)
 
-## ASR 自我介绍：按住大话筒说话 → 转写 → 提取名字 → TTS 复述确认（✓/✗），多轮重问。
+## ASR 自我介绍：旁白问完自动开麦 → VAD 断句 → 转写 → 提取名字 → TTS 复述确认（✓/✗），多轮重问。
+## 话筒是纯状态指示器（不可点）：ic_mic=在听 / ic_mic_rec=听到你说话 / ic_wait=处理中。
 func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
 	_intro_tries = 0
 	_intro_status = UiAssets.icon_rect("ic_mic", 150.0)
 	box.add_child(_intro_status)
 
-	var hold := Button.new()
-	hold.text = "按住说话"
-	hold.add_theme_font_size_override("font_size", 40)
-	hold.custom_minimum_size = Vector2(360.0, 110.0)
-	hold.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.95, 0.55, 0.45)
-	style.set_corner_radius_all(55)
-	hold.add_theme_stylebox_override("normal", style)
-	var down := style.duplicate() as StyleBoxFlat
-	down.bg_color = Color(0.85, 0.35, 0.3)
-	hold.add_theme_stylebox_override("pressed", down)
-	hold.add_theme_stylebox_override("hover", style)
-	hold.button_down.connect(_intro_start)
-	hold.button_up.connect(_intro_stop)
-	box.add_child(hold)
+	# 声波条：随 VAD 电平起伏，让 3 岁小朋友看出「我在听」（world.gd 同款信号源）
+	_intro_wave = HBoxContainer.new()
+	(_intro_wave as HBoxContainer).alignment = BoxContainer.ALIGNMENT_CENTER
+	(_intro_wave as HBoxContainer).add_theme_constant_override("separation", 10)
+	for i in WAVE_BARS:
+		var bar := ColorRect.new()
+		bar.color = Color(0.95, 0.55, 0.45)
+		bar.custom_minimum_size = Vector2(16.0, WAVE_MIN_H)
+		(_intro_wave as HBoxContainer).add_child(bar)
+	box.add_child(_intro_wave)
 
 	# 名字确认行：听完「你叫X对不对呀」后点 ✓/✗（初始隐藏）
 	_intro_confirm = HBoxContainer.new()
@@ -307,40 +329,132 @@ func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
 	box.add_child(_intro_confirm)
 	_intro_confirm.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 
-func _intro_start() -> void:
+## 开放麦：进 intro 页、旁白说完后自动开启。全程采集，由 VAD 判断何时开口/说完。
+func _intro_open_mic() -> void:
+	if _vad != null or _intro_submitting:
+		return
+	# 端侧模型还在异步加载：不开麦。Android 上绝不把 PCM 回落上传服务端。
+	if AsrGuard.must_wait_for_ready(_os_name, _asr_is_ready()):
+		_intro_status.texture = UiAssets.tex("ic_wait")
+		return
+	mic.start()
+	_vad = VoiceVad.new()
+	_intro_status.texture = UiAssets.tex("ic_mic")
+
+## 关麦：提交、切页、退场都要走这里（录音中则先取消，别留悬空的本地会话）。
+func _intro_close_mic() -> void:
+	if _vad == null:
+		return
+	_intro_cancel()
+	mic.stop()
+	_vad = null
+
+## 每帧驱动：旁白/复述播放期间闭麦（半双工防自听），其余时间把麦克风增量喂 VAD。
+func _step_intro(delta: float) -> void:
+	if _vad == null:
+		if not _intro_submitting and not _voice.playing and _is_intro_page():
+			_intro_open_mic() # 旁白说完 → 自动开麦（含端侧就绪门禁）
+		return
+	var pcm := mic.drain_pcm16k() # 闭麦期间也排空，恢复聆听时不吃到仙子自己的声音
+	if _voice.playing:
+		_intro_cancel()
+		_vad.reset()
+		_unmute_t = UNMUTE_GRACE # 旁白刚结束的残响尾音不算开口
+		return
+	if _unmute_t > 0.0:
+		_unmute_t -= delta
+		return
+	_feed_intro_pcm(pcm)
+	if _intro_recording:
+		_chunk_accum += delta
+		if _chunk_accum >= CHUNK_FLUSH_SECS:
+			_flush_intro_chunk() # 与 world.gd 同节奏喂插件，不每帧碎喂
+			_chunk_accum = 0.0
+
+func _is_intro_page() -> bool:
+	return page_idx >= 0 and page_idx < PAGES.size() and String(PAGES[page_idx]["kind"]) == "intro"
+
+## 声波条：开麦时随 VAD 电平起伏，关麦时落回静息。中间高两侧低，像个小山包。
+func _step_wave(delta: float) -> void:
+	if _intro_wave == null or not _intro_wave.is_inside_tree():
+		return
+	var lvl := (_vad.level if _vad != null else 0.0)
+	var bars := _intro_wave.get_children()
+	for i in bars.size():
+		var bar := bars[i] as ColorRect
+		if bar == null:
+			continue
+		var falloff := 1.0 - absf(float(i) - float(bars.size() - 1) * 0.5) / float(bars.size())
+		var target := WAVE_MIN_H + (WAVE_MAX_H - WAVE_MIN_H) * clampf(lvl * 6.0, 0.0, 1.0) * falloff
+		var h := lerpf(bar.custom_minimum_size.y, target, clampf(delta * 12.0, 0.0, 1.0))
+		bar.custom_minimum_size = Vector2(16.0, h)
+
+## VAD 事件驱动。独立函数：headless 测试注入合成 PCM 走同一链路。
+func _feed_intro_pcm(pcm: PackedByteArray) -> void:
+	if _vad == null:
+		return
+	for ev in _vad.feed(pcm):
+		match String(ev["type"]):
+			"start":
+				_intro_begin(ev["pcm"] as PackedByteArray)
+			"speech":
+				_intro_pending_pcm.append_array(ev["pcm"] as PackedByteArray)
+			"end":
+				_intro_commit()
+			"cancel":
+				_intro_cancel() # 说得太短（<400ms）视为误触：丢弃，继续听
+
+## 开口：预录缓冲（含开口前 300ms）作为首片，首音节不丢。
+func _intro_begin(head: PackedByteArray) -> void:
 	if _intro_recording:
 		return
-	_voice.stop() # 别和旁白抢
-	game_audio.play_sfx("mic_on")
 	_intro_recording = true
-	_intro_pcm = PackedByteArray()
+	game_audio.play_sfx("mic_on")
 	_intro_status.texture = UiAssets.tex("ic_mic_rec")
-	mic.start()
+	_intro_pcm = PackedByteArray()
+	_intro_pending_pcm = head.duplicate()
+	_chunk_accum = 0.0
 	_local_session = _asr_local != null and _asr_local.isReady()
 	if _local_session:
 		_asr_local.startSession()
+	_flush_intro_chunk()
 
-func _intro_stop() -> void:
+## 说完（静音断句/12s 硬顶）：残片发出，关麦等结果。
+func _intro_commit() -> void:
 	if not _intro_recording:
 		return
 	_intro_recording = false
+	_intro_submitting = true
 	game_audio.play_sfx("mic_off")
-	_drain_intro()
+	_flush_intro_chunk()
 	mic.stop()
+	_vad = null
 	_intro_status.texture = UiAssets.tex("ic_wait")
 	if _local_session:
 		_asr_local.stopSession() # final_result 信号回来后 _on_local_final
 	else:
 		_submit_intro("", _intro_pcm)
 
-func _drain_intro() -> void:
-	var chunk := mic.drain_pcm16k()
-	if chunk.is_empty():
+## 误触/闭麦兜底：静默丢弃本轮，麦克风继续开着听。
+func _intro_cancel() -> void:
+	if not _intro_recording:
+		return
+	_intro_recording = false
+	_intro_pending_pcm = PackedByteArray()
+	_intro_pcm = PackedByteArray()
+	_local_session = false # 弃会话即可：插件下次 startSession 会自动释放旧流
+	_chunk_accum = 0.0
+	if _intro_status != null:
+		_intro_status.texture = UiAssets.tex("ic_mic")
+
+func _flush_intro_chunk() -> void:
+	if _intro_pending_pcm.is_empty():
 		return
 	if _local_session:
-		_asr_local.feedPcm(chunk)
+		_asr_local.feedPcm(_intro_pending_pcm) # 端侧：原始 PCM 直喂插件，不上传
 	else:
-		_intro_pcm.append_array(chunk)
+		_intro_pcm.append_array(_intro_pending_pcm) # 服务端：攒整段，commit 时一次性上传
+	_intro_pending_pcm = PackedByteArray()
 
 func _on_local_final(text: String) -> void:
 	_local_session = false
@@ -373,16 +487,19 @@ func _submit_intro(transcript: String, pcm: PackedByteArray) -> void:
 	_intro_confirm.visible = true
 
 ## 没听到名字：重问（预制 retry 音频），到达上限先叫「小朋友」继续，不卡住小朋友。
+## 放开 _intro_submitting：retry 旁白播完后 _step_intro 会自动重新开麦。
 func _intro_retry() -> void:
 	_intro_tries += 1
 	if _intro_tries >= INTRO_MAX_TRIES:
 		answers["name"] = ""
 		answers["nickname"] = "小朋友"
+		_intro_close_mic()
 		_next_page()
 		return
 	_intro_status.texture = UiAssets.tex("ic_mic")
 	game_audio.play_sfx("oops")
 	_play("ob_intro_retry")
+	_intro_submitting = false
 
 func _on_intro_confirm(yes: bool) -> void:
 	_intro_confirm.visible = false
@@ -391,6 +508,7 @@ func _on_intro_confirm(yes: bool) -> void:
 		answers["name"] = String(_pending.get("name", ""))
 		answers["nickname"] = String(_pending.get("nickname", "小朋友"))
 		answers["intro"] = String(_pending.get("transcript", ""))
+		_intro_close_mic()
 		_next_page()
 	else:
 		_intro_retry()
@@ -500,8 +618,8 @@ func _process(delta: float) -> void:
 	# 录音期直接静音 BGM（比 duck 更狠）：外放 BGM 会被无 AEC 的麦克风回灌，
 	# 污染端侧 ASR 对名字的识别。与 world.gd:1720 的录音期处理保持一致。
 	game_audio.set_music_muted(_intro_recording)
-	if _intro_recording:
-		_drain_intro() # 录音时持续排空采集缓冲（端侧喂插件/服务端攒整段）
+	_step_intro(delta) # 开放麦：旁白说完自动开麦，VAD 判断开口/说完（非 intro 页直接返回）
+	_step_wave(delta)
 	if _story_auto_t > 0.0 and not _flipping:
 		_story_auto_t -= delta
 		if _story_auto_t <= 0.0 and page_idx >= 0 and String(PAGES[page_idx]["kind"]) == "story":
@@ -527,6 +645,7 @@ func _finish() -> void:
 	if _finishing:
 		return
 	_finishing = true
+	_intro_close_mic() # 家长中途点「跳过」时可能正开着麦：关掉,别留悬空会话
 	var profile := PlayerProfile.load_profile()
 	for k in answers:
 		profile[k] = answers[k]
