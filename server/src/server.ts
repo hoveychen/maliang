@@ -493,7 +493,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     socket.on('close', () => {
       if (session.gate) { session.gate.release(); session.gate = null; }
       session.active = false;
-      notifyHubLeave(hub, connKey, stages);
+      notifyHubLeave(hub, connKey, stages, session.playerId);
       void endSessionVisit(session, adapters, store, Date.now());
     });
   });
@@ -902,11 +902,16 @@ function describeCreationAttrs(state: CreationState): string {
 }
 
 /** 连接退场(leave_world/断连)时摘出 hub；换 host 通知新 host，世界清空则杀掉进行中的演出。 */
-export function notifyHubLeave(hub: WorldHub, connKey: string, stages?: StageDirector): void {
+export function notifyHubLeave(hub: WorldHub, connKey: string, stages?: StageDirector, playerId?: string): void {
   const left = hub.leave(connKey);
   if (!left) return;
   left.newHost?.send({ type: 'world_host', isHost: true });
-  if (stages && hub.membersIn(left.worldId).length === 0) stages.onWorldEmpty(left.worldId);
+  if (stages && hub.membersIn(left.worldId).length === 0) {
+    stages.onWorldEmpty(left.worldId);
+  } else if (playerId) {
+    // 世界还有人：通知他们即时清掉离场者的远端副本（否则要等 3s 插值缓冲陈旧才消失）。
+    hub.broadcast(left.worldId, { type: 'actor_leave', playerId }, connKey);
+  }
 }
 
 export async function handleWsMessage(
@@ -1033,13 +1038,15 @@ export async function handleWsMessage(
       // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
       playerPos: session.playerId ? store.getPlayer(session.playerId)?.position : undefined,
     }));
+    // 中途加入：世界正在演出时补发 stage_begin，让新连接锁交互并接住后续舞台命令/位置流。
+    stages?.snapshotFor(worldId, (m) => socket.send(JSON.stringify(m)));
     return;
   }
 
   // 离开世界（前端正常退出显式发）：会话结束，flush 批量抽记忆并收尾 Visit。掉线未发则靠 socket.close 兜底。
   if (msg.type === 'leave_world') {
     session.creation = null; // 离开世界：丢弃未完成的造角色会话
-    if (hub) notifyHubLeave(hub, connKey, stages);
+    if (hub) notifyHubLeave(hub, connKey, stages, session.playerId);
     await endSessionVisit(session, adapters, store, Date.now());
     return;
   }

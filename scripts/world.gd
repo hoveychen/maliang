@@ -1995,6 +1995,31 @@ func _spawn_remote_actor(id: String, pos: Vector2) -> Dictionary:
 	node.setup(critter_tex, Color(0.86, 0.92, 1.0), id) # setup 内部归一尺寸 + 挂脚下暗斑
 	return { "node": node, "logical": pos, "id": id, "buf": RemoteActorBuffer.new(), "is_remote": true }
 
+## 升任 host（原 host 掉线重指派）：立即收回本端被复制驱动的 NPC，恢复本端自主模拟。
+## 非升任（降为非 host，理论不发生——host 只增不减直到掉线）时不动。
+func _on_world_host_changed(is_host: bool) -> void:
+	if not is_host:
+		return
+	for id in _replicated_bufs.keys():
+		var n := _find_npc(id)
+		if not n.is_empty():
+			n["replicated"] = false
+			if not _stage_active and not n.get("is_fairy", false):
+				_start_ambient_wander(n) # 演出中静候舞台命令；非演出恢复闲逛
+	_replicated_bufs.clear()
+
+## 某玩家离场：即时移除其远端副本节点（不等插值缓冲陈旧回收）。
+func _on_actor_leave(player_id: String) -> void:
+	if player_id.is_empty():
+		return
+	var ra: Dictionary = _remote_actors.get(player_id, {})
+	if ra.is_empty():
+		return
+	var node: Node = ra.get("node")
+	if is_instance_valid(node):
+		node.queue_free()
+	_remote_actors.erase(player_id)
+
 ## 每帧：按插值缓冲推进被复制的本地 NPC 与远端副本的 logical；缓冲陈旧（拥有者停流/掉线）则回收/恢复自主。
 func _step_remote_actors(_delta: float) -> void:
 	if _replicated_bufs.is_empty() and _remote_actors.is_empty():
@@ -2761,8 +2786,10 @@ func _setup_backend() -> void:
 	backend.stage_end.connect(_stage.on_stage_end)
 	backend.stage_abort.connect(_stage.on_stage_abort)
 	backend.world_host.connect(_stage.on_world_host)
+	backend.world_host.connect(_on_world_host_changed) # 升任 host：立即接管 NPC 模拟（不等复制缓冲陈旧）
 	backend.time_sync.connect(_stage.on_time_sync)
 	backend.positions_relay.connect(_on_positions_relay) # 多人位置复制：远端 actor 插值渲染
+	backend.actor_leave.connect(_on_actor_leave)         # 玩家离场：即时清掉其远端副本
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
 	# 也在 THINK_TIMEOUT 秒后自动解卡——这是无论后端如何都不再永久卡死的最后一道保险。
 	_think_timer = Timer.new()

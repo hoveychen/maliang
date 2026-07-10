@@ -138,6 +138,8 @@ class StageSession {
   readonly stageId = randomUUID();
   readonly runner: ScriptRunner;
   readonly backend: WsStageBackend;
+  /** 参演角色静态信息（中途加入者快照回放 stage_begin 用）。 */
+  actors: StageActorInfo[] = [];
   /** actorId → 最新复制到的世界坐标（各端 positions_report 喂入）。 */
   #positions = new Map<string, { x: number; y: number }>();
   /** subId → near 订阅状态。 */
@@ -190,12 +192,24 @@ export class StageDirector {
   }
 
   /**
+   * 中途加入快照：世界正在演出时，给刚进来的连接补发 stage_begin（锁交互 + 准备接收后续命令）。
+   * 只回放静态开场（演员表）；进行中的 HUD/道具/走位靠后续广播的增量命令与位置流补齐——
+   * 儿童沙盒对「错过前几秒」无感，不做完整状态重建。无演出则 no-op。
+   */
+  snapshotFor(worldId: string, send: (msg: Record<string, unknown>) => void): void {
+    const session = this.#active.get(worldId);
+    if (!session) return;
+    send({ type: 'stage_begin', stageId: session.stageId, actors: session.actors });
+  }
+
+  /**
    * 开演：广播 stage_begin，跑完(自然收场/异常/超时/被杀)广播 stage_end 或 stage_abort。
    * 返回演出终局的 Promise(测试与上层可 await)；世界已有演出时返回 null。
    */
   startStage(worldId: string, opts: StageStartOpts): Promise<StageRunResult> | null {
     if (this.#active.has(worldId)) return null;
     const session = new StageSession(this.#hub, worldId, this.#propMaker);
+    session.actors = opts.actors;
     this.#active.set(worldId, session);
     this.#hub.broadcast(worldId, {
       type: 'stage_begin',

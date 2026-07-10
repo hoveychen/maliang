@@ -130,6 +130,53 @@ test('观众走光(leave_world): 世界清空即杀演出', async () => {
   assert.equal(stages.activeIn('w1'), false);
 });
 
+test('中途加入: 世界正在演出 → 新连接进世界即补发 stage_begin(带演员表)', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const done = stages.startStage('w1', { code: `await stage.sleep(500);`, actors: ACTORS });
+  await waitFor(() => stages.activeIn('w1'));
+  // B 中途进世界：没赶上开场广播，靠快照补 stage_begin
+  const b = conn('cB');
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'p2' });
+  const begin = b.ofType('stage_begin');
+  assert.equal(begin.length, 1, '中途加入补发一次 stage_begin');
+  assert.deepEqual(begin[0].actors, ACTORS);
+  stages.handleStageEvent('w1', { kind: 'abort' });
+  await done!;
+});
+
+test('无演出时加入: 不补发 stage_begin', async () => {
+  const { conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  assert.equal(a.ofType('stage_begin').length, 0, '没演出就不该收到 stage_begin');
+});
+
+test('离场广播: 玩家 leave_world → 同世界其他连接收到 actor_leave 带其 playerId', async () => {
+  const { conn } = rig();
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'p2' });
+  await a.say({ type: 'leave_world' });
+  const leave = b.ofType('actor_leave');
+  assert.equal(leave.length, 1);
+  assert.equal(leave[0].playerId, 'p1');
+});
+
+test('host 重指派: 首入者(host)离场 → 剩下的连接收到 world_host isHost=true 接管', async () => {
+  const { conn } = rig();
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' }); // 首入 = host
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'p2' });
+  await a.say({ type: 'leave_world' });
+  assert.equal(b.ofType('world_host').some((m) => m.isHost === true), true, '新 host 收到接管通知');
+  // 世界空了才没有 actor_leave；这里还剩 B，应两者都发（接管 + 清副本）
+  assert.equal(b.ofType('actor_leave').some((m) => m.playerId === 'p1'), true);
+});
+
 test('开演时世界没人: 首条命令直接失败 → stage_abort', async () => {
   const { stages } = rig();
   const done = stages.startStage('w1', { code: `await stage.narrate('自言自语');`, actors: ACTORS });

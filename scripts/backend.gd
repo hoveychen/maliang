@@ -30,6 +30,7 @@ signal stage_abort(data: Dictionary)   ## 异常终止：{stageId, reason}
 signal world_host(is_host: bool)       ## 多人所有权：本连接是否为 host（首位进入者，负责 NPC 模拟）
 signal time_sync(data: Dictionary)     ## 时间握手回执：{t0, serverMs}（倒计时/插值时间戳用）
 signal positions_relay(data: Dictionary) ## 其他端复制位置：{t, chars:[{id,x,y}], player?:{id,x,y}}（远端演员插值渲染）
+signal actor_leave(player_id: String)  ## 某玩家离场：即时清掉其远端副本（不等插值缓冲陈旧）
 ## 出站消息观测（连接未开也发射）：headless 测试/调试用，正常逻辑不要依赖它
 signal sent(msg: Dictionary)
 
@@ -249,5 +250,7 @@ func _dispatch(data: Dictionary) -> void:
 			time_sync.emit(data)
 		"positions_relay":
 			positions_relay.emit(data)
+		"actor_leave":
+			actor_leave.emit(String(data.get("playerId", "")))
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))
