@@ -38,6 +38,7 @@ UNIT_TESTS=(
   test_behavior_executor
   test_edge_tts
   test_fairy_voice
+  test_prebaked_voice
   test_voice_vad
   test_game_audio
   test_sdf_static_baker
