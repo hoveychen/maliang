@@ -238,10 +238,12 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     },
   );
 
-  // 管理端点：把某世界的小红花数直接设为指定值（缺省 INITIAL_FLOWERS）。
-  // 共享 default 世界初始额度被造角色/造物花光后，用它补花便于测试（不改经济规则）。
+  // 管理端点：把小红花数直接设为指定值（缺省 INITIAL_FLOWERS）。补花用，不改经济规则。
+  // 钱包按 (worldId, playerId) 分：
+  //   body.playerId 给了 → 只补那个孩子（即便他还没建钱包，也会就地建出来）。
+  //   没给           → 补该世界所有已有钱包的玩家（含匿名键）；一个都没有则补匿名键。
   // 只动 flowers，盖章进度保留。必须配 MALIANG_ADMIN_TOKEN。
-  app.post<{ Params: { id: string }; Body: { flowers?: number } | null }>(
+  app.post<{ Params: { id: string }; Body: { flowers?: number; playerId?: string } | null }>(
     '/admin/worlds/:id/flowers',
     async (req, reply) => {
       const token = process.env.MALIANG_ADMIN_TOKEN;
@@ -254,8 +256,16 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       if (typeof n !== 'number' || !Number.isFinite(n)) {
         return reply.code(400).send({ error: 'flowers must be a number' });
       }
-      const wallet = store.setFlowers(req.params.id, ANON_PLAYER, n);
-      return { id: req.params.id, wallet };
+      const target = req.body?.playerId;
+      if (typeof target === 'string') {
+        return { id: req.params.id, wallets: [{ playerId: target, wallet: store.setFlowers(req.params.id, target, n) }] };
+      }
+      const existing = store.listWallets(req.params.id).map((w) => w.playerId);
+      const targets = existing.length > 0 ? existing : [ANON_PLAYER];
+      return {
+        id: req.params.id,
+        wallets: targets.map((pid) => ({ playerId: pid, wallet: store.setFlowers(req.params.id, pid, n) })),
+      };
     },
   );
 
