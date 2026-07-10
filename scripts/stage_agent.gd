@@ -12,12 +12,14 @@ extends RefCounted
 ##   - prompt：P5 仍占位即刻 ack（开麦提词留 screenplay-gen plan 接）。
 ##
 ## 规则事件（tap/timer）：客户端本地探测（点角色 / 倒计时归零）→ send_event(kind,subId) 上行，
-## 服务端注回脚本对应订阅回调。near 需复制位置服务端求值，留 P6（位置复制）接。
+## 服务端注回脚本对应订阅回调。near 由服务端对复制位置求值（不下发客户端探测器），客户端对 near 不做本地探测。
+## 多人所有权（P6）：非 host 端不模拟 NPC 命令（走位/跟随/停/动作），只渲染 host 复制来的位置；
+## say/HUD/旁白等表现型命令全端执行；玩家 avatar 永远本端模拟。见 _skip_npc_sim。
 
 var _host: Object
 var _send: Callable
 var _stage_id := ""           ## 当前演出 id（stage_begin 起，end/abort 清）
-var _is_host := false         ## 多人所有权：本连接是否 host（P6 用于 NPC 命令过滤，P4 仅记录）
+var _is_host := false         ## 多人所有权：本连接是否 host（NPC 命令过滤用，见 _skip_npc_sim）
 var _server_offset_ms := 0    ## 服务端时间偏移 serverMs - 本地钟（倒计时读数换算/P6 插值用）
 var _actors := {}             ## actorId → { name, is_player, voice_id }
 var _acked := {}              ## 本场已回执的 cmdId（防重复 ack）
@@ -99,20 +101,30 @@ func on_stage_cmd(data: Dictionary) -> void:
 		"say":
 			_dispatch_say(cmd_id, actor_id, args)
 		"move_to":
+			# NPC 走位是模拟：非 host 不跑，静候 host 复制位置；完成 ack 由 host 权威（此端不回 ack）。
+			if _skip_npc_sim(actor_id):
+				return
 			_host.stage_move(actor_id, args.get("target"), _done(cmd_id))
 		"do_action":
+			# NPC 动作动画是模拟：非 host 不跑、不 ack（位置复制不含动作，属可接受的表现降级）。
+			if _skip_npc_sim(actor_id):
+				return
 			_host.stage_action(actor_id, String(args.get("action", "wave")), _done(cmd_id))
 		"prompt":
 			# 开麦提词回填小朋友的话留 screenplay-gen plan 接；此处占位即刻 ack 空串，脚本不卡。
 			_ack(cmd_id, { "text": "" })
 		"follow":
-			_host.stage_follow(actor_id, String(args.get("target", "")))
+			# 设置型：即刻 ack 保持脚本不卡；非 host 不真跑跟随（NPC 位置由 host 复制）。
+			if not _skip_npc_sim(actor_id):
+				_host.stage_follow(actor_id, String(args.get("target", "")))
 			_ack(cmd_id)
 		"flee":
-			_host.stage_flee(actor_id, String(args.get("target", "")))
+			if not _skip_npc_sim(actor_id):
+				_host.stage_flee(actor_id, String(args.get("target", "")))
 			_ack(cmd_id)
 		"stop":
-			_host.stage_stop(actor_id)
+			if not _skip_npc_sim(actor_id):
+				_host.stage_stop(actor_id)
 			_ack(cmd_id)
 		"banner":
 			_host.stage_banner(String(args.get("text", "")))
@@ -168,6 +180,18 @@ func _on_watch(args: Dictionary) -> void:
 	if sub_id.is_empty():
 		return
 	_subs[sub_id] = { "ev": String(args.get("ev", "")), "params": args.get("params", {}) }
+
+## 多人所有权过滤：该命令针对的 NPC 本端是否「不模拟」。
+## 非 host 端只渲染 host 复制来的 NPC 位置，不跑其走位/跟随/停/动作。
+##   - is_host → 自己模拟 NPC，正常执行，不过滤；
+##   - 玩家演员（is_player）→ 永远本端模拟（自己的输入零延迟），不算 NPC，不过滤；
+##   - 未知 actor + 非 host → 保守视作 NPC 交给 host。
+## 注：单机离线时不进演出（无 stage_cmd），此判定不触发，故不影响单机 NPC 自主行为。
+func _skip_npc_sim(actor_id: String) -> bool:
+	if _is_host or actor_id.is_empty():
+		return false
+	var info: Dictionary = _actors.get(actor_id, {})
+	return not bool(info.get("is_player", false))
 
 ## 本地点击探测回传（world 在观演态点到某演员时调）：命中 tap 订阅则上行 tap 事件。
 ## 触屏一次点击会同时来 ScreenTouch + 仿真 MouseButton，按 TAP_DEBOUNCE_MS 去重只上行一次。

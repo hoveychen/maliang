@@ -29,18 +29,27 @@ export interface StageEventMsg {
   payload?: Record<string, unknown>;
 }
 
+/** near 订阅登记：服务端对复制位置求值（单点判定无双端分歧），不下发客户端探测器。 */
+export interface NearRegistry {
+  add(subId: string, a: string, b: string, dist: number): void;
+  /** 撤销订阅；返回 true 表示确是 near 订阅（据此免发 unwatch）。 */
+  remove(subId: string): boolean;
+}
+
 /** 把命令广播给世界成员、把 ack 关联回 Promise 的舞台后端。 */
 class WsStageBackend implements StageBackend {
   #hub: WorldHub;
   #worldId: string;
   #stageId: string;
   #propMaker?: StagePropMaker;
+  #near: NearRegistry;
   #pending = new Map<number, { resolve: (v?: Record<string, unknown>) => void; reject: (e: Error) => void }>();
 
-  constructor(hub: WorldHub, worldId: string, stageId: string, propMaker?: StagePropMaker) {
+  constructor(hub: WorldHub, worldId: string, stageId: string, near: NearRegistry, propMaker?: StagePropMaker) {
     this.#hub = hub;
     this.#worldId = worldId;
     this.#stageId = stageId;
+    this.#near = near;
     this.#propMaker = propMaker;
   }
 
@@ -73,8 +82,15 @@ class WsStageBackend implements StageBackend {
     return { id: prop.id, ...(res ?? {}) };
   }
 
-  /** 脚本订阅规则(near/tap/timer)：广播 watch 让客户端布置探测器（无 ack，cmdId=-1）。 */
+  /**
+   * 脚本订阅规则：near 挪到服务端对复制位置求值（登记进 NearRegistry，不下发客户端）；
+   * tap/timer 仍广播 watch 让客户端布置本地探测器（无 ack，cmdId=-1）。
+   */
   onSubscribe(sub: StageSubscription): void {
+    if (sub.ev === 'near') {
+      this.#near.add(sub.subId, String(sub.params.a ?? ''), String(sub.params.b ?? ''), Number(sub.params.dist ?? 0));
+      return;
+    }
     this.#hub.broadcast(this.#worldId, {
       type: 'stage_cmd', stageId: this.#stageId, cmdId: -1, op: 'watch',
       args: { subId: sub.subId, ev: sub.ev, params: sub.params },
@@ -82,6 +98,7 @@ class WsStageBackend implements StageBackend {
   }
 
   onUnsubscribe(subId: string): void {
+    if (this.#near.remove(subId)) return; // near 无客户端探测器，免发 unwatch
     this.#hub.broadcast(this.#worldId, { type: 'stage_cmd', stageId: this.#stageId, cmdId: -1, op: 'unwatch', args: { subId } });
   }
 
@@ -101,15 +118,59 @@ class WsStageBackend implements StageBackend {
   }
 }
 
+/** 一条 near 订阅的服务端求值状态。inside：上次是否已判定为「靠近」，用于边沿触发只在远→近时开火一次。 */
+interface NearSub {
+  a: string;
+  b: string;
+  dist: number;
+  inside: boolean;
+}
+
+/** 复制位置一次更新（世界坐标）。 */
+export interface PositionUpdate {
+  id: string;
+  x: number;
+  y: number;
+}
+
 /** 一场进行中的演出。 */
 class StageSession {
   readonly stageId = randomUUID();
   readonly runner: ScriptRunner;
   readonly backend: WsStageBackend;
+  /** actorId → 最新复制到的世界坐标（各端 positions_report 喂入）。 */
+  #positions = new Map<string, { x: number; y: number }>();
+  /** subId → near 订阅状态。 */
+  #nearSubs = new Map<string, NearSub>();
 
   constructor(hub: WorldHub, worldId: string, propMaker?: StagePropMaker) {
-    this.backend = new WsStageBackend(hub, worldId, this.stageId, propMaker);
+    const near: NearRegistry = {
+      add: (subId, a, b, dist) => this.#nearSubs.set(subId, { a, b, dist, inside: false }),
+      remove: (subId) => this.#nearSubs.delete(subId),
+    };
+    this.backend = new WsStageBackend(hub, worldId, this.stageId, near, propMaker);
     this.runner = new ScriptRunner(this.backend);
+  }
+
+  /**
+   * 喂入复制位置并对所有 near 订阅求值。命中(远→近边沿)→注回脚本回调，携带实时距离。
+   * 两端分开时复位 inside，让下一次靠近能再次触发（抓到→逃开→再抓到）。
+   */
+  updatePositions(updates: PositionUpdate[]): void {
+    for (const u of updates) this.#positions.set(u.id, { x: u.x, y: u.y });
+    for (const [subId, s] of this.#nearSubs) {
+      const pa = this.#positions.get(s.a);
+      const pb = this.#positions.get(s.b);
+      if (!pa || !pb) continue;
+      const d = Math.hypot(pa.x - pb.x, pa.y - pb.y);
+      const near = d <= s.dist;
+      if (near && !s.inside) {
+        s.inside = true;
+        this.runner.emitEvent(subId, { dist: d });
+      } else if (!near && s.inside) {
+        s.inside = false;
+      }
+    }
   }
 }
 
@@ -153,6 +214,11 @@ export class StageDirector {
         this.#finish(worldId, session, r);
         return r;
       });
+  }
+
+  /** 复制位置喂入（positions_report 转发点调用）：驱动服务端 near 求值。无演出则忽略。 */
+  updatePositions(worldId: string, updates: PositionUpdate[]): void {
+    this.#active.get(worldId)?.updatePositions(updates);
   }
 
   /** 客户端上行 stage_event 分发：ack 关联命令，abort 终止演出。 */

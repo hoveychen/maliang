@@ -73,6 +73,7 @@ func _init() -> void:
 	var host := FakeHost.new()
 	var agent := StageAgent.new()
 	agent.setup(host, Callable(self, "_on_event"))
+	fails += _eq("默认非 host", agent.is_host(), false)  # 握手前缺省非 host
 
 	# 无演出：命令被忽略，不触宿主不回执
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 1, "op": "narrate", "args": { "text": "x" } })
@@ -88,6 +89,7 @@ func _init() -> void:
 	fails += _eq("开演激活", agent.active(), true)
 	fails += _eq("宿主收到 begin", host.count("begin"), 1)
 	fails += _eq("begin 带两个演员", (host.last("begin")["actors"] as Array).size(), 2)
+	agent.on_world_host(true)  # 单机即 host：主流程 NPC 命令按本端模拟执行验证（非 host 过滤见文末）
 
 	# 串场旧命令（stageId 不符）：忽略
 	agent.on_stage_cmd({ "stageId": "OTHER", "cmdId": 2, "op": "narrate", "args": { "text": "y" } })
@@ -225,10 +227,48 @@ func _init() -> void:
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 201, "op": "teleport", "args": {} })
 	fails += _eq("未知命令回执带 error", String(_ack_for(201).get("error", "")).is_empty(), false)
 
-	# 多人 host 记录
-	fails += _eq("默认非 host", agent.is_host(), false)
+	# 多人 host setter 往返
+	agent.on_world_host(false)
+	fails += _eq("world_host 置 false", agent.is_host(), false)
 	agent.on_world_host(true)
-	fails += _eq("world_host 更新", agent.is_host(), true)
+	fails += _eq("world_host 置 true", agent.is_host(), true)
+
+	# --- 多人所有权过滤（P6）：非 host 端不模拟 NPC 命令；玩家/say/旁白照跑 ---
+	agent.on_world_host(false)
+	# NPC 完成型（move_to/do_action）：非 host 不触宿主、不回 ack（完成 ack 由 host 权威）
+	var move_before := host.count("move")
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 300, "op": "move_to", "args": { "target": "pond" }, "actorId": "duck" })
+	fails += _eq("非host NPC move 不触宿主", host.count("move"), move_before)
+	fails += _eq("非host NPC move 不回 ack", _ack_for(300).is_empty(), true)
+	var action_before := host.count("action")
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 301, "op": "do_action", "args": { "action": "jump" }, "actorId": "duck" })
+	fails += _eq("非host NPC do_action 不触宿主", host.count("action"), action_before)
+	fails += _eq("非host NPC do_action 不回 ack", _ack_for(301).is_empty(), true)
+	# NPC 设置型（follow/stop）：非 host 不触宿主，但即刻回 ack（脚本不卡）
+	var follow_before := host.count("follow")
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 302, "op": "follow", "args": { "target": "p1" }, "actorId": "duck" })
+	fails += _eq("非host NPC follow 不触宿主", host.count("follow"), follow_before)
+	fails += _eq("非host NPC follow 仍即刻回 ack", _ack_for(302).is_empty(), false)
+	var stop_before := host.count("stop")
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 303, "op": "stop", "args": {}, "actorId": "duck" })
+	fails += _eq("非host NPC stop 不触宿主", host.count("stop"), stop_before)
+	fails += _eq("非host NPC stop 仍即刻回 ack", _ack_for(303).is_empty(), false)
+	# 玩家 avatar 永远本端模拟：非 host 也触宿主
+	var pmove_before := host.count("move")
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 304, "op": "move_to", "args": { "target": "home" }, "actorId": "p1" })
+	fails += _eq("非host 玩家 move 仍触宿主", host.count("move"), pmove_before + 1)
+	# say/narrate 是表现：非 host 全端播放
+	var say_before := host.count("say")
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 305, "op": "say", "args": { "text": "嘎" }, "actorId": "duck" })
+	fails += _eq("非host NPC say 仍触宿主", host.count("say"), say_before + 1)
+	var narrate_before := host.count("narrate")
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 306, "op": "narrate", "args": { "text": "旁白" } })
+	fails += _eq("非host 旁白仍触宿主", host.count("narrate"), narrate_before + 1)
+	# host 端不过滤：NPC move 正常触宿主
+	agent.on_world_host(true)
+	var hmove_before := host.count("move")
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 307, "op": "move_to", "args": { "target": "pond" }, "actorId": "duck" })
+	fails += _eq("host NPC move 触宿主", host.count("move"), hmove_before + 1)
 
 	# 收场：宿主 finish（正常），失活；跨场后迟到的完成回调被吞
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 30, "op": "move_to", "args": { "target": "pond" }, "actorId": "duck" })

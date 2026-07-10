@@ -568,6 +568,8 @@ func _setup_npcs() -> void:
 
 ## 让角色自主活动：循环「等一会 → 就近 wander」。
 func _start_ambient_wander(npc_dict: Dictionary) -> void:
+	if npc_dict.get("replicated", false):
+		return # 被 host 复制驱动的 NPC：本端不自主闲逛（位置来自复制流）
 	var ex := BehaviorExecutor.new()
 	ex.setup(npc_dict, {
 		"commands": [
@@ -1797,6 +1799,7 @@ func _process(delta: float) -> void:
 	tp = _prof_lap(tp, "cam")
 	chunk_manager.update(focus_logical)
 	tp = _prof_lap(tp, "chunk")
+	_step_remote_actors(delta) # 多人复制：先按缓冲推进被复制 NPC/远端副本的 logical，再统一渲染
 	_reposition_npcs(delta)
 	_update_npc_notice(delta)  # 近身空闲村民偶尔转头看玩家打招呼（在 reposition 后跑，paper_walk 已更新）
 	tp = _prof_lap(tp, "npcs")
@@ -1826,10 +1829,21 @@ func _exit_tree() -> void:
 
 ## 坐标回报节拍：每 POS_REPORT_INTERVAL 秒扫一次，只上报 tile 变过的角色；全静止则整条消息不发。
 const POS_REPORT_INTERVAL := 5.0
+## 演出/多人期间的高频世界坐标流间隔（~6.6Hz）：owned actors 实时位置，供他端插值 + 服务端 near 求值。
+const POS_STREAM_INTERVAL := 0.15
 ## 离线占位角色的 id 前缀：这些 id 服务端不认识，绝不能上报（在线时 _bootstrap 已清掉，双保险）。
 const _LOCAL_ONLY_IDS := ["demo_", "fairy_local"]
 var _pos_report_t := 0.0
+var _pos_stream_t := 0.0
 var _reported_tiles: Dictionary = {} ## id -> Vector2i，上次已上报的 tile（含玩家，键 PLAYER_ID）
+
+## 多人位置复制（P6，见 docs/script-runtime-design.md）：
+## 远端玩家 avatar 的渲染副本（本端无本地节点，收 positions_relay 动态生成 + 插值）。
+## actorId -> { node:PaperCharacter, logical:Vector2, id, buf:RemoteActorBuffer, is_remote:true }
+var _remote_actors: Dictionary = {}
+## 非 host 端被 host 复制驱动的本地 NPC 的插值缓冲：char_id -> RemoteActorBuffer。
+## 该 NPC 收到复制位置后转「replicated」：本端停模拟（取消执行器、不 wander），logical 改由缓冲插值。
+var _replicated_bufs: Dictionary = {}
 
 static func _is_local_only_id(id: String) -> bool:
 	for prefix in _LOCAL_ONLY_IDS:
@@ -1855,6 +1869,10 @@ static func collect_moved(entries: Array, reported: Dictionary) -> Array:
 func _step_positions_report(delta: float) -> void:
 	if not online or backend == null or world_id.is_empty() or not backend.is_online():
 		return
+	# 演出/多人期间走高频世界坐标流；平时维持 5s tile 节流（省流量、供重载读回）。
+	if _streaming_active():
+		_step_position_stream(delta)
+		return
 	_pos_report_t += delta
 	if _pos_report_t < POS_REPORT_INTERVAL:
 		return
@@ -1876,6 +1894,138 @@ func _step_positions_report(delta: float) -> void:
 	if moved.is_empty() and player_tile.x < 0:
 		return # 全静止：零流量
 	backend.send_positions(world_id, moved, player_tile)
+
+## 是否进入高频复制模式：演出中，或世界里已有其他人（收到过复制位置）。
+func _streaming_active() -> bool:
+	return _stage_active or not _remote_actors.is_empty()
+
+## host = 本连接负责 NPC 模拟。离线/未握手（_stage 缺省非 host）时也按 host 处理：单机自主 NPC 不受影响。
+func _owns_npcs() -> bool:
+	return _stage == null or _stage.is_host() or not backend.is_online()
+
+## 高频世界坐标流：广播自己拥有的 actor 的实时世界坐标（玩家总是自己拥有；NPC 仅 host 拥有）。
+## tile 仍随流带上供服务端持久化；t 为服务端钟毫秒（本地钟 + 时间偏移），接收端据此对齐插值。
+func _step_position_stream(delta: float) -> void:
+	_pos_stream_t += delta
+	if _pos_stream_t < POS_STREAM_INTERVAL:
+		return
+	_pos_stream_t = 0.0
+	_pos_report_t = 0.0 # 复用同一「上次上报」时钟，退出流模式后不立刻再补发一条
+
+	var chars: Array = []
+	if _owns_npcs():
+		for n in npcs:
+			var id := String(n.get("id", ""))
+			if id.is_empty() or _is_local_only_id(id) or n.get("is_fairy", false):
+				continue # 仙子是本端装饰随从，不复制
+			var lg: Vector2 = n["logical"]
+			var tile := WorldGrid.to_tile(lg)
+			chars.append({ "id": id, "x": lg.x, "y": lg.y, "tileX": tile.x, "tileY": tile.y })
+
+	var player_msg: Dictionary = {}
+	if not player.is_empty():
+		var pl: Vector2 = player["logical"]
+		var pt := WorldGrid.to_tile(pl)
+		player_msg = { "x": pl.x, "y": pl.y, "tileX": pt.x, "tileY": pt.y }
+
+	if chars.is_empty() and player_msg.is_empty():
+		return
+	backend.send_position_stream(world_id, chars, player_msg, Time.get_ticks_msec() + _stage_offset())
+
+## 服务端时间偏移（serverMs - 本地钟）；无 stage 大脑时按 0（离线不复制）。
+func _stage_offset() -> int:
+	return _stage.server_offset_ms() if _stage != null else 0
+
+## 收到其他端复制来的位置：喂各 actor 的插值缓冲（远端玩家动态生成副本；本地 NPC 转 host 驱动）。
+func _on_positions_relay(data: Dictionary) -> void:
+	var now_local := Time.get_ticks_msec()
+	var t := int(data.get("t", now_local + _stage_offset()))
+	var chars: Array = data.get("chars", [])
+	for e in chars:
+		var c: Dictionary = e
+		_apply_replicated(String(c.get("id", "")), Vector2(float(c.get("x", 0.0)), float(c.get("y", 0.0))), t, now_local, false)
+	var p: Variant = data.get("player", null)
+	if p is Dictionary and not (p as Dictionary).is_empty():
+		var pd: Dictionary = p
+		_apply_replicated(String(pd.get("id", "")), Vector2(float(pd.get("x", 0.0)), float(pd.get("y", 0.0))), t, now_local, true)
+
+## 把一条复制位置喂进对应缓冲。is_player=远端玩家 avatar（渲染副本）；否则=NPC（非 host 端驱动本地节点）。
+func _apply_replicated(id: String, pos: Vector2, t: int, now_local: int, is_player: bool) -> void:
+	if id.is_empty() or id == backend.player_id or id == PLAYER_ID:
+		return # 自己的 avatar 不建副本（服务端已排除发送者，双保险）
+	if not is_player:
+		if _owns_npcs():
+			return # host 自己模拟 NPC，忽略任何 NPC 复制（理论上收不到自己发的）
+		var n := _find_npc(id)
+		if not n.is_empty():
+			var buf: RemoteActorBuffer = _replicated_bufs.get(id)
+			if buf == null:
+				buf = RemoteActorBuffer.new()
+				_replicated_bufs[id] = buf
+				_halt_npc_for_replication(n) # 停本端自主模拟，改吃 host 复制位置
+			n["replicated"] = true
+			buf.push(t, pos, now_local)
+			return
+		# 本端没有的 NPC（角色列表没同步到）→ 落到远端副本渲染
+	var ra: Dictionary = _remote_actors.get(id, {})
+	if ra.is_empty():
+		ra = _spawn_remote_actor(id, pos)
+		_remote_actors[id] = ra
+	(ra["buf"] as RemoteActorBuffer).push(t, pos, now_local)
+
+func _find_npc(id: String) -> Dictionary:
+	for n in npcs:
+		if String(n.get("id", "")) == id:
+			return n
+	return {}
+
+## 该 NPC 转为「被复制驱动」：取消其一切执行器（wander/stage 走位跟随），本端不再自主移动它。
+func _halt_npc_for_replication(n: Dictionary) -> void:
+	for ex in _executors:
+		if (ex as BehaviorExecutor).drives(n):
+			(ex as BehaviorExecutor).cancel()
+	_executors = _executors.filter(func(e: BehaviorExecutor) -> bool: return not e.drives(n))
+	_stage_holds = _stage_holds.filter(func(e: BehaviorExecutor) -> bool: return not e.drives(n))
+	_stage_drives = _stage_drives.filter(func(m: Dictionary) -> bool: return not (m["ex"] as BehaviorExecutor).drives(n))
+
+## 远端玩家 avatar 的渲染副本（占位外观：真实立绘按 profile 拉取留后续）。
+func _spawn_remote_actor(id: String, pos: Vector2) -> Dictionary:
+	var node := PaperCharacter.new()
+	add_child(node)
+	node.setup(critter_tex, Color(0.86, 0.92, 1.0), id) # setup 内部归一尺寸 + 挂脚下暗斑
+	return { "node": node, "logical": pos, "id": id, "buf": RemoteActorBuffer.new(), "is_remote": true }
+
+## 每帧：按插值缓冲推进被复制的本地 NPC 与远端副本的 logical；缓冲陈旧（拥有者停流/掉线）则回收/恢复自主。
+func _step_remote_actors(_delta: float) -> void:
+	if _replicated_bufs.is_empty() and _remote_actors.is_empty():
+		return
+	var now_local := Time.get_ticks_msec()
+	var render_ms := now_local + _stage_offset() # 渲染时刻换算到服务端钟，与发送端同一时间轴
+	# 被复制的本地 NPC
+	for id in _replicated_bufs.keys():
+		var buf: RemoteActorBuffer = _replicated_bufs[id]
+		var n := _find_npc(id)
+		if n.is_empty():
+			_replicated_bufs.erase(id)
+			continue
+		if buf.is_stale(now_local):
+			_replicated_bufs.erase(id) # 拥有者停流/掉线：恢复本端自主
+			n["replicated"] = false
+			if not _stage_active and not n.get("is_fairy", false):
+				_start_ambient_wander(n)
+			continue
+		n["logical"] = buf.sample(render_ms, n["logical"])
+	# 远端玩家副本
+	for id in _remote_actors.keys():
+		var ra: Dictionary = _remote_actors[id]
+		var buf2: RemoteActorBuffer = ra["buf"]
+		if buf2.is_stale(now_local):
+			var node: Node = ra.get("node")
+			if is_instance_valid(node):
+				node.queue_free()
+			_remote_actors.erase(id)
+			continue
+		ra["logical"] = buf2.sample(render_ms, ra["logical"])
 
 func _step_executors(delta: float) -> void:
 	for ex in _executors:
@@ -1911,6 +2061,8 @@ func _reposition_npcs(delta: float) -> void:
 		_place_char(n, lean, delta)
 	if not player.is_empty():
 		_place_char(player, lean, delta)
+	for id in _remote_actors: # 远端玩家副本：与本地角色同一套弯地表摆放 + 纸片动作
+		_place_char(_remote_actors[id], lean, delta)
 
 ## 按角色字典的逻辑坐标摆到弯曲地表（含台阶高度跟随，短 lerp 平滑 2m 跳变）。
 func _place_char(n: Dictionary, lean: float, delta: float) -> void:
@@ -2610,6 +2762,7 @@ func _setup_backend() -> void:
 	backend.stage_abort.connect(_stage.on_stage_abort)
 	backend.world_host.connect(_stage.on_world_host)
 	backend.time_sync.connect(_stage.on_time_sync)
+	backend.positions_relay.connect(_on_positions_relay) # 多人位置复制：远端 actor 插值渲染
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
 	# 也在 THINK_TIMEOUT 秒后自动解卡——这是无论后端如何都不再永久卡死的最后一道保险。
 	_think_timer = Timer.new()

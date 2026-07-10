@@ -29,6 +29,7 @@ signal stage_end(data: Dictionary)     ## 正常收场：{stageId, result?}
 signal stage_abort(data: Dictionary)   ## 异常终止：{stageId, reason}
 signal world_host(is_host: bool)       ## 多人所有权：本连接是否为 host（首位进入者，负责 NPC 模拟）
 signal time_sync(data: Dictionary)     ## 时间握手回执：{t0, serverMs}（倒计时/插值时间戳用）
+signal positions_relay(data: Dictionary) ## 其他端复制位置：{t, chars:[{id,x,y}], player?:{id,x,y}}（远端演员插值渲染）
 ## 出站消息观测（连接未开也发射）：headless 测试/调试用，正常逻辑不要依赖它
 signal sent(msg: Dictionary)
 
@@ -148,6 +149,16 @@ func send_positions(world_id: String, chars: Array, player_tile := Vector2i(-1, 
 		msg["player"] = { "tileX": player_tile.x, "tileY": player_tile.y }
 	_send(msg)
 
+## 高频世界坐标流（演出/多人期间）：owned actors 的实时世界坐标 + tile（tile 仍供服务端持久化）。
+## chars 形如 [{id, x, y, tileX, tileY}]；player 形如 {x, y, tileX, tileY} 或空。
+## t 为服务端钟毫秒（本地钟 + 时间偏移），接收端据此对齐插值时间戳。
+## 服务端把带 x,y 的条目转发给同世界其他连接，并喂 near 规则求值。
+func send_position_stream(world_id: String, chars: Array, player: Dictionary, t: int) -> void:
+	var msg := { "type": "positions_report", "worldId": world_id, "chars": chars, "t": t }
+	if not player.is_empty():
+		msg["player"] = player
+	_send(msg)
+
 ## 语音生成物件的落位回报：客户端就近找到空位后上报 tile，服务端持久化供重载恢复。
 func send_prop_place(world_id: String, prop_id: String, tile: Vector2i) -> void:
 	_send({ "type": "prop_place", "worldId": world_id, "propId": prop_id, "tileX": tile.x, "tileY": tile.y })
@@ -236,5 +247,7 @@ func _dispatch(data: Dictionary) -> void:
 			world_host.emit(bool(data.get("isHost", false)))
 		"time_sync":
 			time_sync.emit(data)
+		"positions_relay":
+			positions_relay.emit(data)
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))

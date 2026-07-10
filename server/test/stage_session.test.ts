@@ -199,6 +199,48 @@ test('规则订阅: on(tap) → 广播 watch(ev=tap) → 客户端 tap 事件注
   assert.deepEqual(a.ofType('stage_end')[0]?.result, { tapped: true });
 });
 
+test('规则订阅: on(near) 不下发客户端 watch，服务端对复制位置边沿求值 → 触发 end', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const done = stages.startStage('w1', {
+    // 先发一条 hud 命令当「订阅已注册」门闩：host 按序处理 worker 消息，看到 hud_score 广播即证明其后 on(near) 的 subscribe 已登记。
+    // actors[0]=a1(村民), actors[1]=p1(玩家)；靠近阈值 5（世界坐标）。
+    code: `stage.hud.score('ready',''); stage.on('near', stage.actors[0], stage.actors[1], 5, () => stage.end({ caught: true }));`,
+    actors: ACTORS,
+  });
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'hud_score'));
+  // near 走服务端求值：客户端一条 watch 都不该收到（对比 tap/timer 会下发）。
+  assert.equal(a.ofType('stage_cmd').some((m) => m.op === 'watch'), false, 'near 不下发客户端探测器');
+  // 远（dist=100）：不触发。
+  stages.updatePositions('w1', [{ id: 'a1', x: 0, y: 0 }, { id: 'p1', x: 100, y: 0 }]);
+  assert.equal(stages.activeIn('w1'), true, '还很远，不该触发');
+  // 近（dist=2 ≤ 5）：远→近边沿触发回调 → end。
+  stages.updatePositions('w1', [{ id: 'p1', x: 2, y: 0 }]);
+  const r = await done!;
+  assert.equal(r.status, 'done');
+  assert.deepEqual(a.ofType('stage_end')[0]?.result, { caught: true });
+});
+
+test('规则订阅: near 边沿——贴着不重复触发，离开后重新靠近再触发', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const done = stages.startStage('w1', {
+    // hud_score 当订阅门闩（见上一个 near 测试）；脚本内计数：第 2 次靠近才收场。
+    code: `stage.hud.score('ready',''); let n = 0; stage.on('near', stage.actors[0], stage.actors[1], 5, () => { n++; if (n >= 2) stage.end({ n }); });`,
+    actors: ACTORS,
+  });
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'hud_score'));
+  stages.updatePositions('w1', [{ id: 'a1', x: 0, y: 0 }, { id: 'p1', x: 1, y: 0 }]); // 远→近：n=1
+  stages.updatePositions('w1', [{ id: 'p1', x: 2, y: 0 }]);                          // 仍近：不计
+  stages.updatePositions('w1', [{ id: 'p1', x: 100, y: 0 }]);                        // 近→远：复位
+  stages.updatePositions('w1', [{ id: 'p1', x: 1, y: 0 }]);                          // 远→近：n=2 → end
+  const r = await done!;
+  assert.equal(r.status, 'done');
+  assert.deepEqual(a.ofType('stage_end')[0]?.result, { n: 2 }, '贴着那帧没多计，离开再来才第二次');
+});
+
 test('规则订阅: countdown.onDone → 广播 watch(ev=timer) → timer 事件归零触发 → end', async () => {
   const { stages, conn } = rig();
   const a = conn('cA');

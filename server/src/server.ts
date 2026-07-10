@@ -942,6 +942,8 @@ export async function handleWsMessage(
     // positions_report：客户端批量上报 tile（chars 只含本轮变化过的角色，player 可缺省）
     chars?: unknown;
     player?: unknown;
+    // positions_report 流式版（演出/多人）：条目带世界坐标 x,y + 服务端钟时戳 t，供转发插值与 near 求值
+    t?: number;
     // 引导式造角色：creation_reply 幼儿点的图标 id / 说的话
     optionId?: string;
     spokenText?: string;
@@ -1361,19 +1363,30 @@ export async function handleWsMessage(
     const worldId = msg.worldId ?? '';
     const entries = Array.isArray(msg.chars) ? msg.chars : [];
     let applied = 0;
+    // 世界坐标流条目（携 x,y 时）：转发给同世界其他连接插值渲染 + 喂服务端 near 求值。tile 仍照常持久化。
+    const relayChars: { id: string; x: number; y: number }[] = [];
     for (const raw of entries) {
       if (typeof raw !== 'object' || raw === null) continue;
-      const e = raw as { id?: unknown; tileX?: unknown; tileY?: unknown };
+      const e = raw as { id?: unknown; tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
       if (typeof e.id !== 'string' || !e.id) continue;
       const tile: TilePos = { tileX: Number(e.tileX), tileY: Number(e.tileY) };
-      if (!isValidTile(tile)) continue;
-      if (store.setCharacterTile(worldId, e.id, tile)) applied++;
+      if (isValidTile(tile) && store.setCharacterTile(worldId, e.id, tile)) applied++;
+      if (typeof e.x === 'number' && typeof e.y === 'number') relayChars.push({ id: e.id, x: e.x, y: e.y });
     }
     // 玩家自己的位置（Player 表；档案未建时静默跳过——首次进世界还没上报 profile）。
+    let relayPlayer: { id: string; x: number; y: number } | undefined;
     if (typeof msg.player === 'object' && msg.player !== null && session.playerId) {
-      const p = msg.player as { tileX?: unknown; tileY?: unknown };
+      const p = msg.player as { tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
       const tile: TilePos = { tileX: Number(p.tileX), tileY: Number(p.tileY) };
       if (isValidTile(tile)) store.setPlayerTile(session.playerId, tile);
+      // 玩家复制位置以 playerId 为 actor 键（剧本 cast 里玩家演员 id 约定即 playerId）。
+      if (typeof p.x === 'number' && typeof p.y === 'number') relayPlayer = { id: session.playerId, x: p.x, y: p.y };
+    }
+    // 复制位置分发：广播给同世界其他成员（排除自己）+ 喂 near 求值（无演出则 no-op）。
+    if (relayChars.length > 0 || relayPlayer) {
+      hub?.broadcast(worldId, { type: 'positions_relay', t: msg.t, chars: relayChars, player: relayPlayer }, connKey);
+      const all = relayPlayer ? [...relayChars, relayPlayer] : relayChars;
+      stages?.updatePositions(worldId, all);
     }
     // 成功无回包（与 prop_place 一致）；整批一个角色都没落地才回 error，便于客户端察觉世界/角色 id 错配。
     if (entries.length > 0 && applied === 0) {
