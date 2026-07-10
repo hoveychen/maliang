@@ -38,6 +38,20 @@ test('listCharacters 按场景过滤：不传=全世界，传=只该场景', () 
   assert.equal(s.listCharacters('w1', 'desert').length, 0, '没有角色的场景返回空');
 });
 
+test('listCharacters 带 sceneId 时仙女恒在：跨场景跟随玩家', () => {
+  const s = new WorldStore();
+  s.createWorld('w1');
+  s.addCharacter(char('w1', 'v1', 'village'));
+  s.addCharacter({ ...char('w1', 'fairy', 'village'), isFairy: true });
+  s.addCharacter(char('w1', 'f1', 'forest'));
+
+  // 仙女 sceneId=village，但任意场景查询都应带上她
+  assert.deepEqual(s.listCharacters('w1', 'forest').map((c) => c.id).sort(), ['f1', 'fairy'], '森林也要有仙女');
+  assert.deepEqual(s.listCharacters('w1', 'village').map((c) => c.id).sort(), ['fairy', 'v1'], '本场景不重复');
+  assert.deepEqual(s.listCharacters('w1', 'desert').map((c) => c.id), ['fairy'], '空场景只有仙女');
+  assert.equal(s.listCharacters('w1').length, 3, '不传 sceneId 行为不变');
+});
+
 test('listProps 按场景过滤：不传=全世界，传=只该场景', () => {
   const s = new WorldStore();
   s.createWorld('w1');

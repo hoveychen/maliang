@@ -3141,6 +3141,11 @@ func _on_scene_entered(data: Dictionary) -> void:
 		player["logical"] = spot
 		OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
 		focus_logical = spot
+	# 仙女跨场景跟随：服务端记的还是旧场景的坐标，重新降生后直接搬到玩家身旁
+	# （黑幕遮着瞬移不穿帮），免得揭幕后从半张地图外飞一大段追过来。
+	var fairy := _find_fairy()
+	if not fairy.is_empty():
+		fairy["logical"] = WorldGrid.wrap_pos(focus_logical + Vector2(2.6, 1.8))
 	# 新场景就位后向服务端重报地点名（意图 LLM 认新场景的 POI）。
 	if online:
 		_send_world_info()
@@ -3158,6 +3163,7 @@ func _unload_scene() -> void:
 	_player_executor = null
 	_approach = {}
 	_stopped = {}
+	_fairy_poi = {} # 旧场景的 POI 提醒点在新场景是野坐标，别让仙女飞过去
 	for n in npcs:
 		if not bool(n.get("is_fairy", false)):
 			OccupancyMap.char_unregister(String(n.get("id", "")))

@@ -58,6 +58,9 @@ func _tick() -> void:
 				"characters": [
 					{ "id": "tree-1", "name": "松松", "appearance": {} },
 					{ "id": "tree-2", "name": "杉杉", "appearance": {} },
+					# 仙女跨场景跟随（forest-inhabitants P2）：服务端恒下发，position 还是旧场景的陈旧坐标
+					{ "id": "seedFairy", "name": "小仙女", "isFairy": true, "appearance": {},
+						"position": { "tileX": 10, "tileY": 10 } },
 				],
 				"props": [],
 				"playerPos": { "tileX": target_tile.x, "tileY": target_tile.y },
@@ -84,6 +87,18 @@ func _tick() -> void:
 			# 换场景后向服务端重报 world_info，带新 sceneId
 			var wi := _last_of("world_info")
 			_check("重报 world_info 带新 sceneId", String(wi.get("sceneId", "")), "forest")
+			# 仙女跨场景跟随：恰好一个（旧的卸载、新的降生，不重复不丢失），且站在玩家旁
+			# 而非服务端记的陈旧坐标 (10,10)——换场景瞬间已搬到玩家身旁（黑幕遮着）。
+			var fairy_count := 0
+			var fairy: Dictionary = {}
+			for n in npcs:
+				if bool(n.get("is_fairy", false)):
+					fairy_count += 1
+					fairy = n
+			_check("仙女恰有一个", fairy_count, 1)
+			if not fairy.is_empty():
+				var pd: float = WorldGrid.shortest_delta(fairy["logical"], (scene.get("player") as Dictionary)["logical"]).length()
+				_check("仙女站在玩家旁(<10)", pd < 10.0, true)
 		20:
 			if fails == 0:
 				print("visual_scene_switch PASS")

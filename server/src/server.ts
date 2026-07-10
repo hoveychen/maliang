@@ -20,6 +20,7 @@ import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
+import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
@@ -522,6 +523,18 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const result = await generateCreationIcons(adapters, store, { force, only });
     return { ...result, icons: store.listCreationIcons() };
   });
+
+  // 森林村民种入（forest-inhabitants P3）：按 FOREST_CHARACTER_SEEDS 走生图管线落库
+  // sceneId=forest。幂等（同名跳过）；?only=名字,名字 限定只种指定角色。生图烧钱，admin token 门禁。
+  app.post<{ Params: { id: string }; Querystring: { only?: string } }>(
+    '/admin/worlds/:id/seed-forest',
+    async (req, reply) => {
+      if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+      if (!store.getWorld(req.params.id)) return reply.code(404).send({ error: 'world not found' });
+      const only = (req.query.only ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      return seedForestCharacters(adapters, store, req.params.id, { only, toSpriteSheet });
+    },
+  );
 
   // 昂贵操作限流：每连接 N/分钟 + 全局并发上限（防刷付费 API）
   const limiter = new RateLimiter(
