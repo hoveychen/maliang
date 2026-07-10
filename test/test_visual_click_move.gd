@@ -58,6 +58,10 @@ func _tick() -> void:
 		129:
 			_test_fairy_move_keeps_chat()
 		131:
+			_test_fairy_relays_without_errand()
+		133:
+			_check_fairy_relay_landed()
+		135:
 			if fails == 0:
 				print("visual_click_move PASS")
 			else:
@@ -214,6 +218,23 @@ func _test_fairy_move_keeps_chat() -> void:
 			{ "type": "move_to", "params": { "location_name": "池塘" } }], "loop": false } })
 	_check("仙子吃 move_to 不关对话", scene.get("selected") == npc_node, true)
 	_check("仙子不武装延迟退出", (scene.get("_pending_leave") as Dictionary).is_empty(), true)
+
+## 点名指派给别人（「小蓝跳一下」），而说话的是小仙子：她不会跑腿——_run_behavior 对她早返回，
+## 走 relay_command 等于把指令扔进黑洞，村民永远不动。小仙子隔空施法，指令直接落到执行者身上，
+## 对话也不必关（她没离开孩子面前）。
+func _test_fairy_relays_without_errand() -> void:
+	scene.call("_enter_interaction", npc_node) # 仙子
+	villager.erase("paper_action")
+	scene.call("_on_character_response", { "transcript": "让它跳一下", "replyText": "",
+		"emotion": "happy", "performerId": String(villager.get("id", "")),
+		"behaviorScript": { "commands": [
+			{ "type": "do_action", "params": { "action": "jump" } }], "loop": false } })
+	_check("仙子指派后对话不关", scene.get("selected") == npc_node, true)
+	_check("仙子不跑腿（自己没接脚本）", _running_script(scene.call("_find_npc_dict", npc_node)), false)
+
+## 下一帧执行器跑起来：指令真的落到了村民身上（paper_action 由 do_action 写入）。
+func _check_fairy_relay_landed() -> void:
+	_check("指令直接落到村民身上", String(villager.get("paper_action", "")), "jump")
 
 ## 场上第一个非仙子角色（demo 世界里的村民）。
 func _first_villager() -> Dictionary:

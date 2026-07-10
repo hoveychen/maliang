@@ -3927,11 +3927,13 @@ func _on_character_response(data: Dictionary) -> void:
 		# 点名指派（performerId）：不隔空遥控——正在对话的角色跑腿到执行者旁把指令带到，
 		# 对方点头应答才开始做（见 _relay_command）；没有说话者在场才直接下发。
 		var performer := _find_npc_by_id(String(data.get("performerId", "")))
-		if performer != null and selected != null and performer != selected:
+		var speaker_is_fairy := selected != null and bool(_find_npc_dict(selected).get("is_fairy", false))
+		if performer != null and selected != null and performer != selected and not speaker_is_fairy:
 			_dispatch_from_speaker(selected, { "commands": [{ "type": "relay_command",
 				"params": { "to": String(data.get("performerId", "")), "script": script } }], "loop": false }, true)
 		elif performer != null:
-			_run_behavior(performer, script) # 说话者不在场：与当前对话无关，直接下发
+			# 说话者不在场，或说话的是小仙子（她隔空施法、从不跑腿——让她跑腿等于把指令扔了）：直接下发。
+			_run_behavior(performer, script)
 		elif selected != null:
 			_dispatch_from_speaker(selected, script, false)
 	if bool(data.get("ttsStreaming", false)):
