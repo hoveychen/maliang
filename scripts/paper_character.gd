@@ -19,6 +19,20 @@ const SUBDIV_H := 12
 static var _shader: Shader = null
 static var _xray_shader: Shader = null
 
+## X 光穿透剪影开关（AdaptiveQuality 档位驱动，同 SdfProp._snap_iters 模式）：
+## 该 pass 每角色每帧多画一个全 quad 透明面并逐像素采样深度图，老 Mali 上深度采样
+## 打断 tiled 渲染快路径，而绝大多数时间角色根本没被遮挡。移动端默认关（T1/T2 档），
+## T0 强机档由 AdaptiveQuality 重新启用；桌面恒开。
+static var _xray_enabled := not OS.has_feature("mobile")
+
+## 换档入口：作用于已存在（paper_chars 组）与后续创建的所有角色。
+static func set_xray_enabled(on: bool, tree: SceneTree) -> void:
+	_xray_enabled = on
+	for n in tree.get_nodes_in_group("paper_chars"):
+		var p := n as PaperCharacter
+		if p != null:
+			p._mat.next_pass = p._xray_mat if on else null
+
 var texture: Texture2D = null:
 	set(v):
 		texture = v
@@ -54,12 +68,16 @@ func _init() -> void:
 	_mat.shader = _shader
 	_xray_mat = ShaderMaterial.new()
 	_xray_mat.shader = _xray_shader
-	_mat.next_pass = _xray_mat  # 穿透剪影作为主材质的 next_pass，排在不透明之后读深度
+	if _xray_enabled:
+		_mat.next_pass = _xray_mat  # 穿透剪影作为主材质的 next_pass，排在不透明之后读深度
 	var q := QuadMesh.new()
 	q.subdivide_width = SUBDIV_W
 	q.subdivide_depth = SUBDIV_H
 	mesh = q
 	material_override = _mat
+
+func _enter_tree() -> void:
+	add_to_group("paper_chars")  # set_xray_enabled 换档批量寻址用
 
 func setup(tex: Texture2D, color: Color, cname: String) -> void:
 	char_name = cname
