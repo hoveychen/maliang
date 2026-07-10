@@ -2860,6 +2860,7 @@ func _setup_backend() -> void:
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.creation_prompt.connect(_on_creation_prompt)
+	backend.prop_pending.connect(_on_prop_pending)
 	backend.prop_created.connect(_on_prop_created)
 	backend.prop_failed.connect(_on_prop_failed)
 	backend.prop_denied.connect(_on_reward_denied)
@@ -2894,6 +2895,9 @@ func _on_failed(reason: String) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
 	thinking_label.visible = false
+	# gen_failed 也走这里（backend 把它并进 failed）：造砸了就把传送门收起来，
+	# 否则它会一直亮着，孩子等一个永远不来的新朋友。
+	_clear_placeholder(PLACEHOLDER_PORTAL_ID)
 	game_audio.play_sfx("oops")
 	push_warning("voice/gen failed: %s" % reason)
 	if selected != null:
@@ -3185,6 +3189,9 @@ func _unload_scene() -> void:
 	_player_executor = null
 	_approach = {}
 	_stopped = {}
+	# 占位符的节点随区块一起被清；只留下 id→tile 的记账，下次 _clear_placeholder 会去 pickup
+	# 一个不存在的 prop，成品还会落到旧场景的坐标上。
+	_placeholders.clear()
 	_fairy_poi = {} # 旧场景的 POI 提醒点在新场景是野坐标，别让仙女飞过去
 	for n in npcs:
 		if not bool(n.get("is_fairy", false)):
@@ -3442,11 +3449,49 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 	if not is_fairy:
 		_start_ambient_wander(npcs[npcs.size() - 1])
 
-func _on_gen_progress(stage: String) -> void:
-	_in_creation = false # 进造角色管线：引导会话已结束（服务端已开造）
+# ── 异步施法占位符 ───────────────────────────────────────────────────────
+# 造角色/造物要等服务端跑完 LLM 设计 + 生图（几秒到十几秒）。此前孩子被钉在近身对话里干等，
+# 只看得到一行「施法中…」。现在一开工就退出对话、就地立起占位符：传送门=新伙伴要来了，
+# 魔法熔炉=新物件要造出来了。孩子可以绕着它跑，成品从占位符所在的位置出现。
+const PLACEHOLDER_PORTAL_ID := "__casting_portal"
+const PLACEHOLDER_FORGE_ID := "__casting_forge"
+var _placeholders := {} ## 占位符 id → 落位 tile（Vector2i）
+
+## 在玩家身旁立起占位符。gen_progress 会来好几次（逐阶段），只认第一次。
+func _spawn_placeholder(id: String, spec: Dictionary) -> void:
+	if _placeholders.has(id):
+		return
+	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
+	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
+	var placed := chunk_manager.add_dynamic_prop(spec, want, 0.0, 0.0, id)
+	if placed.x < 0:
+		return # 放不下就不立：成品照旧在玩家身旁落位（下面的兜底分支）
+	_placeholders[id] = placed
+
+## 收起占位符，返回它占的 tile（没立成返回 (-1,-1)）——成品就从这里出来。
+## 必须先收起再放成品：占位符占着格子，不腾出来成品会落位失败。
+func _clear_placeholder(id: String) -> Vector2i:
+	if not _placeholders.has(id):
+		return Vector2i(-1, -1)
+	var tile: Vector2i = _placeholders[id]
+	_placeholders.erase(id)
+	var picked := chunk_manager.pickup_dynamic_prop(id)
+	if not picked.is_empty():
+		var node: Node3D = picked.get("node")
+		if is_instance_valid(node):
+			node.queue_free()
+	return tile
+
+## 造角色开工：引导会话已结束，服务端开造。退出对话，立起传送门。
+func _on_gen_progress(_stage: String) -> void:
+	_in_creation = false # 先清，免得 _exit_interaction 误发 creation_cancel
 	_hide_creation_cards()
-	thinking_label.text = "施法中… (%s)" % stage
-	thinking_label.visible = true
+	if selected != null:
+		_exit_interaction() # 不把孩子钉在对话里干等
+	thinking_label.visible = false
+	_spawn_placeholder(PLACEHOLDER_PORTAL_ID, PlaceholderSpecs.PORTAL)
+	banner.text = "传送门打开啦，新朋友就要来了！"
+	banner.visible = true
 
 func _on_gen_complete(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造角色扣了 1 朵花，同步最新钱包
@@ -3454,23 +3499,44 @@ func _on_gen_complete(data: Dictionary) -> void:
 	_in_creation = false
 	_hide_creation_cards()
 	thinking_label.visible = false
-	# 新角色在小神仙旁边降生
-	var fairy := _find_fairy()
-	var anchor: Vector2 = fairy["logical"] if not fairy.is_empty() else focus_logical
-	var spawn_at: Vector2 = anchor + Vector2(6.0, 4.0)
+	# 新伙伴从传送门里走出来；传送门没立成（放不下/离线）就退回小神仙旁降生
+	var tile := _clear_placeholder(PLACEHOLDER_PORTAL_ID)
+	var spawn_at: Vector2
+	if tile.x >= 0:
+		spawn_at = Vector2(tile) * float(WorldGrid.TILE_SIZE)
+	else:
+		var fairy := _find_fairy()
+		var anchor: Vector2 = fairy["logical"] if not fairy.is_empty() else focus_logical
+		spawn_at = anchor + Vector2(6.0, 4.0)
 	await _spawn_server_character(character, spawn_at)
 	game_audio.play_sfx("fanfare")
 	banner.text = "%s 来啦！" % String(character.get("name", "新朋友"))
 	banner.visible = true
 
-## 语音造物完成：物件在玩家身旁就近落位，落位 tile 回报服务端持久化。
+## 造物开工（服务端已扣花）：退出对话，立起魔法熔炉。
+func _on_prop_pending(data: Dictionary) -> void:
+	_apply_wallet(data.get("wallet")) # 花在开造那一刻就扣掉
+	_in_creation = false
+	_hide_creation_cards()
+	if selected != null:
+		_exit_interaction()
+	thinking_label.visible = false
+	_spawn_placeholder(PLACEHOLDER_FORGE_ID, PlaceholderSpecs.FORGE)
+	banner.text = "魔法熔炉烧起来啦！"
+	banner.visible = true
+
+## 语音造物完成：物件从熔炉所在的位置出来，落位 tile 回报服务端持久化。
 func _on_prop_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包
 	var prop: Dictionary = data.get("prop", {})
 	thinking_label.visible = false
 	var spec: Dictionary = prop.get("spec", {})
-	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
-	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
+	# 先收熔炉腾出格子，成品就落在那儿；熔炉没立成就退回玩家身旁
+	var tile := _clear_placeholder(PLACEHOLDER_FORGE_ID)
+	var want := tile
+	if want.x < 0:
+		var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
+		want = WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
 	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec), String(prop.get("id", "")))
 	if placed.x < 0:
 		banner.text = "这里放不下啦，换个地方试试"
@@ -3484,6 +3550,7 @@ func _on_prop_created(data: Dictionary) -> void:
 
 func _on_prop_failed(_reason: String) -> void:
 	thinking_label.visible = false
+	_clear_placeholder(PLACEHOLDER_FORGE_ID) # 造砸了：熔炉收起来，别让它烧到天荒地老
 	banner.text = "没变出来，再说一次试试"
 	banner.visible = true
 
