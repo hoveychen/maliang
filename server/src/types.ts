@@ -95,6 +95,41 @@ export interface TilePos {
   tileY: number;
 }
 
+/** 场景里的一个地点（喂意图 LLM 归一「去某地」；trigger 由客户端映射到仙子台词）。 */
+export interface ScenePoi {
+  tile: [number, number];
+  radius: number;
+  trigger: string;
+  name: string;
+  aliases: string[];
+}
+
+/** 场景之间的传送点（模型 B：同一个 world 内的区域之间走动）。 */
+export interface ScenePortal {
+  tile: [number, number];
+  radius: number;
+  toScene: string;
+  toTile: [number, number];
+}
+
+/**
+ * 场景 = 世界里的一片区域（一张地图）。见 docs/multi-scene-design.md 模型 B。
+ * terrainAsset 是地形二进制在内容寻址资产库里的 hash，同时充当版本号：
+ * 地形变了 hash 就变，客户端据此判缓存，天然不存在版本协商问题。
+ */
+export interface Scene {
+  worldId: string;
+  sceneId: string;
+  name: string;
+  terrainAsset: string;
+  gridTiles: number;
+  pois: ScenePoi[];
+  portals: ScenePortal[];
+}
+
+/** 单场景时代的场景 id：存量角色/物件全部隐含属于它。 */
+export const DEFAULT_SCENE = 'village';
+
 /** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */
 export function isValidTile(tile: TilePos): boolean {
   const inRange = (v: number) => Number.isInteger(v) && v >= 0 && v < GRID_TILES;

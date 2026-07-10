@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
@@ -53,6 +53,17 @@ export interface SpriteAnimRecord {
   status: 'pending' | 'ready' | 'failed';
   animAsset?: string;
   meta?: SpriteSheetMeta;
+}
+
+/** scenes 表的一行原样（列名 snake_case）。 */
+interface SceneRow {
+  world_id: string;
+  scene_id: string;
+  name: string;
+  terrain_asset: string;
+  grid_tiles: number;
+  pois: string;
+  portals: string;
 }
 
 export interface World {
@@ -166,6 +177,17 @@ export class WorldStore {
         player_id TEXT NOT NULL,
         data TEXT NOT NULL,
         PRIMARY KEY (world_id, player_id)
+      );
+      -- 场景 = 世界里的一片区域（一张地图）。地形二进制存 assets 库，这里只记 hash。
+      CREATE TABLE IF NOT EXISTS scenes (
+        world_id      TEXT NOT NULL,
+        scene_id      TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        terrain_asset TEXT NOT NULL,
+        grid_tiles    INTEGER NOT NULL,
+        pois          TEXT NOT NULL DEFAULT '[]',
+        portals       TEXT NOT NULL DEFAULT '[]',
+        PRIMARY KEY (world_id, scene_id)
       );
     `);
   }
@@ -376,6 +398,47 @@ export class WorldStore {
 
   getLocations(worldId: string): string[] {
     return this.#locations.get(worldId) ?? [];
+  }
+
+  // ── 场景（模型 B：world 含多 scene，见 docs/multi-scene-design.md）──────────────
+
+  /** 登记/更新一个场景。地形二进制先经 putAsset 入库，这里只记它的 hash。 */
+  upsertScene(scene: Scene): void {
+    if (!this.#worldExists(scene.worldId)) throw new Error(`world not found: ${scene.worldId}`);
+    this.#db
+      .prepare(
+        'INSERT INTO scenes (world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals) VALUES (?, ?, ?, ?, ?, ?, ?) ' +
+          'ON CONFLICT(world_id, scene_id) DO UPDATE SET name = excluded.name, terrain_asset = excluded.terrain_asset, ' +
+          'grid_tiles = excluded.grid_tiles, pois = excluded.pois, portals = excluded.portals',
+      )
+      .run(
+        scene.worldId, scene.sceneId, scene.name, scene.terrainAsset, scene.gridTiles,
+        JSON.stringify(scene.pois), JSON.stringify(scene.portals),
+      );
+  }
+
+  #rowToScene(r: SceneRow): Scene {
+    return {
+      worldId: r.world_id,
+      sceneId: r.scene_id,
+      name: r.name,
+      terrainAsset: r.terrain_asset,
+      gridTiles: r.grid_tiles,
+      pois: JSON.parse(r.pois) as ScenePoi[],
+      portals: JSON.parse(r.portals) as ScenePortal[],
+    };
+  }
+
+  getScene(worldId: string, sceneId: string): Scene | undefined {
+    const row = this.#db.prepare('SELECT * FROM scenes WHERE world_id = ? AND scene_id = ?').get(worldId, sceneId) as
+      | SceneRow
+      | undefined;
+    return row ? this.#rowToScene(row) : undefined;
+  }
+
+  listScenes(worldId: string): Scene[] {
+    const rows = this.#db.prepare('SELECT * FROM scenes WHERE world_id = ? ORDER BY scene_id').all(worldId) as unknown as SceneRow[];
+    return rows.map((r) => this.#rowToScene(r));
   }
 
   // ── 奖赏系统：小红花钱包 + 进行中委托（均按 (worldId, playerId) 维度）────────────────
