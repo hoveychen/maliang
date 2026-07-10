@@ -60,6 +60,7 @@ var _intro_confirm: Control = null ## ✓/✗ 确认行
 var _pending := {}                 ## 待确认 {name, nickname, transcript}
 var _asr_local: Object = null      ## 端侧 ASR（Android MaliangAsr），null=服务端识别
 var _local_session := false
+var _os_name := OS.get_name()      ## 平台名（headless 测试可覆盖成 "Android" 验端侧门禁）
 
 # 形象生成（generate 页）：intro 页起预取，✓采用 / ↻重生成
 var _gen_status: TextureRect = null
@@ -92,19 +93,29 @@ func _ready() -> void:
 func _setup_local_asr() -> void:
 	if not Engine.has_singleton("MaliangAsr"):
 		# Android 上没有单例 = 导出漏带 ASR 的 AAR（坏包），硬报错拒进游戏；桌面/编辑器合法走服务端。
-		if AsrGuard.is_fatal(OS.get_name(), false):
+		if AsrGuard.is_fatal(_os_name, false):
 			AsrGuard.block(get_tree(), AsrGuard.MSG_MISSING)
 		return
 	_asr_local = Engine.get_singleton("MaliangAsr")
 	_asr_local.connect("final_result", _on_local_final)
+	_asr_local.connect("asr_ready", _on_local_ready)
 	_asr_local.connect("asr_error", func(msg: String) -> void:
 		_local_session = false
 		# Android：端侧 ASR 硬依赖，失败即报错，绝不静默回落。
-		if AsrGuard.is_fatal(OS.get_name(), false):
+		if AsrGuard.is_fatal(_os_name, false):
 			AsrGuard.block(get_tree(), AsrGuard.MSG_INIT_FAILED % msg)
 			return
 		_asr_local = null)
 	_asr_local.initialize()
+
+## 模型异步加载完成（~秒级）。在此之前禁止开麦，图标停在「稍等」。
+func _on_local_ready() -> void:
+	if _intro_status != null and not _intro_recording:
+		_intro_status.texture = UiAssets.tex("ic_mic")
+
+## 端侧 ASR 是否可用于本次录音。Android 上未就绪即禁止开麦（绝不回落服务端上传 PCM）。
+func _asr_is_ready() -> bool:
+	return _asr_local != null and _asr_local.isReady()
 
 func _exit_tree() -> void:
 	# 场景切走时断开插件信号，防悬空回调
@@ -309,6 +320,10 @@ func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
 
 func _intro_start() -> void:
 	if _intro_recording:
+		return
+	# 端侧模型还在异步加载：不开麦。Android 上绝不把 PCM 回落上传服务端。
+	if AsrGuard.must_wait_for_ready(_os_name, _asr_is_ready()):
+		_intro_status.texture = UiAssets.tex("ic_wait")
 		return
 	_voice.stop() # 别和旁白抢
 	game_audio.play_sfx("mic_on")

@@ -17,6 +17,13 @@ func _init() -> void:
 	fails += _check("asr_required(Android)", AsrGuard.asr_required("Android"), true)
 	fails += _check("asr_required(macOS)", AsrGuard.asr_required("macOS"), false)
 
+	# ── utterance 阶段：Android 未就绪必须等待，绝不回落服务端上传 PCM ──
+	# （加载失败走 asr_error 硬报错；这里的未就绪只可能是 initialize() 异步没跑完）
+	fails += _check("Android + 未就绪 → 必须等", AsrGuard.must_wait_for_ready("Android", false), true)
+	fails += _check("Android + 已就绪 → 不等", AsrGuard.must_wait_for_ready("Android", true), false)
+	fails += _check("macOS + 未就绪 → 不等(合法走服务端)", AsrGuard.must_wait_for_ready("macOS", false), false)
+	fails += _check("iOS + 未就绪 → 不等", AsrGuard.must_wait_for_ready("iOS", false), false)
+
 	# ── block()：盖阻断层 + 暂停树；幂等只刷新文案 ──
 	AsrGuard.block(self, "错误A")
 	var overlay := root.get_node_or_null("AsrFatalOverlay")
