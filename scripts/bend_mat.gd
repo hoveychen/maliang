@@ -5,6 +5,12 @@ extends RefCounted
 ## 纯色与贴图两种入口；贴图版可选 normal map（轻 PBR：albedo + normal + 粗糙度常量）。
 
 const CURVATURE := 0.0015  ## 动森式大半径：极缓曲率，大部分平地感、远处缓弯隐去天空
+## 弯曲网格的视锥剔除 AABB 外扩（所有 bend 几何共用这一个值）。
+## bend 只把顶点往下压，最大位移出现在离焦点最远的区块角：slot 重定位保证区块中心
+## 离焦点每轴 ≤75m（半世界），角点再加半区块 25m → |xz|² = 2×100² = 20000，
+## 最大下压 = CURVATURE × 20000 = 30m；取 35 留余量。
+## 旧值 220 ≈ 全场景永不剔除——相机俯仰 47°，背后/侧面几何全在白白提交渲染。
+const CULL_MARGIN := 35.0
 static var _shader: Shader = null
 
 static func _shared_shader() -> Shader:

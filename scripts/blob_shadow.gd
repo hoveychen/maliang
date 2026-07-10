@@ -31,7 +31,7 @@ static func attach(parent: Node3D, radius: float, bend := false) -> void:
 	mi.scale = Vector3(radius * 2.0, 1.0, radius * 2.0)
 	mi.position.y = 0.2  # 抬离地面：给深度测试留余量（0.04 在远距被地表吃掉）；俯视角看不出悬浮
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.extra_cull_margin = 220.0  # 同 chunk_manager：world-bend 位移防误剔除
+	mi.extra_cull_margin = BendMat.CULL_MARGIN  # world-bend 位移防误剔除，推导见 BendMat
 	parent.add_child(mi)
 
 ## 摘掉伪影（悬浮的小仙子等不落地角色用——脚下暗斑反而穿帮）。

@@ -7,7 +7,7 @@ extends MeshInstance3D
 ## 摆放约定：节点只做 yaw 旋转+平移、不缩放（shader 的 world-bend 换算依赖此约定，
 ## 见 sdf_field.gdshaderinc 的 apply_bend）；尺寸在 spec 里改。
 
-const CULL_MARGIN := 220.0  ## 与 chunk_manager 一致：world-bend 位移大，防误剔除
+const CULL_MARGIN := BendMat.CULL_MARGIN  ## 推导见 BendMat：最坏下压 30m，取 35
 
 ## 可动物件壳密度：顶点吸附（snap_iters 次全基本体场求值/顶点/帧 × 主+描边两 pass）
 ## 是真机成本主轴——隐藏 7 个物件 100ms→24.8ms。0.6 档顶点数 ≈ 36%，梯度法线保平滑；
