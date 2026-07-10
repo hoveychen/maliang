@@ -113,6 +113,11 @@ t.onDone(() => stage.end({ winner: '躲藏方' }));
    它同时消掉一个竞态：**先 `once()` 再下 `follow/flee`**，订阅消息先于命令抵达服务端，第一帧就不会漏判。
 3. **`stage.prompt()` 返回字符串**（草案承诺、实现原本返回 `{ text }`）—— 已按草案改，剧本可以直接把孩子说的话拼进剧情。
 
+还有一条**节奏**上的教训：`stage.prop.create()` 要真跑一趟 LLM + 生图，几十秒卡在幕中间，演出就断了。
+所以三幕小剧场现在一件道具都不造（原语覆盖挪进了 `screenplay_e2e.test.ts` 的单测）。等造物能**预热**——
+开演前把整场的道具一次性造好，幕间只管 `place()` 落位——再把蛋和镜子加回来。生成层出大纲时就该把道具清单
+交给造物管线预造，这和「幕间小仙子报幕掩护逐幕生成延迟」是同一个道理。
+
 还有一条给生成层的硬约束：剧本是**异步函数体**，不是模块。没有 import/export、没有 `require/process/setTimeout`，
 全局只有 `stage` / `cast` / `console.log`。`server/test/screenplay_typecheck.test.ts` 就是照这个约束对 d.ts 编译的，
 Plan 2 可以直接复用它校验 LLM 的产物。
