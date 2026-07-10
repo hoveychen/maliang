@@ -21,6 +21,7 @@ import { newCreationState, isValidTile, INITIAL_FLOWERS, WORLD_CENTER_TILE, type
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
+import { WorldHub } from './world_hub.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -457,6 +458,9 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     Number(process.env.RATE_GLOBAL_MAX ?? 4),
   );
 
+  // 多人基座：world 维度的连接注册表（world_info 登记，leave_world/close 摘除）
+  const hub = new WorldHub();
+
   // WebSocket：造角色请求 → 进度推送 → 完成/失败
   app.get('/ws', { websocket: true }, (socket, req) => {
     const connKey = randomUUID(); // 每连接一个限流 key
@@ -464,12 +468,13 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     // 能力协商：客户端自带 TTS（edge-tts）时连接 URL 带 ?clientTts=1，本连接全程跳过服务端合成。
     session.clientTts = (req.query as { clientTts?: string } | undefined)?.clientTts === '1';
     socket.on('message', (raw: Buffer) => {
-      void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session);
+      void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session, hub);
     });
     // 连接断开时释放可能仍持有的限流名额（录到一半断线），并 flush 会话记忆兜底（前端没发 leave_world 就掉线）
     socket.on('close', () => {
       if (session.gate) { session.gate.release(); session.gate = null; }
       session.active = false;
+      notifyHubLeave(hub, connKey);
       void endSessionVisit(session, adapters, store, Date.now());
     });
   });
@@ -877,6 +882,12 @@ function describeCreationAttrs(state: CreationState): string {
   return parts.join('，');
 }
 
+/** 连接退场(leave_world/断连)时摘出 hub；若因此换了 host，通知新 host 接管 NPC 模拟。 */
+export function notifyHubLeave(hub: WorldHub, connKey: string): void {
+  const left = hub.leave(connKey);
+  left?.newHost?.send({ type: 'world_host', isHost: true });
+}
+
 export async function handleWsMessage(
   socket: { send: (data: string) => void },
   raw: string,
@@ -885,6 +896,7 @@ export async function handleWsMessage(
   limiter: RateLimiter,
   connKey: string,
   session: VoiceSession,
+  hub?: WorldHub,
 ): Promise<void> {
   let msg: {
     type?: string;
@@ -911,6 +923,8 @@ export async function handleWsMessage(
     // 引导式造角色：creation_reply 幼儿点的图标 id / 说的话
     optionId?: string;
     spokenText?: string;
+    // time_sync：客户端发送时刻(客户端毫秒钟)，原样回带供其算偏移
+    t0?: number;
     // 玩家身份：每条消息可带 playerId（设备端稳定 UUID）；world_info 另带 profile 供首见建档。
     playerId?: string;
     profile?: {
@@ -931,6 +945,12 @@ export async function handleWsMessage(
 
   // 玩家身份：记进会话，供后续记忆/Visit 按玩家归属（P3/P4 消费）。
   if (typeof msg.playerId === 'string' && msg.playerId) session.playerId = msg.playerId;
+
+  // 时间偏移握手：回带 t0 + 服务端毫秒钟。倒计时 HUD 双端读数一致、位置插值时间戳都靠它。
+  if (msg.type === 'time_sync') {
+    socket.send(JSON.stringify({ type: 'time_sync', t0: typeof msg.t0 === 'number' ? msg.t0 : 0, serverMs: Date.now() }));
+    return;
+  }
 
   // 客户端上报世界地点名（连上 WS 后一次）：喂给意图 LLM，让「去某地」归一到真实地名。
   // 回 world_state 同步贴纸背包与进行中委托（断线重连/重启后客户端补状态）。
@@ -959,6 +979,16 @@ export async function handleWsMessage(
     store.setLocations(worldId, names);
     // 进世界 = 一段会话（Visit）开始：作会话结束批量抽记忆的边界。
     startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now());
+    // 多人基座：登记进 world 分组；首位进入者为 host（NPC 模拟所有权），换世界时旧世界可能换 host。
+    if (hub) {
+      const joined = hub.join(worldId, {
+        clientId: connKey,
+        playerId: session.playerId,
+        send: (m) => socket.send(JSON.stringify(m)),
+      });
+      joined.departed?.newHost?.send({ type: 'world_host', isHost: true });
+      socket.send(JSON.stringify({ type: 'world_host', isHost: joined.isHost }));
+    }
     socket.send(JSON.stringify({
       type: 'world_state',
       wallet: store.getWallet(worldId),
@@ -972,6 +1002,7 @@ export async function handleWsMessage(
   // 离开世界（前端正常退出显式发）：会话结束，flush 批量抽记忆并收尾 Visit。掉线未发则靠 socket.close 兜底。
   if (msg.type === 'leave_world') {
     session.creation = null; // 离开世界：丢弃未完成的造角色会话
+    if (hub) notifyHubLeave(hub, connKey);
     await endSessionVisit(session, adapters, store, Date.now());
     return;
   }
