@@ -1,3 +1,4 @@
+import { ANON_PLAYER } from '../src/types.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -28,7 +29,7 @@ async function seededProp(store: WorldStore): Promise<{ propId: string; close: (
   const app = await buildServer({ adapters, store });
   await app.inject({ method: 'GET', url: '/worlds/default' });
   const sock = fakeSocket();
-  await createPropAsync(sock, 'default', '造一个小风车', adapters, store);
+  await createPropAsync(sock, 'default', ANON_PLAYER, '造一个小风车', adapters, store);
   const propId = (sock.sent[0].prop as { id: string }).id;
   await ws(store, { type: 'prop_place', worldId: 'default', propId, tileX: 12, tileY: 34 });
   return { propId, close: () => app.close() };

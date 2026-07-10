@@ -1,3 +1,4 @@
+import { ANON_PLAYER } from '../src/types.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
@@ -88,7 +89,7 @@ test('createPropAsync: 设计→校验→持久化→推送 / 审核拦截', asy
   try {
     const adapters = createMockAdapters();
     const sock = fakeSocket();
-    await createPropAsync(sock, 'default', '会走路的小房子', adapters, store);
+    await createPropAsync(sock, 'default', ANON_PLAYER, '会走路的小房子', adapters, store);
     assert.equal(sock.sent.length, 1);
     assert.equal(sock.sent[0].type, 'prop_created');
     const prop = sock.sent[0].prop as { id: string; spec: { parts: unknown[] }; tile: null };
@@ -97,7 +98,7 @@ test('createPropAsync: 设计→校验→持久化→推送 / 审核拦截', asy
     assert.equal(store.listProps('default').length, 1);
 
     const sock2 = fakeSocket();
-    await createPropAsync(sock2, 'default', '一把恐怖的枪', adapters, store);
+    await createPropAsync(sock2, 'default', ANON_PLAYER, '一把恐怖的枪', adapters, store);
     assert.equal(sock2.sent[0].type, 'prop_failed');
     assert.equal(store.listProps('default').length, 1); // 没多存
   } finally {
@@ -112,7 +113,7 @@ test('createCharacterAsync: 造角色管线→gen_complete 入库 / 审核拦截
     const adapters = createMockAdapters();
     const before = store.listCharacters('default').length;
     const sock = fakeSocket();
-    await createCharacterAsync(sock, 'default', '一只会飞的小猫', adapters, store);
+    await createCharacterAsync(sock, 'default', ANON_PLAYER, '一只会飞的小猫', adapters, store);
     const types = sock.sent.map((m) => m.type);
     assert.ok(types.includes('gen_progress')); // 逐阶段推进
     const done = sock.sent.find((m) => m.type === 'gen_complete');
@@ -125,7 +126,7 @@ test('createCharacterAsync: 造角色管线→gen_complete 入库 / 审核拦截
     // 无法靠脏输入触发），故直接覆写 moderateText 强制拒绝，验证 catch→gen_failed 且不入库。
     const blocking = { ...adapters, moderation: { moderateText: async () => ({ allowed: false, reason: 'x' }) } };
     const sock2 = fakeSocket();
-    await createCharacterAsync(sock2, 'default', '一只小狗', blocking, store);
+    await createCharacterAsync(sock2, 'default', ANON_PLAYER, '一只小狗', blocking, store);
     assert.equal(sock2.sent.at(-1)!.type, 'gen_failed'); // 审核拦截
     assert.equal(store.listCharacters('default').length, before + 1); // 没多存
   } finally {
@@ -142,7 +143,7 @@ test('语音造角色端到端：respondToTranscript 摘出 → createCharacterA
     const r = await respondToTranscript('default', fairyId, '', '我想要一只小恐龙', adapters, store);
     assert.ok(r.characterRequest, '应摘出 characterRequest');
     const sock = fakeSocket();
-    await createCharacterAsync(sock, 'default', r.characterRequest!, adapters, store);
+    await createCharacterAsync(sock, 'default', ANON_PLAYER, r.characterRequest!, adapters, store);
     assert.ok(sock.sent.some((m) => m.type === 'gen_complete'));
     assert.equal(store.listCharacters('default').length, before + 1);
   } finally {
@@ -160,7 +161,7 @@ test('prop_place 落位回报 + worlds.json roundtrip', async () => {
   try {
     await app.inject({ method: 'GET', url: '/worlds/default' });
     const sock = fakeSocket();
-    await createPropAsync(sock, 'default', '造一个小风车', adapters, store);
+    await createPropAsync(sock, 'default', ANON_PLAYER, '造一个小风车', adapters, store);
     const propId = (sock.sent[0].prop as { id: string }).id;
 
     const limiter = new RateLimiter(100, 100);

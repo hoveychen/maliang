@@ -166,7 +166,7 @@ test('消费门槛：造物扣 1 花、0 花拦截 prop_denied、造失败退还
   const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
 
   // 有花：造物成功，扣 1 花，prop_created 带最新钱包
-  await createPropAsync(socket, 'w1', '一棵小树', createMockAdapters(), store);
+  await createPropAsync(socket, 'w1', ANON_PLAYER, '一棵小树', createMockAdapters(), store);
   const created = sent.find((m) => m['type'] === 'prop_created')!;
   assert.ok(created, '应造出物件');
   assert.equal((created['wallet'] as { flowers: number }).flowers, INITIAL_FLOWERS - 1, '造物扣 1 花');
@@ -175,14 +175,14 @@ test('消费门槛：造物扣 1 花、0 花拦截 prop_denied、造失败退还
   // 造失败（审核挡）：退还，账不变
   const blocked = { ...createMockAdapters(), moderation: { async moderateText() { return { allowed: false, reason: 'x' }; } } };
   const before = store.getWallet('w1', ANON_PLAYER).flowers;
-  await createPropAsync(socket, 'w1', '坏东西', blocked as unknown as ReturnType<typeof createMockAdapters>, store);
+  await createPropAsync(socket, 'w1', ANON_PLAYER, '坏东西', blocked as unknown as ReturnType<typeof createMockAdapters>, store);
   assert.ok(sent.some((m) => m['type'] === 'prop_failed'), '应推 prop_failed');
   assert.equal(store.getWallet('w1', ANON_PLAYER).flowers, before, '造失败退还，账不变');
 
   // 花光后造物：prop_denied，不动账
   store.spendFlower('w1', ANON_PLAYER, before);
   sent.length = 0;
-  await createPropAsync(socket, 'w1', '再来一个', createMockAdapters(), store);
+  await createPropAsync(socket, 'w1', ANON_PLAYER, '再来一个', createMockAdapters(), store);
   const denied = sent.find((m) => m['type'] === 'prop_denied')!;
   assert.ok(denied, '0 花应拦截');
   assert.equal(denied['reason'], 'no_flowers');
@@ -195,7 +195,7 @@ test('消费门槛：造角色 0 花拦截 gen_denied', async () => {
   store.spendFlower('w1', ANON_PLAYER, INITIAL_FLOWERS); // 花光
   const sent: Record<string, unknown>[] = [];
   const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
-  await createCharacterAsync(socket, 'w1', '一只小猫', createMockAdapters(), store);
+  await createCharacterAsync(socket, 'w1', ANON_PLAYER, '一只小猫', createMockAdapters(), store);
   const denied = sent.find((m) => m['type'] === 'gen_denied')!;
   assert.ok(denied, '0 花应拦造角色');
   assert.equal(denied['reason'], 'no_flowers');

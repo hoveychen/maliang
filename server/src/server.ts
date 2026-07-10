@@ -598,8 +598,8 @@ async function pushPraiseTts(
 }
 
 /** 造物/造角色余额检查：至少 1 朵小红花才放行。 */
-function hasFlower(store: WorldStore, worldId: string): boolean {
-  return store.getWallet(worldId, ANON_PLAYER).flowers >= 1;
+function hasFlower(store: WorldStore, worldId: string, playerId: string): boolean {
+  return store.getWallet(worldId, playerId).flowers >= 1;
 }
 
 /**
@@ -611,6 +611,7 @@ async function denyForNoFlowers(
   adapters: ServiceAdapters,
   store: WorldStore,
   worldId: string,
+  playerId: string,
   kind: 'prop' | 'character',
   clientTts = false,
 ): Promise<void> {
@@ -630,7 +631,7 @@ async function denyForNoFlowers(
     message: line,
     ttsAsset,
     voiceId: fairy?.voiceId ?? '',
-    wallet: store.getWallet(worldId, ANON_PLAYER),
+    wallet: store.getWallet(worldId, playerId),
   }));
 }
 
@@ -645,8 +646,8 @@ async function openCreationSession(
   store: WorldStore,
   leadIn = '', // 入口那轮 routeIntent 生成的仙子应答句（缺陷 ②：此前被丢弃）
 ): Promise<void> {
-  if (!hasFlower(store, worldId)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, 'character', session.clientTts);
+  if (!hasFlower(store, worldId, session.playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, 'character', session.clientTts);
     return;
   }
   session.creation = newCreationState();
@@ -679,13 +680,14 @@ async function pushLineTts(
 export async function createPropAsync(
   socket: { send: (data: string) => void },
   worldId: string,
+  playerId: string,
   description: string,
   adapters: ServiceAdapters,
   store: WorldStore,
   clientTts = false,
 ): Promise<void> {
-  if (!store.spendFlower(worldId, ANON_PLAYER)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, 'prop', clientTts);
+  if (!store.spendFlower(worldId, playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
     return;
   }
   let created = false;
@@ -704,11 +706,11 @@ export async function createPropAsync(
     const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed' };
     store.addProp(worldId, prop);
     created = true;
-    socket.send(JSON.stringify({ type: 'prop_created', worldId, prop, wallet: store.getWallet(worldId, ANON_PLAYER) }));
+    socket.send(JSON.stringify({ type: 'prop_created', worldId, prop, wallet: store.getWallet(worldId, playerId) }));
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
   } finally {
-    if (!created) store.refundFlower(worldId, ANON_PLAYER); // 造失败/被审核挡：退还，别让孩子白花一朵
+    if (!created) store.refundFlower(worldId, playerId); // 造失败/被审核挡：退还，别让孩子白花一朵
   }
 }
 
@@ -718,14 +720,15 @@ export async function createPropAsync(
 export async function createCharacterAsync(
   socket: { send: (data: string) => void },
   worldId: string,
+  playerId: string,
   description: string,
   adapters: ServiceAdapters,
   store: WorldStore,
   toSpriteSheet?: ToSpriteSheet,
   clientTts = false,
 ): Promise<void> {
-  if (!store.spendFlower(worldId, ANON_PLAYER)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, 'character', clientTts);
+  if (!store.spendFlower(worldId, playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'character', clientTts);
     return;
   }
   const requestId = randomUUID();
@@ -738,7 +741,7 @@ export async function createCharacterAsync(
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
     );
     created = true;
-    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId, ANON_PLAYER) }));
+    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId, playerId) }));
     // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     if (character.appearance.spriteAsset) {
       triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
@@ -747,7 +750,7 @@ export async function createCharacterAsync(
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
   } finally {
-    if (!created) store.refundFlower(worldId, ANON_PLAYER); // 造失败：退还，别让孩子白花一朵
+    if (!created) store.refundFlower(worldId, playerId); // 造失败：退还，别让孩子白花一朵
   }
 }
 
@@ -819,7 +822,7 @@ export async function advanceCreation(
     console.warn(`guideCreation 失败，用现有属性兜底造：${String(err)}`);
     session.creation = null;
     if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
-    await createCharacterAsync(socket, worldId, describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
+    await createCharacterAsync(socket, worldId, session.playerId, describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
     return;
   }
   // 累积这轮解析出的增量
@@ -838,7 +841,7 @@ export async function advanceCreation(
     session.creation = null;
     // 快捷路径：一句说全、首轮即造。没有问句可以搭载，前置话语单独念出来，别吞掉。
     if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
-    await createCharacterAsync(socket, worldId, r.description || describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
+    await createCharacterAsync(socket, worldId, session.playerId, r.description || describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
     return;
   }
   // 追问：合成仙子问句 TTS（失败不阻塞；clientTts 时客户端自己合成）+ 下发图标选项卡
@@ -964,8 +967,8 @@ export async function handleWsMessage(
     startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now());
     socket.send(JSON.stringify({
       type: 'world_state',
-      wallet: store.getWallet(worldId, ANON_PLAYER),
-      activeTask: store.getActiveTask(worldId, ANON_PLAYER),
+      wallet: store.getWallet(worldId, session.playerId),
+      activeTask: store.getActiveTask(worldId, session.playerId),
       // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
       playerPos: session.playerId ? store.getPlayer(session.playerId)?.position : undefined,
     }));
@@ -1007,7 +1010,7 @@ export async function handleWsMessage(
       return;
     }
     try {
-      await createCharacterAsync(socket, msg.worldId ?? '', msg.intentText ?? '', adapters, store, undefined, session.clientTts);
+      await createCharacterAsync(socket, msg.worldId ?? '', session.playerId, msg.intentText ?? '', adapters, store, undefined, session.clientTts);
     } finally {
       gate.release();
     }
@@ -1070,7 +1073,7 @@ export async function handleWsMessage(
       }
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
-        void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store, session.clientTts);
+        void createPropAsync(socket, msg.worldId ?? '', session.playerId, response.propRequest, adapters, store, session.clientTts);
       }
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -1123,7 +1126,7 @@ export async function handleWsMessage(
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
-        void createPropAsync(socket, msg.worldId ?? '', response.propRequest, adapters, store, session.clientTts);
+        void createPropAsync(socket, msg.worldId ?? '', session.playerId, response.propRequest, adapters, store, session.clientTts);
       }
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -1249,7 +1252,7 @@ export async function handleWsMessage(
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
-        void createPropAsync(socket, worldId, response.propRequest, adapters, store, session.clientTts);
+        void createPropAsync(socket, worldId, session.playerId, response.propRequest, adapters, store, session.clientTts);
       }
       recordVisitTurn(session, worldId, playerId, characterId, response.transcript, response.replyText, adapters, store);
     } catch (err) {

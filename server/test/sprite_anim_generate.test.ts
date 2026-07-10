@@ -1,3 +1,4 @@
+import { ANON_PLAYER } from '../src/types.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildServer, createCharacterAsync } from '../src/server.ts';
@@ -108,7 +109,7 @@ test('createCharacterAsync: 造完 NPC 自动异步补 idle 动画', async () =>
   const sent: string[] = [];
   const socket = { send: (d: string) => sent.push(d) };
 
-  await createCharacterAsync(socket, world.id, '一只蓝色的小兔子', createMockAdapters(), store, fakeSheet);
+  await createCharacterAsync(socket, world.id, ANON_PLAYER, '一只蓝色的小兔子', createMockAdapters(), store, fakeSheet);
 
   const complete = sent.map((s) => JSON.parse(s)).find((m) => m.type === 'gen_complete');
   assert.ok(complete, '应收到 gen_complete');

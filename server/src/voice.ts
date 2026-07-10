@@ -1,6 +1,5 @@
 import type { ServiceAdapters, AudioBlob } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
-import { ANON_PLAYER } from './types.ts';
 import type { Character, VoiceResponse } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
 import { pickGreeting } from './greetings.ts';
@@ -74,7 +73,7 @@ export async function respondToTranscript(
     .map((c) => ({ id: c.id, name: c.name }));
 
   // 委托：进行中的给 LLM 提醒；没有进行中的生成候选让 LLM 挑时机发起（模板池确定性生成）
-  const activeTask = store.getActiveTask(worldId, ANON_PLAYER) ?? undefined;
+  const activeTask = store.getActiveTask(worldId, playerId) ?? undefined;
   const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, playerId, store) ?? undefined;
 
   // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），带 kind 注入（分组）。
@@ -142,7 +141,7 @@ export async function respondToTranscript(
   if (response.characterRequest) return response;
   // LLM 在这句回应里发起了委托候选 → 设为进行中，随 character_response 下发给客户端做提示
   if (intent.offerTask && taskCandidate) {
-    store.setActiveTask(worldId, ANON_PLAYER, taskCandidate);
+    store.setActiveTask(worldId, playerId, taskCandidate);
     response.task = taskCandidate;
   } else if (activeTask) {
     response.task = activeTask; // 已有委托随回应带下去（客户端断线重连后也能补提示）
