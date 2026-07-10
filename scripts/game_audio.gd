@@ -14,6 +14,9 @@ const SFX := {
 	"pluck": "res://assets/audio/kenney_interface/pluck_001.ogg",       # 点地移动标记
 	"pop": "res://assets/audio/kenney_interface/drop_002.ogg",          # 情绪气泡弹出
 	"bell": "res://assets/audio/kenney_interface/bong_001.ogg",         # 听到了提示
+	# 新委托 chip 亮起。不复用 bell：character_response 刚播过 bell，
+	# SFX_GAP(80ms) 会把紧随其后的同名音效吞掉。
+	"task": "res://assets/audio/kenney_interface/select_002.ogg",       # 收到新委托
 	"enter": "res://assets/audio/kenney_interface/maximize_003.ogg",    # 进入对话
 	"exit": "res://assets/audio/kenney_interface/minimize_003.ogg",     # 退出对话
 	"mic_on": "res://assets/audio/kenney_interface/toggle_001.ogg",     # 开始说话

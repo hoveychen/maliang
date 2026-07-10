@@ -1073,7 +1073,11 @@ func _setup_hud() -> void:
 	back_btn.text = "返回"
 	back_btn.add_theme_font_size_override("font_size", 20)
 	UiAssets.style_card_button(back_btn)
-	back_btn.pressed.connect(_close_phone_app)
+	# 包一层：_close_phone_app 也被 _open_phone 内部调用（每次开手机回主屏），直连会误响。
+	back_btn.pressed.connect(func() -> void:
+		if game_audio != null:
+			game_audio.play_sfx("exit")
+		_close_phone_app())
 	app_bar.add_child(back_btn)
 	_phone_app_title = Label.new()
 	_style_card_label(_phone_app_title, 24)
@@ -1526,6 +1530,8 @@ func _step_phone_pager(delta: float) -> void:
 func _open_app(id: String) -> void:
 	if not _album_pages.has(id):
 		return
+	if game_audio != null:
+		game_audio.play_sfx("select")
 	_phone_open_app = id
 	_phone_home.visible = false
 	_phone_app_view.visible = true
@@ -3096,6 +3102,8 @@ func enter_scene(scene_id: String, arrive_tile := Vector2i(-1, -1)) -> void:
 	_arrive_tile = arrive_tile
 	_pending_scene = scene_id
 	_fade_target = 1.0
+	if game_audio != null:
+		game_audio.play_sfx("whoosh") # 黑幕淡入时的过场滑动声
 
 ## 收到 scene_entered：卸载当前场景的角色/物件 → 上新地形并重铺区块 → 生成新场景角色/物件
 ## → 按该场景玩家最后位置落位。顺序保证「地形在 chunk 重铺、角色/玩家落位之前就位」
@@ -3598,8 +3606,11 @@ func _drop_prop(drag: Dictionary, target: Vector2i, notify: bool) -> void:
 	if is_instance_valid(node):
 		node.queue_free() # add_dynamic_prop 重新生成了正式节点，拖拽中的退场
 	if placed.x < 0: # 连原位附近都塞不下（极端）：收进背包兜底
-		_store_dragged_prop(drag)
+		_store_dragged_prop(drag) # 内含 fanfare，别再叠一层落地音
 		return
+	# 只在 notify（孩子松手落地）时出声；notify=false 是取消拖拽自动归位，不该响。
+	if notify and game_audio != null:
+		game_audio.play_sfx("pop") # drop_002 本就是「放下」音
 	if world_props.has(id):
 		world_props[id]["tile"] = [placed.x, placed.y]
 	if notify and online and placed != Vector2i(drag["origin"]):
@@ -3639,6 +3650,8 @@ func _take_prop_out(pid: String) -> void:
 	wp["tile"] = [placed.x, placed.y]
 	if online:
 		backend.send_prop_take(world_id, pid, placed)
+	if game_audio != null:
+		game_audio.play_sfx("pluck") # 从册子拈出来（对称于收进去的 fanfare）
 	_close_phone() # 收起手机看物件落地（幂等，同时退近身相机）
 	banner.text = "摆出来啦！"
 	banner.visible = true
@@ -4727,8 +4740,15 @@ func _apply_wallet(w: Variant) -> void:
 		wallet = w
 	_refresh_album()
 
+## 只在「换了一个新委托」时出声。character_response 每次带 task 都会调到这里
+## （含进行中委托的重申），逐次响就成了噪音。
 func _set_active_task(task: Variant) -> void:
-	active_task = task if typeof(task) == TYPE_DICTIONARY else {}
+	var next: Dictionary = task if typeof(task) == TYPE_DICTIONARY else {}
+	var fresh := not next.is_empty() \
+			and String(next.get("id", "")) != String(active_task.get("id", ""))
+	active_task = next
+	if fresh and game_audio != null:
+		game_audio.play_sfx("task")
 	_update_task_chip()
 
 ## chip 里的小图标/短字（图标为主，家长可读短名）。
@@ -4850,7 +4870,12 @@ func _pulse_album_button() -> void:
 	tw.tween_property(album_button, "scale", Vector2.ONE, 0.2)
 
 ## 手机开合（点左下角手机按钮切换）：开→显示机身+遮罩+进近身相机；关→反之。
+## 音效挂在这里而非 _open_phone/_close_phone：那两个是幂等内部函数，
+## _open_phone 会调 _close_phone_app 回主屏、_take_prop_out 会调 _close_phone 收起手机，
+## 挂进去就会在非用户操作时误响。这里是 album_button 的唯一入口。
 func _toggle_album() -> void:
+	if game_audio != null:
+		game_audio.play_sfx("page")
 	if album_panel.visible:
 		_close_phone()
 	else:
@@ -4910,12 +4935,20 @@ func _exit_phone_cam() -> void:
 
 ## 设置页：重新捏角色——先 ？✓✗ 确认一遍防小手误触，确认后回童话书 onboarding。
 func _on_reroll_pressed() -> void:
+	if game_audio != null:
+		game_audio.play_sfx("click")
 	_reroll_confirm.visible = true
 
+## 点按音效放完再切场景（本节点一切走音就断了，同 menu.gd 的 _go_to）。
 func _on_reroll_yes() -> void:
+	if game_audio != null:
+		game_audio.play_sfx("confirm")
+		await get_tree().create_timer(0.15).timeout
 	get_tree().change_scene_to_file("res://onboarding.tscn")
 
 func _on_reroll_no() -> void:
+	if game_audio != null:
+		game_audio.play_sfx("click")
 	_reroll_confirm.visible = false
 
 ## 设置页：换形象——用档案答案重新生图（走服务端朝向保险丝），预览 ✓ 才落档案并热更新。
