@@ -146,7 +146,12 @@ func on_stage_cmd(data: Dictionary) -> void:
 			_host.stage_hud_toast(String(args.get("text", "")))
 			_ack(cmd_id)
 		"camera":
-			# 相机运镜：P5 占位即刻 ack（cosmetic，运镜实现留 P8 打磨）。
+			# 运镜是纯表现：全端都跑（非 host 也得看戏），发出即回执，不卡脚本。
+			# focus 带 args.actorId；dialog 带 args.a / args.b；overview / reset 不带演员。
+			_host.stage_camera(
+				String(args.get("mode", "")),
+				String(args.get("actorId", args.get("a", ""))),
+				String(args.get("b", "")))
 			_ack(cmd_id)
 		"prop_spawn":
 			# 服务端造好 spec 下发落位（完成型）：host 落位后回 done → ack 带 prop id 回脚本。
