@@ -184,7 +184,7 @@ export const GEN_STAGES: readonly GenStage[] = ['spec', 'moderate_text', 'image'
 
 export interface CreateCharacterInput {
   worldId: string;
-  intentText: string; // M1 文字驱动；M2 由讯飞 ASR 产出
+  intentText: string; // M1 文字驱动；M2 由 ASR 产出
   byFairy: boolean;
   position?: TilePos;
   /** 新伙伴降生的场景；缺省=DEFAULT_SCENE（单场景时代/未指定时落 village）。 */

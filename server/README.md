@@ -1,6 +1,6 @@
 # maliang-server
 
-maliang 后端代理（Node/TS + Fastify）。M1 骨架：造角色编排闭环以 **mock 适配器**跑通，真实第三方（Claude / OpenRouter / 讯飞 / 审核）通过实现 `ServiceAdapters` 契约接入，不改编排逻辑。
+maliang 后端代理（Node/TS + Fastify）。M1 骨架：造角色编排闭环以 **mock 适配器**跑通，真实第三方（Claude / OpenRouter / 语音 / 审核）通过实现 `ServiceAdapters` 契约接入，不改编排逻辑。
 
 ## 运行
 
@@ -25,7 +25,7 @@ pnpm test         # node --test，端到端验证造角色闭环
 
 ## 接真实第三方（M1→真实 / M2）
 
-实现 `ServiceAdapters` 各接口（如 `ClaudeLLMAdapter`、`OpenRouterImageAdapter`、`ChromaKeyCutoutAdapter`、`讯飞`），在 `buildServer({ adapters })` 注入即可。密钥走 `.env` / muvee secrets，**绝不提交进仓库**。
+实现 `ServiceAdapters` 各接口（如 `ClaudeLLMAdapter`、`OpenRouterImageAdapter`、`ChromaKeyCutoutAdapter`、`LocalASRAdapter`），在 `buildServer({ adapters })` 注入即可。密钥走 `.env` / muvee secrets，**绝不提交进仓库**。
 
 ## 语音（ASR/TTS）
 
@@ -44,7 +44,7 @@ TTS 另可走 **MiniMax 云端**（`speech-2.6-turbo`，实测整句 1.0-1.9s、
 
 环境变量：
 
-- `VOICE_ASR_PROVIDER` / `VOICE_TTS_PROVIDER` — 分别路由（未设则用 `VOICE_PROVIDER`，再未设为 `auto`）。取值 `auto`/`local`/`xfyun`/`mock`，TTS 另有 `minimax`。auto 落点：ASR = local→xfyun→mock；TTS = minimax→local→xfyun→mock。
+- `VOICE_ASR_PROVIDER` / `VOICE_TTS_PROVIDER` — 分别路由（未设则用 `VOICE_PROVIDER`，再未设为 `auto`）。取值 `auto`/`local`/`mock`，TTS 另有 `minimax`。auto 落点：ASR = local→mock；TTS = minimax→local→mock。
 - `MINIMAX_API_KEY` / `MINIMAX_TTS_MODEL` — MiniMax 语音（默认 `speech-2.6-turbo`，音质冲高换 `speech-2.6-hd` 约 1.75 倍价）。
 - `VOICE_MODELS_DIR` — 本地模型目录，默认 `models`（相对 server 运行目录）。
 - `VOICE_TTS_SPEED` — TTS 语速倍率 0.5-2（目前仅 minimax），默认 1.35（lovely_girl 童声原生 ~3.4 字/s 偏慢，提速后 ~4.6 字/s）。

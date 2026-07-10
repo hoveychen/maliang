@@ -73,8 +73,8 @@ export interface OrientationAdapter {
   detectFacing(image: ImageBlob): Promise<SpriteFacing>;
 }
 
-/** 语音识别：音频 → 中文文字。真实实现接讯飞。 */
-/** 流式识别会话：录音中持续 feed 分片（实时发往讯飞），finish 收尾并返回最终转写。 */
+/** 语音识别：音频 → 中文文字。真实实现走 sherpa-onnx（LocalASRAdapter）。 */
+/** 流式识别会话：录音中持续 feed 分片（实时喂本地 sherpa 识别器），finish 收尾并返回最终转写。 */
 export interface ASRStream {
   feed(chunk: Uint8Array): void;
   finish(): Promise<string>;
