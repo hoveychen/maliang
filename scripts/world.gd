@@ -2634,6 +2634,11 @@ func _load_server_terrain(scenes: Variant) -> void:
 ## 区块——见 docs/multi-scene-design.md 步骤⑤边界1：地形必须在 chunk 重铺之前就位（本函数
 ## load_from_bytes 先落地、changed 时才 rebuild），玩家落位在调用方于地形就位后再定。
 func _apply_scene(scene: Dictionary) -> void:
+	# 场景 id 先告诉 chunk_manager：重铺时散布 deco / 手工地标按目标场景取规则（village 分区+建筑、
+	# forest 铺满树+河岸苇+空地）。必须在 rebuild 之前置好，否则重铺仍用旧场景的 deco 规则。
+	if chunk_manager != null:
+		chunk_manager.scene_id = String(scene.get("sceneId", chunk_manager.scene_id))
+
 	# POI 先应用：与地形字节相互独立，地形拉取失败不该把地点名一起丢了。
 	# 解析不出任何合法 POI 时保留内置常量——绝不让世界变成没有地点的空壳。
 	var sp := parse_server_pois(scene.get("pois", []))

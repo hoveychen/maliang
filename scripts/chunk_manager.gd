@@ -117,6 +117,11 @@ func set_terrain_low_detail(on: bool) -> void:
 ## { "spec_data": Dictionary, "tile": Vector2i(全局), "yaw": float, "wander": float }
 var _dynamic_props: Array = []
 
+## 当前场景 id（模型 B）。散布 deco（_deco_kind）与手工地标（LANDMARKS/SDF_PROPS）都按它取规则：
+## village=村庄分区（村核心/果园/密林/山地…）+ 村庄建筑；forest=林地铺满树 + 河岸苇 + 空地留白、
+## 无村庄建筑。换场景 rebuild 前由 world.gd 置好，再重铺全图。
+var scene_id := "village"
+
 func _ready() -> void:
 	# 槽位与 wrapped 区块恒等绑定：3×3 槽位恰好覆盖 3×3 环面世界一遍（CHUNKS_PER_SIDE
 	# == 2R+1 是本设计前提），每个 wrapped 只需铺一次内容，之后 update 只挪位置——
@@ -294,20 +299,23 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 		OccupancyMap.free_rect(OccupancyMap.tile_to_cell(cl[0]), cl[1] * 2, cl[2] * 2)
 	_claims[wrapped] = []
 
-	# 先放手工地标（锚点落在本区块的），后散布——地标优先占地。
-	for lm in LANDMARKS:
-		var anchor: Vector2i = lm["tile"] - wrapped * CHUNK_TILES
-		if anchor.x < 0 or anchor.x >= CHUNK_TILES or anchor.y < 0 or anchor.y >= CHUNK_TILES:
-			continue
-		_spawn_on_tile(deco, wrapped, lm["scene"], anchor, lm["scale"], lm["yaw"],
-			int(lm.get("reserve", 0)), int(lm.get("search", 0)), bool(lm.get("path_ok", false)))
+	# 手工地标 + SDF 可动物件是村庄专属（民居/水井/风车/信箱…），只在 village 场景摆；
+	# 森林等其它场景不铺村庄建筑（布景全交给散布 deco 与语音造物）。
+	if scene_id == "village":
+		# 先放手工地标（锚点落在本区块的），后散布——地标优先占地。
+		for lm in LANDMARKS:
+			var anchor: Vector2i = lm["tile"] - wrapped * CHUNK_TILES
+			if anchor.x < 0 or anchor.x >= CHUNK_TILES or anchor.y < 0 or anchor.y >= CHUNK_TILES:
+				continue
+			_spawn_on_tile(deco, wrapped, lm["scene"], anchor, lm["scale"], lm["yaw"],
+				int(lm.get("reserve", 0)), int(lm.get("search", 0)), bool(lm.get("path_ok", false)))
 
-	# SDF 可动物件：与地标同权重的手工锚点，先于散布占地。
-	for sp in SDF_PROPS:
-		var sp_anchor: Vector2i = sp["tile"] - wrapped * CHUNK_TILES
-		if sp_anchor.x < 0 or sp_anchor.x >= CHUNK_TILES or sp_anchor.y < 0 or sp_anchor.y >= CHUNK_TILES:
-			continue
-		_spawn_sdf_on_tile(deco, wrapped, sp, sp_anchor, false)
+		# SDF 可动物件：与地标同权重的手工锚点，先于散布占地。
+		for sp in SDF_PROPS:
+			var sp_anchor: Vector2i = sp["tile"] - wrapped * CHUNK_TILES
+			if sp_anchor.x < 0 or sp_anchor.x >= CHUNK_TILES or sp_anchor.y < 0 or sp_anchor.y >= CHUNK_TILES:
+				continue
+			_spawn_sdf_on_tile(deco, wrapped, sp, sp_anchor, false)
 
 	# 语音生成的动态物件：落位 tile 归属本区块的，重刷时原位重生成（search 0 钉死）。
 	for dp in _dynamic_props:
@@ -344,11 +352,16 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 					_batch(batches, "rock%d" % posmod(hk, ROCK_SCENES.size()), pos, 1.6 + float(posmod(hk, 3)) * 0.4, float(posmod(hk, 360)))
 	_flush_batches(deco, batches)
 
-## 分区散布判定：全局 tile → 长什么（确定性，只在草地上长）。
-## 分区从北往南：山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、
+## 散布 deco 判定：全局 tile → 长什么（确定性，只在草地上长）。按当前场景取规则。
+func _deco_kind(gt: Vector2i) -> int:
+	if scene_id == "forest":
+		return _deco_kind_forest(gt)
+	return _deco_kind_village(gt)
+
+## village 分区散布：从北往南——山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、
 ## 果园（规则行距的浆果灌木）、瞭望丘坡面、村核心（整洁）、出生空地（开阔）、
 ## 岸边一圈芦苇灌木、其余草甸疏树。
-static func _deco_kind(gt: Vector2i) -> int:
+static func _deco_kind_village(gt: Vector2i) -> int:
 	if TerrainMap.tile_type(gt) != TerrainMap.T_GRASS:
 		return DECO_NONE
 	var h := TerrainMap.tile_height(gt)
@@ -408,6 +421,31 @@ static func _deco_kind(gt: Vector2i) -> int:
 	if roll < 11:
 		return DECO_ROCK
 	return DECO_TUFT if roll < 21 else DECO_NONE
+
+## forest 林地散布：林地草铺满树（郁闭林冠）、河岸芦苇灌木、高地/knoll 是留白空地（疏草+零星石）。
+## 与 village 同样只在草地上长、逐 tile 确定性；用同一把 roll 哈希，密度整体拉高成森林。
+static func _deco_kind_forest(gt: Vector2i) -> int:
+	if TerrainMap.tile_type(gt) != TerrainMap.T_GRASS:
+		return DECO_NONE
+	var roll := posmod(hash(Vector2i(gt.x * 3 + 11, gt.y * 7 + 5)), 100)
+	# 河岸一圈：芦苇灌木 + 草丛（紧邻小河/水潭）
+	if _near_water(gt):
+		if roll < 30:
+			return DECO_BUSH
+		return DECO_TUFT if roll < 60 else DECO_NONE
+	# 空地/高地（knoll，height>0）：留白便于活动——疏草 + 零星石，几乎不长树
+	if TerrainMap.tile_height(gt) > 0:
+		if roll < 5:
+			return DECO_ROCK
+		return DECO_TUFT if roll < 18 else DECO_NONE
+	# 林地草（平坦林床）：郁闭林冠——密树 + 灌木下层 + 草丛
+	if roll < 50:
+		return DECO_TREE
+	if roll < 62:
+		return DECO_BUSH
+	if roll < 66:
+		return DECO_ROCK
+	return DECO_TUFT if roll < 86 else DECO_NONE
 
 ## 8 邻里有水（环面 wrap 由 TerrainMap._idx 兜底）。
 static func _near_water(gt: Vector2i) -> bool:
