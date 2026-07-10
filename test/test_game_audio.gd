@@ -27,6 +27,27 @@ func _check(name: String, got: Variant, want: Variant) -> int:
 	printerr("FAIL %s: got %s want %s" % [name, str(got), str(want)])
 	return 1
 
+## 死键护栏：SFX 表里每个 key 都必须至少有一处 play_sfx 调用点。
+## `whoosh`（过场滑动）曾经在表里空挂着，没有任何调用——加了音效却没人听见，
+## 而缺口的另一头是一堆哑掉的交互。这条断言让死键在回测里当场暴露。
+func _test_no_dead_sfx_keys() -> int:
+	var src := ""
+	var dir := DirAccess.open("res://scripts")
+	if dir == null:
+		printerr("FAIL 打不开 res://scripts")
+		return 1
+	for name in dir.get_files():
+		if not name.ends_with(".gd"):
+			continue
+		var f := FileAccess.open("res://scripts/%s" % name, FileAccess.READ)
+		if f != null:
+			src += f.get_as_text()
+	var fails := 0
+	for key in GameAudio.SFX:
+		fails += _check("音效 %s 有调用点(非死键)" % key,
+			src.contains('play_sfx("%s")' % key), true)
+	return fails
+
 func _initialize() -> void:
 	var ga := GameAudio.new()
 	root.add_child(ga)
@@ -50,6 +71,8 @@ func _run(ga: GameAudio) -> void:
 	GameAudio._ensure_bus("Music")
 	GameAudio._ensure_bus("SFX")
 	_fails += _check("ensure_bus 幂等", AudioServer.bus_count, n)
+
+	_fails += _test_no_dead_sfx_keys()
 
 	# 音效：未知名拒绝；连点冷却；冷却过后可再播
 	_fails += _check("未知音效返回 false", ga.play_sfx("nope"), false)
