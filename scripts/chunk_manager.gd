@@ -209,6 +209,19 @@ static func _make_water_mat() -> ShaderMaterial:
 	m.set_shader_parameter("curvature", BendMat.CURVATURE)
 	return m
 
+## 地形数组换了之后重建全图区块（enter_scene 换场景时调用）。
+## 区块外观是首次 _skin 时按当时的 TerrainMap 烘的，地面/水面 ArrayMesh 永久缓存，
+## 不会自己跟着地形变——清掉两张 mesh 缓存并把所有槽位复位成未铺，下一批 update()
+## 便按新地形逐帧重铺（_skin 开头自带旧区块占地释放，占地无需在此另行处理）。
+## 前置：调用前地形必须已就位（TerrainMap 已载入新场景的 .mltr）——见
+## docs/multi-scene-design.md 步骤⑤边界1；玩家/角色/动态物件的卸载由换场景流程另管。
+## 复位期间槽位仍显示旧网格，直到被 update() 逐帧重铺（换场景走过场遮挡，见步骤⑤）。
+func rebuild() -> void:
+	_chunk_meshes.clear()
+	_water_meshes.clear()
+	for slot in _slots:
+		slot["skinned"] = false
+
 func update(player_logical: Vector2) -> void:
 	var pcx := int(floor(player_logical.x / CHUNK_WORLD))
 	var pcz := int(floor(player_logical.y / CHUNK_WORLD))

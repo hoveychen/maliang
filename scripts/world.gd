@@ -2646,9 +2646,13 @@ func _load_server_terrain(scenes: Variant) -> void:
 		push_warning("[terrain] 服务端地形非法(%s)，沿用本地生成" % r["error"])
 		return
 	if r["changed"]:
-		# chunk_manager 没有「地形变了重铺全图」的入口，且 _setup_player 早在 _ready 里就
-		# 摸过地形。今天不该发生（导出字节 == _paint() 输出）；真发生说明两端画法漂了。
-		push_warning("[terrain] 服务端地形与本地生成不一致，已铺区块可能是旧样子")
+		# 服务端地形与本地 _paint() 不同：chunk_manager 首铺用的是本地地形，得整图重铺
+		# 才能反映服务端地形（见 docs/multi-scene-design.md 步骤⑤边界1）。今天导出字节 ==
+		# _paint() 输出，changed 恒为 false，此分支只在真有第二张地图/两端画法漂了时触发。
+		# 玩家落位由换场景流程（portal→enter_scene，P4）按目标场景重定，这里只管地形网格。
+		push_warning("[terrain] 服务端地形与本地生成不一致，重铺全图区块")
+		if chunk_manager != null:
+			chunk_manager.rebuild()
 
 func _bootstrap() -> void:
 	_bootstrapping = true
