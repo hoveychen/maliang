@@ -605,14 +605,15 @@ export class WorldStore {
   }
 
   /**
-   * 世界里的角色。传 sceneId 则只返回该场景的角色（缺 sceneId 的存量角色按 DEFAULT_SCENE 归入）；
+   * 世界里的角色。传 sceneId 则只返回该场景的角色（缺 sceneId 的存量角色按 DEFAULT_SCENE 归入），
+   * 但仙女恒在——她跨场景跟随玩家，任何场景查询都带上她（委托候选/花名册在调用点各自排除 isFairy）；
    * 不传 = 全世界所有场景（保持既有调用点行为不变）。
    */
   listCharacters(worldId: string, sceneId?: string): Character[] {
     const rows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(worldId) as { data: string }[];
     const all = rows.map((r) => JSON.parse(r.data) as Character);
     if (sceneId === undefined) return all;
-    return all.filter((c) => (c.sceneId ?? DEFAULT_SCENE) === sceneId);
+    return all.filter((c) => c.isFairy || (c.sceneId ?? DEFAULT_SCENE) === sceneId);
   }
 
   getCharacter(worldId: string, characterId: string): Character | undefined {
