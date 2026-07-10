@@ -91,6 +91,7 @@ test('guideCreation：语音名字——问过 name 后自由文本当名字', a
   // 构造一个已攒够但仍在问名字的状态：kind+color 已有，上一轮问的是 name
   const state: CreationState = {
     active: true,
+    goal: 'character',
     attrs: { kind: '猫', color: '红', traits: [] },
     askedCategories: ['name'],
     turnCount: 3,
@@ -101,14 +102,14 @@ test('guideCreation：语音名字——问过 name 后自由文本当名字', a
 
 test('guideCreation：提前造——说「就这样」立即 done', async () => {
   const { llm } = createMockAdapters();
-  const state: CreationState = { active: true, attrs: { kind: '狗', traits: [] }, askedCategories: ['kind'], turnCount: 1 };
+  const state: CreationState = { active: true, goal: 'character', attrs: { kind: '狗', traits: [] }, askedCategories: ['kind'], turnCount: 1 };
   const r = await llm.guideCreation(state, '就这样');
   assert.equal(r.done, true);
 });
 
 test('guideCreation：超轮兜底——turnCount 到上限强制 done', async () => {
   const { llm } = createMockAdapters();
-  const state: CreationState = { active: true, attrs: { kind: '兔', traits: [] }, askedCategories: ['kind', 'color', 'trait', 'name', 'personality'], turnCount: 5 };
+  const state: CreationState = { active: true, goal: 'character', attrs: { kind: '兔', traits: [] }, askedCategories: ['kind', 'color', 'trait', 'name', 'personality'], turnCount: 5 };
   const r = await llm.guideCreation(state, '嗯');
   assert.equal(r.done, true);
 });

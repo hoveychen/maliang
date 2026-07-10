@@ -5,30 +5,59 @@ import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 import { CREATION_OPTIONS } from '../src/creation_options.ts';
+import { PROP_CREATION_OPTIONS } from '../src/prop_creation_options.ts';
 
 function fakeSocket(): { send: (d: string) => void; sent: Array<Record<string, unknown>> } {
   const sent: Array<Record<string, unknown>> = [];
   return { send: (d: string) => sent.push(JSON.parse(d)), sent };
 }
 
-test('generateCreationIcons：全量生成 + 幂等 + force 重生', async () => {
+// 图标全库 = 造角色全部 + 造物专属(prop_ 前缀的 kind/motion)；造物的 color/size 复用造角色同 id，不另生成。
+const PROP_OWN = PROP_CREATION_OPTIONS.filter((o) => o.id.startsWith('prop_'));
+const TOTAL_ICONS = CREATION_OPTIONS.length + PROP_OWN.length;
+
+test('generateCreationIcons：全量生成（含造物专属）+ 幂等 + force 重生', async () => {
   const store = new WorldStore();
   const adapters = createMockAdapters();
   // 首次：全部生成，映射落库
   const r1 = await generateCreationIcons(adapters, store);
-  assert.equal(r1.generated.length, CREATION_OPTIONS.length);
+  assert.equal(r1.generated.length, TOTAL_ICONS);
   assert.equal(r1.skipped.length, 0);
   assert.equal(r1.failed.length, 0);
   assert.ok(store.getCreationIcon('cat').length > 0, 'cat 应有图标 hash');
-  assert.equal(Object.keys(store.listCreationIcons()).length, CREATION_OPTIONS.length);
+  assert.ok(store.getCreationIcon('prop_flower').length > 0, 'prop_flower 应有图标 hash');
+  assert.equal(Object.keys(store.listCreationIcons()).length, TOTAL_ICONS);
   // 幂等：再跑全部跳过
   const r2 = await generateCreationIcons(adapters, store);
   assert.equal(r2.generated.length, 0);
-  assert.equal(r2.skipped.length, CREATION_OPTIONS.length);
+  assert.equal(r2.skipped.length, TOTAL_ICONS);
   // force：全量重生
   const r3 = await generateCreationIcons(adapters, store, { force: true });
-  assert.equal(r3.generated.length, CREATION_OPTIONS.length);
+  assert.equal(r3.generated.length, TOTAL_ICONS);
   assert.equal(r3.skipped.length, 0);
+});
+
+test('generateCreationIcons：造物 color/size 复用造角色图标，不重复生成', async () => {
+  const store = new WorldStore();
+  await generateCreationIcons(createMockAdapters(), store);
+  // 造物库里的 color/size 项（如 red/small）用的是造角色同 id 的图标，映射里只有一份
+  const propColorSize = PROP_CREATION_OPTIONS.filter((o) => o.category === 'color' || o.category === 'size');
+  for (const o of propColorSize) {
+    assert.ok(!o.id.startsWith('prop_'), `${o.id} 应是复用的造角色 id（非 prop_ 前缀）`);
+    assert.ok(store.getCreationIcon(o.id).length > 0, `复用的 ${o.id} 应已由造角色库生成`);
+  }
+  // 造物专属 kind/motion 都各自生成了
+  for (const o of PROP_OWN) {
+    assert.ok(store.getCreationIcon(o.id).length > 0, `造物专属 ${o.id} 应生成`);
+  }
+});
+
+test('generateCreationIcons：only 限定只生成造物专属图标', async () => {
+  const store = new WorldStore();
+  const ids = PROP_OWN.map((o) => o.id);
+  const r = await generateCreationIcons(createMockAdapters(), store, { only: ids });
+  assert.equal(r.generated.length, PROP_OWN.length, '只生成指定的造物图标');
+  assert.equal(store.getCreationIcon('cat'), '', '未指定的造角色图标不生成');
 });
 
 test('图标映射持久化 roundtrip：重开 store 仍在', async () => {
@@ -56,13 +85,14 @@ test('admin 端点：POST 生成 / GET 列表', async () => {
     const post = await app.inject({ method: 'POST', url: '/admin/creation-icons' });
     assert.equal(post.statusCode, 200);
     const body = post.json() as { generated: string[]; icons: Record<string, string> };
-    assert.equal(body.generated.length, CREATION_OPTIONS.length);
+    assert.equal(body.generated.length, TOTAL_ICONS);
     assert.ok(body.icons.cat && body.icons.cat.length > 0);
+    assert.ok(body.icons.prop_flower && body.icons.prop_flower.length > 0, '造物图标也随端点生成');
 
     const get = await app.inject({ method: 'GET', url: '/admin/creation-icons' });
     assert.equal(get.statusCode, 200);
     const listed = (get.json() as { icons: Record<string, string> }).icons;
-    assert.equal(Object.keys(listed).length, CREATION_OPTIONS.length);
+    assert.equal(Object.keys(listed).length, TOTAL_ICONS);
   } finally {
     await app.close();
   }
