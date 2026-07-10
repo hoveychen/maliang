@@ -109,6 +109,28 @@ test('positions_report：无 playerId 时不写玩家位置（不误挂到别人
   assert.equal(store.getPlayer('p1')?.position, undefined);
 });
 
+test('world_state 回带 playerPos：上次离开时的 tile', async () => {
+  const { store, sent, send } = harness();
+  seedPlayer(store, 'p1');
+  store.setPlayerTile('p1', { tileX: 11, tileY: 22 });
+
+  await send({ type: 'world_info', worldId: 'w1', playerId: 'p1', locations: [] });
+
+  const ws = sent.find((m) => m.type === 'world_state');
+  assert.ok(ws, '应回 world_state');
+  assert.deepEqual(ws.playerPos, { tileX: 11, tileY: 22 });
+});
+
+test('world_state：首次进世界（无档案/无坐标）不带 playerPos', async () => {
+  const { store, sent, send } = harness();
+  seedPlayer(store, 'p1'); // 有档案但从没上报过位置
+
+  await send({ type: 'world_info', worldId: 'w1', playerId: 'p1', locations: [] });
+
+  const ws = sent.find((m) => m.type === 'world_state');
+  assert.equal(ws.playerPos, undefined, '客户端据此按小神仙旁降生');
+});
+
 test('positions_report：角色 id 属于别的世界 → 不跨世界写入', async () => {
   const { store, sent, send } = harness();
   store.createWorld('w2');

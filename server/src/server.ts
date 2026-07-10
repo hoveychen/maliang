@@ -963,6 +963,8 @@ export async function handleWsMessage(
       type: 'world_state',
       wallet: store.getWallet(worldId),
       activeTask: store.getActiveTask(worldId),
+      // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
+      playerPos: session.playerId ? store.getPlayer(session.playerId)?.position : undefined,
     }));
     return;
   }

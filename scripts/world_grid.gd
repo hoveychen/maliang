@@ -28,3 +28,12 @@ static func shortest_delta(a: Vector2, b: Vector2) -> Vector2:
 static func to_tile(p: Vector2) -> Vector2i:
 	var w := wrap_pos(p)
 	return Vector2i(int(w.x / TILE_SIZE), int(w.y / TILE_SIZE))
+
+## tile 索引 → 该格中心的世界坐标（to_tile 的逆，取中心而非左上角，避免落在格边界上）。
+## 服务端只存 tile 精度，重载读回时用它还原坐标。
+static func from_tile_center(t: Vector2i) -> Vector2:
+	return wrap_pos(Vector2(float(t.x) + 0.5, float(t.y) + 0.5) * TILE_SIZE)
+
+## tile 是否落在世界内（与服务端 types.isValidTile 同口径）。
+static func is_valid_tile(t: Vector2i) -> bool:
+	return t.x >= 0 and t.x < GRID_TILES and t.y >= 0 and t.y < GRID_TILES

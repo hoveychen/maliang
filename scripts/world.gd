@@ -2584,6 +2584,7 @@ func _on_failed(reason: String) -> void:
 ## _bootstrapping 全程置位，无论在线/离线都在收尾清零——world_ready 就绪判定据此知道引导已结束。
 func _bootstrap() -> void:
 	_bootstrapping = true
+	_player_restore_pending = true
 	_boot_status = "连接精灵世界…"
 	_apply_player_sprite() # 档案形象替换占位（并行拉取，不阻塞世界引导）
 	# 加载固定的 default 世界（含预生成村民），不再每次新建
@@ -2631,6 +2632,9 @@ func _bootstrap() -> void:
 ## 然后发 world_ready。每帧让出（await process_frame）确保 _process→chunk_manager.update 推进铺设。
 ## 计时累加帧 delta（仿真时间）而非墙钟：headless 下帧比真机快得多，墙钟会让最短门永不满足。
 var _bootstrapping := false
+## 玩家位置待从 world_state.playerPos 还原（引导窗口内有效）。world_ready 后置否，
+## 断线重连收到的 world_state 不再搬人。
+var _player_restore_pending := false
 var _boot_stage := 0 ## 引导里程碑：0=网络进行中，1=get_world 已定音，2=角色/props/玩家全就位（见 _bootstrap）
 var _boot_sub := 0.0  ## stage 1 内的细粒度子进度 [0,1]：逐个村民就位时推进（消除长尾期仙子停顿）
 var _boot_status := "" ## 当前引导阶段的人读文案；loading debug 浮层轮询 ready_status() 显示（release 不显示）
@@ -2671,6 +2675,7 @@ func _watch_world_ready() -> void:
 			break
 	if not _world_ready_sent:
 		_world_ready_sent = true
+		_player_restore_pending = false # 揭幕后再收到 world_state（重连）不再搬人
 		world_ready.emit()
 
 func _find_fairy() -> Dictionary:
@@ -2733,6 +2738,26 @@ func _prefetch_one(c: Dictionary, results: Dictionary, pending: Array) -> void:
 	pending[0] -= 1
 
 ## 从后端 Character 字典生成一个 PaperCharacter。at_logical 非 INF 时覆盖其逻辑坐标。
+## 从服务端 position 还原降生坐标。服务端只存 tile 精度（positions_report 上报），
+## 读回时取该格中心，再就近找空位（水面/物件/已降生角色都会挡）。
+## 无坐标 / 越界（存量角色仍是旧世界的 tile 500）→ 回退黄金角散环，与改动前行为一致。
+func _restore_logical(c: Dictionary, is_fairy: bool) -> Vector2:
+	var center := Vector2(WorldGrid.WORLD_SPAN, WorldGrid.WORLD_SPAN) * 0.5
+	var pos: Dictionary = c.get("position", {})
+	if not pos.is_empty():
+		var tile := Vector2i(int(pos.get("tileX", -1)), int(pos.get("tileY", -1)))
+		if WorldGrid.is_valid_tile(tile):
+			# 仙子悬浮不占格、不挡路，落点无需避让
+			var at := WorldGrid.from_tile_center(tile)
+			return at if is_fairy else _find_free_spot(at, 2)
+	if is_fairy:
+		return center
+	# 村民按黄金角散开成环，避免初始堆叠
+	var k := _villager_count
+	_villager_count += 1
+	var ang := float(k) * 2.399963
+	return WorldGrid.wrap_pos(center + Vector2(cos(ang), sin(ang)) * (10.0 + float(k) * 3.0))
+
 ## prefetched 非空时从中取纹理/动画（_prefetch_characters 已并发拉好，命中内存缓存瞬时）；
 ## 缺省 {} 时（如新造角色单发）走自拉旧路径。
 func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {}) -> void:
@@ -2786,16 +2811,7 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 			_poll_idle_anim(npc, asset, 6.0, anim_phase)
 	var logical := at_logical
 	if logical == Vector2.INF:
-		# 小世界：忽略后端旧坐标(原 1000×1000 的 tile 500)，统一放到村庄中心(chunk2 = world 中心)
-		var center := Vector2(WorldGrid.WORLD_SPAN, WorldGrid.WORLD_SPAN) * 0.5
-		if is_fairy:
-			logical = center
-		else:
-			# 村民按黄金角散开成环，避免初始堆叠
-			var k := _villager_count
-			_villager_count += 1
-			var ang := float(k) * 2.399963
-			logical = WorldGrid.wrap_pos(center + Vector2(cos(ang), sin(ang)) * (10.0 + float(k) * 3.0))
+		logical = _restore_logical(c, is_fairy)
 	var dict := { "node": npc, "logical": logical, "id": cid, "is_fairy": is_fairy }
 	if is_fairy:
 		dict["hover"] = FAIRY_HOVER # 悬浮随从：不登记占用（飞行不挡路），由 _update_fairy 驱动
@@ -3757,6 +3773,26 @@ func _send_world_info() -> void:
 func _on_world_state(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet"))
 	_set_active_task(data.get("activeTask"))
+	_restore_player_pos(data.get("playerPos"))
+
+## 把玩家搬回上次离开时的 tile。只在引导窗口内生效（_player_restore_pending）：
+## 断线重连也会收到 world_state，那时小朋友早已走开，再搬人就是凭空瞬移。
+func _restore_player_pos(p: Variant) -> void:
+	if not _player_restore_pending:
+		return
+	_player_restore_pending = false
+	if typeof(p) != TYPE_DICTIONARY or player.is_empty():
+		return
+	var pos: Dictionary = p
+	var tile := Vector2i(int(pos.get("tileX", -1)), int(pos.get("tileY", -1)))
+	if not WorldGrid.is_valid_tile(tile):
+		return
+	OccupancyMap.char_unregister(PLAYER_ID)
+	var spot := _find_free_spot(WorldGrid.from_tile_center(tile), PLAYER_SPAN)
+	player["logical"] = spot
+	player["paper_prev"] = spot
+	OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	focus_logical = spot
 
 ## 应用服务端下发的钱包（world_state/task_complete/prop_created/gen_complete 各处复用）：更新状态 + 刷 UI。
 func _apply_wallet(w: Variant) -> void:
