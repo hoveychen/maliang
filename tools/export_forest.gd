@@ -36,6 +36,16 @@ func _init() -> void:
 	pf.store_string(JSON.stringify(build_poi_json(), "  "))
 	pf.close()
 	print("导出 %s：%d 个 POI" % [poi_path, build_poi_json().size()])
+
+	var portal_path := _arg("--portal-out", out_path.get_basename() + ".portals.json")
+	var qf := FileAccess.open(portal_path, FileAccess.WRITE)
+	if qf == null:
+		printerr("无法写入 ", portal_path)
+		quit(1)
+		return
+	qf.store_string(JSON.stringify(build_portal_json(), "  "))
+	qf.close()
+	print("导出 %s：%d 个传送点" % [portal_path, build_portal_json().size()])
 	quit(0)
 
 ## 森林 POI：给意图 LLM 的地名（小河深潭 / 林间空地）。trigger 目前客户端无专属台词，仅供归一。
@@ -44,6 +54,14 @@ static func build_poi_json() -> Array:
 		{ "tile": [41, 33], "radius": 5.0, "trigger": "poi_forest_pond", "name": "小河深潭", "aliases": ["深潭", "小河", "河边"] },
 		{ "tile": [20, 18], "radius": 5.0, "trigger": "poi_forest_clearing", "name": "林间空地", "aliases": ["空地", "草地", "林中空地"] },
 		{ "tile": [55, 30], "radius": 5.0, "trigger": "poi_forest_knoll", "name": "小山丘", "aliases": ["山丘", "高地", "土坡"] },
+	]
+
+## 森林侧传送点：林间空地（20,18）中央，走进半径就穿回村庄西南小树林（18,52）。
+## radius 单位是世界坐标（TILE_SIZE=2.0），3.0 ≈ 1.5 格：玩家还没踩到中心就已触发。
+## 与 export_terrain.gd 的 build_portal_json() 必须互指（test_portal.gd 对拍两边）。
+static func build_portal_json() -> Array:
+	return [
+		{ "tile": [20, 18], "radius": 3.0, "toScene": "village", "toTile": [18, 52] },
 	]
 
 ## 构建森林 .mltr 字节流。抽成静态供回测直接调用（test_forest_scene.gd）。

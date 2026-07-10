@@ -6,6 +6,9 @@
 # 用法:
 #   SERVER_URL=http://127.0.0.1:8080 ADMIN_TOKEN=xxx \
 #     tools/register-scene.sh <world_id> <scene_id> <name> <mltr_path> [pois_json_path] [portals_json_path]
+#
+# pois/portals 两个 json 由导出脚本一并产出（同名 .pois.json / .portals.json）。村庄与森林的
+# 传送点互指，两张图都必须带 portals 重新入库，否则只有单向出口。
 # 依赖: bash / base64 / jq / curl
 set -euo pipefail
 
