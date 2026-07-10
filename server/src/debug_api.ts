@@ -4,6 +4,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { WorldStore } from './persistence.ts';
 import type { Character } from './types.ts';
+import { DEFAULT_SCENE } from './types.ts';
 
 type AuthedFn = (req: { headers: Record<string, unknown>; query: unknown }) => boolean;
 
@@ -15,6 +16,8 @@ function characterSummary(store: WorldStore, c: Character) {
     isFairy: c.isFairy,
     state: c.state,
     position: c.position,
+    // 角色所在场景（存量缺省归 village）：后台地图按场景把角色画到对应场景上
+    sceneId: c.sceneId ?? DEFAULT_SCENE,
     personality: c.personality,
     spriteAsset: c.appearance.spriteAsset,
     scale: c.appearance.scale,

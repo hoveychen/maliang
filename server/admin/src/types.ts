@@ -137,6 +137,8 @@ export interface CharacterSummary {
   isFairy: boolean;
   state: string;
   position: { tileX: number; tileY: number };
+  /** 角色所在场景（后端缺省归 DEFAULT_SCENE）；后台地图按场景归位。 */
+  sceneId: string;
   personality: string;
   spriteAsset: string;
   scale: number;
@@ -153,6 +155,8 @@ export interface WorldProp {
   spec: { name?: string; [k: string]: unknown };
   tile: [number, number] | null;
   state: 'placed' | 'bagged';
+  /** 物件所在场景（后端缺省归 DEFAULT_SCENE）。 */
+  sceneId?: string;
 }
 
 export interface WorldDetail extends WorldRow {

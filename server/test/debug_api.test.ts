@@ -130,6 +130,7 @@ test('GET /debug/api/worlds 与 /debug/api/worlds/:id：列表计数摘要，详
     const c1 = d.characters.find((c: { id: string }) => c.id === 'c1');
     assert.equal(c1.memoryCount, 1);
     assert.equal(c1.chatTurnCount, 2);
+    assert.equal(c1.sceneId, 'village', '角色摘要带场景（存量缺省归 village），供后台地图按场景归位');
     assert.equal(d.props.length, 1);
     assert.equal(d.visits.length, 2);
     // 场景 + POI + 传送门的结构化数据都要透出（此前 debug 只给拍平的 locations 名字）
