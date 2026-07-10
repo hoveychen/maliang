@@ -4,6 +4,7 @@ import { createMockAdapters } from '../src/adapters/mock.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 import { handleWsMessage, newVoiceSession } from '../src/server.ts';
+import { WorldHub } from '../src/world_hub.ts';
 import { DEFAULT_SCENE, WORLD_CENTER_TILE, type Character, type Player } from '../src/types.ts';
 
 function seedChar(store: WorldStore, id: string): Character {
@@ -129,6 +130,68 @@ test('world_state：首次进世界（无档案/无坐标）不带 playerPos', a
 
   const ws = sent.find((m) => m.type === 'world_state');
   assert.equal(ws.playerPos, undefined, '客户端据此按小神仙旁降生');
+});
+
+/** 两个客户端进同一世界的收包台（带 hub，测复制位置转发）。 */
+function relayHarness() {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  const adapters = createMockAdapters();
+  const limiter = new RateLimiter(100, 100);
+  const hub = new WorldHub();
+  const conn = (connKey: string) => {
+    const sent: any[] = [];
+    const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
+    const session = newVoiceSession();
+    const say = (msg: object) => handleWsMessage(socket, JSON.stringify(msg), adapters, store, limiter, connKey, session, hub);
+    return { sent, say, ofType: (t: string) => sent.filter((m) => m.type === t) };
+  };
+  return { store, conn };
+}
+
+test('positions_report 流式：世界坐标转发给同世界其他连接（排除自己），tile 仍持久化', async () => {
+  const { store, conn } = relayHarness();
+  seedChar(store, 'c1');
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb' });
+  a.sent.length = 0;
+  b.sent.length = 0;
+
+  await a.say({
+    type: 'positions_report', worldId: 'w1', playerId: 'pa', t: 12345,
+    chars: [{ id: 'c1', tileX: 10, tileY: 20, x: 100.5, y: 200.25 }],
+    player: { tileX: 5, tileY: 6, x: 50.0, y: 60.0 },
+  });
+
+  // 自己不回收自己的复制包
+  assert.equal(a.ofType('positions_relay').length, 0, '发送者不该收到自己的转发');
+  // 同世界另一端收到，携世界坐标 + 玩家(以 playerId 为 actor 键) + 时戳
+  const relay = b.ofType('positions_relay');
+  assert.equal(relay.length, 1);
+  assert.equal(relay[0].t, 12345);
+  assert.deepEqual(relay[0].chars, [{ id: 'c1', x: 100.5, y: 200.25 }]);
+  assert.deepEqual(relay[0].player, { id: 'pa', x: 50.0, y: 60.0 });
+  // tile 照常持久化
+  assert.deepEqual(store.getCharacter('w1', 'c1')?.position, { tileX: 10, tileY: 20 });
+  assert.deepEqual(store.getPlayerTile('w1', DEFAULT_SCENE, 'pa'), { tileX: 5, tileY: 6 });
+});
+
+test('positions_report 纯 tile（无 x,y）不触发转发（维持旧持久化路径）', async () => {
+  const { store, conn } = relayHarness();
+  seedChar(store, 'c1');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb' });
+  b.sent.length = 0;
+
+  await a.say({ type: 'positions_report', worldId: 'w1', playerId: 'pa', chars: [{ id: 'c1', tileX: 1, tileY: 1 }] });
+
+  assert.equal(b.ofType('positions_relay').length, 0, '无世界坐标不转发');
+  assert.deepEqual(store.getCharacter('w1', 'c1')?.position, { tileX: 1, tileY: 1 });
 });
 
 test('positions_report：角色 id 属于别的世界 → 不跨世界写入', async () => {

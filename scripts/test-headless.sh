@@ -48,6 +48,9 @@ UNIT_TESTS=(
   test_paper_idle
   test_player_profile
   test_backend_player_id
+  test_stage_agent
+  test_screenplay_replay
+  test_remote_actor_buffer
   test_positions_report
   test_terrain_export
   test_terrain_load

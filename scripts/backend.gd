@@ -22,6 +22,15 @@ signal praise_tts(data: Dictionary)
 ## tts_request 降级流（客户端 edge-tts 失败求服务端合成）：tts_start 带 mime，随后 tts_chunk/tts_end 同一通道
 signal tts_start(mime: String)
 signal tts_failed
+## 舞台协议（剧本系统，见 docs/script-runtime-design.md）：下行由 StageAgent 消费，回执经 send_stage_event 上行
+signal stage_begin(data: Dictionary)   ## 开演：{stageId, actors:[{id,name,isPlayer,voiceId}]}
+signal stage_cmd(data: Dictionary)     ## 单条命令：{stageId, cmdId, actorId?, op, args}
+signal stage_end(data: Dictionary)     ## 正常收场：{stageId, result?}
+signal stage_abort(data: Dictionary)   ## 异常终止：{stageId, reason}
+signal world_host(is_host: bool)       ## 多人所有权：本连接是否为 host（首位进入者，负责 NPC 模拟）
+signal time_sync(data: Dictionary)     ## 时间握手回执：{t0, serverMs}（倒计时/插值时间戳用）
+signal positions_relay(data: Dictionary) ## 其他端复制位置：{t, chars:[{id,x,y}], player?:{id,x,y}}（远端演员插值渲染）
+signal actor_leave(player_id: String)  ## 某玩家离场：即时清掉其远端副本（不等插值缓冲陈旧）
 ## 出站消息观测（连接未开也发射）：headless 测试/调试用，正常逻辑不要依赖它
 signal sent(msg: Dictionary)
 
@@ -105,6 +114,28 @@ func send_world_info(world_id: String, locations: Array, profile := {}, scene_id
 func send_tts_request(text: String, voice_id: String) -> void:
 	_send({ "type": "tts_request", "text": text, "voiceId": voice_id })
 
+## 舞台协议上行：命令回执/规则触发/终止请求。
+## kind='ack' 携带 cmdId(+可选 result/error) 关联下行命令；kind='abort' 请求终止本场演出；
+## kind='tap'|'timer'|'near' 携带 subId(+可选 payload) 把规则触发注回服务端脚本订阅。
+## worldId 服务端按连接归属，省略也可（server 回落连接所在世界）。
+func send_stage_event(kind: String, cmd_id := -1, result := {}, error := "", sub_id := "", payload := {}) -> void:
+	var msg := { "type": "stage_event", "kind": kind }
+	if cmd_id >= 0:
+		msg["cmdId"] = cmd_id
+	if not result.is_empty():
+		msg["result"] = result
+	if not error.is_empty():
+		msg["error"] = error
+	if not sub_id.is_empty():
+		msg["subId"] = sub_id
+	if not payload.is_empty():
+		msg["payload"] = payload
+	_send(msg)
+
+## 时间偏移握手：发本地毫秒钟 t0，服务端原样回带 + serverMs（见 time_sync 信号）。
+func send_time_sync() -> void:
+	_send({ "type": "time_sync", "t0": Time.get_ticks_msec() })
+
 ## 委托完成事件（客户端确定性判定：送达/带到/到点）。服务端匹配进行中委托则盖 1 章，回 task_complete。
 func send_task_event(world_id: String, kind: String, extra := {}) -> void:
 	var msg := { "type": "task_event", "worldId": world_id, "kind": kind }
@@ -119,6 +150,16 @@ func send_positions(world_id: String, chars: Array, player_tile := Vector2i(-1, 
 	var msg := { "type": "positions_report", "worldId": world_id, "chars": chars, "sceneId": scene_id }
 	if player_tile.x >= 0:
 		msg["player"] = { "tileX": player_tile.x, "tileY": player_tile.y }
+	_send(msg)
+
+## 高频世界坐标流（演出/多人期间）：owned actors 的实时世界坐标 + tile（tile 仍供服务端持久化）。
+## chars 形如 [{id, x, y, tileX, tileY}]；player 形如 {x, y, tileX, tileY} 或空。
+## t 为服务端钟毫秒（本地钟 + 时间偏移），接收端据此对齐插值时间戳。
+## 服务端把带 x,y 的条目转发给同世界其他连接，并喂 near 规则求值。
+func send_position_stream(world_id: String, chars: Array, player: Dictionary, t: int) -> void:
+	var msg := { "type": "positions_report", "worldId": world_id, "chars": chars, "t": t }
+	if not player.is_empty():
+		msg["player"] = player
 	_send(msg)
 
 ## 语音生成物件的落位回报：客户端就近找到空位后上报 tile，服务端持久化供重载恢复。
@@ -197,5 +238,21 @@ func _dispatch(data: Dictionary) -> void:
 			prop_denied.emit(data)
 		"prop_failed":
 			prop_failed.emit(String(data.get("reason", "")))
+		"stage_begin":
+			stage_begin.emit(data)
+		"stage_cmd":
+			stage_cmd.emit(data)
+		"stage_end":
+			stage_end.emit(data)
+		"stage_abort":
+			stage_abort.emit(data)
+		"world_host":
+			world_host.emit(bool(data.get("isHost", false)))
+		"time_sync":
+			time_sync.emit(data)
+		"positions_relay":
+			positions_relay.emit(data)
+		"actor_leave":
+			actor_leave.emit(String(data.get("playerId", "")))
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))

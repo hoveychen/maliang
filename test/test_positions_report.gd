@@ -63,6 +63,17 @@ func _init() -> void:
 	fails += _check("无玩家位置不带 player 键", (captured[-1] as Dictionary).has("player"), false)
 	fails += _check("scene_id 缺省 village", (captured[-1] as Dictionary).get("sceneId", ""), "village")
 
+	# ── send_position_stream 报文形状（P6 高频世界坐标流）──────────────────
+	b.send_position_stream("w1", [{ "id": "c1", "x": 100.5, "y": 200.25, "tileX": 10, "tileY": 20 }], { "x": 5.0, "y": 6.0, "tileX": 2, "tileY": 3 }, 987654)
+	var sm: Dictionary = captured[-1]
+	fails += _check("stream type", sm.get("type", ""), "positions_report")
+	fails += _check("stream 带时戳 t", sm.get("t", 0), 987654)
+	fails += _check("stream chars 带世界坐标 x", (sm.get("chars", []) as Array)[0].get("x", 0.0), 100.5)
+	fails += _check("stream 带 player", (sm.get("player", {}) as Dictionary).get("x", 0.0), 5.0)
+	# 空 player 字典不发 player 键
+	b.send_position_stream("w1", [{ "id": "c1", "x": 1.0, "y": 1.0, "tileX": 0, "tileY": 0 }], {}, 111)
+	fails += _check("空 player 不带 player 键", (captured[-1] as Dictionary).has("player"), false)
+
 	b.free()
 	print("test_positions_report: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
