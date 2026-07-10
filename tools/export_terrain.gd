@@ -28,7 +28,33 @@ func _init() -> void:
 	var gz := buf.compress(FileAccess.COMPRESSION_GZIP)
 	print("导出 %s：%d B（gzip %d B）grid=%d×%d" % [
 		out_path, buf.size(), gz.size(), WorldGrid.GRID_TILES, WorldGrid.GRID_TILES])
+
+	# POI 一并导出（POST /admin/scenes 的 pois 字段直接吃它）
+	var poi_path := _arg("--poi-out", out_path.get_basename() + ".pois.json")
+	var pf := FileAccess.open(poi_path, FileAccess.WRITE)
+	if pf == null:
+		printerr("无法写入 ", poi_path)
+		quit(1)
+		return
+	pf.store_string(JSON.stringify(build_poi_json(), "  "))
+	pf.close()
+	print("导出 %s：%d 个 POI" % [poi_path, build_poi_json().size()])
 	quit(0)
+
+## world.gd 的 POIS 常量 → POST /admin/scenes 的 pois 载荷（tile 由 Vector2i 摊平成 [x,y]）。
+static func build_poi_json() -> Array:
+	var world_script: GDScript = load("res://scripts/world.gd")
+	var out: Array = []
+	for poi in world_script.POIS:
+		var t: Vector2i = poi["tile"]
+		out.append({
+			"tile": [t.x, t.y],
+			"radius": float(poi["radius"]),
+			"trigger": String(poi["trigger"]),
+			"name": String(poi["name"]),
+			"aliases": poi["aliases"],
+		})
+	return out
 
 ## 构建 .mltr 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。
 static func build_terrain_bytes() -> PackedByteArray:

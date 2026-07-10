@@ -51,6 +51,7 @@ UNIT_TESTS=(
   test_positions_report
   test_terrain_export
   test_terrain_load
+  test_poi_serve
   test_position_restore
   test_webp_load
   test_asset_cache

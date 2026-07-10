@@ -273,6 +273,36 @@ const POIS := [
 	{ "tile": Vector2i(59, 54), "radius": 20.0, "trigger": "poi_windmill", "name": "风车", "aliases": ["大风车", "风车山"] },
 	{ "tile": Vector2i(13, 50), "radius": 18.0, "trigger": "poi_marsh", "name": "小水潭", "aliases": ["水潭", "树林", "小树林"] },
 ]
+## 运行期 POI：服务端 scenes.pois 下发则替换，否则沿用上面的内置常量（离线/老服务端）。
+## POIS 仍是类常量，test_fairy_voice 据它校验「每个内置触发器都有台词」。
+var pois: Array = POIS
+
+## 把服务端下发的 POI 转成运行期结构（tile 由 [x,y] 变 Vector2i）。非法条目跳过。
+## 全部非法/空 → 保留内置常量，绝不让世界变成没有地点的空壳。
+static func parse_server_pois(list: Variant) -> Array:
+	if typeof(list) != TYPE_ARRAY:
+		return []
+	var out: Array = []
+	for e in (list as Array):
+		if typeof(e) != TYPE_DICTIONARY:
+			continue
+		var d: Dictionary = e
+		var t: Variant = d.get("tile", null)
+		if typeof(t) != TYPE_ARRAY or (t as Array).size() != 2:
+			continue
+		var name := String(d.get("name", ""))
+		var trigger := String(d.get("trigger", ""))
+		if name.is_empty() or trigger.is_empty():
+			continue
+		out.append({
+			"tile": Vector2i(int((t as Array)[0]), int((t as Array)[1])),
+			"radius": float(d.get("radius", 20.0)),
+			"trigger": trigger,
+			"name": name,
+			"aliases": d.get("aliases", []),
+		})
+	return out
+
 const POI_FLY_CAP := 9.0          ## 提醒飞行离玩家的最远距离（保持在视野内）
 var _player_executor: BehaviorExecutor = null ## 玩家当前移动指令（新点击即替换）
 var _approach: Dictionary = {}    ## 正在跑向的目标 NPC 字典（到旁边后进近身视图）
@@ -705,7 +735,7 @@ func _check_poi(delta: float) -> void:
 	_poi_check_t = 2.0
 	if InteractionFsm.player_engaged(_fsm_inputs()):
 		return
-	for poi in POIS:
+	for poi in pois:
 		var pp := TerrainMap.tile_center(poi["tile"])
 		var dp := WorldGrid.shortest_delta(player["logical"], pp)
 		if dp.length() <= float(poi["radius"]) and fairy_voice.can_play(String(poi["trigger"])):
@@ -2597,6 +2627,13 @@ func _load_server_terrain(scenes: Variant) -> void:
 			break
 	if scene.is_empty():
 		return
+
+	# POI 先应用：与地形字节相互独立，地形拉取失败不该把地点名一起丢了。
+	# 解析不出任何合法 POI 时保留内置常量——绝不让世界变成没有地点的空壳。
+	var sp := parse_server_pois(scene.get("pois", []))
+	if not sp.is_empty():
+		pois = sp
+
 	var asset := String(scene.get("terrainAsset", ""))
 	if asset.is_empty():
 		return
@@ -3777,11 +3814,11 @@ func _resolve_location(loc: String) -> Vector2:
 	var q := loc.strip_edges()
 	if q.is_empty():
 		return Vector2.INF
-	for poi in POIS:
+	for poi in pois:
 		for n in _poi_names(poi):
 			if n == q:
 				return Vector2(poi["tile"]) * float(WorldGrid.TILE_SIZE)
-	for poi in POIS:
+	for poi in pois:
 		for n in _poi_names(poi):
 			if q.contains(n) or n.contains(q):
 				return Vector2(poi["tile"]) * float(WorldGrid.TILE_SIZE)
@@ -3795,7 +3832,7 @@ func _poi_names(poi: Dictionary) -> Array:
 ## 连上 WS 后上报世界地点名清单（POI 规范名），让意图 LLM 把「去某地」归一到真实地名。
 func _send_world_info() -> void:
 	var names: Array = []
-	for poi in POIS:
+	for poi in pois:
 		names.append(String(poi.get("name", "")))
 	backend.send_world_info(world_id, names, PlayerProfile.upload_dict()) # 带档案供服务端首见建玩家
 
