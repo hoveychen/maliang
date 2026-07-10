@@ -35,6 +35,15 @@ gdextension_asr/*.os
 gdextension_asr/src/*.o
 gdextension_asr/src/*.os
 
+# 签名/公证材料（绝不入库；见 .keystores 同理）——防御性通配
+.signing/
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+*_certificate*.pem
+notarize*.json
+
 # OS
 .DS_Store
 
