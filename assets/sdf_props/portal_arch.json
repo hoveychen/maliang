@@ -1,0 +1,24 @@
+{
+  "name": "portal_arch",
+  "palette": ["#6e4a32", "#b58cf0", "#ffe08a"],
+  "blend": 0.16,
+  "outline": 0.04,
+  "color_k": 0.08,
+  "parts": [
+    {"shape": "capsule", "pos": [-1.05, 1.35, 0], "r": 0.14, "len": 2.5, "color": 0},
+    {"shape": "capsule", "pos": [1.05, 1.35, 0], "r": 0.14, "len": 2.5, "color": 0},
+    {"shape": "capsule", "pos": [-0.82, 2.78, 0], "r": 0.14, "len": 0.62, "rot": [0, 0, 50], "color": 0},
+    {"shape": "capsule", "pos": [0.82, 2.78, 0], "r": 0.14, "len": 0.62, "rot": [0, 0, -50], "color": 0},
+    {"shape": "capsule", "pos": [0, 3.05, 0], "r": 0.14, "len": 1.25, "rot": [0, 0, 90], "color": 0},
+    {"shape": "box", "pos": [0, 1.55, 0], "size": [1.85, 2.5, 0.14], "color": 1, "blend": 0.05},
+    {"shape": "sphere", "pos": [0, 3.36, 0], "r": 0.2, "color": 2, "blend": 0.05},
+    {"shape": "sphere", "pos": [0.85, 1.55, 0], "r": 0.13, "color": 2, "blend": 0.02,
+      "spin": {"rate": 0.22, "axis": [0, 1, 0], "pivot": [0, 1.55, 0]}},
+    {"shape": "sphere", "pos": [-0.42, 1.55, 0.74], "r": 0.13, "color": 2, "blend": 0.02,
+      "spin": {"rate": 0.22, "axis": [0, 1, 0], "pivot": [0, 1.55, 0]}},
+    {"shape": "sphere", "pos": [-0.42, 1.55, -0.74], "r": 0.13, "color": 2, "blend": 0.02,
+      "spin": {"rate": 0.22, "axis": [0, 1, 0], "pivot": [0, 1.55, 0]}}
+  ],
+  "locomotion": {"type": "none"},
+  "ropes": []
+}

@@ -39,6 +39,17 @@ func _init() -> void:
 	pf.store_string(JSON.stringify(build_poi_json(), "  "))
 	pf.close()
 	print("导出 %s：%d 个 POI" % [poi_path, build_poi_json().size()])
+
+	# 传送点一并导出（POST /admin/scenes 的 portals 字段直接吃它）
+	var portal_path := _arg("--portal-out", out_path.get_basename() + ".portals.json")
+	var qf := FileAccess.open(portal_path, FileAccess.WRITE)
+	if qf == null:
+		printerr("无法写入 ", portal_path)
+		quit(1)
+		return
+	qf.store_string(JSON.stringify(build_portal_json(), "  "))
+	qf.close()
+	print("导出 %s：%d 个传送点" % [portal_path, build_portal_json().size()])
 	quit(0)
 
 ## world.gd 的 POIS 常量 → POST /admin/scenes 的 pois 载荷（tile 由 Vector2i 摊平成 [x,y]）。
@@ -55,6 +66,14 @@ static func build_poi_json() -> Array:
 			"aliases": poi["aliases"],
 		})
 	return out
+
+## 村庄侧传送点：西南小树林边缘（18,52）的平坦草地，走进半径就穿到森林的林间空地（20,18）。
+## radius 单位是世界坐标（TILE_SIZE=2.0），3.0 ≈ 1.5 格：玩家还没踩到中心就已触发。
+## 与 export_forest.gd 的 build_portal_json() 必须互指（test_portal.gd 对拍两边）。
+static func build_portal_json() -> Array:
+	return [
+		{ "tile": [18, 52], "radius": 3.0, "toScene": "forest", "toTile": [20, 18] },
+	]
 
 ## 构建 .mltr 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。
 static func build_terrain_bytes() -> PackedByteArray:

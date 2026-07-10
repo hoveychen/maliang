@@ -603,10 +603,15 @@ export interface VoiceSession {
   creation: CreationState | null;
   /** 客户端自带 TTS（edge-tts 直连微软）：WS 连接 URL 带 ?clientTts=1 时置位，服务端全程跳过合成只发文本+voiceId。 */
   clientTts: boolean;
+  /**
+   * 玩家当前所在场景（模型 B）。world_info 进世界时置初值，enter_scene 走 portal 时更新。
+   * getLocations/委托候选/角色物件下发都按它过滤（消化「委托指向别场景」的边界）。
+   */
+  currentScene: string;
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null, creation: null, clientTts: false };
+  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null, creation: null, clientTts: false, currentScene: DEFAULT_SCENE };
 }
 
 const VISIT_FLUSH_THRESHOLD = 20; // 单角色累积超此轮数即中途 flush，兜底长会话掉线全丢
@@ -1089,6 +1094,8 @@ export async function handleWsMessage(
       .map((n) => n.trim())
       .slice(0, 32);
     store.setLocations(worldId, names);
+    // 记下进世界的初始场景（缺省 village）；后续 enter_scene 走 portal 时更新。
+    session.currentScene = (msg.sceneId ?? DEFAULT_SCENE) || DEFAULT_SCENE;
     // 进世界 = 一段会话（Visit）开始：作会话结束批量抽记忆的边界。
     startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now());
     // 多人基座：登记进 world 分组；首位进入者为 host（NPC 模拟所有权），换世界时旧世界可能换 host。
@@ -1204,7 +1211,7 @@ export async function handleWsMessage(
         await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store);
         return;
       }
-      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts);
+      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene);
       // 造角色入口：开引导会话，不发普通回应。
       if (response.characterRequest) {
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText);
@@ -1257,6 +1264,7 @@ export async function handleWsMessage(
         store,
         ttsHooks,
         session.clientTts,
+        session.currentScene,
       );
       // 造角色入口：respondToTranscript 识别到 create_character 意图但没出声，这里开引导会话，不发普通回应。
       if (response.characterRequest) {
@@ -1383,7 +1391,7 @@ export async function handleWsMessage(
         onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
         onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
       };
-      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts);
+      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene);
       // 造角色入口：开引导会话，不发普通回应。
       if (response.characterRequest) {
         await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store, response.replyText);
@@ -1431,6 +1439,26 @@ export async function handleWsMessage(
     if (!store.movePropTile(msg.worldId ?? '', msg.propId ?? '', tile)) {
       socket.send(JSON.stringify({ type: 'error', error: 'prop not placed' }));
     }
+    return;
+  }
+
+  // 走 portal 换场景（模型 B）：换 session.currentScene，回该场景的地形 hash + 角色 + 物件 + pois +
+  // 该场景里玩家的最后位置。客户端据此卸载旧场景、载入新场景。scene 为 null 表示该场景还没入库
+  // （客户端回退本地生成或忽略）。角色/物件按场景过滤，跨场景的不下发。
+  if (msg.type === 'enter_scene') {
+    const worldId = msg.worldId ?? '';
+    const sceneId = (msg.sceneId ?? DEFAULT_SCENE) || DEFAULT_SCENE;
+    session.currentScene = sceneId;
+    const scene = store.getScene(worldId, sceneId);
+    socket.send(JSON.stringify({
+      type: 'scene_entered',
+      worldId,
+      sceneId,
+      scene: scene ?? null,
+      characters: store.listCharacters(worldId, sceneId),
+      props: store.listProps(worldId, sceneId),
+      playerPos: session.playerId ? store.getPlayerTile(worldId, sceneId, session.playerId) : undefined,
+    }));
     return;
   }
 

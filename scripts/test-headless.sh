@@ -54,6 +54,10 @@ UNIT_TESTS=(
   test_positions_report
   test_terrain_export
   test_terrain_load
+  test_terrain_rebuild
+  test_forest_scene
+  test_enter_scene_client
+  test_portal
   test_poi_serve
   test_position_restore
   test_webp_load
@@ -110,6 +114,8 @@ run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
 run_test test_visual_props         --fixed-fps 10 --quit-after 120
 run_test test_visual_settings      --fixed-fps 10 --quit-after 80
 run_test test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
+run_test test_visual_scene_switch   --fixed-fps 10 --quit-after 60
+run_test test_visual_portal         --fixed-fps 10 --quit-after 90
 
 echo
 if [ "$fails" -eq 0 ]; then

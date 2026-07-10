@@ -834,6 +834,18 @@ func _setup_hud() -> void:
 	# 舞台 HUD 工厂（计分/倒计时/toast）：倒计时归零经 _on_stage_timer_done 转 StageAgent 上行。
 	_hud = HudFactory.new()
 	_hud.setup(layer, Callable(self, "_on_stage_timer_done"))
+
+	# 换场景黑幕：独立 CanvasLayer 盖在 HUD 之上，过场期间连按钮一起遮住（顺带吃掉乱点）。
+	var fade_layer := CanvasLayer.new()
+	fade_layer.layer = 100
+	add_child(fade_layer)
+	_fade_rect = ColorRect.new()
+	_fade_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_fade_rect.color = Color(0.04, 0.05, 0.08)
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+	_fade_rect.visible = false
+	_fade_rect.modulate.a = 0.0
+	fade_layer.add_child(_fade_rect)
 	_load_play_budget() # 恢复跨会话可玩时间预算（隔会话对账：冷却已过/长休息则刷新）
 
 	coord_label = Label.new()
@@ -1775,6 +1787,8 @@ func _process(delta: float) -> void:
 	tp = _prof_lap(tp, "executors")
 	_step_positions_report(delta)
 	_check_approach()
+	_step_portal()          # 踏进传送点半径 → enter_scene（黑幕 + 卸旧载新）
+	_step_transition(delta) # 过场黑幕推进（淡入/发报文/等区块/淡出）
 	tp = _prof_lap(tp, "approach")
 	_update_fairy(delta)
 	tp = _prof_lap(tp, "fairy")
@@ -1844,6 +1858,7 @@ func _process(delta: float) -> void:
 	_step_remote_actors(delta) # 多人复制：先按缓冲推进被复制 NPC/远端副本的 logical，再统一渲染
 	_reposition_npcs(delta)
 	_update_npc_notice(delta)  # 近身空闲村民偶尔转头看玩家打招呼（在 reposition 后跑，paper_walk 已更新）
+	_update_portal_markers()   # 传送门拱随世界滚动（与角色同一套环面最短位移）
 	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
 	_update_voice_wave(delta)
@@ -1935,7 +1950,7 @@ func _step_positions_report(delta: float) -> void:
 
 	if moved.is_empty() and player_tile.x < 0:
 		return # 全静止：零流量
-	backend.send_positions(world_id, moved, player_tile, SCENE_ID)
+	backend.send_positions(world_id, moved, player_tile, _scene_id)
 
 ## 是否进入高频复制模式：演出中，或世界里已有其他人（收到过复制位置）。
 func _streaming_active() -> bool:
@@ -2849,6 +2864,7 @@ func _setup_backend() -> void:
 	backend.time_sync.connect(_stage.on_time_sync)
 	backend.positions_relay.connect(_on_positions_relay) # 多人位置复制：远端 actor 插值渲染
 	backend.actor_leave.connect(_on_actor_leave)         # 玩家离场：即时清掉其远端副本
+	backend.scene_entered.connect(_on_scene_entered) # 走 portal 换场景：卸旧场景、载新场景
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
 	# 也在 THINK_TIMEOUT 秒后自动解卡——这是无论后端如何都不再永久卡死的最后一道保险。
 	_think_timer = Timer.new()
@@ -2875,21 +2891,166 @@ func _on_failed(reason: String) -> void:
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 ## _bootstrapping 全程置位，无论在线/离线都在收尾清零——world_ready 就绪判定据此知道引导已结束。
-## 当前场景 id（模型 B：world 含多 scene；步骤①②只有 village 一个）。
-const SCENE_ID := "village"
+## 当前场景 id（模型 B：world 含多 scene）。进世界时按初始场景置初值，走 portal（enter_scene）时更新。
+var _scene_id := "village"
 
-## 从服务端下发的场景里取地形并载入。任何一步不成就静默保留本地 _paint()——
-## 离线、老服务端、地形未入库、载荷损坏，都必须能照常进世界。
+## 当前场景的传送点（服务端 scenes[].portals / scene_entered 的 scene.portals 下发）。
+## 运行期结构 { tile: Vector2i, radius: float, to_scene: String, to_tile: Vector2i }。
+var _portals: Array = []
+## 传送去抖：刚换完场景玩家就站在返回传送点上，必须先走出所有半径才重新武装，否则来回弹。
+var _portal_armed := false
+
+const FADE_TIME := 0.35          ## 过场黑幕淡入/淡出各自的时长（秒）
+const TRANSITION_TIMEOUT := 8.0  ## 服务端不回 scene_entered / 区块铺不完时的兜底：强行淡出，别把小朋友关在黑屏里
+var _fade_rect: ColorRect        ## 换场景黑幕（盖在 HUD 之上，过场期间吃掉乱点）
+var _fade_a := 0.0               ## 黑幕当前不透明度
+var _fade_target := 0.0          ## 黑幕目标不透明度（1=遮住，0=露出世界）
+var _transitioning := false      ## 过场进行中：禁止再次触发传送
+var _pending_scene := ""         ## 全黑之后才发 enter_scene——卸旧载新绝不在半透明时发生
+var _await_skin := false         ## 新场景已落地，等区块重铺完（all_skinned）再淡出
+var _transition_t := 0.0         ## 本次过场累计秒（超时兜底用）
+var _arrive_tile := Vector2i(-1, -1) ## 走 portal 的目标落点（优先于服务端记的该场景最后位置）
+
+## 传送门视觉标记（每个 portal 一座拱门）。刻意不走 chunk_manager 的 SDF 物件通道：那条路会
+## 登记占地（把传送点本身挡住）并进 _dynamic_props（长按就被当语音物件揣走）。这里由 world 直接
+## 持有节点、逐帧按环面最短位移摆位；SdfProp 材质自带 world-bend，不再 CPU 端压 y（与区块内物件同口径）。
+const PORTAL_MARKER_SPEC := "res://assets/sdf_props/portal_arch.json"
+var _portal_markers: Array = [] ## [{ node: SdfProp, logical: Vector2 }]
+
+## 服务端下发的 portals → 运行期结构。非法条目跳过（坏一条不连坐整批）。
+static func parse_server_portals(list: Variant) -> Array:
+	if typeof(list) != TYPE_ARRAY:
+		return []
+	var out: Array = []
+	for e in (list as Array):
+		if typeof(e) != TYPE_DICTIONARY:
+			continue
+		var d: Dictionary = e
+		var t: Variant = d.get("tile", null)
+		var tt: Variant = d.get("toTile", null)
+		if typeof(t) != TYPE_ARRAY or (t as Array).size() != 2:
+			continue
+		if typeof(tt) != TYPE_ARRAY or (tt as Array).size() != 2:
+			continue
+		var to_scene := String(d.get("toScene", ""))
+		if to_scene.is_empty():
+			continue
+		var tile := Vector2i(int((t as Array)[0]), int((t as Array)[1]))
+		var to_tile := Vector2i(int((tt as Array)[0]), int((tt as Array)[1]))
+		if not WorldGrid.is_valid_tile(tile) or not WorldGrid.is_valid_tile(to_tile):
+			continue
+		var radius := float(d.get("radius", 3.0))
+		if radius <= 0.0:
+			continue
+		out.append({ "tile": tile, "radius": radius, "to_scene": to_scene, "to_tile": to_tile })
+	return out
+
+## pos 落在哪个传送点半径内（环面最短距离，世界坐标单位）；都不在返回 {}。纯函数便于回测。
+static func portal_hit(portals: Array, pos: Vector2) -> Dictionary:
+	for p in portals:
+		var center := WorldGrid.from_tile_center(p["tile"] as Vector2i)
+		if WorldGrid.shortest_delta(pos, center).length() <= float(p["radius"]):
+			return p
+	return {}
+
+## 每帧检查玩家是否踏进传送点。走出所有半径才重新武装——刚从对面穿过来时玩家正站在
+## 返回传送点上，若不去抖会立刻被弹回去。
+func _step_portal() -> void:
+	if _transitioning or _portals.is_empty() or player.is_empty():
+		return
+	var hit := portal_hit(_portals, player["logical"])
+	if hit.is_empty():
+		_portal_armed = true
+		return
+	if not _portal_armed:
+		return
+	enter_scene(String(hit["to_scene"]), hit["to_tile"] as Vector2i)
+
+## 为当前 _portals 各立一座传送门拱（换场景时先 _clear_portal_markers 再重建）。
+## spec 坏了就不立——世界照常能玩，只是传送点没有地标。
+func _spawn_portal_markers() -> void:
+	_clear_portal_markers()
+	for p in _portals:
+		var prop := SdfProp.from_json_file(PORTAL_MARKER_SPEC)
+		if prop == null:
+			push_warning("[portal] 传送门标记 spec 载入失败：%s" % PORTAL_MARKER_SPEC)
+			return
+		add_child(prop)
+		_portal_markers.append({ "node": prop, "logical": WorldGrid.from_tile_center(p["tile"] as Vector2i) })
+
+func _clear_portal_markers() -> void:
+	for m in _portal_markers:
+		var node: Variant = m.get("node", null)
+		if node != null and is_instance_valid(node):
+			(node as Node).queue_free()
+	_portal_markers.clear()
+
+## 逐帧把拱门摆到渲染空间（渲染原点 = focus_logical），高度取所在 tile 的台阶高。
+func _update_portal_markers() -> void:
+	for m in _portal_markers:
+		var node: Variant = m.get("node", null)
+		if node == null or not is_instance_valid(node):
+			continue
+		var logical: Vector2 = m["logical"]
+		var d := WorldGrid.shortest_delta(focus_logical, logical)
+		var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(logical))) * TerrainMap.STEP_HEIGHT
+		(node as Node3D).position = Vector3(d.x, ty, d.y)
+
+## 过场黑幕推进：淡入 → 全黑后才发 enter_scene → 卸旧载新 → 区块铺完 → 淡出。
+func _step_transition(delta: float) -> void:
+	if not _transitioning and _fade_a <= 0.0:
+		return
+	_transition_t += delta
+	var step := delta / FADE_TIME
+	_fade_a = clampf(_fade_a + (step if _fade_target > _fade_a else -step), 0.0, 1.0)
+	if _fade_rect != null:
+		_fade_rect.visible = _fade_a > 0.001
+		_fade_rect.modulate.a = _fade_a
+
+	# 全黑了才发报文：换场景的卸旧载新一律发生在黑幕背后
+	if not _pending_scene.is_empty() and _fade_a >= 1.0:
+		if online and backend != null:
+			backend.send_enter_scene(world_id, _pending_scene)
+		_pending_scene = ""
+
+	# 兜底：服务端没回 scene_entered，或区块迟迟铺不完——到点强行淡出，宁可看见半铺的地也不黑屏
+	if _transitioning and _transition_t >= TRANSITION_TIMEOUT and _fade_target > 0.0:
+		push_warning("[portal] 换场景超时（%.1fs），强制淡出" % _transition_t)
+		_pending_scene = ""
+		_await_skin = false
+		_arrive_tile = Vector2i(-1, -1)
+		_fade_target = 0.0
+
+	if _await_skin and (chunk_manager == null or chunk_manager.all_skinned()):
+		_await_skin = false
+		_fade_target = 0.0
+
+	if _transitioning and _fade_target <= 0.0 and _fade_a <= 0.0 \
+			and _pending_scene.is_empty() and not _await_skin:
+		_transitioning = false
+
+## 从服务端下发的场景数组里取当前场景并载入（初始进世界用）。任何一步不成就静默保留本地
+## _paint()——离线、老服务端、地形未入库、载荷损坏，都必须能照常进世界。
 func _load_server_terrain(scenes: Variant) -> void:
 	if typeof(scenes) != TYPE_ARRAY or (scenes as Array).is_empty():
 		return # 地形还没入库：走本地确定性生成，与改动前一致
 	var scene: Dictionary = {}
 	for s in scenes:
-		if typeof(s) == TYPE_DICTIONARY and String((s as Dictionary).get("sceneId", "")) == SCENE_ID:
+		if typeof(s) == TYPE_DICTIONARY and String((s as Dictionary).get("sceneId", "")) == _scene_id:
 			scene = s
 			break
 	if scene.is_empty():
 		return
+	await _apply_scene(scene)
+
+## 应用单个场景的 POI + 地形（初始进世界与换场景 enter_scene 共用）。terrain 变了就重铺全图
+## 区块——见 docs/multi-scene-design.md 步骤⑤边界1：地形必须在 chunk 重铺之前就位（本函数
+## load_from_bytes 先落地、changed 时才 rebuild），玩家落位在调用方于地形就位后再定。
+func _apply_scene(scene: Dictionary) -> void:
+	# 场景 id 先告诉 chunk_manager：重铺时散布 deco / 手工地标按目标场景取规则（village 分区+建筑、
+	# forest 铺满树+河岸苇+空地）。必须在 rebuild 之前置好，否则重铺仍用旧场景的 deco 规则。
+	if chunk_manager != null:
+		chunk_manager.scene_id = String(scene.get("sceneId", chunk_manager.scene_id))
 
 	# POI 先应用：与地形字节相互独立，地形拉取失败不该把地点名一起丢了。
 	# 解析不出任何合法 POI 时保留内置常量——绝不让世界变成没有地点的空壳。
@@ -2897,21 +3058,121 @@ func _load_server_terrain(scenes: Variant) -> void:
 	if not sp.is_empty():
 		pois = sp
 
+	# 传送点同理：地形拉不下来也要认这张图的 portal（走过去还能换场景）。
+	# 没有 portal 的场景就是没有出口，_portals 置空即可（离线/老服务端下发不了 portals）。
+	_portals = parse_server_portals(scene.get("portals", []))
+	_spawn_portal_markers()
+
 	var asset := String(scene.get("terrainAsset", ""))
 	if asset.is_empty():
 		return
 	var buf: PackedByteArray = await api.fetch_bytes(asset)
 	if buf.is_empty():
-		push_warning("[terrain] 拉取地形 %s 失败，沿用本地生成" % asset)
+		push_warning("[terrain] 拉取地形 %s 失败，沿用现有地形" % asset)
 		return
 	var r := TerrainMap.load_from_bytes(buf)
 	if not r["ok"]:
-		push_warning("[terrain] 服务端地形非法(%s)，沿用本地生成" % r["error"])
+		push_warning("[terrain] 服务端地形非法(%s)，沿用现有地形" % r["error"])
 		return
 	if r["changed"]:
-		# chunk_manager 没有「地形变了重铺全图」的入口，且 _setup_player 早在 _ready 里就
-		# 摸过地形。今天不该发生（导出字节 == _paint() 输出）；真发生说明两端画法漂了。
-		push_warning("[terrain] 服务端地形与本地生成不一致，已铺区块可能是旧样子")
+		# 地形与当前 chunk 首铺用的不同：chunk_manager 缓存的区块 mesh 得整图重铺才能反映新地形
+		# （初始进世界：首铺用本地 _paint()，今天导出字节 == _paint() 输出故 changed 恒 false；
+		# 换场景：目标场景地形必然不同，changed=true）。玩家/角色落位由调用方在地形就位后再定。
+		push_warning("[terrain] 地形与当前区块不一致，重铺全图区块")
+		if chunk_manager != null:
+			chunk_manager.rebuild()
+
+## 走 portal 换场景的入口（_step_portal 调用）：黑幕淡入 → 全黑后 _step_transition 才发报文 →
+## 服务端回 scene_entered → _on_scene_entered 卸旧载新 → 区块铺完淡出。离线/未连时静默忽略。
+## arrive_tile 是传送点出口，落位优先于服务端记的该场景最后位置（否则会掉回上次离开的地方）。
+func enter_scene(scene_id: String, arrive_tile := Vector2i(-1, -1)) -> void:
+	if scene_id.is_empty() or scene_id == _scene_id or _transitioning:
+		return
+	if not online or backend == null:
+		return # 离线：没有目标场景的数据，什么也别做
+	_transitioning = true
+	_transition_t = 0.0
+	_portal_armed = false
+	_arrive_tile = arrive_tile
+	_pending_scene = scene_id
+	_fade_target = 1.0
+
+## 收到 scene_entered：卸载当前场景的角色/物件 → 上新地形并重铺区块 → 生成新场景角色/物件
+## → 按该场景玩家最后位置落位。顺序保证「地形在 chunk 重铺、角色/玩家落位之前就位」
+## （docs/multi-scene-design.md 步骤⑤边界1）。
+func _on_scene_entered(data: Dictionary) -> void:
+	var sid := String(data.get("sceneId", ""))
+	if sid.is_empty():
+		return
+	_portal_armed = false # 落地时多半正站在返回传送点上：走出去才重新武装（_step_portal）
+	_unload_scene()
+
+	# 地形先就位（_apply_scene changed 时会 rebuild 区块）；scene 为 null 表示该场景未入库，
+	# 保留当前地形（离线/未入库容错）。
+	var scene: Variant = data.get("scene", null)
+	if typeof(scene) == TYPE_DICTIONARY:
+		await _apply_scene(scene as Dictionary)
+	_scene_id = sid
+
+	# 新场景角色：与初始进世界同一条并发预取 + 顺序降生链路。
+	var chars: Array = data.get("characters", [])
+	var prefetched := await _prefetch_characters(chars)
+	for c in chars:
+		await _spawn_server_character(c as Dictionary, Vector2.INF, prefetched)
+
+	# 新场景物件（placed 的落地，bagged 的留背包）。
+	_restore_world_props(data.get("props", []))
+
+	# 玩家落位：走 portal 来的落在传送点出口（_arrive_tile），否则用该场景的最后位置（服务端下发），
+	# 再否则留在当前逻辑位。都会就近找空位避让新地形。
+	var target := focus_logical
+	if WorldGrid.is_valid_tile(_arrive_tile):
+		target = WorldGrid.from_tile_center(_arrive_tile)
+	else:
+		var pp: Variant = data.get("playerPos", null)
+		if typeof(pp) == TYPE_DICTIONARY:
+			var tile := Vector2i(int((pp as Dictionary).get("tileX", -1)), int((pp as Dictionary).get("tileY", -1)))
+			if WorldGrid.is_valid_tile(tile):
+				target = WorldGrid.from_tile_center(tile)
+	_arrive_tile = Vector2i(-1, -1)
+	if not player.is_empty():
+		OccupancyMap.char_unregister(PLAYER_ID)
+		var spot := _find_free_spot(target, PLAYER_SPAN)
+		player["logical"] = spot
+		OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+		focus_logical = spot
+	# 新场景就位后向服务端重报地点名（意图 LLM 认新场景的 POI）。
+	if online:
+		_send_world_info()
+	# 过场收尾交给 _step_transition：等新地形的区块全铺完（all_skinned）再淡出，
+	# 否则黑幕撤掉时槽位还挂着旧场景的网格（rebuild 是逐帧重铺的）。
+	if _transitioning:
+		_await_skin = true
+
+## 卸载当前场景的所有角色与物件（换场景时调用）。玩家节点跨场景保留（同一个小朋友）。
+func _unload_scene() -> void:
+	if selected != null:
+		_exit_interaction() # 交互中切场景：先干净退出（清麦/相机/HUD/选中态）
+	# 停掉所有 NPC 自主行为 + 玩家当前移动（都指向即将释放的节点）
+	_executors.clear()
+	_player_executor = null
+	_approach = {}
+	_stopped = {}
+	for n in npcs:
+		if not bool(n.get("is_fairy", false)):
+			OccupancyMap.char_unregister(String(n.get("id", "")))
+		var node: Variant = n.get("node", null)
+		if node != null and is_instance_valid(node):
+			(node as Node).queue_free()
+	npcs.clear()
+	_villager_count = 0
+	_reported_tiles.clear() # 位置去重重置：新场景角色从头全报一次
+	# 语音物件：释放占地 + 清运行时清单（rebuild 后不再把旧场景物件重生成到新场景）
+	if chunk_manager != null:
+		chunk_manager.clear_dynamic_props()
+	world_props.clear()
+	_portals.clear() # 旧场景的出口不属于新场景；新场景的由 _apply_scene 重新下发
+	_clear_portal_markers()
 
 func _bootstrap() -> void:
 	_bootstrapping = true
@@ -4415,7 +4676,7 @@ func _send_world_info() -> void:
 	var names: Array = []
 	for poi in pois:
 		names.append(String(poi.get("name", "")))
-	backend.send_world_info(world_id, names, PlayerProfile.upload_dict(), SCENE_ID) # 带档案供服务端首见建玩家；SCENE_ID 让服务端回读本场景 playerPos
+	backend.send_world_info(world_id, names, PlayerProfile.upload_dict(), _scene_id) # 带档案供服务端首见建玩家；_scene_id 让服务端回读本场景 playerPos
 
 # ── 奖赏系统：委托状态 / 提示 chip / 完成判定 ──────────────────────────────
 

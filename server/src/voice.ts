@@ -62,19 +62,21 @@ export async function respondToTranscript(
   store: WorldStore,
   hooks?: TTSStreamHooks,
   clientTts = false,
+  sceneId?: string,
 ): Promise<VoiceResponse> {
   const character = store.getCharacter(worldId, characterId);
   if (!character) throw new CharacterNotFoundError(worldId, characterId);
 
-  // 花名册：世界里其他可指挥的角色（不含自己、不含小神仙——她悬浮不走地面寻路）
+  // 花名册：当前场景里其他可指挥的角色（不含自己、不含小神仙——她悬浮不走地面寻路）。
+  // sceneId 缺省=全世界（老调用点行为不变）；给了则不把别场景的角色列进「小蓝跟我来」的候选。
   const roster = store
-    .listCharacters(worldId)
+    .listCharacters(worldId, sceneId)
     .filter((c) => c.id !== characterId && !c.isFairy)
     .map((c) => ({ id: c.id, name: c.name }));
 
-  // 委托：进行中的给 LLM 提醒；没有进行中的生成候选让 LLM 挑时机发起（模板池确定性生成）
+  // 委托：进行中的给 LLM 提醒；没有进行中的生成候选让 LLM 挑时机发起（模板池确定性生成，按当前场景挑目标）
   const activeTask = store.getActiveTask(worldId, playerId) ?? undefined;
-  const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, playerId, store) ?? undefined;
+  const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, playerId, store, Math.random, sceneId) ?? undefined;
 
   // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），带 kind 注入（分组）。
   const memories = store.getMemories(characterId, playerId).map((m) => ({ text: m.text, kind: m.kind }));
@@ -85,7 +87,7 @@ export async function respondToTranscript(
     recentHistory: store.getRecentTurns(characterId, playerId, RECENT_TURNS), // 这轮之前的近 N 轮（按玩家）
     memory: memories,
     worldCharacters: roster,
-    locations: store.getLocations(worldId),
+    locations: store.getLocations(worldId, sceneId),
     activeTask,
     taskCandidate,
     // 稳定缓存键：绑 world×角色×玩家，做 OpenRouter sticky routing 命中 prompt cache（同一对话连续命中）。
