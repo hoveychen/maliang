@@ -32,6 +32,7 @@ static func set_xray_enabled(on: bool, tree: SceneTree) -> void:
 		var p := n as PaperCharacter
 		if p != null:
 			p._mat.next_pass = p._xray_mat if on else null
+			p._pm_flutter = INF  # 重挂后强制下次 set_paper_motion 补齐 X 光 pass 的参数
 
 var texture: Texture2D = null:
 	set(v):
@@ -91,12 +92,26 @@ func setup(tex: Texture2D, color: Color, cname: String) -> void:
 	# 脚下伪影（替代实时阴影，见 BlobShadow 注释）；换贴图重设尺寸时同步重挂
 	BlobShadow.attach(self, clampf(float(tex.get_width()) * pixel_size * 0.38, 0.4, 1.4))
 
+## 演出参数量化步长（米）：4mm 对 45mm 的慢呼吸卷曲肉眼不可辨，
+## 却把待机时的 uniform 上传从每帧降到 ~1/5——旧版每角色每帧 4 次 set_shader_parameter。
+const PM_STEP := 0.004
+var _pm_flutter := INF
+var _pm_curl := INF
+
 ## 纸片演出参数（world.gd 每帧驱动）：走路飘动幅度 / 待机呼吸卷曲，单位米。
+## 量化脏检查：值未跨过步长格子就不重传；X 光 pass 摘除时也不给游离材质上传。
 func set_paper_motion(flutter_amp: float, curl: float) -> void:
-	_mat.set_shader_parameter("flutter_amp", flutter_amp)
-	_mat.set_shader_parameter("curl", curl)
-	_xray_mat.set_shader_parameter("flutter_amp", flutter_amp)
-	_xray_mat.set_shader_parameter("curl", curl)
+	var qf := snappedf(flutter_amp, PM_STEP)
+	var qc := snappedf(curl, PM_STEP)
+	if qf == _pm_flutter and qc == _pm_curl:
+		return
+	_pm_flutter = qf
+	_pm_curl = qc
+	_mat.set_shader_parameter("flutter_amp", qf)
+	_mat.set_shader_parameter("curl", qc)
+	if _mat.next_pass != null:
+		_xray_mat.set_shader_parameter("flutter_amp", qf)
+		_xray_mat.set_shader_parameter("curl", qc)
 
 ## 从静态立绘切到 idle 动画图集。meta 为服务端 SpriteSheetMeta（cols/rows/frameCount/fps/cellW/cellH）。
 ## world_height：期望世界高度（米），与切换前静态立绘保持一致，观感不跳。phase：相位偏移（秒）。

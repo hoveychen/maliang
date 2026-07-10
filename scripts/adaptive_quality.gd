@@ -38,6 +38,7 @@ func _ready() -> void:
 	if saved >= 0:
 		_apply(saved)
 		_done = true
+		set_process(false)  # 定档后本节点无事可做，不再空转 _process
 	else:
 		# 首次基准测量：临时解除帧率上限，否则平均帧时被 cap 钳在 33ms 以上，
 		# T0 阈值(26ms)永远够不着、强机被误判。测完 _process 里恢复。
@@ -64,6 +65,7 @@ func _process(delta: float) -> void:
 	_save_tier(tier)
 	Engine.max_fps = FPS_CAP  # 基准测量结束，恢复上限（见 _ready 的临时解除）
 	_done = true
+	set_process(false)  # 定档后不再空转
 
 func _apply(tier: int) -> void:
 	_world.get_viewport().scaling_3d_scale = SCALES[tier]
