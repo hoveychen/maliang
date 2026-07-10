@@ -1,0 +1,10 @@
+[configuration]
+entry_symbol = "maliang_asr_library_init"
+compatibility_minimum = "4.6"
+reloadable = true
+
+[libraries]
+; macOS universal2（arm64 + x86_64）。editor/headless 与导出模板分别用各自 target 构建。
+macos.editor = "res://addons/maliang_asr_native/bin/libmaliang_asr.macos.editor.framework"
+macos.debug = "res://addons/maliang_asr_native/bin/libmaliang_asr.macos.template_debug.framework"
+macos.release = "res://addons/maliang_asr_native/bin/libmaliang_asr.macos.template_release.framework"

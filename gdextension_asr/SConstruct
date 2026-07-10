@@ -1,0 +1,38 @@
+#!/usr/bin/env python
+# maliang 端侧 ASR 的 macOS/桌面 GDExtension 构建。
+# 基于 godot-cpp（master/v10，api_version 锁 4.6 —— 见 docs/macos-asr-feasibility.md）。
+# 用法：
+#   scons target=editor            构建编辑器/headless 可加载版（P1 冒烟、P4 headless 测试用）
+#   scons target=template_release  构建导出用 release 版（P3 打包进 .app）
+#   scons target=template_debug    导出用 debug 版
+# 产物落 ../addons/maliang_asr_native/bin/ 的 .framework（gitignore）。
+import os
+
+# godot-cpp 与 4.6 API：从本仓库 dump 的 extension_api.json 生成绑定，
+# 保证与运行期 Godot 4.6.3 的类/方法完全一致（master 默认跟 4.7）。
+api_file = os.path.abspath("extension_api.json")
+if os.path.exists(api_file):
+    ARGUMENTS.setdefault("custom_api_file", api_file)
+
+env = SConscript("godot-cpp/SConstruct")
+
+env.Append(CPPPATH=["src/"])
+sources = Glob("src/*.cpp")
+
+if env["platform"] == "macos":
+    # .framework 布局与 godot-kokoro 一致；P2 接 sherpa 时在此追加 RPATH 与 LIBS。
+    library = env.SharedLibrary(
+        "../addons/maliang_asr_native/bin/libmaliang_asr.{}.{}.framework/libmaliang_asr.{}.{}".format(
+            env["platform"], env["target"], env["platform"], env["target"]
+        ),
+        source=sources,
+    )
+else:
+    library = env.SharedLibrary(
+        "../addons/maliang_asr_native/bin/libmaliang_asr{}{}".format(
+            env["suffix"], env["SHLIBSUFFIX"]
+        ),
+        source=sources,
+    )
+
+Default(library)
