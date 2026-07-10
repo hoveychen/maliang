@@ -86,12 +86,18 @@ func _tick() -> void:
 			_check("listen HUD shown on select", vw.visible, true)
 			var frame := vw.get_child(0) as TextureRect
 			_check("HUD frame texture present", frame != null and frame.texture != null, true)
-		316:
+		313:
+			# 跑腿也是「立去系」：小绿得亲自走过去传话，所以先把这句回应说完再动身。
 			_check("performer not remote-controlled", blue.has("paper_action"), false)
+			_check("跑腿先武装延迟退出", (scene.get("_pending_leave") as Dictionary).is_empty(), false)
+			_check("说完之前小绿还没动身", scene.call("_has_executor_for", green), false)
+		325:
+			# 宽限过后（这轮没 TTS 可等）：小绿动身跑腿，近身对话随之关闭——
+			# 此前这条分支既不延迟也不关对话，小绿转身走了、横幅和相机还锁在他身上。
 			_check("speaker runs errand", scene.call("_has_executor_for", green), true)
+			_check("跑腿后关对话（selected 清空）", scene.get("selected"), null)
 		395:
 			_check("relay reached performer", relay_done > 0, true)
-			scene.set("selected", null)
 		400:
 			if fails == 0:
 				print("visual_interactions PASS")

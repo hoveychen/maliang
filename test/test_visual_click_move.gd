@@ -14,6 +14,7 @@ var frame := 0
 var fails := 0
 var ground_target := Vector2.ZERO
 var npc_node: Node = null
+var villager: Dictionary = {} ## 非仙子的普通村民：验「说完再走」要拿真会走路的角色
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
@@ -54,6 +55,8 @@ func _tick() -> void:
 			_check_leave_after_speech()
 		127:
 			_test_command_action_keeps_chat()
+		129:
+			_test_fairy_move_keeps_chat()
 		131:
 			if fails == 0:
 				print("visual_click_move PASS")
@@ -163,9 +166,14 @@ func _test_speak_bob_active() -> void:
 
 ## 立去系指令（move_to）：说完再走（缺陷 ④）——派发后不得立刻关对话，先把回应说完。
 ## 此处 replyText 为空、无 TTS 可播，仍应停在「等起播」的宽限里，不许同步退出。
-## 注：_tap_npc 取的是离玩家最近的角色 = 随身的小仙子，而仙子不吃移动脚本（_run_behavior 早返回），
-## 所以这里断言的是「延迟退出」这套机制本身（_pending_leave 的武装与释放），不看执行器。
+## 说话人必须是普通村民：_tap_npc 取的是离玩家最近的角色 = 随身的小仙子，而她不吃移动脚本
+## （_run_behavior 早返回、人根本不走），拿她验「说完再走」等于什么也没验（见 _test_fairy_move_keeps_chat）。
 func _test_command_move_defers_exit() -> void:
+	villager = _first_villager()
+	if villager.is_empty():
+		fails += 1
+		printerr("  FAIL no villager to command")
+		return
 	scene.call("_enter_interaction", npc_node)
 	# 这一轮要验的是「没有 TTS 可等 → 宽限后动身」，把两路出声都掐掉，免得等招呼语音播完（时长不定）。
 	(scene.get("_tts_player") as AudioStreamPlayer).stop()
@@ -173,16 +181,46 @@ func _test_command_move_defers_exit() -> void:
 	if fv != null and fv.get("_player") is AudioStreamPlayer:
 		(fv.get("_player") as AudioStreamPlayer).stop()
 	_check("re-entered interaction before move cmd", scene.get("selected") == npc_node, true)
+	scene.set("selected", villager["node"]) # 把对话对象换成村民（仙子不吃移动脚本）
 	scene.call("_on_character_response", { "transcript": "去池塘", "replyText": "",
 		"emotion": "happy", "behaviorScript": { "commands": [
 			{ "type": "move_to", "params": { "location_name": "池塘" } }], "loop": false } })
-	_check("move_to 不再同步关对话（先把话说完）", scene.get("selected") == npc_node, true)
+	_check("move_to 不再同步关对话（先把话说完）", scene.get("selected") == villager["node"], true)
 	_check("延迟退出已武装", (scene.get("_pending_leave") as Dictionary).is_empty(), false)
+	_check("说完之前还没动身（仍在闲逛）", _running_script(villager), false)
 
-## 起播宽限过后（这轮没有 TTS 可等）：角色动身，对话随之关闭。
+## 起播宽限过后（这轮没有 TTS 可等）：角色真的动身（接上指令脚本），对话随之关闭。
 func _check_leave_after_speech() -> void:
 	_check("说完后关对话（selected 清空）", scene.get("selected"), null)
 	_check("延迟退出已释放", (scene.get("_pending_leave") as Dictionary).is_empty(), true)
+	_check("村民已动身（接上指令脚本）", _running_script(villager), true)
+
+## 该角色身上是否挂着「指令脚本」执行器。村民平时都在自主闲逛（ambient=true），
+## 单看 _has_executor_for 恒为真、验不出动没动身；只有非 ambient 的执行器才是服务端下发的指令。
+func _running_script(d: Dictionary) -> bool:
+	for ex in (scene.get("_executors") as Array):
+		if (ex as BehaviorExecutor).drives(d) and not (ex as BehaviorExecutor).ambient:
+			return true
+	return false
+
+## 小仙子吃移动指令：她是贴身随从，_run_behavior 对她早返回、人不会走开，
+## 那就不该按「立去系」把对话关掉——否则孩子说「去风车那儿」，对话没了、仙子纹丝不动。
+func _test_fairy_move_keeps_chat() -> void:
+	var d: Dictionary = scene.call("_find_npc_dict", npc_node)
+	_check("最近的角色确是小仙子", d.get("is_fairy", false), true)
+	scene.call("_enter_interaction", npc_node)
+	scene.call("_on_character_response", { "transcript": "去池塘", "replyText": "",
+		"emotion": "happy", "behaviorScript": { "commands": [
+			{ "type": "move_to", "params": { "location_name": "池塘" } }], "loop": false } })
+	_check("仙子吃 move_to 不关对话", scene.get("selected") == npc_node, true)
+	_check("仙子不武装延迟退出", (scene.get("_pending_leave") as Dictionary).is_empty(), true)
+
+## 场上第一个非仙子角色（demo 世界里的村民）。
+func _first_villager() -> Dictionary:
+	for n in (scene.get("npcs") as Array):
+		if not (n as Dictionary).get("is_fairy", false):
+			return n
+	return {}
 
 ## 就地动作（do_action）：不该关对话——挥手完还能继续跟它说话（selected 保持）。
 func _test_command_action_keeps_chat() -> void:

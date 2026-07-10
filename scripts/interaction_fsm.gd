@@ -134,13 +134,20 @@ static func leave_ready(seen: bool, speaking: bool, arm_left: float, deadline_le
 const LEAVE_COMMANDS := ["move_to", "follow", "chat_with", "deliver_message"]
 
 ## 这次派发会不会让「正在跟孩子说话的那个角色」离开他面前？是则先说完再动身、随后关对话；
-## 否则原地执行、对话继续。三个入参对应 world.gd 的三条派发路径：
-##   command_types      待派发脚本里的指令类型
-##   relaying           脚本靠对话对象跑腿转交给别的角色（relay_command）
-##   _speaker_is_fairy  对话对象是小仙子（随从，_run_behavior 对她早退）
-static func speaker_leaves(command_types: Array, relaying: bool, _speaker_is_fairy: bool) -> bool:
+## 否则原地执行、对话继续。判据是「他会不会离开」，不是「这条指令有没有副作用」——
+## stop_follow 改了跟随状态却站着不动，孩子还看着他，对话没有理由关。
+##   command_types     待派发脚本里的指令类型
+##   relaying          脚本靠对话对象跑腿转交给别的角色（relay_command）
+##   speaker_is_fairy  对话对象是小仙子
+static func speaker_leaves(command_types: Array, relaying: bool, speaker_is_fairy: bool) -> bool:
+	# 小仙子是贴身随从：_run_behavior 对她早退，任何移动脚本都丢弃，她永远不离开孩子身边。
+	# 按 leave 关掉对话就是白关一次——孩子说「去风车那儿」，对话没了，仙子纹丝不动。
+	if speaker_is_fairy:
+		return false
+	# 跑腿传话：带的是什么指令不重要，走开的是「正在跟孩子说话的这个角色」——
+	# 「小蓝跳一下」跳的是小蓝，但眼前这位得亲自走过去把话带到。
 	if relaying:
-		return false # 现行语义：跑腿分支从不判 leave（P2 修）
+		return true
 	for t in command_types:
 		if String(t) in LEAVE_COMMANDS:
 			return true
