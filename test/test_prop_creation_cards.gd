@@ -26,6 +26,8 @@ func _tick() -> void:
 			_test_prompt_renders_cards()
 		34:
 			_test_click_card_replies()
+		37:
+			_test_after_click_cleared() # queue_free 隔帧才生效，下一帧再验
 		40:
 			if fails == 0:
 				print("prop_creation_cards PASS")
@@ -41,10 +43,13 @@ func _enter_fairy() -> void:
 	scene.call("_enter_interaction", fairy["node"])
 	_check("已进入与仙子的交互", scene.get("selected") == fairy["node"], true)
 
-func _cards() -> HBoxContainer:
-	return scene.get("_creation_cards") as HBoxContainer
+func _cards() -> GridContainer:
+	return scene.get("_creation_cards") as GridContainer
 
-## 物品追问 creation_prompt：3 张物品种类卡应渲染出来，会话进入 _in_creation。
+func _view() -> Control:
+	return scene.get("_creation_view") as Control
+
+## 物品追问 creation_prompt：进专门创造视图（暗底显现、退出普通对话构图），中央渲 3 张大卡。
 func _test_prompt_renders_cards() -> void:
 	scene.call("_on_creation_prompt", {
 		"replyText": "你想变出什么呀？",
@@ -58,14 +63,26 @@ func _test_prompt_renders_cards() -> void:
 		"ttsAsset": "", "voiceId": "",
 	})
 	_check("进入引导创造态", scene.get("_in_creation"), true)
-	_check("渲染出 3 张选项卡", _cards().get_child_count(), 3)
-	_check("选项卡可见", _cards().visible, true)
+	_check("创造视图点亮", _view().visible, true)
+	_check("相机进特写态", scene.get("_creation_cam"), true)
+	_check("退出普通对话构图（横幅隐）", (scene.get("banner") as Label).visible, false)
+	_check("居中渲出 3 张大卡", _cards().get_child_count(), 3)
+	_check("2×2 网格布局（columns=2）", _cards().columns, 2)
+	_check("问题字幕就位", (scene.get("_creation_q") as Label).text, "你想变出什么呀？")
+	_check("进度点亮一颗", (scene.get("_creation_dots") as HBoxContainer).get_child_count(), 1)
 
-## 点一张卡：收起卡片、转「施法中…」思考态（答复经 send_creation_reply 发出，离线下静默）。
+## 点一张卡：转「施法中…」，视图仍留着等下一轮/成品（不整屏收起）。
 func _test_click_card_replies() -> void:
 	scene.call("_on_creation_card", "prop_pinwheel")
-	_check("点卡后收起选项卡", _cards().visible, false)
-	_check("点卡后进入思考态", (scene.get("thinking_label") as Label).visible, true)
+	_check("点卡后视图仍在（等下一轮）", _view().visible, true)
+	_check("转施法中字幕", (scene.get("_creation_q") as Label).text, "施法中…")
+
+## queue_free 隔帧生效后：大卡已清空；再验造好/退出整屏收起 + 复位相机。
+func _test_after_click_cleared() -> void:
+	_check("点卡后清空大卡", _cards().get_child_count(), 0)
+	scene.call("_hide_creation_cards")
+	_check("收起后视图隐藏", _view().visible, false)
+	_check("收起后相机复位", scene.get("_creation_cam"), false)
 
 func _check(name: String, got: Variant, want: Variant) -> void:
 	if got == want:
