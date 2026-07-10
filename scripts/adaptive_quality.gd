@@ -10,6 +10,10 @@ extends Node
 ## 存档档位不再测（删 user://quality.cfg 可重新基准测试）。
 
 const CFG_PATH := "user://quality.cfg"
+## 移动端全局帧率上限（menu 入口设置，跨场景持久）。水彩世界大部分画面静止，
+## 60fps 满速重绘是长期运行发热主因；30fps 单帧功耗近乎减半、观感损失极小。
+## 低处理器模式无效——仙子/天空/水面永远在动，达不到"无重绘"条件，只能 cap。
+const FPS_CAP := 30
 const WARMUP := 6.0
 const WINDOW := 4.0
 const T2_MS := 55.0   ## 平均帧时超此值落 T2（≈18fps 以下）
@@ -34,6 +38,10 @@ func _ready() -> void:
 	if saved >= 0:
 		_apply(saved)
 		_done = true
+	else:
+		# 首次基准测量：临时解除帧率上限，否则平均帧时被 cap 钳在 33ms 以上，
+		# T0 阈值(26ms)永远够不着、强机被误判。测完 _process 里恢复。
+		Engine.max_fps = 0
 
 func _process(delta: float) -> void:
 	if _done:
@@ -54,6 +62,7 @@ func _process(delta: float) -> void:
 	if tier != 1:  # T1 就是当前状态，不必重复应用
 		_apply(tier)
 	_save_tier(tier)
+	Engine.max_fps = FPS_CAP  # 基准测量结束，恢复上限（见 _ready 的临时解除）
 	_done = true
 
 func _apply(tier: int) -> void:

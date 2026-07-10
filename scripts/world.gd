@@ -358,6 +358,7 @@ func _ready() -> void:
 			add_child(AdaptiveQuality.make(self, chunk_manager))
 	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
 	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
+		Engine.max_fps = 0  # 扫频要真实帧时，解除 menu 设的移动端限帧
 		add_child(PerfSweep.make(self, _env))
 	_setup_backend()
 	api = Api.new()

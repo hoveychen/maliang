@@ -61,6 +61,7 @@ UNIT_TESTS=(
   test_phone_menu
   test_asr_guard
   test_interaction_fsm
+  test_adaptive_fps_cap
 )
 fails=0
 
