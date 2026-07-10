@@ -17,7 +17,7 @@ import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
+import { newCreationState, isValidTile, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
@@ -905,6 +905,9 @@ export async function handleWsMessage(
     propId?: string; // prop_place：语音生成物件的落位回报
     tileX?: number;
     tileY?: number;
+    // positions_report：客户端批量上报 tile（chars 只含本轮变化过的角色，player 可缺省）
+    chars?: unknown;
+    player?: unknown;
     // 引导式造角色：creation_reply 幼儿点的图标 id / 说的话
     optionId?: string;
     spokenText?: string;
@@ -1280,6 +1283,33 @@ export async function handleWsMessage(
     const tile: [number, number] = [Math.trunc(Number(msg.tileX ?? -1)), Math.trunc(Number(msg.tileY ?? -1))];
     if (!store.movePropTile(msg.worldId ?? '', msg.propId ?? '', tile)) {
       socket.send(JSON.stringify({ type: 'error', error: 'prop not placed' }));
+    }
+    return;
+  }
+
+  // 角色/玩家坐标回报：空间权威在客户端，服务端只记最后位置供下次进世界读回。
+  // 静止时客户端不发；每拍只带 tile 变化过的角色。越界 tile 静默丢弃（单个坏条目不连坐整批）。
+  if (msg.type === 'positions_report') {
+    const worldId = msg.worldId ?? '';
+    const entries = Array.isArray(msg.chars) ? msg.chars : [];
+    let applied = 0;
+    for (const raw of entries) {
+      if (typeof raw !== 'object' || raw === null) continue;
+      const e = raw as { id?: unknown; tileX?: unknown; tileY?: unknown };
+      if (typeof e.id !== 'string' || !e.id) continue;
+      const tile: TilePos = { tileX: Number(e.tileX), tileY: Number(e.tileY) };
+      if (!isValidTile(tile)) continue;
+      if (store.setCharacterTile(worldId, e.id, tile)) applied++;
+    }
+    // 玩家自己的位置（Player 表；档案未建时静默跳过——首次进世界还没上报 profile）。
+    if (typeof msg.player === 'object' && msg.player !== null && session.playerId) {
+      const p = msg.player as { tileX?: unknown; tileY?: unknown };
+      const tile: TilePos = { tileX: Number(p.tileX), tileY: Number(p.tileY) };
+      if (isValidTile(tile)) store.setPlayerTile(session.playerId, tile);
+    }
+    // 成功无回包（与 prop_place 一致）；整批一个角色都没落地才回 error，便于客户端察觉世界/角色 id 错配。
+    if (entries.length > 0 && applied === 0) {
+      socket.send(JSON.stringify({ type: 'error', error: 'no character position applied' }));
     }
     return;
   }
