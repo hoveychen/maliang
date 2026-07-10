@@ -111,6 +111,24 @@ static func player_engaged(x: Inputs) -> bool:
 static func music_muted(x: Inputs) -> bool:
 	return x.in_interaction and not x.speaking()
 
+# ── 「说完再走」的时序判定（缺陷 ④）───────────────────────────────────────
+# leave 指令（move_to/follow/chat_with/deliver_message）到达时，此前是立刻 _exit_interaction()：
+# 横幅与相机锁定在角色开口之前就没了，孩子刚说完「我们去风车吧」对话框就消失、他边走边说话。
+# 改为先把回应说完，再动身 + 关对话。
+#
+# 三个坑：TTS 起播有延迟（edge 异步 / _play_tts 要先拉音频），不能一上来就以「没在说话」判定说完了；
+# 可能压根没有 TTS（合成失败/空文本），不能傻等；必须有兜底超时，否则角色永远钉在原地。
+const LEAVE_ARM_SEC := 0.4      ## 等 TTS 起播的宽限：这段时间内没出声就认为这轮无 TTS
+const LEAVE_DEADLINE_SEC := 8.0 ## 兜底超时：TTS 石沉大海也别把角色钉死（与 _tts_pending_deadline 同量级）
+
+## seen：这轮是否曾经真的出声过。arm_left / deadline_left：两个倒计时的剩余秒数。
+static func leave_ready(seen: bool, speaking: bool, arm_left: float, deadline_left: float) -> bool:
+	if deadline_left <= 0.0:
+		return true          # 兜底：不管发生了什么，都得让角色动身
+	if seen:
+		return not speaking  # 出过声、现在不出声了 = 说完了
+	return arm_left <= 0.0   # 宽限内始终没出声（无 TTS/合成失败）→ 直接动身
+
 ## 调试/日志用的状态名。
 static func name_of(s: State) -> String:
 	match s:
