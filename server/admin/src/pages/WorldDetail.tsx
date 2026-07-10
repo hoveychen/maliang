@@ -7,6 +7,7 @@ import { playerLabel } from './Worlds.tsx';
 
 const TABS = [
   { key: 'characters', label: '角色' },
+  { key: 'scenes', label: '场景' },
   { key: 'props', label: '物品' },
   { key: 'events', label: '世界事件' },
   { key: 'wallet', label: '小红花钱包' },
@@ -60,6 +61,7 @@ export function WorldDetailPage() {
   const counts: Record<string, number> = data
     ? {
         characters: data.characters.length,
+        scenes: data.scenes.length,
         props: data.props.length,
         events: data.visits.length + data.activeTasks.length,
         wallet: data.wallets.length,
@@ -81,6 +83,7 @@ export function WorldDetailPage() {
               { label: '角色', num: data.characterCount },
               { label: '物品', num: data.propCount },
               { label: '会话（进行中/总）', num: <>{data.activeVisitCount}<span className="aux">/{data.visitCount}</span></>, accent: data.activeVisitCount > 0 },
+              { label: '场景', num: data.sceneCount },
               { label: '地点', num: data.locations.length },
             ]}
           />
@@ -121,6 +124,59 @@ export function WorldDetailPage() {
                   ))}
                 </tbody>
               </table>
+            )
+          )}
+
+          {tab === 'scenes' && (
+            data.scenes.length === 0 ? <div className="empty">还没有场景（客户端未上传过地形/场景定义）</div> : (
+              <>
+                {data.scenes.map((s) => (
+                  <div className="panel" key={s.sceneId} style={{ marginBottom: 16 }}>
+                    <h2 className="sect" style={{ marginTop: 0 }}>
+                      {s.name} <span className="aux mono">{s.sceneId}</span>
+                    </h2>
+                    <dl className="kv">
+                      <dt>地形资产</dt><dd><ShortId id={s.terrainAsset} /></dd>
+                      <dt>网格</dt><dd className="mono">{s.gridTiles}×{s.gridTiles}</dd>
+                    </dl>
+
+                    <h3 className="sect" style={{ fontSize: 14 }}>地点（POI · {s.pois.length}）</h3>
+                    {s.pois.length === 0 ? <div className="empty">无 POI</div> : (
+                      <table className="grid">
+                        <thead><tr><th>名字</th><th>位置</th><th>半径</th><th>trigger</th><th>别名</th></tr></thead>
+                        <tbody>
+                          {s.pois.map((p, i) => (
+                            <tr key={`${p.name}-${i}`}>
+                              <td><b>{p.name}</b></td>
+                              <td className="mono">({p.tile[0]},{p.tile[1]})</td>
+                              <td className="num-cell">{p.radius}</td>
+                              <td className="mono">{p.trigger || '—'}</td>
+                              <td>{p.aliases.length === 0 ? <span className="empty-cell">—</span> : p.aliases.map((a) => <span className="badge" style={{ marginRight: 4 }} key={a}>{a}</span>)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+
+                    <h3 className="sect" style={{ fontSize: 14 }}>传送门（Portal · {s.portals.length}）</h3>
+                    {s.portals.length === 0 ? <div className="empty">无传送门</div> : (
+                      <table className="grid">
+                        <thead><tr><th>位置</th><th>半径</th><th>通往场景</th><th>落点</th></tr></thead>
+                        <tbody>
+                          {s.portals.map((pt, i) => (
+                            <tr key={`${pt.toScene}-${i}`}>
+                              <td className="mono">({pt.tile[0]},{pt.tile[1]})</td>
+                              <td className="num-cell">{pt.radius}</td>
+                              <td><span className="badge seal">{pt.toScene}</span></td>
+                              <td className="mono">({pt.toTile[0]},{pt.toTile[1]})</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                ))}
+              </>
             )
           )}
 
@@ -182,8 +238,9 @@ export function WorldDetailPage() {
                 </table>
               )}
 
-              <h2 className="sect">地点（客户端上报的 POI）</h2>
-              {data.locations.length === 0 ? <div className="empty">未上报</div> : (
+              <h2 className="sect">地点名（喂意图 LLM 的归一名单）</h2>
+              <p className="aux" style={{ margin: '2px 0 8px' }}>权威来自服务端场景 POI（见「场景」标签页）；无场景时回退到客户端上报的名单。</p>
+              {data.locations.length === 0 ? <div className="empty">暂无</div> : (
                 <div>{data.locations.map((l) => <span className="badge" style={{ marginRight: 6 }} key={l}>{l}</span>)}</div>
               )}
             </>

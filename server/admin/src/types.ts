@@ -95,11 +95,40 @@ export interface WorldRow {
   wallets: WalletEntry[];
   activeTasks: ActiveTaskEntry[];
   locations: string[];
+  sceneCount: number;
   characterCount: number;
   fairyCount: number;
   propCount: number;
   visitCount: number;
   activeVisitCount: number;
+}
+
+/** 场景里的一个地点（与 server/src/types.ts ScenePoi 对齐）。 */
+export interface ScenePoi {
+  tile: [number, number];
+  radius: number;
+  trigger: string;
+  name: string;
+  aliases: string[];
+}
+
+/** 场景之间的传送点（与 server/src/types.ts ScenePortal 对齐）。 */
+export interface ScenePortal {
+  tile: [number, number];
+  radius: number;
+  toScene: string;
+  toTile: [number, number];
+}
+
+/** 场景 = 世界里的一片区域（模型 B，与 server/src/types.ts Scene 对齐）。 */
+export interface Scene {
+  worldId: string;
+  sceneId: string;
+  name: string;
+  terrainAsset: string;
+  gridTiles: number;
+  pois: ScenePoi[];
+  portals: ScenePortal[];
 }
 
 export interface CharacterSummary {
@@ -127,6 +156,7 @@ export interface WorldProp {
 }
 
 export interface WorldDetail extends WorldRow {
+  scenes: Scene[];
   characters: CharacterSummary[];
   props: WorldProp[];
   visits: Visit[];
