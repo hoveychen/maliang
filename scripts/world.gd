@@ -3594,7 +3594,15 @@ func _begin_prop_press(screen_pos: Vector2) -> void:
 	var ground := _pick_ground(screen_pos)
 	if ground == Vector2.INF:
 		return
-	_prop_press_id = chunk_manager.dynamic_prop_at(WorldGrid.to_tile(ground))
+	var hit_id := chunk_manager.dynamic_prop_at(WorldGrid.to_tile(ground))
+	_prop_press_id = hit_id if _is_pickable_prop(hit_id) else ""
+
+## 这个物件能不能被长按拎起来。施法中的占位符不行——把正在传送新伙伴的传送门抱在手里，
+## 成品落位时记账就对不上了（_placeholders 还记着它，chunk_manager 里却已经没有）。
+func _is_pickable_prop(id: String) -> bool:
+	if id.is_empty():
+		return false
+	return not _placeholders.has(id)
 
 ## 长按累计：手指滑走（变成拖屏/跟随）即取消；到阈值把物件拎起来。
 func _step_prop_press(delta: float) -> void:

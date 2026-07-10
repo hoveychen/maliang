@@ -37,6 +37,8 @@ func _tick() -> void:
 			_test_prop_pending_lights_forge()
 		52:
 			_test_prop_created_replaces_forge()
+		58:
+			_test_placeholder_not_pickable()
 		60:
 			_test_gen_failed_clears_portal()
 		66:
@@ -111,10 +113,20 @@ func _test_prop_created_replaces_forge() -> void:
 		var t: Array = (props["prop-1"] as Dictionary)["tile"]
 		_check("成品落在熔炉腾出的格子上", Vector2i(int(t[0]), int(t[1])), forge_tile)
 
+## 施法中的占位符不许被拎走：它们是普通 dynamic prop，长按拾起会把传送门抱在手里，
+## 成品再落位时记账已经对不上了。长按候选必须把它们排除掉。
+func _test_placeholder_not_pickable() -> void:
+	scene.call("_on_gen_progress", "designing")
+	var tile: Vector2i = _placeholders()[PORTAL_ID]
+	var id: String = scene.get("chunk_manager").call("dynamic_prop_at", tile)
+	_check("传送门确实占着这个格子", id, PORTAL_ID)
+	_check("施法占位符不是可拾起的物件", scene.call("_is_pickable_prop", id), false)
+	# 普通造出来的物件照旧可以拎起来（别把整个拾起功能误杀了）
+	_check("普通物件仍可拾起", scene.call("_is_pickable_prop", "prop-1"), true)
+
 ## 造砸了（gen_failed 并进 failed 信号）：传送门必须收起来。
 func _test_gen_failed_clears_portal() -> void:
-	scene.call("_on_gen_progress", "designing")
-	_check("传送门重新立起", _placeholders().has(PORTAL_ID), true)
+	_check("传送门立着", _placeholders().has(PORTAL_ID), true)
 	scene.call("_on_failed", "moderation blocked")
 	_check("造砸了传送门收起", _placeholders().has(PORTAL_ID), false)
 
