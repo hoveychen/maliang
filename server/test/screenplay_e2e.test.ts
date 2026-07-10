@@ -217,7 +217,7 @@ const PLAY_ACTORS: StageActorInfo[] = [
   { id: 'c3', name: '天鹅', isPlayer: false, voiceId: 'zh-CN-XiaoyiNeural' },
 ];
 
-test('三幕小剧场: 命令按幕逐条推进，Promise.all 走位并行下发，道具经造物管线落位', async () => {
+test('三幕小剧场: 命令按幕逐条推进，Promise.all 走位并行下发，全程不等造物管线', async () => {
   const { stages, conn } = rig();
   const a = conn('cA');
   await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
@@ -254,28 +254,18 @@ test('三幕小剧场: 命令按幕逐条推进，Promise.all 走位并行下发
   const walk = await step('并行走位: 丑小鸭与鸭妈妈同时出发', ['move_to', 'c1'], ['move_to', 'c2']);
   assert.deepEqual(walk.map((m) => (m.args as Record<string, unknown>).target), ['pond', 'pond']);
 
-  const egg = await step('造蛋: 客户端只收到带规格的 prop_spawn', ['prop_spawn']);
-  assert.equal((egg[0].args as Record<string, unknown>).id, 'prop-1');
-  assert.deepEqual((egg[0].args as Record<string, unknown>).spec, { desc: '一颗大大的蛋' });
-  assert.equal((egg[0].args as Record<string, unknown>).near, 'c2', '道具落在鸭妈妈身边');
-
   const line1 = await step('鸭妈妈开口', ['say', 'c2']);
   assert.equal((line1[0].args as Record<string, unknown>).action, 'wave');
 
   // 第二幕
   await step('第二幕开场', ['banner'], ['narrate']);
-  const act2 = await step('蛋壳碎了 + 对话运镜 + 丑小鸭的委屈', ['prop_remove'], ['camera'], ['say', 'c1']);
-  assert.equal((act2[0].args as Record<string, unknown>).id, 'prop-1');
-  assert.equal((act2[1].args as Record<string, unknown>).mode, 'dialog');
-  assert.equal((act2[2].args as Record<string, unknown>).action, 'cry');
+  const act2 = await step('对话运镜 + 丑小鸭的委屈', ['camera'], ['say', 'c1']);
+  assert.equal((act2[0].args as Record<string, unknown>).mode, 'dialog');
+  assert.equal((act2[1].args as Record<string, unknown>).action, 'cry');
   await step('鸭妈妈安慰', ['say', 'c2']);
 
   // 第三幕
   await step('第三幕开场', ['banner'], ['narrate']);
-  const mirror = await step('造镜子', ['prop_spawn']);
-  assert.equal((mirror[0].args as Record<string, unknown>).id, 'prop-2');
-  const place = await step('把镜子挪到湖边', ['prop_place']);
-  assert.deepEqual(place[0].args, { id: 'prop-2', at: 'lake' });
   await step('并行走位: 丑小鸭与天鹅同赴湖边', ['move_to', 'c1'], ['move_to', 'c3']);
   await step('天鹅点破', ['say', 'c3']);
   const spin = await step('丑小鸭转个圈', ['do_action', 'c1']);
@@ -290,10 +280,38 @@ test('三幕小剧场: 命令按幕逐条推进，Promise.all 走位并行下发
   assert.equal((last.args as Record<string, unknown>).mode, 'reset');
   assert.equal(a.cmds().filter((m) => m.op === 'narrate').length, 3, '三幕三段旁白');
   assert.equal(a.cmds().filter((m) => m.op === 'move_to').length, 4);
-  assert.equal(a.cmds().some((m) => m.op === 'prop_create'), false, '造物只在服务端，客户端收 prop_spawn');
+  // 造物要真跑一趟 LLM+生图，几十秒卡在幕中间；剧本刻意不碰它（原语覆盖见下一条测试）
+  assert.equal(a.cmds().some((m) => m.op === 'prop_spawn'), false, '演出全程不等造物管线');
   assert.deepEqual(a.ofType('stage_end')[0]?.result, { praise: '演得真棒！' });
 
   record('three_act_play', PLAY_ACTORS, a);
+});
+
+test('道具原语: create 走服务端造物出 spec → 客户端只收 prop_spawn；place/remove 直接下发', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const stop = autoAck(a);
+  const done = stages.startStage('w1', {
+    code: `
+      const egg = await stage.prop.create('一颗大大的蛋', stage.actors[1]);
+      await stage.prop.place(egg.id, 'lake');
+      stage.prop.remove(egg.id);
+      stage.end({ pid: egg.id });
+    `,
+    actors: PLAY_ACTORS,
+  });
+  const r = await done!;
+  stop();
+  assert.equal(r.status, 'done');
+  assert.deepEqual(r.status === 'done' ? r.result : undefined, { pid: 'prop-1' });
+
+  const spawn = a.cmds().find((m) => m.op === 'prop_spawn')!;
+  assert.equal(a.cmds().some((m) => m.op === 'prop_create'), false, '客户端造不出 spec，从不收 prop_create');
+  assert.deepEqual((spawn.args as Record<string, unknown>).spec, { desc: '一颗大大的蛋' });
+  assert.equal((spawn.args as Record<string, unknown>).near, 'c2', '道具落在指定演员身边');
+  assert.deepEqual(a.cmds().find((m) => m.op === 'prop_place')!.args, { id: 'prop-1', at: 'lake' });
+  assert.deepEqual(a.cmds().find((m) => m.op === 'prop_remove')!.args, { id: 'prop-1' });
 });
 
 test('三幕小剧场: 选角名字对不上 → 脚本抛错 → 广播 stage_abort', async () => {

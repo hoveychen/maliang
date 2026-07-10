@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { fmtTs, useApi } from '../api.ts';
+import { apiPost, fmtTs, useApi } from '../api.ts';
 import { MAX_FLOWERS, STAMP_GLYPHS, STAMPS_PER_FLOWER, TASK_TYPE_LABELS, type WorldDetail } from '../types.ts';
 import { AnimStatusBadge, Fallback, PageHead, RowLink, ShortId, Sprite, Stats } from '../components.tsx';
 
@@ -9,6 +10,45 @@ const TABS = [
   { key: 'events', label: '世界事件' },
   { key: 'wallet', label: '小红花钱包' },
 ] as const;
+
+/** 手写剧本（Plan 2 上线前的试演入口，见 server/src/screenplays/）。 */
+const SCREENPLAYS = [
+  { key: 'hide_and_seek', label: '躲猫猫', hint: '要世界里有在线的小朋友：村民当鬼来追他' },
+  { key: 'three_act_play', label: '三幕小剧场', hint: '要三个村民：演《丑小鸭》，孩子在场看戏' },
+] as const;
+
+/** 开演面板：点一下就在这个世界起一场戏，进世界的平板会立刻进观演态。 */
+function DebutPanel({ worldId }: { worldId: string }) {
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const start = async (key: string, label: string) => {
+    setBusy(key);
+    setMsg(null);
+    try {
+      const r = await apiPost<{ actors: { name: string }[] }>(`/admin/worlds/${encodeURIComponent(worldId)}/stage`, { screenplay: key });
+      setMsg({ ok: true, text: `《${label}》开演了：${r.actors.map((a) => a.name).join('、')}` });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <div className="panel" style={{ marginBottom: 16 }}>
+      <h2 className="sect" style={{ marginTop: 0 }}>试演</h2>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {SCREENPLAYS.map((s) => (
+          <button key={s.key} title={s.hint} disabled={busy !== ''} onClick={() => void start(s.key, s.label)}>
+            {busy === s.key ? '开演中…' : `开演 · ${s.label}`}
+          </button>
+        ))}
+        {msg && <span className={msg.ok ? 'badge pine' : 'badge seal'}>{msg.text}</span>}
+      </div>
+    </div>
+  );
+}
 
 export function WorldDetailPage() {
   const { id = '' } = useParams();
@@ -43,6 +83,7 @@ export function WorldDetailPage() {
               { label: '地点', num: data.locations.length },
             ]}
           />
+          <DebutPanel worldId={id} />
           <div className="tabs">
             {TABS.map((t) => (
               <button

@@ -28,11 +28,20 @@ export async function api<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** 管理写操作（补动画等触发类端点）：POST 带 admin token，返回 JSON。 */
-export async function apiPost<T>(path: string): Promise<T> {
+/**
+ * 管理写操作（补动画、开演等触发类端点）：POST 带 admin token，返回 JSON。
+ * 失败时优先拿服务端 body 里的 error 当消息——「世界里没有在线的小朋友」比「400 Bad Request」有用得多。
+ */
+export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const token = getToken();
-  const res = await fetch(path, { method: 'POST', headers: token ? { 'x-admin-token': token } : {} });
-  if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  const headers: Record<string, string> = {};
+  if (token) headers['x-admin-token'] = token;
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  const res = await fetch(path, { method: 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!res.ok) {
+    const detail = await res.json().then((j: { error?: string }) => j?.error).catch(() => undefined);
+    throw new ApiError(res.status, detail ?? `${res.status} ${res.statusText}`);
+  }
   return res.json() as Promise<T>;
 }
 

@@ -191,17 +191,6 @@
       },
       {
         "cmdId": 6,
-        "op": "prop_spawn",
-        "args": {
-          "id": "prop-1",
-          "spec": {
-            "desc": "一颗大大的蛋"
-          },
-          "near": "c2"
-        }
-      },
-      {
-        "cmdId": 7,
         "actorId": "c2",
         "op": "say",
         "args": {
@@ -210,28 +199,21 @@
         }
       },
       {
-        "cmdId": 8,
+        "cmdId": 7,
         "op": "banner",
         "args": {
           "text": "第二幕 · 谁都笑他丑"
         }
       },
       {
-        "cmdId": 9,
+        "cmdId": 8,
         "op": "narrate",
         "args": {
           "text": "小鸭子一个个破壳而出，可有一只，长得和大家都不一样。"
         }
       },
       {
-        "cmdId": 10,
-        "op": "prop_remove",
-        "args": {
-          "id": "prop-1"
-        }
-      },
-      {
-        "cmdId": 11,
+        "cmdId": 9,
         "op": "camera",
         "args": {
           "mode": "dialog",
@@ -240,7 +222,7 @@
         }
       },
       {
-        "cmdId": 12,
+        "cmdId": 10,
         "actorId": "c1",
         "op": "say",
         "args": {
@@ -249,7 +231,7 @@
         }
       },
       {
-        "cmdId": 13,
+        "cmdId": 11,
         "actorId": "c2",
         "op": "say",
         "args": {
@@ -257,40 +239,21 @@
         }
       },
       {
-        "cmdId": 14,
+        "cmdId": 12,
         "op": "banner",
         "args": {
           "text": "第三幕 · 冬去春来"
         }
       },
       {
-        "cmdId": 15,
+        "cmdId": 13,
         "op": "narrate",
         "args": {
           "text": "冬去春来，丑小鸭一个人熬过了长长的冬天。"
         }
       },
       {
-        "cmdId": 16,
-        "op": "prop_spawn",
-        "args": {
-          "id": "prop-2",
-          "spec": {
-            "desc": "一面亮亮的小镜子"
-          },
-          "near": "c1"
-        }
-      },
-      {
-        "cmdId": 17,
-        "op": "prop_place",
-        "args": {
-          "id": "prop-2",
-          "at": "lake"
-        }
-      },
-      {
-        "cmdId": 18,
+        "cmdId": 14,
         "actorId": "c1",
         "op": "move_to",
         "args": {
@@ -298,7 +261,7 @@
         }
       },
       {
-        "cmdId": 19,
+        "cmdId": 15,
         "actorId": "c3",
         "op": "move_to",
         "args": {
@@ -306,7 +269,7 @@
         }
       },
       {
-        "cmdId": 20,
+        "cmdId": 16,
         "actorId": "c3",
         "op": "say",
         "args": {
@@ -315,7 +278,7 @@
         }
       },
       {
-        "cmdId": 21,
+        "cmdId": 17,
         "actorId": "c1",
         "op": "do_action",
         "args": {
@@ -323,7 +286,7 @@
         }
       },
       {
-        "cmdId": 22,
+        "cmdId": 18,
         "op": "camera",
         "args": {
           "mode": "reset"

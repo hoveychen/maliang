@@ -36,7 +36,7 @@ func _init() -> void:
 	fails += _eq("躲猫猫: near 不下发客户端探测器", _count_watch(golden["hide_and_seek"], "near"), 0)
 	fails += _eq("躲猫猫: timer 下发一个客户端探测器", _count_watch(golden["hide_and_seek"], "timer"), 1)
 
-	# --- 三幕小剧场：旁白 + 并行走位 + 道具 ---
+	# --- 三幕小剧场：旁白 + 并行走位 + 对话运镜 ---
 	var play := _replay("three_act_play", golden)
 	fails += _fails
 	fails += _eq("小剧场: 三段旁白", play.count("narrate"), 3)
@@ -44,9 +44,8 @@ func _init() -> void:
 	fails += _eq("小剧场: 四次走位", play.count("move"), 4)
 	fails += _eq("小剧场: 四句台词", play.count("say"), 4)
 	fails += _eq("小剧场: 一个动作", play.count("action"), 1)
-	fails += _eq("小剧场: 造两件道具", play.count("prop_spawn"), 2)
-	fails += _eq("小剧场: 挪一次道具", play.count("prop_place"), 1)
-	fails += _eq("小剧场: 撤一次道具", play.count("prop_remove"), 1)
+	# 造物要真跑一趟 LLM+生图，几十秒卡在幕中间：剧本刻意不碰道具（原语覆盖在服务端单测）
+	fails += _eq("小剧场: 演出全程不等造物", play.count("prop_spawn"), 0)
 	# 台词用的是角色自己的音色（服务端随 stage_begin 下发的 voiceId）
 	fails += _eq("小剧场: 天鹅用自己的音色", String(play.last("say").get("voice", "")), "zh-CN-XiaoyiNeural")
 

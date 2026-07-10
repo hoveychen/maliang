@@ -23,7 +23,9 @@ import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts'
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
-import { StageDirector } from './stage_session.ts';
+import { StageDirector, type StageStartOpts } from './stage_session.ts';
+import { buildDebut, DebutError } from './stage_debut.ts';
+import { SCREENPLAYS, type ScreenplayName } from './screenplays.ts';
 import type { StagePropMaker } from './stage_types.ts';
 
 export interface ServerDeps {
@@ -546,6 +548,36 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     }
   };
   const stages = new StageDirector(hub, makeStageProp);
+
+  // 管理端点：拿一个手写剧本在指定世界开演（试演/真机验收用；Plan 2 上线后由语音意图触发）。
+  // 演出广播给世界里所有连接，孩子的平板会直接进观演态——所以世界里得先有人。
+  app.post<{ Params: { id: string }; Body: { screenplay?: string; sceneId?: string } | null }>(
+    '/admin/worlds/:id/stage',
+    async (req, reply) => {
+      const token = process.env.MALIANG_ADMIN_TOKEN;
+      if (!token || req.headers['x-admin-token'] !== token) {
+        return reply.code(403).send({ error: 'admin token required' });
+      }
+      if (!store.getWorld(req.params.id)) return reply.code(404).send({ error: 'world not found' });
+      const name = req.body?.screenplay ?? '';
+      if (!(SCREENPLAYS as readonly string[]).includes(name)) {
+        return reply.code(400).send({ error: `screenplay must be one of ${SCREENPLAYS.join(', ')}` });
+      }
+      if (stages.activeIn(req.params.id)) return reply.code(409).send({ error: '这个世界正在演出' });
+      let opts: StageStartOpts;
+      try {
+        opts = buildDebut(store, hub, req.params.id, name as ScreenplayName, req.body?.sceneId);
+      } catch (e) {
+        if (e instanceof DebutError) return reply.code(400).send({ error: e.message });
+        throw e;
+      }
+      const run = stages.startStage(req.params.id, opts);
+      if (!run) return reply.code(409).send({ error: '这个世界正在演出' });
+      // 不 await 终局：演出要演几分钟，HTTP 只回「开演了，演员是这些」。
+      void run.catch(() => {});
+      return { id: req.params.id, screenplay: name, actors: opts.actors, params: opts.params };
+    },
+  );
 
   // WebSocket：造角色请求 → 进度推送 → 完成/失败
   app.get('/ws', { websocket: true }, (socket, req) => {
