@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, TilePos, Visit, Wallet, WorldProp } from './types.ts';
-import { INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import { ANON_PLAYER, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 
@@ -58,23 +58,23 @@ export interface SpriteAnimRecord {
 export interface World {
   id: string;
   characters: Map<string, Character>;
-  /** 玩家钱包：小红花代币 + 集邮盖章进度（复用旧 inventory 列存 Wallet JSON，见 types.Wallet）。 */
-  wallet: Wallet;
-  /** 进行中的 NPC 委托（至多一个，见 types.ActiveTask）。 */
-  activeTask: ActiveTask | null;
   /** 语音生成的 SDF 物件（id → WorldProp，tile 为落位回报）。 */
   props: Map<string, WorldProp>;
 }
+// 注：钱包与进行中委托已不属于「世界」——它们按 (worldId, playerId) 分，
+// 见 getWallet/getActiveTask。世界只剩角色与物件这类真正全局的东西。
 
 /**
  * 世界状态 + 生成的 sprite 资源存储。
  * 传 dataDir → 持久化到 SQLite（<dataDir>/world.db，assets/ + assets.json 清单沿用文件寻址）；
  * 不传 → 内存 SQLite（`:memory:`，测试用）。
  *
- * 存储布局（P1：只换介质，对外 API 与返回结构不变）：
- *   worlds(id, inventory JSON, active_task JSON|null)
- *   characters(id PK, world_id, data JSON)   ← Character 整对象存一行（memory/chatHistory 暂 JSON 内嵌，表拆分留 P3/P5）
+ * 存储布局：
+ *   worlds(id, inventory, active_task)       ← inventory/active_task 两列已废弃，见 wallets/player_tasks
+ *   characters(id PK, world_id, data JSON)   ← Character 整对象存一行
  *   props(id PK, world_id, data JSON)
+ *   wallets(world_id, player_id, data JSON)      ← 每玩家一份小红花钱包
+ *   player_tasks(world_id, player_id, data JSON) ← 每玩家一个进行中委托（无委托则无行）
  * saveCharacter 从「全量重写 worlds.json」变为「UPDATE 一行」，根治 chatHistory 膨胀拖慢落盘。
  * 首启若存在旧 worlds.json 且库为空 → 一次性迁移后把 worlds.json 改名 .migrated 备份。
  */
@@ -154,6 +154,18 @@ export class WorldStore {
       CREATE TABLE IF NOT EXISTS creation_icons (
         option_id TEXT PRIMARY KEY,
         asset_hash TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS wallets (
+        world_id TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (world_id, player_id)
+      );
+      CREATE TABLE IF NOT EXISTS player_tasks (
+        world_id TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (world_id, player_id)
       );
     `);
   }
@@ -253,11 +265,12 @@ export class WorldStore {
   }
 
   createWorld(id: string = randomUUID()): World {
-    // 冷启动初始送小红花（decision：新档预置 INITIAL_FLOWERS 朵）。
+    // 钱包不再随世界创建：每个玩家首次读到自己的钱包时才发初始小红花（见 getWallet）。
+    // inventory / active_task 两列已废弃，保留仅为兼容旧库文件。
     this.#db
       .prepare('INSERT OR IGNORE INTO worlds (id, inventory, active_task) VALUES (?, ?, ?)')
-      .run(id, JSON.stringify(freshWallet()), null);
-    return { id, characters: new Map(), wallet: this.getWallet(id), activeTask: null, props: new Map() };
+      .run(id, '{}', null);
+    return { id, characters: new Map(), props: new Map() };
   }
 
   getWorld(id: string): World | undefined {
@@ -269,13 +282,7 @@ export class WorldStore {
     for (const c of this.listCharacters(id)) characters.set(c.id, c);
     const props = new Map<string, WorldProp>();
     for (const p of this.listProps(id)) props.set(p.id, p);
-    return {
-      id: row.id,
-      characters,
-      wallet: this.getWallet(id),
-      activeTask: row.active_task ? (JSON.parse(row.active_task) as ActiveTask) : null,
-      props,
-    };
+    return { id: row.id, characters, props };
   }
 
   #worldExists(id: string): boolean {
@@ -371,29 +378,48 @@ export class WorldStore {
     return this.#locations.get(worldId) ?? [];
   }
 
-  // ── 奖赏系统：小红花钱包（复用 inventory 列存 Wallet JSON）+ 进行中委托 ────────────────
+  // ── 奖赏系统：小红花钱包 + 进行中委托（均按 (worldId, playerId) 维度）────────────────
+  //
+  // 历史：两者原本挂在 worlds 表（inventory / active_task 列），全世界共用一份——
+  // 所有小朋友共享同一个钱包，且 A 接了委托后 B 再也拿不到委托（tasks.ts 的空位判定）。
+  // 现已迁到 wallets / player_tasks 两张表。worlds 的那两列就此废弃，不再读写。
+  //
+  // 匿名兜底：playerId 为空（老客户端 / 直连调试，不带 playerId）统一落到 ANON_PLAYER 键，
+  // 行为退化成「所有匿名连接共用一个钱包」——与改动前一致，不会因为缺身份就崩。
 
-  #setWallet(worldId: string, w: Wallet): void {
-    this.#db.prepare('UPDATE worlds SET inventory = ? WHERE id = ?').run(JSON.stringify(w), worldId);
+  #walletKey(playerId: string): string {
+    return playerId || ANON_PLAYER;
+  }
+
+  #setWallet(worldId: string, playerId: string, w: Wallet): void {
+    this.#db
+      .prepare(
+        'INSERT INTO wallets (world_id, player_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(world_id, player_id) DO UPDATE SET data = excluded.data',
+      )
+      .run(worldId, this.#walletKey(playerId), JSON.stringify(w));
   }
 
   /**
-   * 读钱包。旧存档（贴纸背包 JSON 或空）或非法值一律按方案 A 迁移成初始小红花，并写回持久化（懒迁移）。
+   * 读某玩家在某世界的钱包。没有行 → 发初始小红花并落库（懒初始化，每个小朋友各自一份）。
    * 世界不存在返回一个空钱包（不写库）。
    */
-  getWallet(worldId: string): Wallet {
-    const row = this.#db.prepare('SELECT inventory FROM worlds WHERE id = ?').get(worldId) as
-      | { inventory: string }
-      | undefined;
-    if (!row) return { flowers: 0, stampProgress: 0, stampsTotal: 0 };
-    let raw: unknown;
-    try {
-      raw = JSON.parse(row.inventory);
-    } catch {
-      raw = null;
+  getWallet(worldId: string, playerId: string): Wallet {
+    if (!this.#worldExists(worldId)) return { flowers: 0, stampProgress: 0, stampsTotal: 0 };
+    const row = this.#db
+      .prepare('SELECT data FROM wallets WHERE world_id = ? AND player_id = ?')
+      .get(worldId, this.#walletKey(playerId)) as { data: string } | undefined;
+    let raw: unknown = null;
+    if (row) {
+      try {
+        raw = JSON.parse(row.data);
+      } catch {
+        raw = null;
+      }
     }
     const { wallet, migrated } = coerceWallet(raw);
-    if (migrated && this.#worldExists(worldId)) this.#setWallet(worldId, wallet); // 懒迁移：旧贴纸档首次读到即固化成初始花
+    // 首次见到这个玩家（或行损坏）→ 固化初始钱包，之后每次读到的都是同一份
+    if (migrated) this.#setWallet(worldId, playerId, wallet);
     return wallet;
   }
 
@@ -401,55 +427,82 @@ export class WorldStore {
    * 盖 1 章：stampsTotal++，攒满 STAMPS_PER_FLOWER 结算 1 花（受 MAX_FLOWERS 上限；满 9 溢出见 settleWallet）。
    * 返回是否因此升了花 + 结算后的钱包。世界不存在则 flowerGained=false。
    */
-  addStamp(worldId: string): { flowerGained: boolean; wallet: Wallet } {
+  addStamp(worldId: string, playerId: string): { flowerGained: boolean; wallet: Wallet } {
     if (!this.#worldExists(worldId)) return { flowerGained: false, wallet: { flowers: 0, stampProgress: 0, stampsTotal: 0 } };
-    const w = this.getWallet(worldId);
+    const w = this.getWallet(worldId, playerId);
     w.stampsTotal += 1;
     w.stampProgress += 1;
     const flowerGained = settleWallet(w);
-    this.#setWallet(worldId, w);
+    this.#setWallet(worldId, playerId, w);
     return { flowerGained, wallet: w };
   }
 
   /** 花 n 朵小红花（造物/造角色）。够扣则扣、腾出格子后立即补升满 9 溢出的待兑换组，返回 true；不够返回 false 且不动账。 */
-  spendFlower(worldId: string, n = 1): boolean {
+  spendFlower(worldId: string, playerId: string, n = 1): boolean {
     if (!this.#worldExists(worldId)) return false;
-    const w = this.getWallet(worldId);
+    const w = this.getWallet(worldId, playerId);
     if (w.flowers < n) return false;
     w.flowers -= n;
     settleWallet(w); // 满 9 溢出停在待兑换的那一组，腾出格子后立即补升
-    this.#setWallet(worldId, w);
+    this.#setWallet(worldId, playerId, w);
     return true;
   }
 
   /** 退还/补发 n 朵小红花（造失败退款，受 MAX_FLOWERS 上限，多余丢弃）。返回结算后的钱包。 */
-  refundFlower(worldId: string, n = 1): Wallet {
-    const w = this.getWallet(worldId);
+  refundFlower(worldId: string, playerId: string, n = 1): Wallet {
+    const w = this.getWallet(worldId, playerId);
     if (!this.#worldExists(worldId)) return w;
     w.flowers = Math.min(MAX_FLOWERS, w.flowers + n);
-    this.#setWallet(worldId, w);
+    this.#setWallet(worldId, playerId, w);
     return w;
   }
 
   /** 管理用：把小红花数直接设为 n（夹紧到 0..MAX_FLOWERS），盖章进度不动。返回结算后的钱包。世界不存在则原样返回空钱包。 */
-  setFlowers(worldId: string, n: number): Wallet {
-    const w = this.getWallet(worldId);
+  setFlowers(worldId: string, playerId: string, n: number): Wallet {
+    const w = this.getWallet(worldId, playerId);
     if (!this.#worldExists(worldId)) return w;
     w.flowers = Math.max(0, Math.min(MAX_FLOWERS, Math.floor(n)));
-    this.#setWallet(worldId, w);
+    this.#setWallet(worldId, playerId, w);
     return w;
   }
 
-  getActiveTask(worldId: string): ActiveTask | null {
-    const row = this.#db.prepare('SELECT active_task FROM worlds WHERE id = ?').get(worldId) as
-      | { active_task: string | null }
-      | undefined;
-    return row && row.active_task ? (JSON.parse(row.active_task) as ActiveTask) : null;
+  /** 列出某世界里所有有钱包的玩家（debug 后台用）。匿名键原样出现在结果里。 */
+  listWallets(worldId: string): { playerId: string; wallet: Wallet }[] {
+    const rows = this.#db
+      .prepare('SELECT player_id, data FROM wallets WHERE world_id = ? ORDER BY player_id')
+      .all(worldId) as { player_id: string; data: string }[];
+    return rows.map((r) => ({ playerId: r.player_id, wallet: coerceWallet(JSON.parse(r.data)).wallet }));
   }
 
-  setActiveTask(worldId: string, task: ActiveTask | null): void {
+  getActiveTask(worldId: string, playerId: string): ActiveTask | null {
+    const row = this.#db
+      .prepare('SELECT data FROM player_tasks WHERE world_id = ? AND player_id = ?')
+      .get(worldId, this.#walletKey(playerId)) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as ActiveTask) : null;
+  }
+
+  /** 设进行中委托；task=null 直接删行（「无委托」不留空行）。 */
+  setActiveTask(worldId: string, playerId: string, task: ActiveTask | null): void {
     if (!this.#worldExists(worldId)) return;
-    this.#db.prepare('UPDATE worlds SET active_task = ? WHERE id = ?').run(task ? JSON.stringify(task) : null, worldId);
+    const key = this.#walletKey(playerId);
+    if (task === null) {
+      this.#db.prepare('DELETE FROM player_tasks WHERE world_id = ? AND player_id = ?').run(worldId, key);
+      return;
+    }
+    this.#db
+      .prepare(
+        'INSERT INTO player_tasks (world_id, player_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(world_id, player_id) DO UPDATE SET data = excluded.data',
+      )
+      .run(worldId, key, JSON.stringify(task));
+  }
+
+  /** 列出某世界里所有玩家的进行中委托（debug 后台用）。 */
+  listActiveTasks(worldId: string): { playerId: string; task: ActiveTask }[] {
+    const rows = this.#db
+      .prepare('SELECT player_id, data FROM player_tasks WHERE world_id = ? ORDER BY player_id')
+      .all(worldId) as { player_id: string; data: string }[];
+    return rows.map((r) => ({ playerId: r.player_id, task: JSON.parse(r.data) as ActiveTask }));
   }
 
   listCharacters(worldId: string): Character[] {
@@ -636,16 +689,17 @@ export class WorldStore {
 
   // ── 只读观测（P6 调试后台；不改状态，直连查询）────────────────────────────
 
-  /** 列出所有世界（含钱包/进行中委托）。 */
-  listWorlds(): { id: string; wallet: Wallet; activeTask: ActiveTask | null }[] {
-    const rows = this.#db.prepare('SELECT id, active_task FROM worlds ORDER BY id').all() as {
-      id: string;
-      active_task: string | null;
-    }[];
+  /** 列出所有世界，每个世界带上各玩家的钱包与进行中委托（debug 后台用）。 */
+  listWorlds(): {
+    id: string;
+    wallets: { playerId: string; wallet: Wallet }[];
+    activeTasks: { playerId: string; task: ActiveTask }[];
+  }[] {
+    const rows = this.#db.prepare('SELECT id FROM worlds ORDER BY id').all() as { id: string }[];
     return rows.map((r) => ({
       id: r.id,
-      wallet: this.getWallet(r.id),
-      activeTask: r.active_task ? (JSON.parse(r.active_task) as ActiveTask) : null,
+      wallets: this.listWallets(r.id),
+      activeTasks: this.listActiveTasks(r.id),
     }));
   }
 

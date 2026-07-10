@@ -17,7 +17,7 @@ import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
@@ -72,8 +72,8 @@ export function buildDebugState(store: WorldStore) {
     players: store.listPlayers(),
     worlds: store.listWorlds().map((w) => ({
       id: w.id,
-      wallet: w.wallet,
-      activeTask: w.activeTask,
+      wallets: w.wallets,
+      activeTasks: w.activeTasks,
       characters: store.listCharacters(w.id).map((c) => ({
         id: c.id,
         name: c.name,
@@ -142,7 +142,10 @@ function render(s){
     : '<p class="empty">（无玩家）</p>';
   for(const w of s.worlds){
     h += '<div class="world"><div class="wid">世界 '+esc(w.id)+'</div>';
-    h += '<div class="mono">钱包 '+esc(JSON.stringify(w.wallet))+' · 委托 '+esc(w.activeTask?w.activeTask.type+'('+w.activeTask.npcName+')':'无')+'</div>';
+    const taskOf = pid => { const t = w.activeTasks.find(t => t.playerId === pid); return t ? t.task.type+'('+t.task.npcName+')' : '无'; };
+    const pname = pid => pid ? pid.slice(0,8) : '(匿名)';
+    h += w.wallets.length ? w.wallets.map(x => '<div class="mono">'+esc(pname(x.playerId))+' · 钱包 '+esc(JSON.stringify(x.wallet))+' · 委托 '+esc(taskOf(x.playerId))+'</div>').join('')
+      : '<div class="mono empty">（无玩家钱包）</div>';
     h += '<h4 style="margin:10px 0 2px">角色 ('+w.characters.length+')</h4>'+ (w.characters.map(charBlock).join('')||'<span class="empty">（无角色）</span>');
     h += '<h4 style="margin:10px 0 2px">物件 ('+w.props.length+') · Visit ('+w.visits.length+')</h4>';
     h += '<div class="mono">'+w.visits.slice(0,10).map(v => v.playerId.slice(0,8)+' '+new Date(v.startedAt).toLocaleString()+(v.endedAt?' → 已结束':' · 进行中')).join('<br>')+'</div>';
@@ -251,7 +254,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       if (typeof n !== 'number' || !Number.isFinite(n)) {
         return reply.code(400).send({ error: 'flowers must be a number' });
       }
-      const wallet = store.setFlowers(req.params.id, n);
+      const wallet = store.setFlowers(req.params.id, ANON_PLAYER, n);
       return { id: req.params.id, wallet };
     },
   );
@@ -596,7 +599,7 @@ async function pushPraiseTts(
 
 /** 造物/造角色余额检查：至少 1 朵小红花才放行。 */
 function hasFlower(store: WorldStore, worldId: string): boolean {
-  return store.getWallet(worldId).flowers >= 1;
+  return store.getWallet(worldId, ANON_PLAYER).flowers >= 1;
 }
 
 /**
@@ -627,7 +630,7 @@ async function denyForNoFlowers(
     message: line,
     ttsAsset,
     voiceId: fairy?.voiceId ?? '',
-    wallet: store.getWallet(worldId),
+    wallet: store.getWallet(worldId, ANON_PLAYER),
   }));
 }
 
@@ -681,7 +684,7 @@ export async function createPropAsync(
   store: WorldStore,
   clientTts = false,
 ): Promise<void> {
-  if (!store.spendFlower(worldId)) {
+  if (!store.spendFlower(worldId, ANON_PLAYER)) {
     await denyForNoFlowers(socket, adapters, store, worldId, 'prop', clientTts);
     return;
   }
@@ -701,11 +704,11 @@ export async function createPropAsync(
     const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed' };
     store.addProp(worldId, prop);
     created = true;
-    socket.send(JSON.stringify({ type: 'prop_created', worldId, prop, wallet: store.getWallet(worldId) }));
+    socket.send(JSON.stringify({ type: 'prop_created', worldId, prop, wallet: store.getWallet(worldId, ANON_PLAYER) }));
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
   } finally {
-    if (!created) store.refundFlower(worldId); // 造失败/被审核挡：退还，别让孩子白花一朵
+    if (!created) store.refundFlower(worldId, ANON_PLAYER); // 造失败/被审核挡：退还，别让孩子白花一朵
   }
 }
 
@@ -721,7 +724,7 @@ export async function createCharacterAsync(
   toSpriteSheet?: ToSpriteSheet,
   clientTts = false,
 ): Promise<void> {
-  if (!store.spendFlower(worldId)) {
+  if (!store.spendFlower(worldId, ANON_PLAYER)) {
     await denyForNoFlowers(socket, adapters, store, worldId, 'character', clientTts);
     return;
   }
@@ -735,7 +738,7 @@ export async function createCharacterAsync(
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
     );
     created = true;
-    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId) }));
+    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId, ANON_PLAYER) }));
     // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     if (character.appearance.spriteAsset) {
       triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
@@ -744,7 +747,7 @@ export async function createCharacterAsync(
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
   } finally {
-    if (!created) store.refundFlower(worldId); // 造失败：退还，别让孩子白花一朵
+    if (!created) store.refundFlower(worldId, ANON_PLAYER); // 造失败：退还，别让孩子白花一朵
   }
 }
 
@@ -961,8 +964,8 @@ export async function handleWsMessage(
     startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now());
     socket.send(JSON.stringify({
       type: 'world_state',
-      wallet: store.getWallet(worldId),
-      activeTask: store.getActiveTask(worldId),
+      wallet: store.getWallet(worldId, ANON_PLAYER),
+      activeTask: store.getActiveTask(worldId, ANON_PLAYER),
       // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
       playerPos: session.playerId ? store.getPlayer(session.playerId)?.position : undefined,
     }));

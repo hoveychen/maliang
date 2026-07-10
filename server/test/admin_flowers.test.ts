@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { buildServer } from '../src/server.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
-import { INITIAL_FLOWERS, MAX_FLOWERS } from '../src/types.ts';
+import { ANON_PLAYER, INITIAL_FLOWERS, MAX_FLOWERS } from '../src/types.ts';
 
 // 管理端点：给某世界补/设小红花（共享 default 世界初始额度被造角色花光后补花测试用）。
 // 只动 flowers、保留盖章进度、必须过 admin token 门禁。
@@ -11,9 +11,9 @@ test('admin flowers: token 门禁 + 设值/缺省/夹紧/保留盖章进度', as
   const store = new WorldStore();
   store.createWorld('w1');
   // 先花光初始花并盖 1 章，制造 flowers=0、stampProgress=1、stampsTotal=1 的存量态
-  assert.equal(store.spendFlower('w1', INITIAL_FLOWERS), true);
-  store.addStamp('w1');
-  assert.deepEqual(store.getWallet('w1'), { flowers: 0, stampProgress: 1, stampsTotal: 1 });
+  assert.equal(store.spendFlower('w1', ANON_PLAYER, INITIAL_FLOWERS), true);
+  store.addStamp('w1', ANON_PLAYER);
+  assert.deepEqual(store.getWallet('w1', ANON_PLAYER), { flowers: 0, stampProgress: 1, stampsTotal: 1 });
 
   const app = await buildServer({ adapters: createMockAdapters(), store });
   t.after(() => app.close());

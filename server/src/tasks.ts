@@ -3,7 +3,7 @@
 // （见 openrouter_llm.routeIntent 的 offerTask）；完成判定是客户端上报的确定性事件，不靠 LLM 猜。
 // 完成任一委托 = 盖 1 个集邮章；每满 3 章换 1 朵小红花（见 docs/reward-flower-design.md）。
 import { randomUUID } from 'node:crypto';
-import { MAX_FLOWERS, STAMPS_PER_FLOWER, STAMP_STYLES, type ActiveTask, type TaskType, type Wallet } from './types.ts';
+import { ANON_PLAYER, MAX_FLOWERS, STAMPS_PER_FLOWER, STAMP_STYLES, type ActiveTask, type TaskType, type Wallet } from './types.ts';
 import type { WorldStore } from './persistence.ts';
 
 /** deliver 委托的带话内容池（判定不依赖文本，纯演出）。 */
@@ -28,7 +28,7 @@ export function pickTaskCandidate(
   store: WorldStore,
   rand: () => number = Math.random,
 ): ActiveTask | null {
-  if (store.getActiveTask(worldId)) return null;
+  if (store.getActiveTask(worldId, ANON_PLAYER)) return null;
   const npc = store.getCharacter(worldId, npcId);
   if (!npc || npc.isFairy) return null;
   const others = store.listCharacters(worldId).filter((c) => c.id !== npcId && !c.isFairy);
@@ -123,14 +123,14 @@ export function completeTaskOnEvent(
   event: TaskEvent,
   store: WorldStore,
 ): { task: ActiveTask; flowerGained: boolean; wallet: Wallet } | null {
-  const task = store.getActiveTask(worldId);
+  const task = store.getActiveTask(worldId, ANON_PLAYER);
   if (!task) return null;
   const ok =
     (task.type === 'deliver' && event.kind === 'deliver_done' && sameName(event.targetName, task.targetName)) ||
     (task.type === 'bring' && event.kind === 'bring_done' && sameName(event.targetName, task.targetName)) ||
     (task.type === 'visit' && event.kind === 'visit_done' && sameName(event.locationName, task.locationName));
   if (!ok) return null;
-  const { flowerGained, wallet } = store.addStamp(worldId);
-  store.setActiveTask(worldId, null);
+  const { flowerGained, wallet } = store.addStamp(worldId, ANON_PLAYER);
+  store.setActiveTask(worldId, ANON_PLAYER, null);
   return { task, flowerGained, wallet };
 }

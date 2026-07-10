@@ -8,7 +8,7 @@ import { respondToTranscript } from '../src/voice.ts';
 import { handleWsMessage, newVoiceSession, createPropAsync, createCharacterAsync } from '../src/server.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 import { pickTaskCandidate, completeTaskOnEvent, describeTask, praiseLine, flowerDeniedLine } from '../src/tasks.ts';
-import { INITIAL_FLOWERS, type ActiveTask, type Character, type IntentContext, type IntentResult } from '../src/types.ts';
+import { ANON_PLAYER, INITIAL_FLOWERS, type ActiveTask, type Character, type IntentContext, type IntentResult } from '../src/types.ts';
 
 function seedChar(store: WorldStore, worldId: string, id: string, name: string, isFairy = false): Character {
   const c: Character = {
@@ -63,7 +63,7 @@ test('pickTaskCandidate：按世界现状挑可行类型，字段齐全（无 gi
 test('pickTaskCandidate：有进行中委托/委托人是小神仙/世界空 → 不出候选', () => {
   const store = seedWorld();
   assert.equal(pickTaskCandidate('w1', 'fairy', store), null, '小神仙不发委托');
-  store.setActiveTask('w1', pickTaskCandidate('w1', 'green', store));
+  store.setActiveTask('w1', ANON_PLAYER, pickTaskCandidate('w1', 'green', store));
   assert.equal(pickTaskCandidate('w1', 'green', store), null, '已有进行中委托不再出候选');
   const empty = new WorldStore();
   empty.createWorld('w2');
@@ -86,7 +86,7 @@ test('respondToTranscript：LLM offerTask → 委托设为进行中并随回应�
   };
   const r = await respondToTranscript('w1', 'green', '', '有什么要帮忙的吗', adapters, store);
   assert.ok(r.task, '回应应带新委托');
-  assert.equal(store.getActiveTask('w1')!.id, r.task!.id, '委托应设为进行中');
+  assert.equal(store.getActiveTask('w1', ANON_PLAYER)!.id, r.task!.id, '委托应设为进行中');
   const r2 = await respondToTranscript('w1', 'green', '', '你好', createMockAdapters(), store);
   assert.equal(r2.task!.id, r.task!.id);
 });
@@ -97,20 +97,20 @@ test('completeTaskOnEvent：三类事件匹配盖章，错事件/错参数不动
     id: 't', type: 'deliver', npcId: 'green', npcName: '小绿', stampStyle: 'star', ...over,
   });
   // deliver：目标名模糊匹配 → 盖第 1 章（未升花）
-  store.setActiveTask('w1', mk({ type: 'deliver', targetName: '小蓝', message: 'hi' }));
+  store.setActiveTask('w1', ANON_PLAYER, mk({ type: 'deliver', targetName: '小蓝', message: 'hi' }));
   assert.equal(completeTaskOnEvent('w1', { kind: 'visit_done', locationName: '池塘' }, store), null, '错类型不完成');
   assert.equal(completeTaskOnEvent('w1', { kind: 'deliver_done', targetName: '小黄' }, store), null, '错对象不完成');
   const r1 = completeTaskOnEvent('w1', { kind: 'deliver_done', targetName: '小蓝呀' }, store)!;
   assert.ok(r1, '模糊名应匹配');
   assert.equal(r1.flowerGained, false);
   assert.equal(r1.wallet.stampProgress, 1, '盖第 1 章');
-  assert.equal(store.getActiveTask('w1'), null, '完成清委托');
+  assert.equal(store.getActiveTask('w1', ANON_PLAYER), null, '完成清委托');
   // bring → 第 2 章
-  store.setActiveTask('w1', mk({ type: 'bring', targetName: '小蓝' }));
+  store.setActiveTask('w1', ANON_PLAYER, mk({ type: 'bring', targetName: '小蓝' }));
   const r2 = completeTaskOnEvent('w1', { kind: 'bring_done', targetName: '小蓝' }, store)!;
   assert.equal(r2.wallet.stampProgress, 2);
   // visit → 第 3 章 → 升 1 花
-  store.setActiveTask('w1', mk({ type: 'visit', locationName: '池塘' }));
+  store.setActiveTask('w1', ANON_PLAYER, mk({ type: 'visit', locationName: '池塘' }));
   const r3 = completeTaskOnEvent('w1', { kind: 'visit_done', locationName: '池塘' }, store)!;
   assert.equal(r3.flowerGained, true, '满 3 章升花');
   assert.equal(r3.wallet.flowers, INITIAL_FLOWERS + 1);
@@ -133,8 +133,8 @@ test('praiseLine：升花报喜 / 未升花报进度 / 满仓夸奖（纯中文�
 
 test('WS world_info/task_event：world_state 同步钱包，完成盖章 → task_complete 带钱包 + praise_tts', async () => {
   const store = seedWorld();
-  store.addStamp('w1');
-  store.addStamp('w1'); // stampProgress=2，下一次完成即升花
+  store.addStamp('w1', ANON_PLAYER);
+  store.addStamp('w1', ANON_PLAYER); // stampProgress=2，下一次完成即升花
   const sent: Record<string, unknown>[] = [];
   const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
   const rest = [createMockAdapters(), store, new RateLimiter(100, 100), 'c1', newVoiceSession()] as const;
@@ -145,7 +145,7 @@ test('WS world_info/task_event：world_state 同步钱包，完成盖章 → tas
   assert.deepEqual(ws['wallet'], { flowers: INITIAL_FLOWERS, stampProgress: 2, stampsTotal: 2 });
 
   // task_event：deliver 完成 → task_complete 带盖章款式/升花/最新钱包
-  store.setActiveTask('w1', {
+  store.setActiveTask('w1', ANON_PLAYER, {
     id: 't1', type: 'deliver', npcId: 'green', npcName: '小绿', targetName: '小蓝', message: 'hi', stampStyle: 'medal',
   });
   await handleWsMessage(socket, JSON.stringify({ type: 'task_event', worldId: 'w1', kind: 'deliver_done', targetName: '小蓝' }), ...rest);
@@ -154,7 +154,7 @@ test('WS world_info/task_event：world_state 同步钱包，完成盖章 → tas
   assert.equal(tc['stampStyle'], 'medal');
   assert.equal(tc['flowerGained'], true, '第 3 章升花');
   assert.deepEqual(tc['wallet'], { flowers: INITIAL_FLOWERS + 1, stampProgress: 0, stampsTotal: 3 });
-  assert.equal(store.getActiveTask('w1'), null);
+  assert.equal(store.getActiveTask('w1', ANON_PLAYER), null);
   const praise = sent.filter((m) => m['type'] === 'praise_tts');
   assert.equal(praise.length, 1, '完成应推一条表扬语音');
   assert.ok(store.getAsset(String(praise[0]!['ttsAsset'])), '表扬音频应入资产库');
@@ -170,29 +170,29 @@ test('消费门槛：造物扣 1 花、0 花拦截 prop_denied、造失败退还
   const created = sent.find((m) => m['type'] === 'prop_created')!;
   assert.ok(created, '应造出物件');
   assert.equal((created['wallet'] as { flowers: number }).flowers, INITIAL_FLOWERS - 1, '造物扣 1 花');
-  assert.equal(store.getWallet('w1').flowers, INITIAL_FLOWERS - 1);
+  assert.equal(store.getWallet('w1', ANON_PLAYER).flowers, INITIAL_FLOWERS - 1);
 
   // 造失败（审核挡）：退还，账不变
   const blocked = { ...createMockAdapters(), moderation: { async moderateText() { return { allowed: false, reason: 'x' }; } } };
-  const before = store.getWallet('w1').flowers;
+  const before = store.getWallet('w1', ANON_PLAYER).flowers;
   await createPropAsync(socket, 'w1', '坏东西', blocked as unknown as ReturnType<typeof createMockAdapters>, store);
   assert.ok(sent.some((m) => m['type'] === 'prop_failed'), '应推 prop_failed');
-  assert.equal(store.getWallet('w1').flowers, before, '造失败退还，账不变');
+  assert.equal(store.getWallet('w1', ANON_PLAYER).flowers, before, '造失败退还，账不变');
 
   // 花光后造物：prop_denied，不动账
-  store.spendFlower('w1', before);
+  store.spendFlower('w1', ANON_PLAYER, before);
   sent.length = 0;
   await createPropAsync(socket, 'w1', '再来一个', createMockAdapters(), store);
   const denied = sent.find((m) => m['type'] === 'prop_denied')!;
   assert.ok(denied, '0 花应拦截');
   assert.equal(denied['reason'], 'no_flowers');
   assert.equal(denied['message'], flowerDeniedLine());
-  assert.equal(store.getWallet('w1').flowers, 0, '拦截不动账');
+  assert.equal(store.getWallet('w1', ANON_PLAYER).flowers, 0, '拦截不动账');
 });
 
 test('消费门槛：造角色 0 花拦截 gen_denied', async () => {
   const store = seedWorld();
-  store.spendFlower('w1', INITIAL_FLOWERS); // 花光
+  store.spendFlower('w1', ANON_PLAYER, INITIAL_FLOWERS); // 花光
   const sent: Record<string, unknown>[] = [];
   const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
   await createCharacterAsync(socket, 'w1', '一只小猫', createMockAdapters(), store);

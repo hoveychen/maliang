@@ -31,6 +31,12 @@ export const STAMPS_PER_FLOWER = 3;
 export const INITIAL_FLOWERS = 3;
 
 /**
+ * 无 playerId 时的匿名玩家键（老客户端 / 直连调试不带 playerId）。
+ * 所有匿名连接共用这一个钱包与委托——与「按玩家分」之前的行为一致，不因缺身份而崩。
+ */
+export const ANON_PLAYER = '';
+
+/**
  * 玩家钱包：唯一货币「小红花」+ 集邮盖章进度。随世界持久化（复用旧 inventory 列，存 Wallet JSON）。
  * 经济：完成任一委托盖 1 章；每满 3 章换 1 朵花（纯累加，不因中断清零）；造物/造角色各扣 1 朵。
  */
