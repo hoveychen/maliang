@@ -110,6 +110,15 @@ func send_task_event(world_id: String, kind: String, extra := {}) -> void:
 	msg.merge(extra)
 	_send(msg)
 
+## 角色/玩家坐标回报：空间权威在客户端，服务端只记最后位置供下次进世界读回。
+## chars 只带本轮 tile 变化过的角色（静止时整条消息不发）；player_tile 传 Vector2i(-1,-1) 表示不带玩家。
+## 服务端成功无回包，越界 tile 静默丢弃。
+func send_positions(world_id: String, chars: Array, player_tile := Vector2i(-1, -1)) -> void:
+	var msg := { "type": "positions_report", "worldId": world_id, "chars": chars }
+	if player_tile.x >= 0:
+		msg["player"] = { "tileX": player_tile.x, "tileY": player_tile.y }
+	_send(msg)
+
 ## 语音生成物件的落位回报：客户端就近找到空位后上报 tile，服务端持久化供重载恢复。
 func send_prop_place(world_id: String, prop_id: String, tile: Vector2i) -> void:
 	_send({ "type": "prop_place", "worldId": world_id, "propId": prop_id, "tileX": tile.x, "tileY": tile.y })

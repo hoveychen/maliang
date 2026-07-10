@@ -1719,6 +1719,7 @@ func _process(delta: float) -> void:
 	tp = _prof_lap(tp, "task/give")
 	_step_executors(delta)
 	tp = _prof_lap(tp, "executors")
+	_step_positions_report(delta)
 	_check_approach()
 	tp = _prof_lap(tp, "approach")
 	_update_fairy(delta)
@@ -1812,6 +1813,59 @@ func _exit_tree() -> void:
 	for ex in _executors:
 		ex.cancel()  # 把各自在途寻路任务转孤儿
 	BehaviorExecutor.flush_all_blocking()  # 阻塞收完（关停允许阻塞）
+
+## 坐标回报节拍：每 POS_REPORT_INTERVAL 秒扫一次，只上报 tile 变过的角色；全静止则整条消息不发。
+const POS_REPORT_INTERVAL := 5.0
+## 离线占位角色的 id 前缀：这些 id 服务端不认识，绝不能上报（在线时 _bootstrap 已清掉，双保险）。
+const _LOCAL_ONLY_IDS := ["demo_", "fairy_local"]
+var _pos_report_t := 0.0
+var _reported_tiles: Dictionary = {} ## id -> Vector2i，上次已上报的 tile（含玩家，键 PLAYER_ID）
+
+static func _is_local_only_id(id: String) -> bool:
+	for prefix in _LOCAL_ONLY_IDS:
+		if id.begins_with(prefix):
+			return true
+	return false
+
+## 挑出 tile 变化过的角色（纯函数，便于回测）。entries 形如 [{id, tileX, tileY}]。
+## reported 会被就地更新为本轮上报后的状态。
+static func collect_moved(entries: Array, reported: Dictionary) -> Array:
+	var out: Array = []
+	for e in entries:
+		var id := String(e["id"])
+		if _is_local_only_id(id):
+			continue
+		var tile: Vector2i = e["tile"]
+		if reported.get(id, Vector2i(-1, -1)) == tile:
+			continue
+		reported[id] = tile
+		out.append({ "id": id, "tileX": tile.x, "tileY": tile.y })
+	return out
+
+func _step_positions_report(delta: float) -> void:
+	if not online or backend == null or world_id.is_empty() or not backend.is_online():
+		return
+	_pos_report_t += delta
+	if _pos_report_t < POS_REPORT_INTERVAL:
+		return
+	_pos_report_t = 0.0
+
+	var entries: Array = []
+	for n in npcs:
+		entries.append({ "id": String(n.get("id", "")), "tile": WorldGrid.to_tile(n["logical"]) })
+	var moved := collect_moved(entries, _reported_tiles)
+
+	# 玩家单独走 player 字段（Player 表），不混进 chars。
+	var player_tile := Vector2i(-1, -1)
+	if not player.is_empty():
+		var t := WorldGrid.to_tile(player["logical"])
+		if _reported_tiles.get(PLAYER_ID, Vector2i(-1, -1)) != t:
+			_reported_tiles[PLAYER_ID] = t
+			player_tile = t
+
+	if moved.is_empty() and player_tile.x < 0:
+		return # 全静止：零流量
+	backend.send_positions(world_id, moved, player_tile)
 
 func _step_executors(delta: float) -> void:
 	for ex in _executors:
