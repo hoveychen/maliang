@@ -20,7 +20,7 @@ import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationGoal, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
-import { findPropOption, composePropDesc } from './prop_creation_options.ts';
+import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
@@ -941,9 +941,10 @@ export async function createCharacterAsync(
 }
 
 /**
- * 引导式造角色图标批量生成（P3）：遍历图标库每个选项，走图标专用管线 generateIconAsset
+ * 引导式创造图标批量生成：遍历图标库每个选项，走图标专用管线 generateIconAsset
  * （图标画风生图→抠图→程序加白 die-cut 边→putAsset）出一张图，存「option id→asset hash」映射。
- * 幂等：已生成的跳过，除非 force。opts.only 限定只生成指定 id（低成本验证画风）。
+ * 覆盖造角色全库 + 造物专属的 kind/motion（prop_ 前缀）；造物的 color/size 复用造角色同 id，
+ * 不重复生成（同 id 幂等跳过）。幂等：已生成的跳过，除非 force。opts.only 限定只生成指定 id。
  * 返回生成/跳过/失败清单。绝不抛（单项失败不影响其它）。
  */
 export async function generateCreationIcons(
@@ -955,19 +956,25 @@ export async function generateCreationIcons(
   const skipped: string[] = [];
   const failed: string[] = [];
   const onlySet = opts.only && opts.only.length > 0 ? new Set(opts.only) : null;
-  for (const o of CREATION_OPTIONS) {
-    if (onlySet && !onlySet.has(o.id)) continue;
-    if (!opts.force && store.getCreationIcon(o.id)) {
-      skipped.push(o.id);
+  // 待生成图标 = 造角色全库(iconPrompt) + 造物专属 kind/motion(propIconPrompt)。
+  // 造物的 color/size 是造角色的同 id，已在 CREATION_OPTIONS 里，不再单列（避免重复生成）。
+  const jobs: { id: string; prompt: string }[] = [
+    ...CREATION_OPTIONS.map((o) => ({ id: o.id, prompt: iconPrompt(o.id) })),
+    ...PROP_CREATION_OPTIONS.filter((o) => o.id.startsWith('prop_')).map((o) => ({ id: o.id, prompt: propIconPrompt(o.id) })),
+  ];
+  for (const job of jobs) {
+    if (onlySet && !onlySet.has(job.id)) continue;
+    if (!opts.force && store.getCreationIcon(job.id)) {
+      skipped.push(job.id);
       continue;
     }
     try {
-      const hash = await generateIconAsset(adapters, iconPrompt(o.id), store);
-      store.setCreationIcon(o.id, hash);
-      generated.push(o.id);
+      const hash = await generateIconAsset(adapters, job.prompt, store);
+      store.setCreationIcon(job.id, hash);
+      generated.push(job.id);
     } catch (err) {
-      console.warn(`造角色图标生成失败（${o.id}，跳过）：${String(err)}`);
-      failed.push(o.id);
+      console.warn(`创造图标生成失败（${job.id}，跳过）：${String(err)}`);
+      failed.push(job.id);
     }
   }
   return { generated, skipped, failed };
