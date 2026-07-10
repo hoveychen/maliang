@@ -129,6 +129,23 @@ static func leave_ready(seen: bool, speaking: bool, arm_left: float, deadline_le
 		return not speaking  # 出过声、现在不出声了 = 说完了
 	return arm_left <= 0.0   # 宽限内始终没出声（无 TTS/合成失败）→ 直接动身
 
+## 立去系指令：会让角色离开当前位置去别处（去某地/跟随/找人聊天/带话）。
+## 就地动作(do_action)、停跟(stop_follow)不算——角色留在孩子面前，对话不必关。
+const LEAVE_COMMANDS := ["move_to", "follow", "chat_with", "deliver_message"]
+
+## 这次派发会不会让「正在跟孩子说话的那个角色」离开他面前？是则先说完再动身、随后关对话；
+## 否则原地执行、对话继续。三个入参对应 world.gd 的三条派发路径：
+##   command_types      待派发脚本里的指令类型
+##   relaying           脚本靠对话对象跑腿转交给别的角色（relay_command）
+##   _speaker_is_fairy  对话对象是小仙子（随从，_run_behavior 对她早退）
+static func speaker_leaves(command_types: Array, relaying: bool, _speaker_is_fairy: bool) -> bool:
+	if relaying:
+		return false # 现行语义：跑腿分支从不判 leave（P2 修）
+	for t in command_types:
+		if String(t) in LEAVE_COMMANDS:
+			return true
+	return false
+
 ## 调试/日志用的状态名。
 static func name_of(s: State) -> String:
 	match s:
