@@ -93,13 +93,18 @@ void MaliangAsr::_emit_deferred(const String &signal, const Variant &arg) {
 }
 
 String MaliangAsr::_resolve_model_dir() const {
-	// 测试/开发：env 直指（P2 headless 测试用 server/models）。
+	// 测试/开发：env 直指（headless 测试用 server/models）。
 	String env_dir = OS::get_singleton()->get_environment("MALIANG_ASR_MODEL_DIR");
 	if (!env_dir.is_empty()) {
 		return env_dir;
 	}
-	// 运行期（P3 打包）：模型随 .app 走，放可执行文件旁的 asr-models/。
 	String exe_dir = OS::get_singleton()->get_executable_path().get_base_dir();
+	// macOS .app：可执行文件在 Contents/MacOS/，模型随包放 Contents/Resources/asr-models/。
+	String bundled = exe_dir.path_join("../Resources/asr-models").path_join(ASR_MODEL_DIR).simplify_path();
+	if (FileAccess::file_exists(bundled.path_join("tokens.txt"))) {
+		return bundled;
+	}
+	// 退路：可执行文件旁 asr-models/（其它平台/布局）。
 	return exe_dir.path_join("asr-models").path_join(ASR_MODEL_DIR);
 }
 

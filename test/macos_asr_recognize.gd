@@ -1,40 +1,34 @@
 extends SceneTree
-## P2 端到端：喂真实中文 wav 给 GDExtension 的 sherpa 识别器，断言 final_result 正确。
-## 跑法（模型经 env 指向 server/models）：
-##   MALIANG_ASR_MODEL_DIR=<abs>/server/models/sherpa-onnx-streaming-zipformer-multi-zh-hans-2023-12-12 \
-##   Godot --headless --path <worktree> --script res://test/macos_asr_recognize.gd
-## 成功打印 "[P2 PASS] <识别文本>" 并 quit(0)。
+## 端到端：喂真实中文 wav 给 GDExtension 的 sherpa 识别器，断言 final_result 正确。
+## 结果写文件（MALIANG_ASR_CHECK_OUT），不依赖 stdout——导出的 release .app 不向终端打印。
+## 音频与模型经 MALIANG_ASR_MODEL_DIR 指定（editor 测试与签名 app 识别验证共用）。
 
-const CHUNK_BYTES := 4800 # 150ms @ 16k/16bit，与客户端 feedPcm 批大小一致
-# 期望文本的关键片段（模型自带样音 DEV_T0000000000 的稳定转写）
+const CHUNK_BYTES := 4800 # 150ms @ 16k/16bit
 const EXPECT_SUBSTR := "研究"
+const MAX_FRAMES := 1800 # ~30s @ 60fps 的兜底
 
 var _asr: Object
 var _final := ""
-var _got_final := false
-var _elapsed := 0.0
+var _got := false
+var _frames := 0
+var _out := ""
 
 func _initialize() -> void:
+	_out = OS.get_environment("MALIANG_ASR_CHECK_OUT")
 	if not Engine.has_singleton("MaliangAsr"):
-		_fail("MaliangAsr 单例不存在（GDExtension 未加载）")
-		return
+		_write("FAIL has_singleton=false（GDExtension 未加载）")
+		quit(1); return
 	_asr = Engine.get_singleton("MaliangAsr")
+	_asr.connect("final_result", func(t): _final = t; _got = true)
+	_asr.connect("asr_error", func(m): _write("FAIL asr_error=" + m); quit(1))
 	_asr.connect("asr_ready", _on_ready)
-	_asr.connect("final_result", _on_final)
-	_asr.connect("asr_error", _on_error)
-	print("[P2] initialize() ...")
 	_asr.initialize()
 
 func _on_ready() -> void:
-	print("[P2] asr_ready，is_ready=%s，开始喂音频" % _asr.is_ready())
-	if not _asr.is_ready():
-		_fail("asr_ready 后 is_ready() 仍为 false")
-		return
 	var wav := OS.get_environment("MALIANG_ASR_MODEL_DIR").path_join("test_wavs/DEV_T0000000000.wav")
 	var pcm := _read_wav_pcm(wav)
 	if pcm.is_empty():
-		_fail("读不到测试音频 PCM：" + wav)
-		return
+		_write("FAIL 读不到 wav：" + wav); quit(1); return
 	_asr.start_session()
 	var off := 0
 	while off < pcm.size():
@@ -42,27 +36,25 @@ func _on_ready() -> void:
 		off += CHUNK_BYTES
 	_asr.stop_session()
 
-func _on_final(text: String) -> void:
-	_final = text
-	_got_final = true
-
-func _on_error(msg: String) -> void:
-	_fail("asr_error: " + msg)
-
-# SceneTree 每帧回调：等 final_result 回来（deferred 信号需主循环 flush）。
-func _process(delta: float) -> bool:
-	_elapsed += delta
-	if _got_final:
+func _process(_dt: float) -> bool:
+	_frames += 1
+	if _got:
 		if _final.find(EXPECT_SUBSTR) >= 0:
-			print("[P2 PASS] 端侧识别：「%s」" % _final)
-			quit(0)
+			_write("PASS " + _final); quit(0)
 		else:
-			_fail("识别文本不含期望片段「%s」，实际：「%s」" % [EXPECT_SUBSTR, _final])
+			_write("FAIL 文本不含「%s」：%s" % [EXPECT_SUBSTR, _final]); quit(1)
 		return true
-	if _elapsed > 30.0:
-		_fail("30s 内未收到 final_result")
+	if _frames > MAX_FRAMES:
+		_write("FAIL 超时未收到 final_result（frames=%d）" % _frames); quit(1)
 		return true
 	return false
+
+func _write(msg: String) -> void:
+	if _out.is_empty():
+		printerr(msg); return
+	var f := FileAccess.open(_out, FileAccess.WRITE)
+	if f != null:
+		f.store_line(msg); f.flush(); f.close()
 
 func _read_wav_pcm(path: String) -> PackedByteArray:
 	var f := FileAccess.open(path, FileAccess.READ)
@@ -70,17 +62,7 @@ func _read_wav_pcm(path: String) -> PackedByteArray:
 		return PackedByteArray()
 	var all := f.get_buffer(f.get_length())
 	f.close()
-	# 跳到 "data" chunk 后的 PCM（16k/mono/16bit wav）
-	var data_pos := -1
 	for i in range(12, all.size() - 4):
-		if all[i] == 0x64 and all[i + 1] == 0x61 and all[i + 2] == 0x74 and all[i + 3] == 0x61:
-			data_pos = i + 8
-			break
-	if data_pos < 0:
-		return PackedByteArray()
-	return all.slice(data_pos)
-
-func _fail(msg: String) -> void:
-	push_error("[P2 FAIL] " + msg)
-	printerr("[P2 FAIL] " + msg)
-	quit(1)
+		if all[i] == 0x64 and all[i+1] == 0x61 and all[i+2] == 0x74 and all[i+3] == 0x61:
+			return all.slice(i + 8)
+	return PackedByteArray()
