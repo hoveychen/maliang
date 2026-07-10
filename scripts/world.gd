@@ -2582,6 +2582,37 @@ func _on_failed(reason: String) -> void:
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 ## _bootstrapping 全程置位，无论在线/离线都在收尾清零——world_ready 就绪判定据此知道引导已结束。
+## 当前场景 id（模型 B：world 含多 scene；步骤①②只有 village 一个）。
+const SCENE_ID := "village"
+
+## 从服务端下发的场景里取地形并载入。任何一步不成就静默保留本地 _paint()——
+## 离线、老服务端、地形未入库、载荷损坏，都必须能照常进世界。
+func _load_server_terrain(scenes: Variant) -> void:
+	if typeof(scenes) != TYPE_ARRAY or (scenes as Array).is_empty():
+		return # 地形还没入库：走本地确定性生成，与改动前一致
+	var scene: Dictionary = {}
+	for s in scenes:
+		if typeof(s) == TYPE_DICTIONARY and String((s as Dictionary).get("sceneId", "")) == SCENE_ID:
+			scene = s
+			break
+	if scene.is_empty():
+		return
+	var asset := String(scene.get("terrainAsset", ""))
+	if asset.is_empty():
+		return
+	var buf: PackedByteArray = await api.fetch_bytes(asset)
+	if buf.is_empty():
+		push_warning("[terrain] 拉取地形 %s 失败，沿用本地生成" % asset)
+		return
+	var r := TerrainMap.load_from_bytes(buf)
+	if not r["ok"]:
+		push_warning("[terrain] 服务端地形非法(%s)，沿用本地生成" % r["error"])
+		return
+	if r["changed"]:
+		# chunk_manager 没有「地形变了重铺全图」的入口，且 _setup_player 早在 _ready 里就
+		# 摸过地形。今天不该发生（导出字节 == _paint() 输出）；真发生说明两端画法漂了。
+		push_warning("[terrain] 服务端地形与本地生成不一致，已铺区块可能是旧样子")
+
 func _bootstrap() -> void:
 	_bootstrapping = true
 	_player_restore_pending = true
@@ -2593,6 +2624,7 @@ func _bootstrap() -> void:
 	if not world.is_empty():
 		online = true
 		world_id = String(world.get("id", "default"))
+		await _load_server_terrain(world.get("scenes", []))
 		backend.url = (api.base as String).replace("http", "ws") + "/ws"
 		backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入
 		backend.connect_to_server()
