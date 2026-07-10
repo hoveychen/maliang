@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ImageBlob, ServiceAdapters } from './adapters/types.ts';
 import { flipHorizontal, addStickerBorder, trimToContent } from './adapters/chroma_cutout.ts';
 import type { WorldStore } from './persistence.ts';
-import { WORLD_CENTER_TILE } from './types.ts';
+import { DEFAULT_SCENE, WORLD_CENTER_TILE } from './types.ts';
 import type { Character, CharacterSpec, CreateCharacterInput, GenStage } from './types.ts';
 
 /** 内容审核拦截（文字环节）。 */
@@ -35,6 +35,7 @@ function buildCharacter(
     state: 'idle',
     behaviorScript: { commands: [{ type: 'wander', params: { radius: 5, duration: 8 } }], loop: true },
     position: input.position ?? WORLD_CENTER_TILE,
+    sceneId: input.sceneId ?? DEFAULT_SCENE,
     abilities: spec.abilities,
     relationships: {},
   };

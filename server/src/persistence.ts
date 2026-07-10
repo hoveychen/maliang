@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
-import { ANON_PLAYER, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 
@@ -108,6 +108,7 @@ export class WorldStore {
       this.#migrateLegacyMemories();
       this.#migrateLegacyChatHistory();
       this.#migrateLegacyPlayerPositions();
+      this.#migrateLegacyEntityScenes();
       this.#loadAssets();
       this.#loadSpriteAnims();
     }
@@ -397,9 +398,15 @@ export class WorldStore {
     return true;
   }
 
-  listProps(worldId: string): WorldProp[] {
+  /**
+   * 世界里的物件。传 sceneId 则只返回该场景的物件（缺 sceneId 的存量物件按 DEFAULT_SCENE 归入）；
+   * 不传 = 全世界所有场景（保持既有调用点行为不变）。
+   */
+  listProps(worldId: string, sceneId?: string): WorldProp[] {
     const rows = this.#db.prepare('SELECT data FROM props WHERE world_id = ?').all(worldId) as { data: string }[];
-    return rows.map((r) => JSON.parse(r.data) as WorldProp);
+    const all = rows.map((r) => JSON.parse(r.data) as WorldProp);
+    if (sceneId === undefined) return all;
+    return all.filter((p) => (p.sceneId ?? DEFAULT_SCENE) === sceneId);
   }
 
   /**
@@ -594,9 +601,15 @@ export class WorldStore {
     return rows.map((r) => ({ playerId: r.player_id, task: JSON.parse(r.data) as ActiveTask }));
   }
 
-  listCharacters(worldId: string): Character[] {
+  /**
+   * 世界里的角色。传 sceneId 则只返回该场景的角色（缺 sceneId 的存量角色按 DEFAULT_SCENE 归入）；
+   * 不传 = 全世界所有场景（保持既有调用点行为不变）。
+   */
+  listCharacters(worldId: string, sceneId?: string): Character[] {
     const rows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(worldId) as { data: string }[];
-    return rows.map((r) => JSON.parse(r.data) as Character);
+    const all = rows.map((r) => JSON.parse(r.data) as Character);
+    if (sceneId === undefined) return all;
+    return all.filter((c) => (c.sceneId ?? DEFAULT_SCENE) === sceneId);
   }
 
   getCharacter(worldId: string, characterId: string): Character | undefined {
@@ -609,11 +622,13 @@ export class WorldStore {
   /**
    * 角色所在 tile 的落位回报（positions_report）。空间权威在客户端，服务端只记最后位置供重载读回。
    * 角色不存在 → false 不动账。tile 合法性由调用方（server.ts）先行校验。
+   * sceneId 给了就一并更新角色所在场景——上报只带当前场景里的角色，故场景跟着位置走（模型 B）。
    */
-  setCharacterTile(worldId: string, characterId: string, tile: TilePos): boolean {
+  setCharacterTile(worldId: string, characterId: string, tile: TilePos, sceneId?: string): boolean {
     const character = this.getCharacter(worldId, characterId);
     if (!character) return false;
     character.position = tile;
+    if (sceneId !== undefined) character.sceneId = sceneId;
     this.saveCharacter(character);
     return true;
   }
@@ -661,6 +676,26 @@ export class WorldStore {
       delete p.position;
       this.#db.prepare('UPDATE players SET data = ? WHERE id = ?').run(JSON.stringify(p), r.id);
     }
+  }
+
+  /**
+   * 存量迁移：单场景时代的角色/物件 blob 里没有 sceneId 字段。
+   * 那批全部隐含属于 village，一次性补写 sceneId='village' 让数据说清自己在哪个场景。
+   * 已有 sceneId 的行跳过 → 幂等（第二次开库不改任何值）。
+   */
+  #migrateLegacyEntityScenes(): void {
+    const backfill = (table: 'characters' | 'props') => {
+      const rows = this.#db.prepare(`SELECT id, data FROM ${table}`).all() as { id: string; data: string }[];
+      const upd = this.#db.prepare(`UPDATE ${table} SET data = ? WHERE id = ?`);
+      for (const r of rows) {
+        const obj = JSON.parse(r.data) as { sceneId?: string };
+        if (obj.sceneId !== undefined) continue;
+        obj.sceneId = DEFAULT_SCENE;
+        upd.run(JSON.stringify(obj), r.id);
+      }
+    };
+    backfill('characters');
+    backfill('props');
   }
 
   /** 登记/更新玩家档案（首见即建，再见即更）。整对象 UPSERT 一行。 */

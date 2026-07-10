@@ -58,6 +58,7 @@ function seedFairy(worldId: string): Character {
     state: 'idle',
     behaviorScript: { commands: [{ type: 'wait', params: { duration: 1 } }], loop: true },
     position: WORLD_CENTER_TILE,
+    sceneId: DEFAULT_SCENE,
     abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop'],
     relationships: {},
   };
@@ -766,7 +767,7 @@ export async function createPropAsync(
       socket.send(JSON.stringify({ type: 'prop_failed', reason: validated.error }));
       return;
     }
-    const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed' };
+    const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed', sceneId: DEFAULT_SCENE };
     store.addProp(worldId, prop);
     created = true;
     socket.send(JSON.stringify({ type: 'prop_created', worldId, prop, wallet: store.getWallet(worldId, playerId) }));
@@ -1371,7 +1372,7 @@ export async function handleWsMessage(
       if (typeof e.id !== 'string' || !e.id) continue;
       const tile: TilePos = { tileX: Number(e.tileX), tileY: Number(e.tileY) };
       if (!isValidTile(tile)) continue;
-      if (store.setCharacterTile(worldId, e.id, tile)) applied++;
+      if (store.setCharacterTile(worldId, e.id, tile, sceneId)) applied++;
     }
     // 玩家自己的位置（Player 表；档案未建时静默跳过——首次进世界还没上报 profile）。
     if (typeof msg.player === 'object' && msg.player !== null && session.playerId) {

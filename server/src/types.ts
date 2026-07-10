@@ -152,6 +152,12 @@ export interface Character {
   behaviorScript: BehaviorScript;
   /** 环面 tile 坐标。空间权威在客户端：这里存的是客户端 positions_report 上报的最后位置，重载时读回。 */
   position: TilePos;
+  /**
+   * 角色所在场景（模型 B 多场景，见 docs/multi-scene-design.md）。
+   * 缺省/undefined = DEFAULT_SCENE（单场景时代的存量角色，迁移时补齐为 village）。
+   * 随 positions_report 携带的 sceneId 更新——上报只带当前场景里的角色，故场景跟着位置走。
+   */
+  sceneId?: string;
   abilities: string[];
   relationships: Record<string, string>;
 }
@@ -166,6 +172,8 @@ export interface CreateCharacterInput {
   intentText: string; // M1 文字驱动；M2 由讯飞 ASR 产出
   byFairy: boolean;
   position?: TilePos;
+  /** 新伙伴降生的场景；缺省=DEFAULT_SCENE（单场景时代/未指定时落 village）。 */
+  sceneId?: string;
 }
 
 export interface ModerationResult {
@@ -249,6 +257,8 @@ export interface WorldProp {
   tile: [number, number] | null;
   /** placed=摆在世界（tile 有效）；bagged=收进收集册物品页（tile 置 null）。 */
   state: 'placed' | 'bagged';
+  /** 物件所在场景（模型 B）。缺省/undefined = DEFAULT_SCENE（存量物件迁移时补 village）。 */
+  sceneId?: string;
 }
 
 /**

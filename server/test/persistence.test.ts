@@ -4,7 +4,7 @@ import { rmSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WorldStore } from '../src/persistence.ts';
-import { ANON_PLAYER, INITIAL_FLOWERS, type Character } from '../src/types.ts';
+import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, type Character } from '../src/types.ts';
 
 function char(worldId: string, id: string, name: string): Character {
   return {
@@ -89,7 +89,8 @@ test('迁移：旧 worlds.json → SQLite 全字段等价，备份为 .migrated�
   );
   // 钱包 / 物件迁移：方案 A 清空旧贴纸背包，置初始小红花
   assert.deepEqual(s.getWallet('w1', ANON_PLAYER), { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0 });
-  assert.deepEqual(s.listProps('w1'), [oldProp]);
+  // 存量物件迁移后补上 sceneId='village'（单场景时代物件隐含属于 village）
+  assert.deepEqual(s.listProps('w1'), [{ ...oldProp, sceneId: DEFAULT_SCENE }]);
   // 旧文件改名备份，不再存在
   assert.ok(!existsSync(join(dir, 'worlds.json')), '旧 worlds.json 应已改名');
   assert.ok(existsSync(join(dir, 'worlds.json.migrated')), '应留 .migrated 备份');
@@ -98,7 +99,7 @@ test('迁移：旧 worlds.json → SQLite 全字段等价，备份为 .migrated�
   const s2 = new WorldStore(dir);
   assert.equal(s2.getMemories('c1', '').length, 2, '二次实例不重复迁移记忆');
   assert.equal(s2.getRecentTurns('c1', '', 10).length, 2, '二次实例不重复迁移对话');
-  assert.deepEqual(s2.listProps('w1'), [oldProp]);
+  assert.deepEqual(s2.listProps('w1'), [{ ...oldProp, sceneId: DEFAULT_SCENE }]);
 
   rmSync(dir, { recursive: true, force: true });
 });
