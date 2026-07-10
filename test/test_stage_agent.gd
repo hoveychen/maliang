@@ -113,11 +113,16 @@ func _init() -> void:
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 107, "op": "banner", "args": { "text": "第一幕" } })
 	fails += _eq("banner 触宿主", String(host.last("banner").get("text", "")), "第一幕")
 
-	# camera：cosmetic 占位，不触宿主，即刻回执
-	var before_cam := host.calls.size()
+	# camera：路由到宿主运镜 + 即刻回执（cosmetic，不卡脚本）
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 108, "op": "camera", "args": { "mode": "overview" } })
-	fails += _eq("camera 不触宿主", host.calls.size(), before_cam)
+	fails += _eq("camera overview 触宿主", String(host.last("camera").get("mode", "")), "overview")
 	fails += _eq("camera 即刻回执", _ack_for(108).is_empty(), false)
+	# focus 的演员在 args.actorId；dialog 的两人在 args.a / args.b
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 109, "op": "camera", "args": { "mode": "focus", "actorId": "duck" } })
+	fails += _eq("camera focus 传演员", String(host.last("camera").get("a", "")), "duck")
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 113, "op": "camera", "args": { "mode": "dialog", "a": "duck", "b": "p1" } })
+	fails += _eq("camera dialog 传 a", String(host.last("camera").get("a", "")), "duck")
+	fails += _eq("camera dialog 传 b", String(host.last("camera").get("b", "")), "p1")
 
 	# prop_spawn：完成型——宿主落位后回 done 才 ack，回执带 prop id
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 110, "op": "prop_spawn", "args": { "id": "egg1", "spec": { "k": 1 }, "near": "duck" } })

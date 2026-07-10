@@ -543,7 +543,7 @@ func _dialog_camera() -> Dictionary:
 	var npc_h := _char_top(_locked)
 	var player_h := _char_top(player["node"] as PaperCharacter)
 	var base_h := maxf(npc_h, player_h)
-	var center := WorldGrid.wrap_pos(npc_l + WorldGrid.shortest_delta(npc_l, player_l) * 0.5)
+	var center := torus_midpoint(npc_l, player_l)
 	var who := _dialog_speaker()
 	var spk_l := npc_l if who == "npc" else player_l
 	var spk_h := npc_h if who == "npc" else player_h
@@ -1824,11 +1824,18 @@ func _process(delta: float) -> void:
 	_gest_yaw = lerpf(_gest_yaw, _gest_yaw_t, t)
 	_gest_pitch = lerpf(_gest_pitch, _gest_pitch_t, t)
 	_gest_zoom = lerpf(_gest_zoom, _gest_zoom_t, t)
-	# 聚焦缓动：测试 override > 对话构图（站桩+说话人跟随）> 交互对象 > 玩家（饥荒式相机永远跟着「我」）
+	# 聚焦缓动：测试 override > 舞台运镜 > 对话构图（站桩+说话人跟随）> 交互对象 > 玩家（饥荒式相机永远跟着「我」）
 	var want := focus_logical
 	var lift := 0.0  ## 对话构图的焦点竖直抬升（把双方/说话方框在屏幕竖直中段）
 	if focus_override != Vector2.INF:
 		want = focus_override
+	elif not _stage_cam.is_empty():
+		# 演出中脚本说了算：戏在地图哪头演，镜头就跟去哪头——否则孩子只看得见自己站着不动。
+		var sc := _stage_cam_shot()
+		if not sc.is_empty():
+			want = sc["want"]
+			_target_dist = sc["dist"]
+			lift = sc["lift"]
 	elif _phone_cam and not player.is_empty():
 		# 手机近身：焦点右移让玩家渲染到屏幕偏左、右侧留给手机；距离/抬升在 _recompute_phone_cam 定。
 		want = WorldGrid.wrap_pos(player["logical"] + Vector2(_phone_cam_shift, 0.0))
@@ -4391,12 +4398,76 @@ func _poi_names(poi: Dictionary) -> Array:
 
 const STAGE_NARRATE_VOICE := "zh-CN-XiaoyiNeural" ## 旁白固定用小仙子音色（edge 原生名，直通 map_voice）
 var _stage_player_actor_id := ""                  ## 本场演出里玩家占的角色 id（stage_begin 从 isPlayer 认定）
+var _stage_actor_ids: Array = []                  ## 本场演员 id 表（overview 取全体中心用）
+
+## 舞台运镜态：{} = 不接管（镜头照常跟玩家）；否则 { mode, a, b }，见 stage_camera / _stage_cam_shot。
+var _stage_cam: Dictionary = {}
+const STAGE_CAM_OVERVIEW_DIST := 48.0  ## 全景：拉远看整场戏（ZOOM_MAX 是 64，别顶满，留点近感）
+const STAGE_CAM_FOCUS_DIST := 20.0     ## 单人特写：比 god 态 ZOOM_MIN(16) 略远，人在画面中段
+
+## 环面上的中点（纯函数）：不能直接取算术平均——两点跨接缝时会算到地图对面去。
+static func torus_midpoint(a: Vector2, b: Vector2) -> Vector2:
+	return WorldGrid.wrap_pos(a + WorldGrid.shortest_delta(a, b) * 0.5)
+
+## 环面上一组点的中心（纯函数）：以首点为锚，各点取最短位移后平均，再 wrap 回环面。
+static func torus_centroid(points: Array) -> Vector2:
+	if points.is_empty():
+		return Vector2.ZERO
+	var anchor: Vector2 = points[0]
+	var sum := Vector2.ZERO
+	for p in points:
+		sum += WorldGrid.shortest_delta(anchor, p as Vector2)
+	return WorldGrid.wrap_pos(anchor + sum / float(points.size()))
+
+## 舞台运镜：脚本的 camera 命令落到这里。mode=reset 交还镜头给玩家。
+func stage_camera(mode: String, a_id: String, b_id: String) -> void:
+	if mode == "reset" or mode.is_empty():
+		_stage_cam = {}
+		return
+	_stage_cam = { "mode": mode, "a": a_id, "b": b_id }
+
+## 当前运镜的构图（焦点/距离/抬升）。演员找不到（还没降生/已离场）时返回 {}，镜头维持原样不抽搐。
+func _stage_cam_shot() -> Dictionary:
+	var mode := String(_stage_cam.get("mode", ""))
+	if mode == "overview":
+		var pts := _stage_actors_logical()
+		if pts.is_empty():
+			return {}
+		return { "want": torus_centroid(pts), "dist": STAGE_CAM_OVERVIEW_DIST, "lift": 0.0 }
+	if mode == "focus":
+		var d := _stage_actor_dict(String(_stage_cam.get("a", "")))
+		if d.is_empty():
+			return {}
+		return { "want": d["logical"] as Vector2, "dist": STAGE_CAM_FOCUS_DIST, "lift": 0.0 }
+	if mode == "dialog":
+		var da := _stage_actor_dict(String(_stage_cam.get("a", "")))
+		var db := _stage_actor_dict(String(_stage_cam.get("b", "")))
+		if da.is_empty() or db.is_empty():
+			return {}
+		var mid := torus_midpoint(da["logical"] as Vector2, db["logical"] as Vector2)
+		# 复用对话构图：两人都在画面里（is_idle 归中，不朝谁偏）
+		var h := maxf(_char_top(da["node"] as PaperCharacter), _char_top(db["node"] as PaperCharacter))
+		var dc := compute_dialog_cam(mid, mid, h, h, camera.fov, true)
+		return { "want": dc["want"], "dist": dc["dist"], "lift": dc["lift"] }
+	return {}
+
+## 本场演员的逻辑坐标（还没降生/已离场的跳过）。
+func _stage_actors_logical() -> Array:
+	var out: Array = []
+	for id in _stage_actor_ids:
+		var d := _stage_actor_dict(String(id))
+		if not d.is_empty():
+			out.append(d["logical"] as Vector2)
+	return out
 
 ## 开演：进观演态（吞玩家输入），退出当前对话/取消玩家自主移动，认出玩家占哪个角色。
 func stage_begin(actors: Array) -> void:
 	_stage_active = true
 	_stage_player_actor_id = ""
+	_stage_actor_ids.clear()
+	_stage_cam = {}
 	for a in actors:
+		_stage_actor_ids.append(String((a as Dictionary).get("id", "")))
 		if bool((a as Dictionary).get("isPlayer", false)):
 			_stage_player_actor_id = String((a as Dictionary).get("id", ""))
 	if selected != null:
@@ -4408,6 +4479,8 @@ func stage_begin(actors: Array) -> void:
 func stage_finish(result: Dictionary, aborted: bool, reason: String) -> void:
 	_stage_active = false
 	_stage_player_actor_id = ""
+	_stage_actor_ids.clear()
+	_stage_cam = {} # 镜头交还玩家（收场后还锁在演员身上，孩子会以为卡死了）
 	for m in _stage_drives:
 		(m["ex"] as BehaviorExecutor).cancel()
 	_stage_drives.clear()

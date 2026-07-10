@@ -49,6 +49,9 @@ func stage_hud_score(id: String, label: String) -> void:
 func stage_hud_score_add(id: String, n: int) -> void:
 	calls.append({ "m": "hud_score_add", "id": id, "n": n })
 
+func stage_camera(mode: String, a: String, b: String) -> void:
+	calls.append({ "m": "camera", "mode": mode, "a": a, "b": b })
+
 func stage_hud_countdown(id: String, sec: int, server_start_ms: int, offset_ms: int) -> void:
 	calls.append({ "m": "hud_countdown", "id": id, "sec": sec, "start": server_start_ms, "offset": offset_ms })
 
