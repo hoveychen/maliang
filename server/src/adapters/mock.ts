@@ -3,6 +3,7 @@ import { fallbackVoice } from '../voice_catalog.ts';
 import {
   BASE_ABILITIES,
   type CharacterSpec,
+  type CreationAttrs,
   type CreationCategory,
   type CreationState,
   type ExtractedMemory,
@@ -12,6 +13,7 @@ import {
   type MemoryExtractionContext,
 } from '../types.ts';
 import { CREATION_OPTIONS, optionsByCategory } from '../creation_options.ts';
+import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
 
 // 1x1 透明 PNG，作为生图占位。（须是合法 PNG：Godot 客户端会真解码，CRC 错会拒收；
@@ -41,6 +43,7 @@ const CREATION_ASK: Record<CreationCategory, string> = {
   trait: '它有什么特别的本领吗？',
   personality: '它是什么性格的呀？',
   name: '给它起个名字吧，你想叫它什么？',
+  motion: '（造角色不问会不会动）', // 占位：motion 是造物专属类别
 };
 
 const ANIMALS = ['兔', '猫', '狗', '熊', '龙', '鸟', '鱼', '象', '鹿', '羊'];
@@ -231,6 +234,30 @@ export function createMockAdapters(): ServiceAdapters {
         const next: CreationCategory = !attrs.kind ? 'kind' : !attrs.color ? 'color' : attrs.traits.length === 0 ? 'trait' : 'name';
         const optionIds = next === 'name' ? [] : optionsByCategory(next).slice(0, 4).map((o) => o.id);
         return { replyText: CREATION_ASK[next], done: false, question: CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
+      },
+      async guideProp(state: CreationState, childInput: string): Promise<GuideCreationResult> {
+        // 造物 mock：从输入按图标 label 认属性（kind/color/size/motion），凑够 kind + 一项 或超轮即造。
+        const attrs = { ...state.attrs, traits: [...state.attrs.traits] };
+        const updated: Partial<CreationAttrs> = {};
+        const text = childInput.trim();
+        for (const o of PROP_CREATION_OPTIONS) {
+          if (!text.includes(o.label)) continue;
+          if (o.category === 'kind' && !attrs.kind) { attrs.kind = o.label; updated.kind = o.label; }
+          else if (o.category === 'color' && !attrs.color) { attrs.color = o.label; updated.color = o.label; }
+          else if (o.category === 'size' && !attrs.size) { attrs.size = o.label; updated.size = o.label; }
+          else if (o.category === 'motion' && !attrs.motion) { attrs.motion = o.label; updated.motion = o.label; }
+        }
+        const early = /(就这样|好了|够了|够啦|可以了)/.test(text);
+        const enough = !!attrs.kind && (!!attrs.color || !!attrs.motion || !!attrs.size);
+        const forced = state.turnCount >= 5;
+        if (early || enough || forced) {
+          const desc = composePropDesc(attrs);
+          return { replyText: `好呀，我这就变出${desc}！`, done: true, description: desc, updatedAttrs: updated };
+        }
+        // 追问下一个缺失类别（kind→color→motion→size）
+        const next: CreationCategory = !attrs.kind ? 'kind' : !attrs.color ? 'color' : !attrs.motion ? 'motion' : 'size';
+        const optionIds = propOptionsByCategory(next).slice(0, 4).map((o) => o.id);
+        return { replyText: PROP_CREATION_ASK[next], done: false, question: PROP_CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
       },
       async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
         // mock：确定性地扫整段会话的每轮「我叫X」「我喜欢X」抽要点并分类，去重后返回（真实接 LLM 自由判断）

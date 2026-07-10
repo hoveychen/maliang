@@ -33,6 +33,8 @@ export interface LLMAdapter {
   routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult>;
   /** 引导式造角色一轮：给累积状态 + 本轮输入（幼儿点的选项 label 或说的话），返回继续追问或攒够去造。 */
   guideCreation(state: CreationState, childInput: string): Promise<GuideCreationResult>;
+  /** 引导式造物品一轮：与 guideCreation 平行，问的是 kind/color/size/motion，产物描述喂 designSdfProp。 */
+  guideProp(state: CreationState, childInput: string): Promise<GuideCreationResult>;
   /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条，各带分类 kind；去重、归属玩家由 voice 落地）。 */
   extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]>;
   /** onboarding 自我介绍：从小朋友的转写里提取名字与称呼（提取不到均返回空串）。 */

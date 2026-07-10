@@ -337,26 +337,31 @@ export interface ExtractedMemory {
 
 // ── 引导式造角色（多轮会话，见 docs/guided-creation-design.md）──────────────
 
-/** 引导式造角色累积的属性（幼儿逐轮填；traits 可多个）。 */
+/** 引导式创造累积的属性（幼儿逐轮填；traits 可多个）。造角色/造物共用此结构，各取所需字段。 */
 export interface CreationAttrs {
-  kind?: string;        // 类型：猫/狗/龙/精灵…
+  kind?: string;        // 类型：造角色=猫/狗/龙…；造物=花/风车/小房子…
   color?: string;       // 颜色
   size?: string;        // 大小
-  traits: string[];     // 特点：会飞/毛茸茸/发光…
-  personality?: string; // 性格
-  name?: string;        // 名字（语音说，无图标）
+  traits: string[];     // 特点：会飞/毛茸茸/发光…（造角色用）
+  personality?: string; // 性格（造角色用）
+  name?: string;        // 名字（造角色用；语音说，无图标）
+  motion?: string;      // 会不会动：安静/会转/会飘/会跳（造物用，映射 SDF locomotion/spin）
 }
 
-/** 造角色会话状态：连接级（一个孩子一条连接），挂在 VoiceSession 上。 */
+/** 引导式创造的目标：造新角色 or 造新物件。会话状态机据此分派 guide 与生成接口。 */
+export type CreationGoal = 'character' | 'prop';
+
+/** 引导式创造会话状态：连接级（一个孩子一条连接），挂在 VoiceSession 上。 */
 export interface CreationState {
   active: boolean;
+  goal: CreationGoal;        // 这次会话在造什么（缺省 character，兼容存量调用点）
   attrs: CreationAttrs;
   askedCategories: string[]; // 已问过的类别，避免重复问
   turnCount: number;         // 兜底：超上限强制造
 }
 
-/** 造角色属性类别（图标库按此组织；name 无图标走语音）。 */
-export type CreationCategory = 'kind' | 'color' | 'size' | 'trait' | 'personality' | 'name';
+/** 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。 */
+export type CreationCategory = 'kind' | 'color' | 'size' | 'trait' | 'personality' | 'name' | 'motion';
 
 /** 图标库里的一个候选项。iconAsset 由 P3 图标生成填入（/assets/:hash），未生成为空串。 */
 export interface CreationOption {
@@ -377,7 +382,7 @@ export interface GuideCreationResult {
   updatedAttrs?: Partial<CreationAttrs>; // 从本轮输入解析出的属性更新（含 traits 增量）
 }
 
-/** 造角色会话的初始空状态。 */
-export function newCreationState(): CreationState {
-  return { active: true, attrs: { traits: [] }, askedCategories: [], turnCount: 0 };
+/** 引导式创造会话的初始空状态（缺省造角色，兼容存量调用点）。 */
+export function newCreationState(goal: CreationGoal = 'character'): CreationState {
+  return { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0 };
 }
