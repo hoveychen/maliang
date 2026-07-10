@@ -6,11 +6,14 @@ extends SceneTree
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 10 \
 ##       --quit-after 60 --script res://test/test_stage_camera.gd
 
+const SPREAD_RADIUS := 34.0   ## 三演员摆成等边三角、外接圆半径（旧的固定 48 距离框不住这么散的一台戏）
+
 var scene: Node
 var frame := 0
 var fails := 0
 var _actor: Dictionary = {}
 var _start_focus := Vector2.ZERO
+var _cast: Array = []         ## 全景取景那一段的三个演员字典
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
@@ -61,11 +64,28 @@ func _tick() -> void:
 	_check("focus 构图非空", shot.is_empty(), false)
 	_check("focus 焦点落在演员身上", _wrapped_near(shot["want"], actor["logical"], 0.01), true)
 
-	# overview 取全体演员中心：单演员时就是他本人
+	# overview 取全体演员中心：单演员时就是他本人（这一位既是全景也是特写，距离收到下限）
 	scene.call("stage_camera", "overview", "", "")
 	var ov: Dictionary = scene.call("_stage_cam_shot")
 	_check("overview 焦点是演员中心", _wrapped_near(ov["want"], actor["logical"], 0.01), true)
-	_check("overview 比特写拉得远", ov["dist"] > shot["dist"], true)
+	_check("overview 不比特写更近", ov["dist"] >= shot["dist"], true)
+
+	# 取景反算（纯函数）：距离随演员散布单调拉远，夹在 [特写距离, ZOOM_MAX]
+	var one: Dictionary = scene.call("compute_overview_cam", [Vector2(20, 20)], 3.2, 50.0, 47.0)
+	_check("独角戏收到特写距离下限", is_equal_approx(one["dist"], 20.0), true)
+	var tight: Dictionary = scene.call("compute_overview_cam",
+		[Vector2(-8, 0), Vector2(8, 0), Vector2(0, 8)], 3.2, 50.0, 47.0)
+	var wide: Dictionary = scene.call("compute_overview_cam",
+		[Vector2(-20, 0), Vector2(20, 0), Vector2(0, 20)], 3.2, 50.0, 47.0)
+	_check("散得越开镜头越远", wide["dist"] > tight["dist"], true)
+	_check("再散也不超 ZOOM_MAX", wide["dist"] <= 64.0, true)
+	var huge: Dictionary = scene.call("compute_overview_cam",
+		[Vector2(0, 0), Vector2(50, 50)], 3.2, 50.0, 47.0)
+	_check("散布超出取景能力时夹到 ZOOM_MAX", is_equal_approx(huge["dist"], 64.0), true)
+	# 跨接缝：两人分居地图两侧接缝处，实为邻居——包围半径必须走最短位移，不能算成隔了整张地图
+	var seam: Dictionary = scene.call("compute_overview_cam",
+		[Vector2(span - 3.0, 0.0), Vector2(3.0, 0.0)], 3.2, 50.0, 47.0)
+	_check("跨接缝的两人算作邻居（不拉满镜头）", seam["dist"] < 30.0, true)
 
 	# 找不到演员（还没降生/已离场）→ 返回空构图，镜头维持原样不抽搐
 	scene.call("stage_camera", "focus", "查无此人", "")
@@ -94,7 +114,42 @@ func _tick_late() -> void:
 		var player: Dictionary = scene.get("player")
 		_check("收场后镜头缓回玩家",
 			_wrapped_near(scene.get("focus_logical"), player["logical"], 8.0), true)
+		_setup_overview_cast(player["logical"])
+	elif frame == 96:
+		# 老板真机看到的症状：「运镜有了，但运镜里没有角色」——镜头飞到几何中心，
+		# 演员全在画面外。全景取景必须按演员散布反算距离，把每个人都框进视锥。
+		var cam: Camera3D = scene.get("camera")
+		for a in _cast:
+			var node: PaperCharacter = a["node"]
+			var name := node.char_name
+			_check("%s 的脚在画面里" % name, cam.is_position_in_frustum(node.global_position), true)
+			_check("%s 的身子在画面里" % name,
+				cam.is_position_in_frustum(node.global_position + Vector3(0.0, node.visible_height() * 0.5, 0.0)), true)
 		_finish()
+
+## 把三个演员摆成半径 SPREAD_RADIUS 的等边三角，开演 + 全景。
+## 闲逛执行器先清场（P2 才让 stage_begin 自己停），这一段只测取景。
+func _setup_overview_cast(center: Vector2) -> void:
+	var npcs: Array = scene.get("npcs")
+	if npcs.size() < 3:
+		printerr("  FAIL 世界里 NPC 不足三个，测不了全景取景")
+		fails += 1
+		_finish()
+		return
+	var exs: Array = scene.get("_executors")
+	for e in exs:
+		(e as BehaviorExecutor).cancel() # 必须 cancel 再清：在途 A* 任务的绑定 Callable 会活到引擎关停时崩
+	exs.clear()
+	_cast = [npcs[0], npcs[1], npcs[2]]
+	var actors: Array = []
+	for i in _cast.size():
+		var ang := TAU * float(i) / float(_cast.size()) - PI * 0.5
+		var a: Dictionary = _cast[i]
+		a["logical"] = WorldGrid.wrap_pos(center + Vector2(cos(ang), sin(ang)) * SPREAD_RADIUS)
+		a["paper_prev"] = a["logical"]
+		actors.append({ "id": String(a.get("id", "")), "name": (a["node"] as PaperCharacter).char_name, "isPlayer": false })
+	scene.call("stage_begin", actors)
+	scene.call("stage_camera", "overview", "", "")
 
 func _finish() -> void:
 	if fails == 0:

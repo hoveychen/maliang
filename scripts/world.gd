@@ -484,7 +484,7 @@ func _setup_camera() -> void:
 ## 焦点随 focus 所在 tile 的台阶高度整体抬升（_cur_focus_y），否则上高阶地形后角色出画。
 ## 双指手势的临时偏移（_gest_*）叠加在基准之上：俯仰加偏移、距离乘倍率、绕焦点环绕 yaw。
 func _update_camera() -> void:
-	var pitch := deg_to_rad(clampf(_cur_pitch + _gest_pitch, GESTURE_PITCH_MIN, GESTURE_PITCH_MAX))
+	var pitch := deg_to_rad(_cam_pitch_deg())
 	# 对话态/手机近身态放开近距下限（贴近构图）；god 态仍守 ZOOM_MIN
 	var zmin := DIALOG_ZOOM_MIN if (_locked != null or _phone_cam) else ZOOM_MIN
 	var dist := clampf(_cur_dist * _gest_zoom, zmin, ZOOM_MAX)
@@ -492,6 +492,11 @@ func _update_camera() -> void:
 	var offset := Vector3(0.0, sin(pitch) * dist, cos(pitch) * dist).rotated(Vector3.UP, _gest_yaw)
 	camera.global_position = focus + offset
 	camera.look_at(focus, Vector3.UP)
+
+## 相机当前实际俯仰角（度）：基准缓动值 + 手势偏移，与 _update_camera 用的是同一个数——
+## 取景反算（compute_overview_cam）必须拿这个，不能拿 GOD_PITCH_DEG，否则手势抬头后取景就错了。
+func _cam_pitch_deg() -> float:
+	return clampf(_cur_pitch + _gest_pitch, GESTURE_PITCH_MIN, GESTURE_PITCH_MAX)
 
 ## 站桩侧（纯函数）：dx = shortest_delta(NPC→玩家).x，>0 玩家在 NPC 右侧、否则左侧（含 dx≈0 默认左）。
 static func stage_side(dx: float) -> float:
@@ -2148,18 +2153,25 @@ func _step_executors(delta: float) -> void:
 		return
 	for e in done:
 		for n in npcs:
-			if not (e as BehaviorExecutor).drives(n):
-				continue
-			if n.get("is_fairy", false) or n == _stopped or n.get("in_chat", false) \
-					or (selected != null and n.get("node") == selected) \
-					or _has_executor_for(n):
+			if (e as BehaviorExecutor).drives(n):
+				_resume_ambient(n)
 				break
-			_start_ambient_wander(n)
-			break
 
+## 恢复某角色的自主闲逛。玩家、小仙子、正被交互叫停（_stopped/selected/in_chat）、
+## 已有别的执行器在驱动的，都不动——避免用闲逛盖掉刚下发的指令。
+func _resume_ambient(n: Dictionary) -> void:
+	if n.is_empty() or n.get("id", "") == PLAYER_ID or n.get("is_fairy", false) \
+			or n == _stopped or n.get("in_chat", false) \
+			or (selected != null and n.get("node") == selected) \
+			or _has_executor_for(n):
+		return
+	_start_ambient_wander(n)
+
+## 有执行器**正在**驱动这个角色吗。cancel 过的（is_done）不算：它当帧还赖在 _executors 里
+## 等 _step_executors 回收，若算数就会挡住紧接着的闲逛恢复（收场时演员集体呆立）。
 func _has_executor_for(dict: Dictionary) -> bool:
 	for ex in _executors:
-		if (ex as BehaviorExecutor).drives(dict):
+		if not (ex as BehaviorExecutor).is_done() and (ex as BehaviorExecutor).drives(dict):
 			return true
 	return false
 
@@ -2182,6 +2194,11 @@ func _place_char(n: Dictionary, lean: float, delta: float) -> void:
 	n["ry"] = ry
 	_place_on_bent_ground(node, Vector3(d.x, ry + float(n.get("hover", 0.0)), d.y))
 	_update_paper_motion(n, node as PaperCharacter, lean, delta)
+	# 参演光环寄生在角色节点下（跟着走位/弯曲），但纸片的倾角/摇摆/点头会把它一起掀起来，
+	# 转身时 lean 还随 cos(fry) 反号——直接钉死世界基，让它永远平躺在脚下。
+	var ring: Variant = n.get("stage_ring")
+	if ring != null and is_instance_valid(ring):
+		(ring as Node3D).global_basis = STAGE_RING_BASIS
 
 ## 纸片动作演出（每帧）：走路左右摇摆+下摆飘动 / 横向变向绕竖轴翻面 / 待机呼吸微卷。
 ## 朝向约定：立绘统一朝右（sprite_style.ts），ry=0 朝右、ry=PI 背面即水平镜像=朝左；
@@ -2350,6 +2367,11 @@ func _update_voice_wave(delta: float) -> void:
 		var shape := 0.5 + 0.5 * sin(_wave_t * 7.0 + float(i) * 0.8)
 		var amp := base * (0.4 + 0.6 * shape)
 		bar.offset_top = WAVE_BASE_Y - (WAVE_MIN_H + amp * (WAVE_MAX_H - WAVE_MIN_H))
+
+## 角色立绘的可见世界宽度（米）：quad 的宽就是单格立绘的宽（sprite-sheet 已按 cellW 归一）。
+func _char_quad_w(npc: PaperCharacter) -> float:
+	var q := npc.mesh as QuadMesh
+	return q.size.x if q != null and q.size.x > 0.0 else PaperCharacter.PLACEHOLDER_HEIGHT
 
 ## 角色立绘顶端相对节点原点（脚底）的高度——头顶挂饰（耳朵/气泡）按此定位，小仙子等小体型不悬空。
 func _char_top(npc: PaperCharacter) -> float:
@@ -4430,8 +4452,13 @@ var _stage_actor_ids: Array = []                  ## 本场演员 id 表（overv
 
 ## 舞台运镜态：{} = 不接管（镜头照常跟玩家）；否则 { mode, a, b }，见 stage_camera / _stage_cam_shot。
 var _stage_cam: Dictionary = {}
-const STAGE_CAM_OVERVIEW_DIST := 48.0  ## 全景：拉远看整场戏（ZOOM_MAX 是 64，别顶满，留点近感）
 const STAGE_CAM_FOCUS_DIST := 20.0     ## 单人特写：比 god 态 ZOOM_MIN(16) 略远，人在画面中段
+const STAGE_CAM_FILL := 0.8            ## 全景构图：演员包围圆的直径占屏中间 80%（留一圈边，别贴着画框演）
+const STAGE_RING_NAME := "StageRing"   ## 参演高亮：演员脚下光环的节点名（挂在角色节点下）
+const STAGE_RING_COLOR := Color(1.0, 0.84, 0.32, 0.85)
+## 光环的世界基：不跟角色转，且把圆环压扁成贴地的一圈（而不是一个甜甜圈）
+const STAGE_RING_SQUASH := Vector3(1.0, 0.2, 1.0)
+static var STAGE_RING_BASIS := Basis().scaled(STAGE_RING_SQUASH)
 
 ## 环面上的中点（纯函数）：不能直接取算术平均——两点跨接缝时会算到地图对面去。
 static func torus_midpoint(a: Vector2, b: Vector2) -> Vector2:
@@ -4447,6 +4474,24 @@ static func torus_centroid(points: Array) -> Vector2:
 		sum += WorldGrid.shortest_delta(anchor, p as Vector2)
 	return WorldGrid.wrap_pos(anchor + sum / float(points.size()))
 
+## 全景构图（纯函数）：把这场戏的所有演员框进画面所需的焦点与轨道距离。
+## 反算与 compute_dialog_cam 同源——可见世界高 = 2*d*tan(fov/2)，令内容跨度占比 = STAGE_CAM_FILL。
+## 内容跨度取「包围圆直径」而非逐人投影：包围圆与相机 yaw 无关，孩子转视角也不会有人被甩出画面
+## （代价是演员排成一横排时镜头略宽——全景本就该宽）。地面散布投到屏幕竖直方向被 sin(pitch) 压缩、
+## 立绘高度乘 cos(pitch)：漏掉这两个系数会一路顶到 ZOOM_MAX，全景永远拉满。
+## 距离夹在 [STAGE_CAM_FOCUS_DIST, ZOOM_MAX]——超出 ZOOM_MAX 的散布本就框不下（更远会露出 chunk 边缘）。
+static func compute_overview_cam(points: Array, top_h: float, fov_deg: float, pitch_deg: float) -> Dictionary:
+	var center := torus_centroid(points)
+	var radius := 0.0
+	for p in points:
+		# 包围半径必须走环面最短位移：直接相减会把跨接缝的两个邻居算成隔了整张地图
+		radius = maxf(radius, WorldGrid.shortest_delta(center, p as Vector2).length())
+	var pitch := deg_to_rad(pitch_deg)
+	var tanhalf := tan(deg_to_rad(fov_deg * 0.5))
+	var span := 2.0 * radius * sin(pitch) + top_h * cos(pitch)
+	var dist := span / (2.0 * STAGE_CAM_FILL * tanhalf)
+	return { "want": center, "dist": clampf(dist, STAGE_CAM_FOCUS_DIST, ZOOM_MAX), "lift": top_h * 0.5 }
+
 ## 舞台运镜：脚本的 camera 命令落到这里。mode=reset 交还镜头给玩家。
 func stage_camera(mode: String, a_id: String, b_id: String) -> void:
 	if mode == "reset" or mode.is_empty():
@@ -4461,7 +4506,7 @@ func _stage_cam_shot() -> Dictionary:
 		var pts := _stage_actors_logical()
 		if pts.is_empty():
 			return {}
-		return { "want": torus_centroid(pts), "dist": STAGE_CAM_OVERVIEW_DIST, "lift": 0.0 }
+		return compute_overview_cam(pts, _stage_actors_top(), camera.fov, _cam_pitch_deg())
 	if mode == "focus":
 		var d := _stage_actor_dict(String(_stage_cam.get("a", "")))
 		if d.is_empty():
@@ -4488,6 +4533,15 @@ func _stage_actors_logical() -> Array:
 			out.append(d["logical"] as Vector2)
 	return out
 
+## 本场最高演员的立绘高度（全景要让最高的那位也露头）。全员未降生时退回占位高度。
+func _stage_actors_top() -> float:
+	var top := 0.0
+	for id in _stage_actor_ids:
+		var d := _stage_actor_dict(String(id))
+		if not d.is_empty():
+			top = maxf(top, _char_top(d["node"] as PaperCharacter))
+	return top if top > 0.0 else PaperCharacter.PLACEHOLDER_HEIGHT
+
 ## 开演：进观演态（吞玩家输入），退出当前对话/取消玩家自主移动，认出玩家占哪个角色。
 func stage_begin(actors: Array) -> void:
 	_stage_active = true
@@ -4501,11 +4555,63 @@ func stage_begin(actors: Array) -> void:
 	if selected != null:
 		_exit_interaction()
 	_cancel_player_move()
+	_stage_stop_ambient()
+	_stage_mark_actors(true)
 	banner.visible = false
+
+## 开演即停掉参演角色的自主闲逛。_step_executors 在 _stage_active 时已不再补挂闲逛，
+## 但降生时挂的那个 loop wander 还活着——不停掉，演员就会在开场旁白和每段对白里各走各的。
+func _stage_stop_ambient() -> void:
+	for id in _stage_actor_ids:
+		var d := _stage_actor_dict(String(id))
+		if d.is_empty():
+			continue
+		for ex in _executors:
+			if (ex as BehaviorExecutor).ambient and (ex as BehaviorExecutor).drives(d):
+				(ex as BehaviorExecutor).cancel()
+
+## 参演高亮：给演员脚下挂/摘一圈金色光环，孩子一眼看出台上是谁在演。
+## 光环挂成角色节点的子节点（与 BlobShadow 同一套寄生法）——他走到哪跟到哪，
+## 世界弯曲/走位/浮动原点全都不用管，也就不需要每帧重摆。
+## 悬空的小仙子跳过：她脚下没有地，光环会飘在半空。
+func _stage_mark_actors(on: bool) -> void:
+	for id in _stage_actor_ids:
+		var d := _stage_actor_dict(String(id))
+		if d.is_empty() or d.get("is_fairy", false):
+			continue
+		var node := d["node"] as PaperCharacter
+		var old := node.get_node_or_null(STAGE_RING_NAME)
+		if old != null:
+			old.queue_free()
+		d.erase("stage_ring")
+		if not on:
+			continue
+		var mi := MeshInstance3D.new()
+		mi.name = STAGE_RING_NAME
+		var ring := TorusMesh.new()
+		# 半径按立绘实际宽度（quad 宽）算，不按身高：光环要比身子宽一圈才看得见——
+		# 立绘是竖直纸片，圆环凡是落在身子后面的部分都会被它挡掉，只剩前面一道弧。
+		var r := clampf(_char_quad_w(node) * 0.55, 0.8, 2.2)
+		ring.outer_radius = r
+		ring.inner_radius = r * 0.84
+		ring.rings = 32        # 主圆的分段：给少了会画成菱形
+		ring.ring_segments = 4 # 截面的分段：反正 _place_char 里要压扁贴地，四段够了
+		mi.mesh = ring
+		mi.position.y = 0.22 # 抬离 BlobShadow(0.2) 一点，别打架（压扁与保持水平见 _place_char）
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = STAGE_RING_COLOR
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.extra_cull_margin = BendMat.CULL_MARGIN # 角色被 CPU 预下压，光环随之位移，防误剔除
+		node.add_child(mi)
+		d["stage_ring"] = mi # 缓存供 _place_char 每帧摆平（省掉逐帧 get_node_or_null）
 
 ## 收场（正常结束/异常终止）：解锁输入，停掉一切舞台驱动的执行器与念白，横幅圆场。
 func stage_finish(result: Dictionary, aborted: bool, reason: String) -> void:
 	_stage_active = false
+	_stage_mark_actors(false) # 摘光环必须赶在 _stage_actor_ids 清空之前——清了就找不到人了
 	_stage_player_actor_id = ""
 	_stage_actor_ids.clear()
 	_stage_cam = {} # 镜头交还玩家（收场后还锁在演员身上，孩子会以为卡死了）
@@ -4515,6 +4621,10 @@ func stage_finish(result: Dictionary, aborted: bool, reason: String) -> void:
 	for ex in _stage_holds:
 		(ex as BehaviorExecutor).cancel() # 停掉持续 follow/flee（否则演员收场后还在追/逃）
 	_stage_holds.clear()
+	# 闲逛恢复要在上面两轮 cancel 之后：演员卸了妆回去自己晃悠，
+	# 顺带把演出期间跑完指令、被 _stage_active 挡住没能恢复的路人也一并放回去。
+	for n in npcs:
+		_resume_ambient(n)
 	_stage_speaks.clear() # 未完成念白的回执随收场丢弃（服务端已终场，不再需要 ack）
 	if _hud != null:
 		_hud.clear() # 移除计分板/倒计时/toast
