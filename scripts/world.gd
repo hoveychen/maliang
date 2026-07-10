@@ -484,7 +484,7 @@ func _setup_camera() -> void:
 ## 焦点随 focus 所在 tile 的台阶高度整体抬升（_cur_focus_y），否则上高阶地形后角色出画。
 ## 双指手势的临时偏移（_gest_*）叠加在基准之上：俯仰加偏移、距离乘倍率、绕焦点环绕 yaw。
 func _update_camera() -> void:
-	var pitch := deg_to_rad(clampf(_cur_pitch + _gest_pitch, GESTURE_PITCH_MIN, GESTURE_PITCH_MAX))
+	var pitch := deg_to_rad(_cam_pitch_deg())
 	# 对话态/手机近身态放开近距下限（贴近构图）；god 态仍守 ZOOM_MIN
 	var zmin := DIALOG_ZOOM_MIN if (_locked != null or _phone_cam) else ZOOM_MIN
 	var dist := clampf(_cur_dist * _gest_zoom, zmin, ZOOM_MAX)
@@ -492,6 +492,11 @@ func _update_camera() -> void:
 	var offset := Vector3(0.0, sin(pitch) * dist, cos(pitch) * dist).rotated(Vector3.UP, _gest_yaw)
 	camera.global_position = focus + offset
 	camera.look_at(focus, Vector3.UP)
+
+## 相机当前实际俯仰角（度）：基准缓动值 + 手势偏移，与 _update_camera 用的是同一个数——
+## 取景反算（compute_overview_cam）必须拿这个，不能拿 GOD_PITCH_DEG，否则手势抬头后取景就错了。
+func _cam_pitch_deg() -> float:
+	return clampf(_cur_pitch + _gest_pitch, GESTURE_PITCH_MIN, GESTURE_PITCH_MAX)
 
 ## 站桩侧（纯函数）：dx = shortest_delta(NPC→玩家).x，>0 玩家在 NPC 右侧、否则左侧（含 dx≈0 默认左）。
 static func stage_side(dx: float) -> float:
@@ -4419,8 +4424,8 @@ var _stage_actor_ids: Array = []                  ## 本场演员 id 表（overv
 
 ## 舞台运镜态：{} = 不接管（镜头照常跟玩家）；否则 { mode, a, b }，见 stage_camera / _stage_cam_shot。
 var _stage_cam: Dictionary = {}
-const STAGE_CAM_OVERVIEW_DIST := 48.0  ## 全景：拉远看整场戏（ZOOM_MAX 是 64，别顶满，留点近感）
 const STAGE_CAM_FOCUS_DIST := 20.0     ## 单人特写：比 god 态 ZOOM_MIN(16) 略远，人在画面中段
+const STAGE_CAM_FILL := 0.8            ## 全景构图：演员包围圆的直径占屏中间 80%（留一圈边，别贴着画框演）
 
 ## 环面上的中点（纯函数）：不能直接取算术平均——两点跨接缝时会算到地图对面去。
 static func torus_midpoint(a: Vector2, b: Vector2) -> Vector2:
@@ -4436,6 +4441,24 @@ static func torus_centroid(points: Array) -> Vector2:
 		sum += WorldGrid.shortest_delta(anchor, p as Vector2)
 	return WorldGrid.wrap_pos(anchor + sum / float(points.size()))
 
+## 全景构图（纯函数）：把这场戏的所有演员框进画面所需的焦点与轨道距离。
+## 反算与 compute_dialog_cam 同源——可见世界高 = 2*d*tan(fov/2)，令内容跨度占比 = STAGE_CAM_FILL。
+## 内容跨度取「包围圆直径」而非逐人投影：包围圆与相机 yaw 无关，孩子转视角也不会有人被甩出画面
+## （代价是演员排成一横排时镜头略宽——全景本就该宽）。地面散布投到屏幕竖直方向被 sin(pitch) 压缩、
+## 立绘高度乘 cos(pitch)：漏掉这两个系数会一路顶到 ZOOM_MAX，全景永远拉满。
+## 距离夹在 [STAGE_CAM_FOCUS_DIST, ZOOM_MAX]——超出 ZOOM_MAX 的散布本就框不下（更远会露出 chunk 边缘）。
+static func compute_overview_cam(points: Array, top_h: float, fov_deg: float, pitch_deg: float) -> Dictionary:
+	var center := torus_centroid(points)
+	var radius := 0.0
+	for p in points:
+		# 包围半径必须走环面最短位移：直接相减会把跨接缝的两个邻居算成隔了整张地图
+		radius = maxf(radius, WorldGrid.shortest_delta(center, p as Vector2).length())
+	var pitch := deg_to_rad(pitch_deg)
+	var tanhalf := tan(deg_to_rad(fov_deg * 0.5))
+	var span := 2.0 * radius * sin(pitch) + top_h * cos(pitch)
+	var dist := span / (2.0 * STAGE_CAM_FILL * tanhalf)
+	return { "want": center, "dist": clampf(dist, STAGE_CAM_FOCUS_DIST, ZOOM_MAX), "lift": top_h * 0.5 }
+
 ## 舞台运镜：脚本的 camera 命令落到这里。mode=reset 交还镜头给玩家。
 func stage_camera(mode: String, a_id: String, b_id: String) -> void:
 	if mode == "reset" or mode.is_empty():
@@ -4450,7 +4473,7 @@ func _stage_cam_shot() -> Dictionary:
 		var pts := _stage_actors_logical()
 		if pts.is_empty():
 			return {}
-		return { "want": torus_centroid(pts), "dist": STAGE_CAM_OVERVIEW_DIST, "lift": 0.0 }
+		return compute_overview_cam(pts, _stage_actors_top(), camera.fov, _cam_pitch_deg())
 	if mode == "focus":
 		var d := _stage_actor_dict(String(_stage_cam.get("a", "")))
 		if d.is_empty():
@@ -4476,6 +4499,15 @@ func _stage_actors_logical() -> Array:
 		if not d.is_empty():
 			out.append(d["logical"] as Vector2)
 	return out
+
+## 本场最高演员的立绘高度（全景要让最高的那位也露头）。全员未降生时退回占位高度。
+func _stage_actors_top() -> float:
+	var top := 0.0
+	for id in _stage_actor_ids:
+		var d := _stage_actor_dict(String(id))
+		if not d.is_empty():
+			top = maxf(top, _char_top(d["node"] as PaperCharacter))
+	return top if top > 0.0 else PaperCharacter.PLACEHOLDER_HEIGHT
 
 ## 开演：进观演态（吞玩家输入），退出当前对话/取消玩家自主移动，认出玩家占哪个角色。
 func stage_begin(actors: Array) -> void:
