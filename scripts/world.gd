@@ -3002,12 +3002,29 @@ func _on_local_asr_error(msg: String) -> void:
 # ── 近身对话开放麦（VAD 自动断句：开口即录、说完即发，零按钮零模式）─────────
 
 ## 每帧驱动：角色思考/说话时闭麦（半双工防自听），其余时间把麦克风增量喂 VAD。
+## 当前帧的交互标志位快照 → 喂给显式状态机（见 interaction_fsm.gd）。
+## 字段与旧 _step_voice 的闭麦表达式逐字对应，行为等价由 test_interaction_fsm 的 64 组合护栏保证。
+func _fsm_inputs() -> InteractionFsm.Inputs:
+	var speaking := (_tts_player != null and _tts_player.playing) or _tts_pending \
+			or (fairy_voice != null and fairy_voice.is_playing())
+	return InteractionFsm.Inputs.new({
+		"in_interaction": selected != null,
+		"approaching": not _approach.is_empty(),
+		"thinking": thinking_label != null and thinking_label.visible,
+		"speaking": speaking,
+		"recording": _recording,
+		"in_creation": _in_creation,
+	})
+
+## 本帧的显式交互状态。
+func _fsm_state() -> InteractionFsm.State:
+	return InteractionFsm.derive(_fsm_inputs())
+
 func _step_voice(delta: float) -> void:
 	if _vad == null:
 		return
 	var pcm := _mic.drain_pcm16k() # 闭麦期间也持续排空采集缓冲，恢复聆听时不会吃到角色的声音
-	if thinking_label.visible or _tts_player.playing or _tts_pending \
-			or (fairy_voice != null and fairy_voice.is_playing()):
+	if not InteractionFsm.mic_open(_fsm_state()):
 		if _recording:
 			_utterance_cancel() # 时序兜底：闭麦瞬间还在录 → 静默丢弃
 		_vad.reset()
