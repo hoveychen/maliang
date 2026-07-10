@@ -49,10 +49,12 @@ func _tick() -> void:
 		113:
 			_test_speak_bob_active()
 		116:
-			_test_command_move_exits_chat()
-		120:
+			_test_command_move_defers_exit()
+		123:
+			_check_leave_after_speech()
+		127:
 			_test_command_action_keeps_chat()
-		124:
+		131:
 			if fails == 0:
 				print("visual_click_move PASS")
 			else:
@@ -159,14 +161,28 @@ func _test_speak_bob_active() -> void:
 	_check("speaking bob squashes sprite", node != null and node.scale.y != 1.0, true)
 	(scene.get("_tts_player") as AudioStreamPlayer).stop()
 
-## 立去系指令（move_to）：派发后应「关对话」——退出近身交互（selected 清空），NPC 独自走去。
-func _test_command_move_exits_chat() -> void:
+## 立去系指令（move_to）：说完再走（缺陷 ④）——派发后不得立刻关对话，先把回应说完。
+## 此处 replyText 为空、无 TTS 可播，仍应停在「等起播」的宽限里，不许同步退出。
+## 注：_tap_npc 取的是离玩家最近的角色 = 随身的小仙子，而仙子不吃移动脚本（_run_behavior 早返回），
+## 所以这里断言的是「延迟退出」这套机制本身（_pending_leave 的武装与释放），不看执行器。
+func _test_command_move_defers_exit() -> void:
 	scene.call("_enter_interaction", npc_node)
+	# 这一轮要验的是「没有 TTS 可等 → 宽限后动身」，把两路出声都掐掉，免得等招呼语音播完（时长不定）。
+	(scene.get("_tts_player") as AudioStreamPlayer).stop()
+	var fv: Node = scene.get("fairy_voice")
+	if fv != null and fv.get("_player") is AudioStreamPlayer:
+		(fv.get("_player") as AudioStreamPlayer).stop()
 	_check("re-entered interaction before move cmd", scene.get("selected") == npc_node, true)
-	scene.call("_on_character_response", { "transcript": "去池塘", "replyText": "好的！",
+	scene.call("_on_character_response", { "transcript": "去池塘", "replyText": "",
 		"emotion": "happy", "behaviorScript": { "commands": [
 			{ "type": "move_to", "params": { "location_name": "池塘" } }], "loop": false } })
-	_check("move_to command closes chat (selected cleared)", scene.get("selected"), null)
+	_check("move_to 不再同步关对话（先把话说完）", scene.get("selected") == npc_node, true)
+	_check("延迟退出已武装", (scene.get("_pending_leave") as Dictionary).is_empty(), false)
+
+## 起播宽限过后（这轮没有 TTS 可等）：角色动身，对话随之关闭。
+func _check_leave_after_speech() -> void:
+	_check("说完后关对话（selected 清空）", scene.get("selected"), null)
+	_check("延迟退出已释放", (scene.get("_pending_leave") as Dictionary).is_empty(), true)
 
 ## 就地动作（do_action）：不该关对话——挥手完还能继续跟它说话（selected 保持）。
 func _test_command_action_keeps_chat() -> void:

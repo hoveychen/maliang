@@ -14,6 +14,7 @@ func _init() -> void:
 	fails += _test_cooldown()
 	fails += _test_empty_backoff()
 	fails += _test_music_muted()
+	fails += _test_leave_ready()
 	if fails == 0:
 		print("interaction_fsm tests PASS")
 	else:
@@ -185,6 +186,23 @@ func _test_music_muted() -> int:
 		InteractionFsm.music_muted(_mk(true, false, false, true, false, false)), false)
 	fails += _check("仙子说话也算 SPEAKING,不静音",
 		InteractionFsm.music_muted(_mk_fairy(true, true)), false)
+	return fails
+
+## 「说完再走」的时序判定（缺陷 ④）：TTS 起播有延迟、可能压根没有 TTS、必须有兜底超时。
+func _test_leave_ready() -> int:
+	var fails := 0
+	# 还没出过声，宽限未尽 → 等（这就是「不能一上来就以没在说话判定说完了」）
+	fails += _check("宽限内未出声 → 等", InteractionFsm.leave_ready(false, false, 0.3, 8.0), false)
+	# 宽限耗尽仍没出声（无 TTS/合成失败）→ 直接动身，别傻等
+	fails += _check("宽限耗尽仍无声 → 动身", InteractionFsm.leave_ready(false, false, 0.0, 8.0), true)
+	# 正在出声 → 等它说完
+	fails += _check("正在说话 → 等", InteractionFsm.leave_ready(true, true, 0.0, 8.0), false)
+	fails += _check("宽限内就开口了 → 等", InteractionFsm.leave_ready(true, true, 0.2, 8.0), false)
+	# 出过声、现在不出声了 = 说完了 → 动身
+	fails += _check("说完了 → 动身", InteractionFsm.leave_ready(true, false, 0.0, 8.0), true)
+	# 兜底：TTS 石沉大海（一直"在说"）也不能把角色钉死
+	fails += _check("兜底超时 → 强制动身", InteractionFsm.leave_ready(true, true, 0.0, 0.0), true)
+	fails += _check("兜底优先于一切", InteractionFsm.leave_ready(false, true, 5.0, -0.1), true)
 	return fails
 
 func _check(name: String, got: Variant, want: Variant) -> int:
