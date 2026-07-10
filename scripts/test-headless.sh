@@ -48,6 +48,7 @@ UNIT_TESTS=(
   test_paper_idle
   test_player_profile
   test_backend_player_id
+  test_stage_agent
   test_positions_report
   test_position_restore
   test_webp_load

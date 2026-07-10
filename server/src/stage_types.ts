@@ -6,6 +6,8 @@ export interface StageActorInfo {
   id: string;
   name: string;
   isPlayer: boolean;
+  /** 该角色 TTS 音色（clientTts：随 stage_begin 下发，客户端 say 用它本地合成）。玩家无音色可省。 */
+  voiceId?: string;
 }
 
 /** 沙箱脚本发出的一条舞台命令。op 对 Runner 透明，由 StageBackend 解释。 */

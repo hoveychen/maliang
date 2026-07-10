@@ -255,6 +255,10 @@ var _prop_drag: Dictionary = {}    ## 拖拽中 { id, spec_data, yaw, wander, no
 const BRING_DONE_DIST := 4.5       ## 带人：目标与委托人相邻半径
 const VISIT_DONE_DIST := 14.0      ## 探访：玩家到地点中心半径（POI 中心可能不可达，如池塘水面）
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
+var _stage: StageAgent            ## 舞台协议大脑（剧本系统，见 stage_agent.gd）；_setup_backend 接线
+var _stage_active := false        ## 观演/游戏态：期间吞玩家输入，StageAgent 全权调度演出
+var _stage_drives: Array = []     ## 进行中的完成型舞台命令 { ex:BehaviorExecutor, done:Callable }
+var _stage_speaks: Array = []     ## 进行中的舞台念白 { done:Callable, deadline:float, started:bool }
 var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
 var fairy_voice: FairyVoice       ## 预制台词播放器（构建期 TTS，运行期零调用）
 var game_audio: GameAudio         ## BGM + 音效（语音/思考时自动 duck）
@@ -1718,6 +1722,7 @@ func _process(delta: float) -> void:
 	_step_task(delta)
 	tp = _prof_lap(tp, "task/give")
 	_step_executors(delta)
+	_step_stage(delta) # 舞台协议：轮询完成型命令（走位/动作/念白）→ 回 ack
 	tp = _prof_lap(tp, "executors")
 	_step_positions_report(delta)
 	_check_approach()
@@ -1874,6 +1879,9 @@ func _step_executors(delta: float) -> void:
 	_executors = _executors.filter(func(e: BehaviorExecutor) -> bool: return not e.is_done())
 	# 指令跑完的村民恢复自主闲逛，否则永远呆立。被替换（已有新执行器）、
 	# 正被交互叫停（_stopped/selected）、玩家、小仙子都不恢复。
+	# 观演/游戏态：演出角色跑完一条命令不自作主张闲逛，静候下一条舞台命令。
+	if _stage_active:
+		return
 	for e in done:
 		for n in npcs:
 			if not (e as BehaviorExecutor).drives(n):
@@ -2109,6 +2117,10 @@ func _update_hud() -> void:
 	]
 
 func _unhandled_input(event: InputEvent) -> void:
+	# 观演/游戏态：StageAgent 全权调度演出，吞掉一切玩家输入（点击移动/进对话/手势/缩放）。
+	# 玩家想退场（"不玩了"）走别的通道（P5 提词/横幅按钮），不从这里放行。
+	if _stage_active:
+		return
 	# 调试：选中角色后按 Enter/空格。小神仙→造角色；其他→本地 move_to（离线演示）。
 	if event.is_action_pressed("ui_accept") and selected != null:
 		var d := _find_npc_dict(selected)
@@ -2556,6 +2568,15 @@ func _setup_backend() -> void:
 	backend.prop_denied.connect(_on_reward_denied)
 	backend.gen_denied.connect(_on_reward_denied)
 	backend.failed.connect(_on_failed)
+	# 舞台协议（剧本系统）：StageAgent 消费下行、经 send_stage_event 回执；world 作能力宿主。
+	_stage = StageAgent.new()
+	_stage.setup(self, Callable(backend, "send_stage_event"))
+	backend.stage_begin.connect(_stage.on_stage_begin)
+	backend.stage_cmd.connect(_stage.on_stage_cmd)
+	backend.stage_end.connect(_stage.on_stage_end)
+	backend.stage_abort.connect(_stage.on_stage_abort)
+	backend.world_host.connect(_stage.on_world_host)
+	backend.time_sync.connect(_stage.on_time_sync)
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
 	# 也在 THINK_TIMEOUT 秒后自动解卡——这是无论后端如何都不再永久卡死的最后一道保险。
 	_think_timer = Timer.new()
@@ -3759,6 +3780,164 @@ func _poi_names(poi: Dictionary) -> Array:
 	var names: Array = [String(poi.get("name", ""))]
 	names.append_array(poi.get("aliases", []))
 	return names.filter(func(n: Variant) -> bool: return not String(n).is_empty())
+
+# ── 舞台协议宿主：StageAgent 的能力执行器（剧本系统，见 stage_agent.gd）────────────
+# 完成型命令（走位/动作/念白）在 _step_stage 轮询完成后回调 done→StageAgent 回 ack。
+
+const STAGE_NARRATE_VOICE := "zh-CN-XiaoyiNeural" ## 旁白固定用小仙子音色（edge 原生名，直通 map_voice）
+var _stage_player_actor_id := ""                  ## 本场演出里玩家占的角色 id（stage_begin 从 isPlayer 认定）
+
+## 开演：进观演态（吞玩家输入），退出当前对话/取消玩家自主移动，认出玩家占哪个角色。
+func stage_begin(actors: Array) -> void:
+	_stage_active = true
+	_stage_player_actor_id = ""
+	for a in actors:
+		if bool((a as Dictionary).get("isPlayer", false)):
+			_stage_player_actor_id = String((a as Dictionary).get("id", ""))
+	if selected != null:
+		_exit_interaction()
+	_cancel_player_move()
+	banner.visible = false
+
+## 收场（正常结束/异常终止）：解锁输入，停掉一切舞台驱动的执行器与念白，横幅圆场。
+func stage_finish(result: Dictionary, aborted: bool, reason: String) -> void:
+	_stage_active = false
+	_stage_player_actor_id = ""
+	for m in _stage_drives:
+		(m["ex"] as BehaviorExecutor).cancel()
+	_stage_drives.clear()
+	_stage_speaks.clear() # 未完成念白的回执随收场丢弃（服务端已终场，不再需要 ack）
+	if _tts_player != null:
+		_tts_player.stop()
+	if aborted:
+		banner.text = "今天先演到这里啦"
+		banner.visible = true
+		push_warning("stage aborted: %s" % reason)
+	elif not String(result.get("praise", "")).is_empty():
+		banner.text = String(result["praise"])
+		banner.visible = true
+
+## 走位：解析目标（坐标/角色名/地点名）→ 一次性执行器驱动，到达回 done。
+func stage_move(actor_id: String, target: Variant, done: Callable) -> void:
+	var dict := _stage_actor_dict(actor_id)
+	if dict.is_empty():
+		done.call(false, { "error": "找不到演员: %s" % actor_id })
+		return
+	if dict.get("is_fairy", false):
+		done.call(true, {}) # 小仙子随从由 _update_fairy 驱动，不吃移动脚本；视作已到位
+		return
+	var params := _stage_move_params(target)
+	if params.is_empty():
+		done.call(false, { "error": "无法解析移动目标" })
+		return
+	_stage_drive(dict, { "commands": [{ "type": "move_to", "params": params }], "loop": false }, done)
+
+## 动作（wave/jump/spin/nod）：一次性执行器阻塞动作时长，演完回 done。
+func stage_action(actor_id: String, action: String, done: Callable) -> void:
+	var dict := _stage_actor_dict(actor_id)
+	if dict.is_empty():
+		if done.is_valid():
+			done.call(false, { "error": "找不到演员: %s" % actor_id })
+		return
+	_stage_drive(dict, { "commands": [{ "type": "do_action", "params": { "action": action } }], "loop": false }, done)
+
+## 说话：用角色自己音色本地合成 TTS（clientTts），可选同时演动作；TTS 播完回 done。
+func stage_say(actor_id: String, text: String, action: String, voice_id: String, done: Callable) -> void:
+	if not action.is_empty():
+		var dict := _stage_actor_dict(actor_id)
+		if not dict.is_empty() and not dict.get("is_fairy", false):
+			_stage_drive(dict, { "commands": [{ "type": "do_action", "params": { "action": action } }], "loop": false }, Callable())
+	_stage_speak(text, voice_id, done)
+
+## 旁白：小仙子音色念白，说完回 done。
+func stage_narrate(text: String, done: Callable) -> void:
+	_stage_speak(text, STAGE_NARRATE_VOICE, done)
+
+## actorId → 玩家/村民字典（玩家可占某个角色 id；再按后端 id、名字兜底解析村民）。
+func _stage_actor_dict(actor_id: String) -> Dictionary:
+	if not player.is_empty() and (actor_id == PLAYER_ID or actor_id == _stage_player_actor_id):
+		return player
+	for n in npcs:
+		if String(n.get("id", "")) == actor_id:
+			return n
+	for n in npcs:
+		if (n["node"] as PaperCharacter).char_name == actor_id:
+			return n
+	return {}
+
+## 舞台 move 目标 → BehaviorExecutor move_to 参数。target：世界坐标 [x,y] / Tile {x,y}(格) / 角色名 / 地点名。
+func _stage_move_params(target: Variant) -> Dictionary:
+	if target is Array and (target as Array).size() >= 2:
+		var t: Array = target
+		return { "target": [float(t[0]), float(t[1])] }
+	if target is Dictionary:
+		var d: Dictionary = target
+		if d.has("x") and d.has("y"):
+			return { "tile_x": int(d["x"]), "tile_y": int(d["y"]) }
+		if d.has("tileX") and d.has("tileY"):
+			return { "tile_x": int(d["tileX"]), "tile_y": int(d["tileY"]) }
+	if target is String:
+		var s := String(target)
+		if _resolve_char_pos(s) != Vector2.INF:
+			return { "character_name": s }
+		if _resolve_location(s) != Vector2.INF:
+			return { "location_name": s }
+	return {}
+
+## 一次性执行器驱动某角色（玩家/村民通用）：替换其现有执行器，跑完在 _step_stage 回 done。
+func _stage_drive(dict: Dictionary, script: Dictionary, done: Callable) -> void:
+	for old in _executors:
+		if (old as BehaviorExecutor).drives(dict):
+			(old as BehaviorExecutor).cancel()
+	var ex := BehaviorExecutor.new()
+	ex.setup(dict, script, Callable(self, "_resolve_char_pos"), Callable(self, "_deliver_message"),
+		Callable(self, "_resolve_location"), Callable(self, "_relay_command"))
+	_executors.append(ex)
+	if done.is_valid():
+		_stage_drives.append({ "ex": ex, "done": done })
+
+## 舞台念白：本地合成播放。完成检测靠 _step_stage 轮询 TTS 空闲；离线/无回音时用估算时长兜底。
+func _stage_speak(text: String, voice_id: String, done: Callable) -> void:
+	if text.strip_edges().is_empty() or voice_id.is_empty():
+		if done.is_valid():
+			done.call(true, {})
+		return
+	_speak_line(text, voice_id) # async：内部 await edge 合成后播放；此处不 await，完成靠轮询
+	# 时长兜底（0.22s/字，1.5–12s）：真机 TTS 空闲检测可靠，但 headless dummy 音频 playing 永真，
+	# 靠此兜底保证 ack 必达不卡场。
+	var est := clampf(0.22 * float(text.strip_edges().length()), 1.5, 12.0)
+	_stage_speaks.append({ "done": done, "deadline": Time.get_ticks_msec() / 1000.0 + est, "started": false })
+
+func _is_tts_busy() -> bool:
+	return (_tts_player != null and _tts_player.playing) or _tts_pending
+
+## 舞台完成轮询：走位/动作执行器跑完、念白 TTS 播完（或超时兜底）→ 回 done（StageAgent 据此回 ack）。
+func _step_stage(_delta: float) -> void:
+	if not _stage_drives.is_empty():
+		var still: Array = []
+		for m in _stage_drives:
+			if (m["ex"] as BehaviorExecutor).is_done():
+				var cb: Callable = m["done"]
+				if cb.is_valid():
+					cb.call(true, {})
+			else:
+				still.append(m)
+		_stage_drives = still
+	if not _stage_speaks.is_empty():
+		var now := Time.get_ticks_msec() / 1000.0
+		var busy := _is_tts_busy()
+		var kept: Array = []
+		for s in _stage_speaks:
+			if busy:
+				s["started"] = true # 观测到出声：之后转空闲即算说完
+			var idle_done: bool = bool(s["started"]) and not busy
+			if idle_done or now >= float(s["deadline"]):
+				var cb: Callable = s["done"]
+				if cb.is_valid():
+					cb.call(true, {})
+			else:
+				kept.append(s)
+		_stage_speaks = kept
 
 ## 连上 WS 后上报世界地点名清单（POI 规范名），让意图 LLM 把「去某地」归一到真实地名。
 func _send_world_info() -> void:
