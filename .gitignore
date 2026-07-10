@@ -27,6 +27,7 @@ asr_plugin/local.properties
 # macOS/桌面端侧 ASR GDExtension 产物（scripts/build-asr-gdextension.sh 生成/下载）
 addons/maliang_asr_native/bin/
 gdextension_asr/godot-cpp/
+gdextension_asr/sherpa-onnx/
 gdextension_asr/extension_api.json
 gdextension_asr/gdextension_interface.h
 gdextension_asr/*.o

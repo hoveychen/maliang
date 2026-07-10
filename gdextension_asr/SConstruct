@@ -16,11 +16,16 @@ if os.path.exists(api_file):
 
 env = SConscript("godot-cpp/SConstruct")
 
-env.Append(CPPPATH=["src/"])
+env.Append(CPPPATH=["src/", "sherpa-onnx/include/"])
+env.Append(LIBPATH=["sherpa-onnx/lib/"])
+env.Append(LIBS=["sherpa-onnx-c-api", "onnxruntime"])
 sources = Glob("src/*.cpp")
 
 if env["platform"] == "macos":
-    # .framework 布局与 godot-kokoro 一致；P2 接 sherpa 时在此追加 RPATH 与 LIBS。
+    # RPATH：@loader_path = .framework/ 目录；运行期 dylib 与 framework 同放
+    # .app/Contents/Frameworks/（P3 打包），故 @loader_path 能找到 sherpa/onnxruntime。
+    env.Append(LINKFLAGS=["-Wl,-rpath,@loader_path"])
+    # .framework 布局与 godot-kokoro 一致。
     library = env.SharedLibrary(
         "../addons/maliang_asr_native/bin/libmaliang_asr.{}.{}.framework/libmaliang_asr.{}.{}".format(
             env["platform"], env["target"], env["platform"], env["target"]

@@ -36,9 +36,33 @@ if [ ! -f "$EXT/extension_api.json" ]; then
   ( cd "$EXT" && "$GODOT" --headless --dump-extension-api --dump-gdextension-interface >/dev/null 2>&1 )
 fi
 
+# 2b. sherpa-onnx macOS universal2（shared，含 c-api 头文件 + dylib + onnxruntime）。
+#     与 Android AAR、服务端 sherpa-onnx-node 同一版本 v1.13.3。
+SHERPA_VER="1.13.3"
+SHERPA_PKG="sherpa-onnx-v$SHERPA_VER-osx-universal2-shared-no-tts"
+if [ ! -f "$EXT/sherpa-onnx/include/sherpa-onnx/c-api/c-api.h" ]; then
+  echo "下载 sherpa-onnx macOS 库 ..."
+  TMP="$(mktemp -d)"
+  curl -fL --retry 3 -o "$TMP/s.tar.bz2" \
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$SHERPA_VER/$SHERPA_PKG.tar.bz2"
+  tar xjf "$TMP/s.tar.bz2" -C "$TMP"
+  mkdir -p "$EXT/sherpa-onnx"
+  cp -R "$TMP/$SHERPA_PKG/include" "$EXT/sherpa-onnx/"
+  cp -R "$TMP/$SHERPA_PKG/lib" "$EXT/sherpa-onnx/"
+  rm -rf "$TMP"
+fi
+
 # 3. 构建 framework
 echo "scons target=$TARGET arch=$ARCH ..."
 ( cd "$EXT" && scons target="$TARGET" arch="$ARCH" )
+
+# 3b. sherpa/onnxruntime dylib 放进 .framework 内（rpath=@loader_path 自包含，
+#     framework 走到哪 dylib 跟到哪；P3 打包 .app 时随 framework 一起进 Frameworks/）。
+FW="$ROOT/addons/maliang_asr_native/bin/libmaliang_asr.macos.$TARGET.framework"
+if [ -d "$FW" ]; then
+  cp "$EXT/sherpa-onnx/lib/libsherpa-onnx-c-api.dylib" "$FW/"
+  cp "$EXT/sherpa-onnx/lib/libonnxruntime.1.24.4.dylib" "$FW/"
+fi
 
 # 4. 让 Godot 把 .gdextension 写进 .godot/extension_list.cfg（headless --script 只读此清单，
 #    否则单例加载不出来——踩过：--import 不登记扩展，必须 --editor 扫一次）
