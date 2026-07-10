@@ -10,8 +10,9 @@ extends RefCounted
 ## 纯逻辑、不碰节点/时钟：world.gd 每帧把标志位喂进来，拿回状态与闭麦决定。
 ##
 ## 等价契约（必须永远成立，见 test_interaction_fsm）：
-##   mic_open(derive(x)) == not (x.thinking or x.speaking)   —— 当 x.in_interaction 为真
+##   mic_open(derive(x)) == not (x.thinking or x.speaking or x.cooldown)  —— 当 x.in_interaction 为真
 ##   否则 mic_open 恒为 false（未进对话时 _vad 为 null，本就不喂麦）
+## cooldown 是本状态机第一个「拥有态」（由 world.gd 的退避计时器驱动），其余仍是标志位派生。
 
 enum State {
 	EXPLORE,    ## 自由巡游：未进对话
@@ -21,7 +22,18 @@ enum State {
 	THINKING,   ## 等服务端回应（含造角色「施法中」）：闭麦
 	SPEAKING,   ## 角色出声（招呼/回应 TTS/仙子预制语音）：闭麦
 	CREATION,   ## 引导造角色·等孩子点卡或开口（麦开着）
+	COOLDOWN,   ## 刚吃到一次空识别：闭麦退避，别被噪声立刻再触发（缺陷 ① 的解药）
 }
+
+## 连续空识别的退避：第 n 次空结果闭麦多久（秒）。指数退避、封顶。
+## 一次空结果多半是误触发；连着空说明环境在持续骗 VAD，退得越久越好。
+const EMPTY_COOLDOWN_BASE := 0.8
+const EMPTY_COOLDOWN_MAX := 4.0
+
+static func empty_cooldown(streak: int) -> float:
+	if streak <= 0:
+		return 0.0
+	return minf(EMPTY_COOLDOWN_BASE * pow(2.0, float(streak - 1)), EMPTY_COOLDOWN_MAX)
 
 ## world.gd 每帧喂入的原始标志位快照。字段名与 world.gd 的成员一一对应，便于核对。
 class Inputs extends RefCounted:
@@ -32,6 +44,7 @@ class Inputs extends RefCounted:
 	var fairy_speaking := false ## fairy_voice.is_playing()（仙子预制语音）
 	var recording := false      ## _recording
 	var in_creation := false    ## _in_creation
+	var cooldown := false       ## _cooldown_t > 0.0（空识别退避中）
 
 	func _init(p := {}) -> void:
 		in_interaction = bool(p.get("in_interaction", false))
@@ -41,6 +54,7 @@ class Inputs extends RefCounted:
 		fairy_speaking = bool(p.get("fairy_speaking", false))
 		recording = bool(p.get("recording", false))
 		in_creation = bool(p.get("in_creation", false))
+		cooldown = bool(p.get("cooldown", false))
 
 	## 任何角色在出声（含仙子预制语音）。
 	func speaking() -> bool:
@@ -55,6 +69,8 @@ static func derive(x: Inputs) -> State:
 		return State.SPEAKING # 角色在出声：半双工闭麦，防自听
 	if x.thinking:
 		return State.THINKING # 等回应/施法中：闭麦
+	if x.cooldown:
+		return State.COOLDOWN # 刚吃到空识别：闭麦退避，别被噪声立刻再触发
 	if x.recording:
 		return State.RECORDING
 	if x.in_creation:
@@ -95,4 +111,5 @@ static func name_of(s: State) -> String:
 		State.THINKING: return "THINKING"
 		State.SPEAKING: return "SPEAKING"
 		State.CREATION: return "CREATION"
+		State.COOLDOWN: return "COOLDOWN"
 	return "?"

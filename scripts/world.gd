@@ -149,6 +149,10 @@ var _speak_anim_t := 0.0           ## 说话呼吸弹跳相位
 var _recording := false
 var _vad_log := false               ## 录音诊断 logcat（仅 debug）：VAD 收尾原因/阈值/静音累计
 var _vad_log_accum := 0.0           ## 录音期周期打点节流（每 1s 一行）
+# 空识别退避（缺陷 ①）：误触发录到近静音 → ASR 返回空 → 若立刻重开麦就会被噪声再触发，
+# 形成连环录。空结果不再当一轮正常结束，而是闭麦退避一段（连续空则指数退避，见 InteractionFsm）。
+var _empty_streak := 0              ## 连续空识别次数（拿到有效转写即清零）
+var _cooldown_t := 0.0              ## 退避剩余秒数（>0 即闭麦，派生为 COOLDOWN 态）
 # 奖赏系统：进行中委托 + 小红花钱包（服务端权威，world_state/task_complete 同步；见 docs/reward-flower-design.md）
 var active_task: Dictionary = {}   ## 进行中委托（空=无），见 _set_active_task
 var wallet: Dictionary = { "flowers": 0, "stampProgress": 0, "stampsTotal": 0 } ## 小红花钱包
@@ -2414,6 +2418,7 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	_mic.start()
 	_vad = VoiceVad.new()
 	_unmute_t = 0.0
+	_reset_empty_streak() # 新一场对话不继承上一场的空识别退避
 	_greet_on_enter(d) # 对方先开口打招呼（播放期间 _step_voice 自动闭麦，说完再放开）
 
 ## 进对话对方先打招呼：小仙子走预制语音（离线可用、零延迟），普通 NPC 走服务端招呼
@@ -2442,6 +2447,7 @@ func _exit_interaction() -> void:
 	_mic.stop()
 	_vad = null
 	selected = null
+	_reset_empty_streak()
 	# 中途退出时清掉未完成的小跳（保留当前位置，不瞬移回落点）
 	if not player.is_empty():
 		player.erase("_hop")
@@ -2975,6 +2981,21 @@ func _setup_local_asr() -> void:
 	_asr_local.connect("asr_error", _on_local_asr_error)
 	_asr_local.initialize()
 
+## 一次空识别：多半是 VAD 误触发。闭麦退避一段再听，连续空则指数退避——
+## 否则刚放开麦就被同一串噪声再次触发，连环录（缺陷 ①）。
+func _begin_empty_cooldown() -> void:
+	_empty_streak += 1
+	_cooldown_t = InteractionFsm.empty_cooldown(_empty_streak)
+	if _vad != null:
+		_vad.reset()
+	if _vad_log:
+		print("[vad] EMPTY streak=%d cooldown=%.1fs" % [_empty_streak, _cooldown_t])
+
+## 拿到有效转写：退避清零，恢复正常聆听节奏。
+func _reset_empty_streak() -> void:
+	_empty_streak = 0
+	_cooldown_t = 0.0
+
 func _on_local_asr_final(text: String) -> void:
 	_local_asr_session = false
 	_vt_asr_done = Time.get_ticks_msec() # 端侧识别出文本
@@ -2985,7 +3006,9 @@ func _on_local_asr_final(text: String) -> void:
 		thinking_label.visible = false
 		heard_label.text = "没听清，再说一次试试"
 		heard_label.visible = true
+		_begin_empty_cooldown()
 		return
+	_reset_empty_streak()
 	_vt_send = Time.get_ticks_msec() # 发转写 → 到 character_response 即纯 LLM 耗时
 	backend.send_voice_transcript(world_id, _selected_id(), t)
 
@@ -3012,6 +3035,7 @@ func _fsm_inputs() -> InteractionFsm.Inputs:
 		"fairy_speaking": fairy_voice != null and fairy_voice.is_playing(),
 		"recording": _recording,
 		"in_creation": _in_creation,
+		"cooldown": _cooldown_t > 0.0,
 	})
 
 ## 本帧的显式交互状态。
@@ -3021,8 +3045,13 @@ func _fsm_state() -> InteractionFsm.State:
 func _step_voice(delta: float) -> void:
 	if _vad == null:
 		return
+	var x := _fsm_inputs()
+	# 退避只在「否则就该开麦」时倒计时：角色说话/思考期本就闭麦，别把退避空烧掉，
+	# 否则 TTS 一停麦就全开，退避形同虚设。
+	if _cooldown_t > 0.0 and not (x.thinking or x.speaking()):
+		_cooldown_t = maxf(_cooldown_t - delta, 0.0)
 	var pcm := _mic.drain_pcm16k() # 闭麦期间也持续排空采集缓冲，恢复聆听时不会吃到角色的声音
-	if not InteractionFsm.mic_open(_fsm_state()):
+	if not InteractionFsm.mic_open(InteractionFsm.derive(x)):
 		if _recording:
 			_utterance_cancel() # 时序兜底：闭麦瞬间还在录 → 静默丢弃
 		_vad.reset()
@@ -3150,9 +3179,11 @@ func _on_character_response(data: Dictionary) -> void:
 		if transcript.is_empty():
 			heard_label.text = "没听清，再说一次试试"
 			game_audio.play_sfx("oops")
+			_begin_empty_cooldown() # 服务端 ASR 路径的空结果，同样退避（缺陷 ①）
 		else:
 			heard_label.text = "听到：%s" % transcript
 			game_audio.play_sfx("bell")
+			_reset_empty_streak()
 		heard_label.visible = true
 	banner.text = String(data.get("replyText", ""))
 	banner.visible = true

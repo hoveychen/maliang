@@ -11,6 +11,8 @@ func _init() -> void:
 	fails += _test_precedence()
 	fails += _test_fairy_speaking()
 	fails += _test_predicates()
+	fails += _test_cooldown()
+	fails += _test_empty_backoff()
 	if fails == 0:
 		print("interaction_fsm tests PASS")
 	else:
@@ -120,6 +122,43 @@ func _test_predicates() -> int:
 	fails += _check("全空 → player_engaged 假", InteractionFsm.player_engaged(idle), false)
 	fails += _check("只是进了对话 → player_engaged 真",
 		InteractionFsm.player_engaged(_mk(true, false, false, false, false, false)), true)
+	return fails
+
+## 空识别退避态：闭麦，且不被噪声立刻再触发（缺陷 ① 的解药）。
+## 但不得压过「角色在出声/正在思考」——那两态本就闭麦，语义更强。
+func _test_cooldown() -> int:
+	var fails := 0
+	var cd := InteractionFsm.Inputs.new({ "in_interaction": true, "cooldown": true })
+	fails += _check("冷却中 → COOLDOWN", InteractionFsm.derive(cd), InteractionFsm.State.COOLDOWN)
+	fails += _check("COOLDOWN 闭麦", InteractionFsm.mic_open(InteractionFsm.State.COOLDOWN), false)
+
+	var cd_speak := InteractionFsm.Inputs.new({
+		"in_interaction": true, "cooldown": true, "tts_busy": true })
+	fails += _check("speaking 压过 cooldown", InteractionFsm.derive(cd_speak), InteractionFsm.State.SPEAKING)
+
+	var cd_think := InteractionFsm.Inputs.new({
+		"in_interaction": true, "cooldown": true, "thinking": true })
+	fails += _check("thinking 压过 cooldown", InteractionFsm.derive(cd_think), InteractionFsm.State.THINKING)
+
+	var cd_crea := InteractionFsm.Inputs.new({
+		"in_interaction": true, "cooldown": true, "in_creation": true })
+	fails += _check("cooldown 压过 creation(造角色期也退避)",
+		InteractionFsm.derive(cd_crea), InteractionFsm.State.COOLDOWN)
+
+	fails += _check("冷却结束 → 回 LISTENING",
+		InteractionFsm.derive(InteractionFsm.Inputs.new({ "in_interaction": true })),
+		InteractionFsm.State.LISTENING)
+	return fails
+
+## 指数退避 + 封顶。
+func _test_empty_backoff() -> int:
+	var fails := 0
+	fails += _check("streak 0 → 不退避", InteractionFsm.empty_cooldown(0), 0.0)
+	fails += _check("streak 1 → BASE", InteractionFsm.empty_cooldown(1), InteractionFsm.EMPTY_COOLDOWN_BASE)
+	fails += _check("streak 2 → 2×BASE", InteractionFsm.empty_cooldown(2), 1.6)
+	fails += _check("streak 3 → 4×BASE", InteractionFsm.empty_cooldown(3), 3.2)
+	fails += _check("streak 4 → 封顶", InteractionFsm.empty_cooldown(4), InteractionFsm.EMPTY_COOLDOWN_MAX)
+	fails += _check("streak 9 → 仍封顶", InteractionFsm.empty_cooldown(9), InteractionFsm.EMPTY_COOLDOWN_MAX)
 	return fails
 
 func _check(name: String, got: Variant, want: Variant) -> int:
