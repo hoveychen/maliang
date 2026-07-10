@@ -676,7 +676,7 @@ export interface VisitState {
   pending: Map<string, { child: string; npc: string }[]>; // characterId → 尚未抽取的对话增量
 }
 
-/** 边说边识别的单连接语音会话：voice_start 开讯飞流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
+/** 边说边识别的单连接语音会话：voice_start 开识别流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
 export interface VoiceSession {
   active: boolean;
   worldId: string;
@@ -1428,7 +1428,7 @@ export async function handleWsMessage(
     return;
   }
 
-  // ── 边说边识别：分片随到随发讯飞，voice_end 时识别已基本完成（见 asr-live-stream 计划）──
+  // ── 边说边识别：分片随到随发识别器，voice_end 时识别已基本完成（见 asr-live-stream 计划）──
   if (msg.type === 'voice_start') {
     if (session.gate) { session.gate.release(); session.gate = null; } // 上一会话没正常收尾，先释放
     const gate = limiter.tryAcquire(connKey, Date.now());
@@ -1439,17 +1439,17 @@ export async function handleWsMessage(
     session.active = true;
     session.worldId = msg.worldId ?? '';
     session.characterId = msg.characterId ?? '';
-    session.asr = adapters.asr.openStream(); // 立即开讯飞流，分片随到随发
+    session.asr = adapters.asr.openStream(); // 立即开识别流，分片随到随发
     session.gate = gate;
     return;
   }
 
   if (msg.type === 'voice_chunk') {
     if (session.active && session.asr && msg.audio) session.asr.feed(Buffer.from(msg.audio, 'base64'));
-    return; // 分片实时喂讯飞，不回包
+    return; // 分片实时喂识别器，不回包
   }
 
-  // 误触/中途放弃（按住说话 <0.4s 松手）：丢弃识别流（finish 让讯飞关 WS/sherpa 释放，
+  // 误触/中途放弃（按住说话 <0.4s 松手）：丢弃识别流（finish 让 sherpa 识别流释放，
   // 转写弃用），释放 gate，不回任何包——客户端取消后不该看到任何反馈。
   if (msg.type === 'voice_cancel') {
     if (session.asr) void session.asr.finish().catch(() => {});

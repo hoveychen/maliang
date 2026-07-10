@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import type { ASRAdapter, ASRStream, TTSAdapter, AudioBlob } from './types.ts';
 
 // sherpa-onnx-node 是 CJS native addon（加载 ~30MB 动态库），按需 require，
-// 避免 mock/xfyun 模式下白白载入。
+// 避免 mock 模式下白白载入。
 const require = createRequire(import.meta.url);
 
 export const ASR_MODEL_DIR = 'sherpa-onnx-streaming-zipformer-multi-zh-hans-2023-12-12';

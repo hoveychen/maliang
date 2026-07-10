@@ -1,6 +1,6 @@
 // 运行时配置。密钥从环境读取（node --env-file=.env），绝不写入源码。
 
-export type VoiceProvider = 'auto' | 'local' | 'xfyun' | 'mock';
+export type VoiceProvider = 'auto' | 'local' | 'mock';
 export type TTSProvider = VoiceProvider | 'minimax';
 
 export interface Config {
@@ -12,16 +12,13 @@ export interface Config {
   /** 立绘朝向检测用的 vision 模型（看图回答朝向）。 */
   visionModel: string;
   moderationTextModel: string;
-  xfyunAppId: string | undefined;
-  xfyunApiKey: string | undefined;
-  xfyunApiSecret: string | undefined;
   minimaxApiKey: string | undefined;
   minimaxTtsModel: string;
   /** ASR/TTS 共同的基础路由；VOICE_ASR_PROVIDER / VOICE_TTS_PROVIDER 可分别覆盖。 */
   voiceProvider: VoiceProvider;
-  /** ASR 路由：auto=有本地模型用 local → 有讯飞 key 用 xfyun → mock。 */
+  /** ASR 路由：auto=有本地模型用 local → mock。 */
   voiceAsrProvider: VoiceProvider;
-  /** TTS 路由：auto=有 MiniMax key 用 minimax → 本地模型 local → 讯飞 → mock。 */
+  /** TTS 路由：auto=有 MiniMax key 用 minimax → 本地模型 local → mock。 */
   voiceTtsProvider: TTSProvider;
   /** 本地语音模型目录（scripts/fetch-voice-models.sh 拉取）。 */
   voiceModelsDir: string;
@@ -47,9 +44,6 @@ export function loadConfig(): Config {
     // 3.1-flash-lite 左右混淆（把明确朝左的旧小狐判 RIGHT）；3.5-flash 8 张样本全符合预期。
     visionModel: process.env.OPENROUTER_VISION_MODEL ?? 'google/gemini-3.5-flash',
     moderationTextModel: process.env.OPENROUTER_MOD_TEXT_MODEL ?? 'moonshotai/kimi-k2.6',
-    xfyunAppId: process.env.XFYUN_APP_ID,
-    xfyunApiKey: process.env.XFYUN_API_KEY,
-    xfyunApiSecret: process.env.XFYUN_API_SECRET,
     minimaxApiKey: process.env.MINIMAX_API_KEY,
     // turbo 实测整句 1.0-1.9s、¥0.013/条；hd 音质更高、约 1.75 倍价
     minimaxTtsModel: process.env.MINIMAX_TTS_MODEL ?? 'speech-2.6-turbo',
@@ -71,7 +65,7 @@ function parseSpeed(v: string | undefined): number | undefined {
 }
 
 function parseVoiceProvider(v: string | undefined, name: string, fallback: VoiceProvider = 'auto'): VoiceProvider {
-  if (v === 'local' || v === 'xfyun' || v === 'mock' || v === 'auto') return v;
+  if (v === 'local' || v === 'mock' || v === 'auto') return v;
   if (v) console.warn(`未知 ${name}=${v}，回落 ${fallback}`);
   return fallback;
 }
@@ -84,10 +78,6 @@ function parseTtsProvider(v: string | undefined, fallback: VoiceProvider): TTSPr
 /** 有 key 才能用真实适配器；否则回落 mock。 */
 export function hasOpenRouter(c: Config): boolean {
   return typeof c.openrouterApiKey === 'string' && c.openrouterApiKey.length > 0;
-}
-
-export function hasXfyun(c: Config): boolean {
-  return !!(c.xfyunAppId && c.xfyunApiKey && c.xfyunApiSecret);
 }
 
 export function hasMinimax(c: Config): boolean {

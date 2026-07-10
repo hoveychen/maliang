@@ -56,7 +56,6 @@ test('LocalTTS：英文+全角括号混合文本能在限时内合成（lang 配
 function baseConfig(over: Partial<Config>): Config {
   return {
     ...loadConfig(),
-    xfyunAppId: undefined, xfyunApiKey: undefined, xfyunApiSecret: undefined,
     minimaxApiKey: undefined,
     voiceAsrProvider: 'auto', voiceTtsProvider: 'auto',
     ...over,
@@ -65,33 +64,18 @@ function baseConfig(over: Partial<Config>): Config {
 
 test('resolveAsrProvider：显式指定优先于 auto 探测', () => {
   assert.equal(resolveAsrProvider(baseConfig({ voiceAsrProvider: 'mock' })), 'mock');
-  assert.equal(resolveAsrProvider(baseConfig({ voiceAsrProvider: 'xfyun' })), 'xfyun');
   assert.equal(resolveAsrProvider(baseConfig({ voiceAsrProvider: 'local' })), 'local');
 });
 
-test('resolveAsrProvider：auto 无模型无讯飞 → mock；有讯飞 → xfyun；有模型 → local', () => {
+test('resolveAsrProvider：auto 无模型 → mock；有模型 → local', () => {
   assert.equal(
     resolveAsrProvider(baseConfig({ voiceModelsDir: '/nonexistent-path-xyz' })),
     'mock',
   );
-  assert.equal(
-    resolveAsrProvider(
-      baseConfig({
-        voiceModelsDir: '/nonexistent-path-xyz',
-        xfyunAppId: 'a', xfyunApiKey: 'b', xfyunApiSecret: 'c',
-      }),
-    ),
-    'xfyun',
-  );
-  // 本地模型已就绪时（开发机跑过 fetch 脚本），auto 应选 local——讯飞凭证在场也优先本地
+  // 本地模型已就绪时（开发机跑过 fetch 脚本），auto 应选 local
   if (hasLocalVoiceModels('models')) {
     assert.equal(
-      resolveAsrProvider(
-        baseConfig({
-          voiceModelsDir: 'models',
-          xfyunAppId: 'a', xfyunApiKey: 'b', xfyunApiSecret: 'c',
-        }),
-      ),
+      resolveAsrProvider(baseConfig({ voiceModelsDir: 'models' })),
       'local',
     );
   }

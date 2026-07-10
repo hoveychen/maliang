@@ -57,7 +57,7 @@ const BAD_WORDS = /(暴力|血腥|恐怖|武器|杀|枪|刀)/;
 const GO_WORDS = /(去|到|走去|过去)/;
 
 function audioStub(): AudioBlob {
-  // 极小的占位音频（mock TTS）。真实 TTS 由讯飞产出。
+  // 极小的占位音频（mock TTS）。真实 TTS 走 MiniMax 或本地 Kokoro。
   return { bytes: Uint8Array.from([0x52, 0x49, 0x46, 0x46]), mime: 'audio/wav' };
 }
 
@@ -254,7 +254,7 @@ export function createMockAdapters(): ServiceAdapters {
     },
     asr: {
       async transcribe(_audio: AudioBlob): Promise<string> {
-        return '你好呀'; // mock：固定转写；真实接讯飞
+        return '你好呀'; // mock：固定转写；真实走 sherpa-onnx
       },
       openStream() {
         return {
