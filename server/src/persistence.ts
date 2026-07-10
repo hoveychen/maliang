@@ -624,13 +624,16 @@ export class WorldStore {
   }
 
   /**
-   * 角色所在 tile 的落位回报（positions_report）。空间权威在客户端，服务端只记最后位置供重载读回。
+   * 角色所在 tile 的落位回报（positions_report）。空间授权在客户端，服务端只记最后位置供重载读回。
    * 角色不存在 → false 不动账。tile 合法性由调用方（server.ts）先行校验。
-   * sceneId 给了就一并更新角色所在场景——上报只带当前场景里的角色，故场景跟着位置走（模型 B）。
+   * sceneId 给了且与角色当前场景一致才落位；不一致整条拒绝（scene-drag-guard）——
+   * NPC 不会走 portal，跨场景上报只可能是客户端脏数据（实锤案例：旧客户端初载把全库角色
+   * 降生在村庄再上报，把森林村民整批拖回 village）。角色换场景走 admin 修数据端点。
    */
   setCharacterTile(worldId: string, characterId: string, tile: TilePos, sceneId?: string): boolean {
     const character = this.getCharacter(worldId, characterId);
     if (!character) return false;
+    if (sceneId !== undefined && (character.sceneId ?? DEFAULT_SCENE) !== sceneId) return false;
     character.position = tile;
     if (sceneId !== undefined) character.sceneId = sceneId;
     this.saveCharacter(character);

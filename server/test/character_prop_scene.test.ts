@@ -73,18 +73,34 @@ test('缺 sceneId 的存量角色/物件按 DEFAULT_SCENE 归入', () => {
   assert.deepEqual(s.listProps('w1', DEFAULT_SCENE).map((p) => p.id), ['legacyprop']);
 });
 
-test('setCharacterTile 带 sceneId：角色场景跟着位置走，跨场景不串', () => {
+test('setCharacterTile 跨场景上报被整条拒绝：不搬场景、不动位置（scene-drag-guard）', () => {
   const s = new WorldStore();
   s.createWorld('w1');
-  s.addCharacter(char('w1', 'c1', 'village'));
+  s.addCharacter(char('w1', 'c1', 'forest'));
+  const before = s.getCharacter('w1', 'c1')!.position;
 
-  // 客户端在 forest 场景上报 c1 的新位置 → c1 应迁入 forest
-  assert.equal(s.setCharacterTile('w1', 'c1', { tileX: 10, tileY: 20 }, 'forest'), true);
+  // 初载漏洞实锤过：村庄客户端把森林角色全降生在村里再上报 sceneId=village，
+  // 整个森林被拖空。NPC 现在不会走 portal，跨场景上报一律视为客户端脏数据拒收。
+  assert.equal(s.setCharacterTile('w1', 'c1', { tileX: 10, tileY: 20 }, 'village'), false);
 
-  assert.equal(s.listCharacters('w1', 'village').length, 0, 'village 里不该再有 c1');
+  assert.equal(s.getCharacter('w1', 'c1')?.sceneId, 'forest', '场景不被拖走');
+  assert.deepEqual(s.getCharacter('w1', 'c1')?.position, before, '别场景的坐标无意义，不落位');
   assert.deepEqual(s.listCharacters('w1', 'forest').map((c) => c.id), ['c1']);
+
+  // 同场景上报照常落位
+  assert.equal(s.setCharacterTile('w1', 'c1', { tileX: 10, tileY: 20 }, 'forest'), true);
   assert.deepEqual(s.getCharacter('w1', 'c1')?.position, { tileX: 10, tileY: 20 });
-  assert.equal(s.getCharacter('w1', 'c1')?.sceneId, 'forest');
+});
+
+test('setCharacterTile 跨场景拒绝对缺 sceneId 的存量角色按 village 判定', () => {
+  const s = new WorldStore();
+  s.createWorld('w1');
+  s.addCharacter(char('w1', 'legacy')); // 无 sceneId（存量 blob）
+
+  // 存量角色视同 village：village 上报收，forest 上报拒
+  assert.equal(s.setCharacterTile('w1', 'legacy', { tileX: 3, tileY: 4 }, 'village'), true);
+  assert.equal(s.setCharacterTile('w1', 'legacy', { tileX: 9, tileY: 9 }, 'forest'), false);
+  assert.deepEqual(s.getCharacter('w1', 'legacy')?.position, { tileX: 3, tileY: 4 });
 });
 
 test('setCharacterTile 不传 sceneId：只更新位置，不动场景', () => {
