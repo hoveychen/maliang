@@ -111,9 +111,11 @@ func send_world_info(world_id: String, locations: Array, profile := {}) -> void:
 func send_tts_request(text: String, voice_id: String) -> void:
 	_send({ "type": "tts_request", "text": text, "voiceId": voice_id })
 
-## 舞台协议上行：命令回执/终止请求。kind='ack' 携带 cmdId(+可选 result/error) 关联下行命令；
-## kind='abort' 请求终止本场演出。worldId 服务端按连接归属，省略也可（server 回落连接所在世界）。
-func send_stage_event(kind: String, cmd_id := -1, result := {}, error := "") -> void:
+## 舞台协议上行：命令回执/规则触发/终止请求。
+## kind='ack' 携带 cmdId(+可选 result/error) 关联下行命令；kind='abort' 请求终止本场演出；
+## kind='tap'|'timer'|'near' 携带 subId(+可选 payload) 把规则触发注回服务端脚本订阅。
+## worldId 服务端按连接归属，省略也可（server 回落连接所在世界）。
+func send_stage_event(kind: String, cmd_id := -1, result := {}, error := "", sub_id := "", payload := {}) -> void:
 	var msg := { "type": "stage_event", "kind": kind }
 	if cmd_id >= 0:
 		msg["cmdId"] = cmd_id
@@ -121,6 +123,10 @@ func send_stage_event(kind: String, cmd_id := -1, result := {}, error := "") -> 
 		msg["result"] = result
 	if not error.is_empty():
 		msg["error"] = error
+	if not sub_id.is_empty():
+		msg["subId"] = sub_id
+	if not payload.is_empty():
+		msg["payload"] = payload
 	_send(msg)
 
 ## 时间偏移握手：发本地毫秒钟 t0，服务端原样回带 + serverMs（见 time_sync 信号）。

@@ -139,6 +139,34 @@ func _init() -> void:
 	fails += _check("stop_follow done", ex7.is_done(), true)
 	fails += _check("stop_follow clears resume flag", d7.has("resume_follow"), false)
 
+	# flee：逃离威胁——威胁进 FLEE_NEAR(5) 就沿背离方向逃，拉开到 FLEE_FAR(8) 停下歇着，永不自完成
+	OccupancyMap.clear()
+	var flee_start := TerrainMap.tile_center(Vector2i(37, 37))
+	var threat := { "pos": TerrainMap.tile_center(Vector2i(39, 37)) } # 起手 ~4 单位, 在威胁半径内
+	OccupancyMap.char_register("runner", flee_start, 2)
+	var d_flee := { "logical": flee_start, "id": "runner" }
+	var ex_flee := BehaviorExecutor.new()
+	ex_flee.setup(d_flee, { "commands": [ { "type": "flee", "params": { "target_id": "threat" } } ] },
+		func(_id: String) -> Vector2: return threat["pos"])
+	for i in range(1200):
+		ex_flee.step(dt)
+	var flee_dist: float = WorldGrid.shortest_delta(d_flee["logical"], threat["pos"]).length()
+	fails += _check("flee escapes threat (>=5)", flee_dist >= 5.0, true)
+	fails += _check("flee never done", ex_flee.is_done(), false)
+	var flee_settle: Vector2 = d_flee["logical"]
+	for i in range(120):
+		ex_flee.step(dt) # 已在安全距离外：滞回内不再挪步
+	fails += _check("flee holds when safe (no jitter)", WorldGrid.shortest_delta(d_flee["logical"], flee_settle).length() <= 1.5, true)
+	# 威胁追近 → 重新开逃，进一步拉开
+	threat["pos"] = WorldGrid.wrap_pos(d_flee["logical"] + Vector2(3.0, 0.0))
+	var near_dist: float = WorldGrid.shortest_delta(d_flee["logical"], threat["pos"]).length()
+	for i in range(900):
+		ex_flee.step(dt)
+	fails += _check("flee re-escapes approaching threat", WorldGrid.shortest_delta(d_flee["logical"], threat["pos"]).length() > near_dist, true)
+	ex_flee.cancel()
+	fails += _check("flee cancel done", ex_flee.is_done(), true)
+	_drain_orphans() # flee 的在途寻路任务收尾（防泄漏/关停崩）
+
 	# move_to character_name：经 resolver 找到角色，走到旁边（对方占格）即到
 	OccupancyMap.clear()
 	var c_start := TerrainMap.tile_center(Vector2i(60, 68))

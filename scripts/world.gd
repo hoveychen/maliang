@@ -256,8 +256,10 @@ const BRING_DONE_DIST := 4.5       ## 带人：目标与委托人相邻半径
 const VISIT_DONE_DIST := 14.0      ## 探访：玩家到地点中心半径（POI 中心可能不可达，如池塘水面）
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
 var _stage: StageAgent            ## 舞台协议大脑（剧本系统，见 stage_agent.gd）；_setup_backend 接线
+var _hud: HudFactory              ## 舞台 HUD 工厂（计分/倒计时/toast，见 hud_factory.gd）；_setup_hud 建
 var _stage_active := false        ## 观演/游戏态：期间吞玩家输入，StageAgent 全权调度演出
 var _stage_drives: Array = []     ## 进行中的完成型舞台命令 { ex:BehaviorExecutor, done:Callable }
+var _stage_holds: Array = []      ## 设置型持续驱动的执行器（follow/flee）：收场统一 cancel（永不自完成）
 var _stage_speaks: Array = []     ## 进行中的舞台念白 { done:Callable, deadline:float, started:bool }
 var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
 var fairy_voice: FairyVoice       ## 预制台词播放器（构建期 TTS，运行期零调用）
@@ -785,6 +787,9 @@ func _setup_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_hud_layer = layer
+	# 舞台 HUD 工厂（计分/倒计时/toast）：倒计时归零经 _on_stage_timer_done 转 StageAgent 上行。
+	_hud = HudFactory.new()
+	_hud.setup(layer, Callable(self, "_on_stage_timer_done"))
 	_load_play_budget() # 恢复跨会话可玩时间预算（隔会话对账：冷却已过/长休息则刷新）
 
 	coord_label = Label.new()
@@ -2118,8 +2123,15 @@ func _update_hud() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	# 观演/游戏态：StageAgent 全权调度演出，吞掉一切玩家输入（点击移动/进对话/手势/缩放）。
-	# 玩家想退场（"不玩了"）走别的通道（P5 提词/横幅按钮），不从这里放行。
+	# 唯一例外——「点角色」这类游戏规则（躲猫猫抓人/点选）仍要探测：命中被 watch 的演员即上行 tap 事件。
+	# 玩家想退场（"不玩了"）走别的通道（提词/横幅按钮），不从这里放行。
 	if _stage_active:
+		if _stage != null:
+			var tap_pos := _stage_tap_pos(event)
+			if tap_pos != Vector2.INF:
+				var aid := _stage_tapped_actor(tap_pos)
+				if not aid.is_empty():
+					_stage.on_local_tap(aid)
 		return
 	# 调试：选中角色后按 Enter/空格。小神仙→造角色；其他→本地 move_to（离线演示）。
 	if event.is_action_pressed("ui_accept") and selected != null:
@@ -2403,6 +2415,26 @@ func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
 			best = node
 	return best
 
+## 观演态点击 → 按下事件的屏幕坐标；非按下（拖拽/松手/键盘）返回 INF。
+## 触屏一次点击会同时来 ScreenTouch + 仿真 MouseButton，两者都返回坐标，去重交 StageAgent（TAP_DEBOUNCE_MS）。
+func _stage_tap_pos(event: InputEvent) -> Vector2:
+	if event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed:
+		return (event as InputEventScreenTouch).position
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			return mb.position
+	return Vector2.INF
+
+## 观演态点击 → 命中的舞台演员 id（玩家归本场占的角色 id，NPC 归其后端 id）；未命中空串。
+func _stage_tapped_actor(screen_pos: Vector2) -> String:
+	if _pick_player(screen_pos):
+		return _stage_player_actor_id if not _stage_player_actor_id.is_empty() else PLAYER_ID
+	var npc := _pick_npc(screen_pos)
+	if npc != null:
+		return String(_find_npc_dict(npc).get("id", ""))
+	return ""
+
 ## 点 NPC：对象停下等待，玩家跑到旁边后再进近身视图（饥荒式）。
 func _approach_npc(npc: PaperCharacter) -> void:
 	if npc == selected:
@@ -2549,6 +2581,7 @@ func _setup_backend() -> void:
 	backend.name = "Backend"
 	add_child(backend)
 	backend.connected.connect(_send_world_info) # 每次连上（含重连）上报地点名，喂意图 LLM
+	backend.connected.connect(backend.send_time_sync) # 连上即做时间偏移握手（倒计时 HUD 双端读数一致）
 	backend.character_response.connect(_on_character_response)
 	backend.world_state.connect(_on_world_state)
 	backend.task_complete.connect(_on_task_complete)
@@ -3806,7 +3839,12 @@ func stage_finish(result: Dictionary, aborted: bool, reason: String) -> void:
 	for m in _stage_drives:
 		(m["ex"] as BehaviorExecutor).cancel()
 	_stage_drives.clear()
+	for ex in _stage_holds:
+		(ex as BehaviorExecutor).cancel() # 停掉持续 follow/flee（否则演员收场后还在追/逃）
+	_stage_holds.clear()
 	_stage_speaks.clear() # 未完成念白的回执随收场丢弃（服务端已终场，不再需要 ack）
+	if _hud != null:
+		_hud.clear() # 移除计分板/倒计时/toast
 	if _tts_player != null:
 		_tts_player.stop()
 	if aborted:
@@ -3852,6 +3890,149 @@ func stage_say(actor_id: String, text: String, action: String, voice_id: String,
 ## 旁白：小仙子音色念白，说完回 done。
 func stage_narrate(text: String, done: Callable) -> void:
 	_stage_speak(text, STAGE_NARRATE_VOICE, done)
+
+## follow：让某演员持续跟随目标（设置型，即刻生效不卡脚本）。target 为舞台演员 id（玩家归 PLAYER_ID）。
+func stage_follow(actor_id: String, target_id: String) -> void:
+	var dict := _stage_actor_dict(actor_id)
+	if dict.is_empty() or dict.get("is_fairy", false):
+		return # 小仙子随从由 _update_fairy 驱动，不吃跟随脚本
+	_stage_hold(dict, { "commands": [{ "type": "follow", "params": { "target_id": _stage_resolve_key(target_id) } }], "loop": false })
+
+## flee：让某演员持续逃离目标（设置型）。
+func stage_flee(actor_id: String, target_id: String) -> void:
+	var dict := _stage_actor_dict(actor_id)
+	if dict.is_empty() or dict.get("is_fairy", false):
+		return
+	_stage_hold(dict, { "commands": [{ "type": "flee", "params": { "target_id": _stage_resolve_key(target_id) } }], "loop": false })
+
+## stop：停掉某演员的一切舞台驱动（follow/flee/走位），原地静止候下一条命令。
+func stage_stop(actor_id: String) -> void:
+	var dict := _stage_actor_dict(actor_id)
+	if dict.is_empty():
+		return
+	for ex in _executors:
+		if (ex as BehaviorExecutor).drives(dict):
+			(ex as BehaviorExecutor).cancel()
+	_stage_holds = _stage_holds.filter(func(e: BehaviorExecutor) -> bool: return not e.drives(dict))
+	_stage_drives = _stage_drives.filter(func(m: Dictionary) -> bool: return not (m["ex"] as BehaviorExecutor).drives(dict))
+
+## 顶部横幅（脚本 stage.banner）。空文本即隐藏。
+func stage_banner(text: String) -> void:
+	banner.text = text
+	banner.visible = not text.strip_edges().is_empty()
+
+## HUD 计分板 / 加分 / 倒计时 / 取消 / toast：委托 HudFactory 渲染（见 hud_factory.gd）。
+func stage_hud_score(id: String, label: String) -> void:
+	if _hud != null:
+		_hud.score(id, label)
+
+func stage_hud_score_add(id: String, n: int) -> void:
+	if _hud != null:
+		_hud.score_add(id, n)
+
+## 倒计时：服务端起始时戳 + 时长 → 服务端截止，减时间偏移换本地钟（双端读数一致）。
+## 无握手（offset=0，剧本必在线故理论不发生）时退化为本地 now 兜底。
+func stage_hud_countdown(id: String, sec: int, server_start_ms: int, offset_ms: int) -> void:
+	if _hud == null:
+		return
+	var deadline_ms: int
+	if server_start_ms > 0 and offset_ms != 0:
+		deadline_ms = server_start_ms + sec * 1000 - offset_ms
+	else:
+		deadline_ms = Time.get_ticks_msec() + sec * 1000
+	_hud.countdown(id, deadline_ms)
+
+func stage_hud_cancel(id: String) -> void:
+	if _hud != null:
+		_hud.cancel_timer(id)
+
+func stage_hud_toast(text: String) -> void:
+	if _hud != null:
+		_hud.toast(text)
+
+## 倒计时归零（HudFactory 回调）→ 转 StageAgent 上行 timer 事件。
+func _on_stage_timer_done(hud_id: String) -> void:
+	if _stage != null:
+		_stage.on_timer_done(hud_id)
+
+## 服务端造好 spec 的道具落位（完成型）：near 解析为世界坐标 → 就近落位 → 持久化 → 回 done 带 id。
+func stage_prop_spawn(id: String, spec: Dictionary, near: Variant, done: Callable) -> void:
+	var anchor := _stage_near_pos(near)
+	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(2.0, 1.0)))
+	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec), id)
+	if placed.x < 0:
+		if done.is_valid():
+			done.call(false, { "error": "道具没地方放" })
+		return
+	world_props[id] = { "spec": spec, "state": "placed", "tile": [placed.x, placed.y] }
+	backend.send_prop_place(world_id, id, placed)
+	if done.is_valid():
+		done.call(true, { "id": id })
+
+## 已造道具挪位（脚本 prop.place）：先拾起（释放旧位/节点）再按 at 落位。
+func stage_prop_place(id: String, at: Variant) -> void:
+	var entry: Dictionary = world_props.get(id, {})
+	var spec: Dictionary = entry.get("spec", {})
+	var picked := chunk_manager.pickup_dynamic_prop(id)
+	if not picked.is_empty():
+		var node: Node3D = picked.get("node")
+		if is_instance_valid(node):
+			node.queue_free()
+		if spec.is_empty():
+			spec = picked.get("spec_data", {})
+	if spec.is_empty():
+		return
+	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(_stage_near_pos(at)))
+	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec), id)
+	if placed.x >= 0:
+		world_props[id] = { "spec": spec, "state": "placed", "tile": [placed.x, placed.y] }
+		backend.send_prop_place(world_id, id, placed)
+
+## 移除道具（脚本 prop.remove）。
+func stage_prop_remove(id: String) -> void:
+	var picked := chunk_manager.pickup_dynamic_prop(id)
+	if not picked.is_empty():
+		var node: Node3D = picked.get("node")
+		if is_instance_valid(node):
+			node.queue_free()
+	world_props.erase(id)
+
+## 设置型持续驱动（follow/flee）：替换该演员现有执行器，登记 _stage_holds 供收场统一 cancel。
+func _stage_hold(dict: Dictionary, script: Dictionary) -> void:
+	for old in _executors:
+		if (old as BehaviorExecutor).drives(dict):
+			(old as BehaviorExecutor).cancel()
+	_stage_holds = _stage_holds.filter(func(e: BehaviorExecutor) -> bool: return not e.drives(dict))
+	var ex := BehaviorExecutor.new()
+	ex.setup(dict, script, Callable(self, "_resolve_char_pos"), Callable(self, "_deliver_message"),
+		Callable(self, "_resolve_location"), Callable(self, "_relay_command"))
+	_executors.append(ex)
+	_stage_holds.append(ex)
+
+## 舞台演员 id → BehaviorExecutor 可解析的键（玩家占的角色 id 归一到 PLAYER_ID）。
+func _stage_resolve_key(actor_id: String) -> String:
+	if actor_id == _stage_player_actor_id or actor_id == PLAYER_ID:
+		return PLAYER_ID
+	return actor_id
+
+## near/at 目标 → 世界坐标：坐标 [x,y] / Tile{x,y} / 演员 id / 地点名；都解析不到用玩家/焦点兜底。
+func _stage_near_pos(near: Variant) -> Vector2:
+	if near is Array and (near as Array).size() >= 2:
+		var a: Array = near
+		return WorldGrid.wrap_pos(Vector2(float(a[0]), float(a[1])))
+	if near is Dictionary:
+		var d: Dictionary = near
+		if d.has("x") and d.has("y"):
+			return TerrainMap.tile_center(Vector2i(int(d["x"]), int(d["y"])))
+	if near is String and not String(near).is_empty():
+		var s := String(near)
+		var cp := _resolve_char_pos(_stage_resolve_key(s))
+		if cp != Vector2.INF:
+			return cp
+		var lp := _resolve_location(s)
+		if lp != Vector2.INF:
+			return lp
+	return player["logical"] if not player.is_empty() else focus_logical
 
 ## actorId → 玩家/村民字典（玩家可占某个角色 id；再按后端 id、名字兜底解析村民）。
 func _stage_actor_dict(actor_id: String) -> Dictionary:
@@ -3913,6 +4094,8 @@ func _is_tts_busy() -> bool:
 
 ## 舞台完成轮询：走位/动作执行器跑完、念白 TTS 播完（或超时兜底）→ 回 done（StageAgent 据此回 ack）。
 func _step_stage(_delta: float) -> void:
+	if _hud != null:
+		_hud.step(_delta) # 倒计时读数刷新 + 归零触发 + toast 过期（非演出态时无控件，空转极廉价）
 	if not _stage_drives.is_empty():
 		var still: Array = []
 		for m in _stage_drives:

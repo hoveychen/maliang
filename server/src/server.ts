@@ -23,6 +23,7 @@ import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
 import { StageDirector } from './stage_session.ts';
+import type { StagePropMaker } from './stage_types.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -461,7 +462,23 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
 
   // 多人基座：world 维度的连接注册表（world_info 登记，leave_world/close 摘除）+ 演出调度台
   const hub = new WorldHub();
-  const stages = new StageDirector(hub);
+  // 剧本造物：prop.create(desc) 走造物管线出 spec 并入库（供重载恢复），不扣小红花（非付费造角色）。
+  // 审核挡/校验败/异常一律返回 null，execCommand 侧转 stage_abort。
+  const makeStageProp: StagePropMaker = async (worldId, desc) => {
+    try {
+      const check = await adapters.moderation.moderateText(desc);
+      if (!check.allowed) return null;
+      const spec = await adapters.llm.designSdfProp(desc);
+      const validated = validateSdfPropSpec(spec);
+      if (!validated.ok) return null;
+      const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed' };
+      store.addProp(worldId, prop);
+      return { id: prop.id, spec: prop.spec };
+    } catch {
+      return null;
+    }
+  };
+  const stages = new StageDirector(hub, makeStageProp);
 
   // WebSocket：造角色请求 → 进度推送 → 完成/失败
   app.get('/ws', { websocket: true }, (socket, req) => {
@@ -930,10 +947,12 @@ export async function handleWsMessage(
     spokenText?: string;
     // time_sync：客户端发送时刻(客户端毫秒钟)，原样回带供其算偏移
     t0?: number;
-    // stage_event：舞台协议上行(kind 复用上面的字段: ack/abort/…)
+    // stage_event：舞台协议上行(kind 复用上面的字段: ack/abort/near/tap/timer)
     cmdId?: number;
     result?: Record<string, unknown>;
     error?: string;
+    subId?: string; // near/tap/timer：触发的订阅 id
+    payload?: Record<string, unknown>; // 规则事件负载（注回脚本回调）
     // 玩家身份：每条消息可带 playerId（设备端稳定 UUID）；world_info 另带 profile 供首见建档。
     playerId?: string;
     profile?: {
@@ -964,7 +983,7 @@ export async function handleWsMessage(
   // 舞台协议上行：命令回执/终止请求，路由给该世界进行中的演出。
   if (msg.type === 'stage_event') {
     const worldId = hub?.worldOf(connKey) ?? msg.worldId ?? '';
-    stages?.handleStageEvent(worldId, { kind: msg.kind, cmdId: msg.cmdId, result: msg.result, error: msg.error });
+    stages?.handleStageEvent(worldId, { kind: msg.kind, cmdId: msg.cmdId, result: msg.result, error: msg.error, subId: msg.subId, payload: msg.payload });
     return;
   }
 

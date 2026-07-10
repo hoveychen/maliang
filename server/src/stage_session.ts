@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { ScriptRunner } from './stage_runner.ts';
-import type { StageActorInfo, StageBackend, StageCommand, StageRunResult } from './stage_types.ts';
+import type { StageActorInfo, StageBackend, StageCommand, StagePropMaker, StageRunResult, StageSubscription } from './stage_types.ts';
 import type { WorldHub } from './world_hub.ts';
 
 export interface StageStartOpts {
@@ -23,6 +23,10 @@ export interface StageEventMsg {
   cmdId?: number;
   result?: Record<string, unknown>;
   error?: string;
+  /** near/tap/timer 规则触发时携带的订阅 id（关联脚本里的 on(...)/countdown.onDone）。 */
+  subId?: string;
+  /** 事件负载（如 tap 的角色、near 的实时距离），注回脚本回调。 */
+  payload?: Record<string, unknown>;
 }
 
 /** 把命令广播给世界成员、把 ack 关联回 Promise 的舞台后端。 */
@@ -30,30 +34,55 @@ class WsStageBackend implements StageBackend {
   #hub: WorldHub;
   #worldId: string;
   #stageId: string;
+  #propMaker?: StagePropMaker;
   #pending = new Map<number, { resolve: (v?: Record<string, unknown>) => void; reject: (e: Error) => void }>();
 
-  constructor(hub: WorldHub, worldId: string, stageId: string) {
+  constructor(hub: WorldHub, worldId: string, stageId: string, propMaker?: StagePropMaker) {
     this.#hub = hub;
     this.#worldId = worldId;
     this.#stageId = stageId;
+    this.#propMaker = propMaker;
   }
 
   execCommand(cmd: StageCommand): Promise<Record<string, unknown> | void> {
+    // prop.create 不下发客户端（客户端造不出 spec）：服务端跑造物管线出 spec，
+    // 再以 prop_spawn 携规格广播让客户端落位，客户端 ack 后 resolve 回脚本。
+    if (cmd.op === 'prop_create') return this.#createProp(cmd);
+    // 倒计时打服务端起始时戳：客户端按 serverStartMs + 时间偏移算本地截止，双端读数一致。
+    if (cmd.op === 'hud_countdown') cmd.args = { ...cmd.args, serverStartMs: Date.now() };
+    return this.#dispatch(cmd.cmdId, cmd.op, cmd.actorId, cmd.args);
+  }
+
+  /** 广播一条命令给世界成员，登记 pending 等客户端 ack（首个生效）。世界空则立即回绝。 */
+  #dispatch(cmdId: number, op: string, actorId: string | undefined, args: Record<string, unknown>): Promise<Record<string, unknown> | void> {
     return new Promise((resolve, reject) => {
-      this.#pending.set(cmd.cmdId, { resolve, reject });
-      const n = this.#hub.broadcast(this.#worldId, {
-        type: 'stage_cmd',
-        stageId: this.#stageId,
-        cmdId: cmd.cmdId,
-        actorId: cmd.actorId,
-        op: cmd.op,
-        args: cmd.args,
-      });
+      this.#pending.set(cmdId, { resolve, reject });
+      const n = this.#hub.broadcast(this.#worldId, { type: 'stage_cmd', stageId: this.#stageId, cmdId, actorId, op, args });
       if (n === 0) {
-        this.#pending.delete(cmd.cmdId);
+        this.#pending.delete(cmdId);
         reject(new Error('世界里没有观众了'));
       }
     });
+  }
+
+  async #createProp(cmd: StageCommand): Promise<Record<string, unknown>> {
+    const prop = this.#propMaker ? await this.#propMaker(this.#worldId, String(cmd.args.desc ?? '')) : null;
+    if (!prop) throw new Error('造物失败');
+    // 复用原 cmdId：客户端把 prop_spawn 落位后 ack cmdId，resolve 回脚本的 prop.create。
+    const res = await this.#dispatch(cmd.cmdId, 'prop_spawn', undefined, { id: prop.id, spec: prop.spec, near: cmd.args.near });
+    return { id: prop.id, ...(res ?? {}) };
+  }
+
+  /** 脚本订阅规则(near/tap/timer)：广播 watch 让客户端布置探测器（无 ack，cmdId=-1）。 */
+  onSubscribe(sub: StageSubscription): void {
+    this.#hub.broadcast(this.#worldId, {
+      type: 'stage_cmd', stageId: this.#stageId, cmdId: -1, op: 'watch',
+      args: { subId: sub.subId, ev: sub.ev, params: sub.params },
+    });
+  }
+
+  onUnsubscribe(subId: string): void {
+    this.#hub.broadcast(this.#worldId, { type: 'stage_cmd', stageId: this.#stageId, cmdId: -1, op: 'unwatch', args: { subId } });
   }
 
   /** 客户端回执；多客户端时首个 ack 生效，后续忽略。 */
@@ -78,8 +107,8 @@ class StageSession {
   readonly runner: ScriptRunner;
   readonly backend: WsStageBackend;
 
-  constructor(hub: WorldHub, worldId: string) {
-    this.backend = new WsStageBackend(hub, worldId, this.stageId);
+  constructor(hub: WorldHub, worldId: string, propMaker?: StagePropMaker) {
+    this.backend = new WsStageBackend(hub, worldId, this.stageId, propMaker);
     this.runner = new ScriptRunner(this.backend);
   }
 }
@@ -87,10 +116,12 @@ class StageSession {
 /** 每个 world 至多一场演出的调度台。 */
 export class StageDirector {
   #hub: WorldHub;
+  #propMaker?: StagePropMaker;
   #active = new Map<string, StageSession>();
 
-  constructor(hub: WorldHub) {
+  constructor(hub: WorldHub, propMaker?: StagePropMaker) {
     this.#hub = hub;
+    this.#propMaker = propMaker;
   }
 
   activeIn(worldId: string): boolean {
@@ -103,7 +134,7 @@ export class StageDirector {
    */
   startStage(worldId: string, opts: StageStartOpts): Promise<StageRunResult> | null {
     if (this.#active.has(worldId)) return null;
-    const session = new StageSession(this.#hub, worldId);
+    const session = new StageSession(this.#hub, worldId, this.#propMaker);
     this.#active.set(worldId, session);
     this.#hub.broadcast(worldId, {
       type: 'stage_begin',
@@ -132,6 +163,9 @@ export class StageDirector {
       session.backend.ack(ev.cmdId, ev.result, ev.error);
     } else if (ev.kind === 'abort') {
       session.runner.kill(); // 终局广播走 run().then 的统一收尾
+    } else if ((ev.kind === 'near' || ev.kind === 'tap' || ev.kind === 'timer') && typeof ev.subId === 'string') {
+      // 规则触发：客户端探测到（点角色/倒计时归零/靠近）→ 注回脚本对应订阅回调。
+      session.runner.emitEvent(ev.subId, ev.payload);
     }
   }
 

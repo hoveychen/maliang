@@ -13,13 +13,15 @@ const ACTORS = [
 ];
 
 /** 两个客户端已进 w1 的测试台。 */
-function rig() {
+import type { StagePropMaker } from '../src/stage_types.ts';
+
+function rig(propMaker?: StagePropMaker) {
   const store = new WorldStore();
   store.createWorld('w1');
   const adapters = createMockAdapters();
   const limiter = new RateLimiter(100, 100);
   const hub = new WorldHub();
-  const stages = new StageDirector(hub);
+  const stages = new StageDirector(hub, propMaker);
   const conn = (connKey: string) => {
     const sent: { type: string; [k: string]: unknown }[] = [];
     const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
@@ -134,4 +136,85 @@ test('开演时世界没人: 首条命令直接失败 → stage_abort', async ()
   const r = await done!;
   assert.equal(r.status, 'error');
   assert.match(r.status === 'error' ? r.message : '', /没有观众/);
+});
+
+test('prop.create: 服务端造物管线出 spec → 广播 prop_spawn(不下发 prop_create) → 客户端落位 ack → 脚本拿到 id', async () => {
+  let seenDesc = '';
+  const maker: StagePropMaker = async (worldId, desc) => {
+    seenDesc = `${worldId}:${desc}`;
+    return { id: 'prop-1', spec: { kind: 'egg', size: 3 } };
+  };
+  const { stages, conn } = rig(maker);
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const done = stages.startStage('w1', {
+    code: `const egg = await stage.prop.create('一颗大蛋', 'a1'); stage.end({ pid: egg.id });`,
+    actors: ACTORS,
+  });
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'prop_spawn'));
+  // 客户端从不收到 prop_create（造不出 spec），只收 prop_spawn 携规格
+  assert.equal(a.ofType('stage_cmd').some((m) => m.op === 'prop_create'), false);
+  const spawn = a.ofType('stage_cmd').find((m) => m.op === 'prop_spawn')!;
+  assert.equal(seenDesc, 'w1:一颗大蛋');
+  assert.deepEqual((spawn.args as Record<string, unknown>).spec, { kind: 'egg', size: 3 });
+  assert.equal((spawn.args as Record<string, unknown>).near, 'a1');
+  // 客户端落位后 ack 同 cmdId → 脚本 prop.create resolve
+  await a.say({ type: 'stage_event', kind: 'ack', cmdId: spawn.cmdId, result: { id: 'prop-1' } });
+  const r = await done!;
+  assert.equal(r.status, 'done');
+  assert.deepEqual(a.ofType('stage_end')[0]?.result, { pid: 'prop-1' });
+});
+
+test('prop.create: 造物管线失败(返回 null) → 脚本 await 抛错 → stage_abort', async () => {
+  const { stages, conn } = rig(async () => null);
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const done = stages.startStage('w1', {
+    code: `await stage.prop.create('坏东西', 'a1'); stage.end();`,
+    actors: ACTORS,
+  });
+  const r = await done!;
+  assert.equal(r.status, 'error');
+  assert.match(String(a.ofType('stage_abort')[0]?.reason), /造物失败/);
+});
+
+test('规则订阅: on(tap) → 广播 watch(ev=tap) → 客户端 tap 事件注回脚本回调 → end', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const done = stages.startStage('w1', {
+    code: `stage.on('tap', stage.actors[0], () => stage.end({ tapped: true }));`,
+    actors: ACTORS,
+  });
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'watch'));
+  const watch = a.ofType('stage_cmd').find((m) => m.op === 'watch')!;
+  assert.equal(watch.cmdId, -1, 'watch 无 ack 语义, cmdId=-1');
+  assert.equal((watch.args as Record<string, unknown>).ev, 'tap');
+  assert.equal(((watch.args as Record<string, unknown>).params as Record<string, unknown>).actorId, 'a1');
+  const subId = (watch.args as Record<string, unknown>).subId as string;
+  // 客户端探测到点击 → 上行 tap 事件 → 脚本回调触发 end
+  await a.say({ type: 'stage_event', kind: 'tap', subId });
+  const r = await done!;
+  assert.equal(r.status, 'done');
+  assert.deepEqual(a.ofType('stage_end')[0]?.result, { tapped: true });
+});
+
+test('规则订阅: countdown.onDone → 广播 watch(ev=timer) → timer 事件归零触发 → end', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const done = stages.startStage('w1', {
+    code: `const t = stage.hud.countdown(60); t.onDone(() => stage.end({ timeUp: true }));`,
+    actors: ACTORS,
+    cmdTimeoutMs: 200,
+  });
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'watch' && (m.args as Record<string, unknown>).ev === 'timer'));
+  // 倒计时 HUD 命令也广播了(客户端渲染)
+  assert.equal(a.ofType('stage_cmd').some((m) => m.op === 'hud_countdown'), true);
+  const watch = a.ofType('stage_cmd').find((m) => m.op === 'watch' && (m.args as Record<string, unknown>).ev === 'timer')!;
+  const subId = (watch.args as Record<string, unknown>).subId as string;
+  await a.say({ type: 'stage_event', kind: 'timer', subId });
+  const r = await done!;
+  assert.equal(r.status, 'done');
+  assert.deepEqual(a.ofType('stage_end')[0]?.result, { timeUp: true });
 });

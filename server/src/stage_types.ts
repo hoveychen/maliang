@@ -63,3 +63,9 @@ export interface StageBackend {
   onSubscribe?(sub: StageSubscription): void;
   onUnsubscribe?(subId: string): void;
 }
+
+/**
+ * 舞台造物：把剧本里的 prop.create(desc) 翻成服务端造物管线生成的道具规格。
+ * 剧本道具不走小红花经济（非孩子付费造角色），失败返回 null（execCommand 侧转 stage_abort）。
+ */
+export type StagePropMaker = (worldId: string, desc: string) => Promise<{ id: string; spec: unknown } | null>;

@@ -27,6 +27,33 @@ class FakeHost:
 	func stage_narrate(text: String, done: Callable) -> void:
 		calls.append({ "m": "narrate", "text": text })
 		last_narrate_done = done
+	# P5：设置型/HUD/道具路由目标（记录被调，不做真实演出）。
+	var last_prop_done := Callable()
+	func stage_follow(actor_id: String, target_id: String) -> void:
+		calls.append({ "m": "follow", "actor": actor_id, "target": target_id })
+	func stage_flee(actor_id: String, target_id: String) -> void:
+		calls.append({ "m": "flee", "actor": actor_id, "target": target_id })
+	func stage_stop(actor_id: String) -> void:
+		calls.append({ "m": "stop", "actor": actor_id })
+	func stage_banner(text: String) -> void:
+		calls.append({ "m": "banner", "text": text })
+	func stage_hud_score(id: String, label: String) -> void:
+		calls.append({ "m": "hud_score", "id": id, "label": label })
+	func stage_hud_score_add(id: String, n: int) -> void:
+		calls.append({ "m": "hud_score_add", "id": id, "n": n })
+	func stage_hud_countdown(id: String, sec: int, server_start_ms: int, offset_ms: int) -> void:
+		calls.append({ "m": "hud_countdown", "id": id, "sec": sec, "start": server_start_ms, "offset": offset_ms })
+	func stage_hud_cancel(id: String) -> void:
+		calls.append({ "m": "hud_cancel", "id": id })
+	func stage_hud_toast(text: String) -> void:
+		calls.append({ "m": "hud_toast", "text": text })
+	func stage_prop_spawn(id: String, spec: Dictionary, near: Variant, done: Callable) -> void:
+		calls.append({ "m": "prop_spawn", "id": id, "spec": spec, "near": near })
+		last_prop_done = done
+	func stage_prop_place(id: String, at: Variant) -> void:
+		calls.append({ "m": "prop_place", "id": id, "at": at })
+	func stage_prop_remove(id: String) -> void:
+		calls.append({ "m": "prop_remove", "id": id })
 	func count(m: String) -> int:
 		var n := 0
 		for c in calls:
@@ -113,15 +140,82 @@ func _init() -> void:
 	host.last_move_done.call(false, { "error": "无法解析" })
 	fails += _eq("move 失败回执带 error", String(_ack_for(15).get("error", "")), "无法解析")
 
-	# 设置/占位型（P5 域）：即刻回执，不触宿主
-	var stub_ops := ["follow", "flee", "stop", "banner", "hud_score", "hud_countdown", "camera", "prop_create"]
-	for i in range(stub_ops.size()):
-		var op: String = stub_ops[i]
-		var cid := 100 + i
-		var before := host.calls.size()
-		agent.on_stage_cmd({ "stageId": "s1", "cmdId": cid, "op": op, "args": {}, "actorId": "duck" })
-		fails += _eq("%s 不触宿主" % op, host.calls.size(), before)
-		fails += _eq("%s 即刻回执" % op, _ack_for(cid).is_empty(), false)
+	# 设置型（follow/flee/stop/banner/hud/prop_place/prop_remove）：路由到宿主 + 即刻回执
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 100, "op": "follow", "args": { "target": "p1" }, "actorId": "duck" })
+	fails += _eq("follow 触宿主", String(host.last("follow").get("actor", "")), "duck")
+	fails += _eq("follow 传目标", String(host.last("follow").get("target", "")), "p1")
+	fails += _eq("follow 即刻回执", _ack_for(100).is_empty(), false)
+
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 101, "op": "flee", "args": { "target": "duck" }, "actorId": "p1" })
+	fails += _eq("flee 触宿主", String(host.last("flee").get("target", "")), "duck")
+	fails += _eq("flee 即刻回执", _ack_for(101).is_empty(), false)
+
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 102, "op": "stop", "args": {}, "actorId": "duck" })
+	fails += _eq("stop 触宿主", String(host.last("stop").get("actor", "")), "duck")
+	fails += _eq("stop 即刻回执", _ack_for(102).is_empty(), false)
+
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 103, "op": "hud_score", "args": { "id": "h1", "label": "抓到" } })
+	fails += _eq("hud_score 触宿主", String(host.last("hud_score").get("label", "")), "抓到")
+	fails += _eq("hud_score 即刻回执", _ack_for(103).is_empty(), false)
+
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 104, "op": "hud_score_add", "args": { "id": "h1", "n": 2 } })
+	fails += _eq("hud_score_add 传增量", int(host.last("hud_score_add").get("n", 0)), 2)
+
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 105, "op": "hud_countdown", "args": { "id": "h2", "sec": 60, "serverStartMs": 111 } })
+	fails += _eq("hud_countdown 传时长", int(host.last("hud_countdown").get("sec", 0)), 60)
+	fails += _eq("hud_countdown 传服务端时戳", int(host.last("hud_countdown").get("start", 0)), 111)
+
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 106, "op": "hud_toast", "args": { "text": "开始！" } })
+	fails += _eq("hud_toast 触宿主", String(host.last("hud_toast").get("text", "")), "开始！")
+
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 107, "op": "banner", "args": { "text": "第一幕" } })
+	fails += _eq("banner 触宿主", String(host.last("banner").get("text", "")), "第一幕")
+
+	# camera：cosmetic 占位，不触宿主，即刻回执
+	var before_cam := host.calls.size()
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 108, "op": "camera", "args": { "mode": "overview" } })
+	fails += _eq("camera 不触宿主", host.calls.size(), before_cam)
+	fails += _eq("camera 即刻回执", _ack_for(108).is_empty(), false)
+
+	# prop_spawn：完成型——宿主落位后回 done 才 ack，回执带 prop id
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 110, "op": "prop_spawn", "args": { "id": "egg1", "spec": { "k": 1 }, "near": "duck" } })
+	fails += _eq("prop_spawn 触宿主", String(host.last("prop_spawn").get("id", "")), "egg1")
+	fails += _eq("prop_spawn 未完成不回执", _ack_for(110).is_empty(), true)
+	host.last_prop_done.call(true, { "id": "egg1" })
+	fails += _eq("prop_spawn 完成回执带 id", String((_ack_for(110).get("result", {}) as Dictionary).get("id", "")), "egg1")
+
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 111, "op": "prop_place", "args": { "id": "egg1", "at": { "x": 3, "y": 4 } } })
+	fails += _eq("prop_place 触宿主", String(host.last("prop_place").get("id", "")), "egg1")
+	fails += _eq("prop_place 即刻回执", _ack_for(111).is_empty(), false)
+
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 112, "op": "prop_remove", "args": { "id": "egg1" } })
+	fails += _eq("prop_remove 触宿主", String(host.last("prop_remove").get("id", "")), "egg1")
+
+	# watch/unwatch（cmdId=-1，无 ack）+ 规则事件上行
+	_events.clear()
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": -1, "op": "watch", "args": { "subId": "sub_tap", "ev": "tap", "params": { "actorId": "duck" } } })
+	fails += _eq("watch 不回执", _events.size(), 0)
+	# 点到被 watch 的演员 → 上行 tap 事件带 subId
+	agent.on_local_tap("duck")
+	fails += _eq("tap 上行 subId", String(_last_event_of("tap").get("subId", "")), "sub_tap")
+	fails += _eq("tap 上行 payload actorId", String((_last_event_of("tap").get("payload", {}) as Dictionary).get("actorId", "")), "duck")
+	# 去重：同角色紧邻两次点击（触屏 ScreenTouch + 仿真 MouseButton）只上行一次
+	var taps_before := _count_kind("tap")
+	agent.on_local_tap("duck")
+	fails += _eq("tap 去重只上行一次", _count_kind("tap"), taps_before)
+	# 点未被 watch 的演员 → 不上行
+	agent.on_local_tap("p1")
+	fails += _eq("未 watch 演员 tap 不上行", _count_kind("tap"), taps_before)
+
+	# timer：watch 倒计时归零 → 上行 timer 事件带 subId
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": -1, "op": "watch", "args": { "subId": "sub_timer", "ev": "timer", "params": { "id": "h2" } } })
+	agent.on_timer_done("h2")
+	fails += _eq("timer 上行 subId", String(_last_event_of("timer").get("subId", "")), "sub_timer")
+	# unwatch 后不再触发
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": -1, "op": "unwatch", "args": { "subId": "sub_timer" } })
+	var timers_before := _count_kind("timer")
+	agent.on_timer_done("h2")
+	fails += _eq("unwatch 后 timer 不上行", _count_kind("timer"), timers_before)
 
 	# prompt 占位：回执带空 text
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 200, "op": "prompt", "args": { "hint": "该你了" }, "actorId": "p1" })
@@ -168,8 +262,8 @@ func _init() -> void:
 		printerr("stage_agent tests FAILED: %d" % fails)
 	quit(fails)
 
-func _on_event(kind: String, cmd_id: int, result: Dictionary, error: String) -> void:
-	_events.append({ "kind": kind, "cmdId": cmd_id, "result": result, "error": error })
+func _on_event(kind: String, cmd_id: int, result: Dictionary, error: String, sub_id := "", payload := {}) -> void:
+	_events.append({ "kind": kind, "cmdId": cmd_id, "result": result, "error": error, "subId": sub_id, "payload": payload })
 
 ## 找某 cmdId 的 ack 事件（无则 {}）。
 func _ack_for(cmd_id: int) -> Dictionary:
@@ -177,6 +271,21 @@ func _ack_for(cmd_id: int) -> Dictionary:
 		if String(e["kind"]) == "ack" and int(e["cmdId"]) == cmd_id:
 			return e
 	return {}
+
+## 最后一个某 kind 的事件（无则 {}）。
+func _last_event_of(kind: String) -> Dictionary:
+	for i in range(_events.size() - 1, -1, -1):
+		if String(_events[i]["kind"]) == kind:
+			return _events[i]
+	return {}
+
+## 某 kind 事件计数。
+func _count_kind(kind: String) -> int:
+	var n := 0
+	for e in _events:
+		if String(e["kind"]) == kind:
+			n += 1
+	return n
 
 func _count_ack(cmd_id: int) -> int:
 	var n := 0
