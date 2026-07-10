@@ -9,7 +9,7 @@ import type { HostToWorkerMsg, StageActorInfo, StageWorkerData, WorkerToHostMsg 
 
 const port = parentPort;
 if (!port) throw new Error('stage_worker 必须作为 worker 启动');
-const { code, actors, maxCommands } = workerData as StageWorkerData;
+const { code, actors, maxCommands, params } = workerData as StageWorkerData;
 
 let cmdSeq = 0;
 let issued = 0;
@@ -121,6 +121,19 @@ function makeActor(info: StageActorInfo): SdkActor {
 
 const actorList = actors.map(makeActor);
 
+/** stage.on / stage.once 共用的订阅入口（模块级：避免 stage 对象字面量自引用）。 */
+function onEvent(ev: string, ...rest: unknown[]): () => void {
+  if (ev === 'near') {
+    const [a, b, dist, fn] = rest as [SdkActor, SdkActor, number, () => void];
+    return subscribe('near', { a: a.id, b: b.id, dist }, fn);
+  }
+  if (ev === 'tap') {
+    const [a, fn] = rest as [SdkActor, () => void];
+    return subscribe('tap', { actorId: a.id }, fn);
+  }
+  throw new Error(`未知事件: ${ev}`);
+}
+
 function cast(...names: string[]): SdkActor[] {
   return names.map((n) => {
     const a = actorList.find((x) => x.name === n);
@@ -132,10 +145,16 @@ function cast(...names: string[]): SdkActor[] {
 const stage = {
   actors: actorList,
   player: actorList.find((a) => a.isPlayer) ?? null,
+  // 生成层/调用方注入的旋钮；冻结防脚本互改。剧本一律 Number(stage.params.x ?? 默认值) 读，缺省不炸。
+  params: Object.freeze({ ...(params ?? {}) }) as Readonly<Record<string, unknown>>,
   narrate: (text: string) => sendCmd('narrate', { text }),
   banner: (text: string) => fireCmd('banner', { text }),
   sleep: (sec: number) => new Promise<void>((r) => setTimeout(r, Math.max(0, sec) * 1000)),
-  prompt: (actor: SdkActor, hint: string) => sendCmd('prompt', { hint }, actor.id),
+  // 提词返回小朋友说的那句话（客户端 ack 携 { text }），脚本直接拿字符串写进剧情。
+  prompt: async (actor: SdkActor, hint: string): Promise<string> => {
+    const r = (await sendCmd('prompt', { hint }, actor.id)) as { text?: unknown } | undefined;
+    return typeof r?.text === 'string' ? r.text : '';
+  },
   end: (result?: Record<string, unknown>) => finish(result),
   prop: {
     create: (desc: string, near: unknown) =>
@@ -165,17 +184,21 @@ const stage = {
     dialog: (a: SdkActor, b: SdkActor) => fireCmd('camera', { mode: 'dialog', a: a.id, b: b.id }),
     reset: () => fireCmd('camera', { mode: 'reset' }),
   },
-  on: (ev: string, ...rest: unknown[]): (() => void) => {
-    if (ev === 'near') {
-      const [a, b, dist, fn] = rest as [SdkActor, SdkActor, number, () => void];
-      return subscribe('near', { a: a.id, b: b.id, dist }, fn);
-    }
-    if (ev === 'tap') {
-      const [a, fn] = rest as [SdkActor, () => void];
-      return subscribe('tap', { actorId: a.id }, fn);
-    }
-    throw new Error(`未知事件: ${ev}`);
-  },
+  on: onEvent,
+  /**
+   * 一次性事件：await 到它发生（首次触发即退订）。
+   * 让「布判定 → 放角色 → await 结果」的游戏脚本写成直线，不必嵌套回调。
+   * 注意先 once() 再下设置型命令(follow/flee)：订阅消息先于命令抵达宿主，判定不会漏第一帧。
+   */
+  once: (ev: string, ...rest: unknown[]): Promise<Record<string, unknown> | undefined> =>
+    new Promise((resolve) => {
+      let un: (() => void) | null = null;
+      const fire = (payload?: Record<string, unknown>) => {
+        un?.();
+        resolve(payload);
+      };
+      un = onEvent(ev, ...rest, fire);
+    }),
 };
 
 // ---- 在 vm 沙箱里跑剧本 ----

@@ -15,5 +15,8 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "test"]
+  // 剧本(src/screenplays)不是模块：顶层 await + 引用全局 stage，主工程编不过也不该编。
+  // 它们对 stage_sdk.d.ts 的类型检查由 test/screenplay_typecheck.test.ts 单独跑。
+  "include": ["src", "test"],
+  "exclude": ["src/screenplays"]
 }

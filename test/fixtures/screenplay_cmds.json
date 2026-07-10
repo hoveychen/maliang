@@ -1,0 +1,334 @@
+{
+  "hide_and_seek": {
+    "actors": [
+      {
+        "id": "a1",
+        "name": "小灰狼",
+        "isPlayer": false,
+        "voiceId": "zh-CN-YunxiaNeural"
+      },
+      {
+        "id": "p1",
+        "name": "宝宝",
+        "isPlayer": true
+      }
+    ],
+    "cmds": [
+      {
+        "cmdId": 1,
+        "op": "hud_score",
+        "args": {
+          "id": "hud1",
+          "label": "抓到"
+        }
+      },
+      {
+        "cmdId": 2,
+        "op": "hud_countdown",
+        "args": {
+          "id": "hud2",
+          "sec": 60
+        }
+      },
+      {
+        "cmdId": -1,
+        "op": "watch",
+        "args": {
+          "subId": "s1",
+          "ev": "timer",
+          "params": {
+            "id": "hud2"
+          }
+        }
+      },
+      {
+        "cmdId": 3,
+        "op": "narrate",
+        "args": {
+          "text": "躲猫猫开始啦！小灰狼当鬼，宝宝快躲好！"
+        }
+      },
+      {
+        "cmdId": 4,
+        "op": "camera",
+        "args": {
+          "mode": "focus",
+          "actorId": "p1"
+        }
+      },
+      {
+        "cmdId": 5,
+        "op": "narrate",
+        "args": {
+          "text": "小灰狼来抓人咯！"
+        }
+      },
+      {
+        "cmdId": 6,
+        "actorId": "a1",
+        "op": "follow",
+        "args": {
+          "target": "p1"
+        }
+      },
+      {
+        "cmdId": 7,
+        "actorId": "a1",
+        "op": "stop",
+        "args": {}
+      },
+      {
+        "cmdId": 8,
+        "op": "hud_score_add",
+        "args": {
+          "id": "hud1",
+          "n": 1
+        }
+      },
+      {
+        "cmdId": 9,
+        "op": "hud_toast",
+        "args": {
+          "text": "抓到啦！换你当鬼～"
+        }
+      },
+      {
+        "cmdId": 10,
+        "op": "narrate",
+        "args": {
+          "text": "换宝宝当鬼啦，小灰狼快跑！"
+        }
+      },
+      {
+        "cmdId": 11,
+        "actorId": "a1",
+        "op": "flee",
+        "args": {
+          "target": "p1"
+        }
+      },
+      {
+        "cmdId": 12,
+        "actorId": "a1",
+        "op": "stop",
+        "args": {}
+      },
+      {
+        "cmdId": 13,
+        "op": "hud_score_add",
+        "args": {
+          "id": "hud1",
+          "n": 1
+        }
+      },
+      {
+        "cmdId": 14,
+        "op": "hud_cancel",
+        "args": {
+          "id": "hud2"
+        }
+      }
+    ]
+  },
+  "three_act_play": {
+    "actors": [
+      {
+        "id": "c1",
+        "name": "丑小鸭",
+        "isPlayer": false,
+        "voiceId": "zh-CN-YunxiaNeural"
+      },
+      {
+        "id": "c2",
+        "name": "鸭妈妈",
+        "isPlayer": false,
+        "voiceId": "zh-CN-XiaoxiaoNeural"
+      },
+      {
+        "id": "c3",
+        "name": "天鹅",
+        "isPlayer": false,
+        "voiceId": "zh-CN-XiaoyiNeural"
+      }
+    ],
+    "cmds": [
+      {
+        "cmdId": 1,
+        "op": "camera",
+        "args": {
+          "mode": "overview"
+        }
+      },
+      {
+        "cmdId": 2,
+        "op": "banner",
+        "args": {
+          "text": "第一幕 · 池塘边的鸭妈妈"
+        }
+      },
+      {
+        "cmdId": 3,
+        "op": "narrate",
+        "args": {
+          "text": "从前，池塘边住着鸭妈妈一家。"
+        }
+      },
+      {
+        "cmdId": 4,
+        "actorId": "c1",
+        "op": "move_to",
+        "args": {
+          "target": "pond"
+        }
+      },
+      {
+        "cmdId": 5,
+        "actorId": "c2",
+        "op": "move_to",
+        "args": {
+          "target": "pond"
+        }
+      },
+      {
+        "cmdId": 6,
+        "op": "prop_spawn",
+        "args": {
+          "id": "prop-1",
+          "spec": {
+            "desc": "一颗大大的蛋"
+          },
+          "near": "c2"
+        }
+      },
+      {
+        "cmdId": 7,
+        "actorId": "c2",
+        "op": "say",
+        "args": {
+          "text": "我的孩子们要出壳啦！",
+          "action": "wave"
+        }
+      },
+      {
+        "cmdId": 8,
+        "op": "banner",
+        "args": {
+          "text": "第二幕 · 谁都笑他丑"
+        }
+      },
+      {
+        "cmdId": 9,
+        "op": "narrate",
+        "args": {
+          "text": "小鸭子一个个破壳而出，可有一只，长得和大家都不一样。"
+        }
+      },
+      {
+        "cmdId": 10,
+        "op": "prop_remove",
+        "args": {
+          "id": "prop-1"
+        }
+      },
+      {
+        "cmdId": 11,
+        "op": "camera",
+        "args": {
+          "mode": "dialog",
+          "a": "c1",
+          "b": "c2"
+        }
+      },
+      {
+        "cmdId": 12,
+        "actorId": "c1",
+        "op": "say",
+        "args": {
+          "text": "大家都笑我长得丑……",
+          "action": "cry"
+        }
+      },
+      {
+        "cmdId": 13,
+        "actorId": "c2",
+        "op": "say",
+        "args": {
+          "text": "孩子，别难过，你会长大的。"
+        }
+      },
+      {
+        "cmdId": 14,
+        "op": "banner",
+        "args": {
+          "text": "第三幕 · 冬去春来"
+        }
+      },
+      {
+        "cmdId": 15,
+        "op": "narrate",
+        "args": {
+          "text": "冬去春来，丑小鸭一个人熬过了长长的冬天。"
+        }
+      },
+      {
+        "cmdId": 16,
+        "op": "prop_spawn",
+        "args": {
+          "id": "prop-2",
+          "spec": {
+            "desc": "一面亮亮的小镜子"
+          },
+          "near": "c1"
+        }
+      },
+      {
+        "cmdId": 17,
+        "op": "prop_place",
+        "args": {
+          "id": "prop-2",
+          "at": "lake"
+        }
+      },
+      {
+        "cmdId": 18,
+        "actorId": "c1",
+        "op": "move_to",
+        "args": {
+          "target": "lake"
+        }
+      },
+      {
+        "cmdId": 19,
+        "actorId": "c3",
+        "op": "move_to",
+        "args": {
+          "target": "lake"
+        }
+      },
+      {
+        "cmdId": 20,
+        "actorId": "c3",
+        "op": "say",
+        "args": {
+          "text": "你不是丑小鸭呀，你是一只美丽的天鹅！",
+          "action": "wave"
+        }
+      },
+      {
+        "cmdId": 21,
+        "actorId": "c1",
+        "op": "do_action",
+        "args": {
+          "action": "spin"
+        }
+      },
+      {
+        "cmdId": 22,
+        "op": "camera",
+        "args": {
+          "mode": "reset"
+        }
+      }
+    ]
+  }
+}

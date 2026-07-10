@@ -34,6 +34,11 @@ export interface StageRunOpts {
   cmdTimeoutMs?: number;
   /** 命令总数预算，默认 500。 */
   maxCommands?: number;
+  /**
+   * 注入 stage.params 的旋钮（藏身时长/一局时长/判定距离等）。
+   * 剧本用 Number(stage.params.x ?? 默认值) 读取，缺省不炸；生成层用它调难度，测试用它压缩时长。
+   */
+  params?: Record<string, unknown>;
 }
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -84,6 +89,7 @@ export class ScriptRunner {
       code: js,
       actors: opts.actors,
       maxCommands: opts.maxCommands ?? DEFAULT_MAX_COMMANDS,
+      params: opts.params,
     };
     const worker = new Worker(new URL('./stage_worker.ts', import.meta.url), { workerData });
     this.#worker = worker;

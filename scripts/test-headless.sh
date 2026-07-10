@@ -49,6 +49,7 @@ UNIT_TESTS=(
   test_player_profile
   test_backend_player_id
   test_stage_agent
+  test_screenplay_replay
   test_remote_actor_buffer
   test_positions_report
   test_position_restore

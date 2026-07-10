@@ -15,6 +15,8 @@ export interface StageStartOpts {
   timeoutMs?: number;
   cmdTimeoutMs?: number;
   maxCommands?: number;
+  /** 注入脚本的旋钮（stage.params）。 */
+  params?: Record<string, unknown>;
 }
 
 /** 客户端上行的舞台事件(handleWsMessage 解析后传入)。 */
@@ -223,6 +225,7 @@ export class StageDirector {
         timeoutMs: opts.timeoutMs,
         cmdTimeoutMs: opts.cmdTimeoutMs,
         maxCommands: opts.maxCommands,
+        params: opts.params,
       })
       .then((r) => {
         this.#finish(worldId, session, r);

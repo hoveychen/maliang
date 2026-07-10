@@ -53,6 +53,8 @@ export interface StageWorkerData {
   actors: StageActorInfo[];
   /** 脚本累计可发出的命令上限（防失控）。 */
   maxCommands: number;
+  /** 注入脚本的旋钮（stage.params）：藏身时长/一局时长/判定距离等。 */
+  params?: Record<string, unknown>;
 }
 
 /** 舞台后端：把命令翻译成真实演出（P1 用 mock，P3 起接 WS 舞台协议）。 */
