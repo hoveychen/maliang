@@ -74,24 +74,34 @@ func _tick() -> void:
 			_check("chat happened", chat_started > 0, true)
 		312:
 			# 点名指派传话链路：设玩家正与小绿对话，点名小蓝跳——小绿应跑腿传话，小蓝收到才动。
-			# 小蓝固定摆到 10 单位外：距离太近曾让传话在 f316 断言前就完成（假阳"被遥控"）
+			# 小蓝固定摆到 10 单位外：距离太近曾让传话在断言前就完成（假阳"被遥控"）。
+			# 再把小蓝钉住（in_chat 拦住 _step_executors 的「跑完恢复闲逛」）：这条断言量的是
+			# 小绿送达时站得够不够近，小蓝自己的闲逛漂移只是噪声，会把边界阈值顶成 flaky。
 			_freeze_and_place(blue, green, Vector2(10.0, 0.0))
+			blue["in_chat"] = true
 			scene.set("selected", green["node"])
-			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false })
-		315:
+			# 回应留空、掐掉出声：让「说完再走」只由起播宽限（LEAVE_ARM_SEC）决定，动身时刻可预期。
+			(scene.get("_tts_player") as AudioStreamPlayer).stop()
+			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false }, "")
+		313:
+			# 跑腿也是「立去系」：小绿得亲自走过去传话，所以先把这句回应说完再动身。
+			_check("performer not remote-controlled", blue.has("paper_action"), false)
+			_check("跑腿先武装延迟退出", (scene.get("_pending_leave") as Dictionary).is_empty(), false)
+			_check("说完之前小绿还没动身", scene.call("_has_executor_for", green), false)
 			# 收听 HUD 重设计：头顶耳朵已删除（不再有 ear_icon 盖脸）；选中角色时底部 AIGC
-			# 边框 HUD（hud_listen）显示，声波柱嵌在边框内板。
+			# 边框 HUD（hud_listen）显示，声波柱嵌在边框内板。（须在延迟退出释放前查，那之后对话已关）
 			_check("ear_icon removed (no head sprite)", scene.get("ear_icon"), null)
 			var vw := scene.get("voice_wave") as Control
 			_check("listen HUD shown on select", vw.visible, true)
-			var frame := vw.get_child(0) as TextureRect
-			_check("HUD frame texture present", frame != null and frame.texture != null, true)
-		316:
-			_check("performer not remote-controlled", blue.has("paper_action"), false)
+			var hud_frame := vw.get_child(0) as TextureRect
+			_check("HUD frame texture present", hud_frame != null and hud_frame.texture != null, true)
+		325:
+			# 宽限过后（这轮没 TTS 可等）：小绿动身跑腿，近身对话随之关闭——
+			# 此前这条分支既不延迟也不关对话，小绿转身走了、横幅和相机还锁在他身上。
 			_check("speaker runs errand", scene.call("_has_executor_for", green), true)
+			_check("跑腿后关对话（selected 清空）", scene.get("selected"), null)
 		395:
 			_check("relay reached performer", relay_done > 0, true)
-			scene.set("selected", null)
 		400:
 			if fails == 0:
 				print("visual_interactions PASS")
@@ -140,9 +150,10 @@ func _test_resolvers() -> void:
 	_check("resolve npc by name", scene.call("_resolve_char_pos", "小黄"), yellow["logical"])
 
 ## 模拟服务端 character_response（performerId 点名路由），与真实 WS 回包同路。
-func _inject(target: Dictionary, script: Dictionary) -> void:
+## reply 留空 = 这轮没有 TTS 可等，「说完再走」只由起播宽限决定（动身时刻可预期）。
+func _inject(target: Dictionary, script: Dictionary, reply := "好！") -> void:
 	scene.call("_on_character_response", {
-		"transcript": "测试", "replyText": "好！", "emotion": "happy",
+		"transcript": "测试", "replyText": reply, "emotion": "happy",
 		"performerId": String(target.get("id", "")), "behaviorScript": script,
 	})
 

@@ -1,6 +1,7 @@
 import type { ServiceAdapters, AudioBlob } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, VoiceResponse } from './types.ts';
+import { effectiveAbilities } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
 import { pickGreeting } from './greetings.ts';
 
@@ -83,7 +84,8 @@ export async function respondToTranscript(
   const intent = await adapters.llm.routeIntent(transcript, {
     characterName: character.name,
     personality: character.personality,
-    abilities: character.abilities,
+    // 基础集 ∪ 角色自带；小仙子减去需要走动的能力——她不会走，给了也兑现不了
+    abilities: effectiveAbilities(character),
     recentHistory: store.getRecentTurns(characterId, playerId, RECENT_TURNS), // 这轮之前的近 N 轮（按玩家）
     memory: memories,
     worldCharacters: roster,

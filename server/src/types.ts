@@ -21,6 +21,21 @@ export interface BehaviorScript {
  * 存量角色 abilities 里可能只有旧的两项，意图 prompt 按「基础集 ∪ 角色自带」取并集，免数据迁移。 */
 export const BASE_ABILITIES = ['move_to', 'follow', 'stop_follow', 'do_action', 'chat_with', 'deliver_message'];
 
+/** 要「走过去」才能兑现的能力（stop_follow 只有在能 follow 时才有意义，一并算入）。 */
+export const LOCOMOTION_ABILITIES = ['move_to', 'follow', 'stop_follow', 'chat_with', 'deliver_message'];
+
+/**
+ * 喂给意图 LLM 的能力集：基础集 ∪ 角色自带，小仙子再减去所有需要走动的能力。
+ *
+ * 小仙子是贴身随从——客户端 _run_behavior 对 is_fairy 早返回，移动脚本一律丢弃。把 move_to/follow
+ * 这类能力写进她的 prompt，LLM 就会让她「去风车那儿」：孩子听见一句「好呀」，人却纹丝不动。
+ * 与其在下游拦，不如源头上不给。她保留就地能做的 do_action 与看家本领 create_character/create_prop。
+ */
+export function effectiveAbilities(c: { abilities: string[]; isFairy: boolean }): string[] {
+  const all = [...new Set([...BASE_ABILITIES, ...c.abilities])];
+  return c.isFairy ? all.filter((a) => !LOCOMOTION_ABILITIES.includes(a)) : all;
+}
+
 // ── 奖赏系统：小红花代币 + 集邮盖章（替换旧的 8 种贴纸 + give 转赠，见 docs/reward-flower-design.md）──
 
 /** 小红花上限（3×3 格）。 */

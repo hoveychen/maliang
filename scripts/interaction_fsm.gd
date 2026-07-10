@@ -129,6 +129,30 @@ static func leave_ready(seen: bool, speaking: bool, arm_left: float, deadline_le
 		return not speaking  # 出过声、现在不出声了 = 说完了
 	return arm_left <= 0.0   # 宽限内始终没出声（无 TTS/合成失败）→ 直接动身
 
+## 立去系指令：会让角色离开当前位置去别处（去某地/跟随/找人聊天/带话）。
+## 就地动作(do_action)、停跟(stop_follow)不算——角色留在孩子面前，对话不必关。
+const LEAVE_COMMANDS := ["move_to", "follow", "chat_with", "deliver_message"]
+
+## 这次派发会不会让「正在跟孩子说话的那个角色」离开他面前？是则先说完再动身、随后关对话；
+## 否则原地执行、对话继续。判据是「他会不会离开」，不是「这条指令有没有副作用」——
+## stop_follow 改了跟随状态却站着不动，孩子还看着他，对话没有理由关。
+##   command_types     待派发脚本里的指令类型
+##   relaying          脚本靠对话对象跑腿转交给别的角色（relay_command）
+##   speaker_is_fairy  对话对象是小仙子
+static func speaker_leaves(command_types: Array, relaying: bool, speaker_is_fairy: bool) -> bool:
+	# 小仙子是贴身随从：_run_behavior 对她早退，任何移动脚本都丢弃，她永远不离开孩子身边。
+	# 按 leave 关掉对话就是白关一次——孩子说「去风车那儿」，对话没了，仙子纹丝不动。
+	if speaker_is_fairy:
+		return false
+	# 跑腿传话：带的是什么指令不重要，走开的是「正在跟孩子说话的这个角色」——
+	# 「小蓝跳一下」跳的是小蓝，但眼前这位得亲自走过去把话带到。
+	if relaying:
+		return true
+	for t in command_types:
+		if String(t) in LEAVE_COMMANDS:
+			return true
+	return false
+
 ## 调试/日志用的状态名。
 static func name_of(s: State) -> String:
 	match s:
