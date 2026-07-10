@@ -1833,6 +1833,7 @@ func _process(delta: float) -> void:
 	tp = _prof_lap(tp, "chunk")
 	_reposition_npcs(delta)
 	_update_npc_notice(delta)  # 近身空闲村民偶尔转头看玩家打招呼（在 reposition 后跑，paper_walk 已更新）
+	_update_portal_markers()   # 传送门拱随世界滚动（与角色同一套环面最短位移）
 	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
 	_update_voice_wave(delta)
@@ -2647,6 +2648,12 @@ var _await_skin := false         ## 新场景已落地，等区块重铺完（al
 var _transition_t := 0.0         ## 本次过场累计秒（超时兜底用）
 var _arrive_tile := Vector2i(-1, -1) ## 走 portal 的目标落点（优先于服务端记的该场景最后位置）
 
+## 传送门视觉标记（每个 portal 一座拱门）。刻意不走 chunk_manager 的 SDF 物件通道：那条路会
+## 登记占地（把传送点本身挡住）并进 _dynamic_props（长按就被当语音物件揣走）。这里由 world 直接
+## 持有节点、逐帧按环面最短位移摆位；SdfProp 材质自带 world-bend，不再 CPU 端压 y（与区块内物件同口径）。
+const PORTAL_MARKER_SPEC := "res://assets/sdf_props/portal_arch.json"
+var _portal_markers: Array = [] ## [{ node: SdfProp, logical: Vector2 }]
+
 ## 服务端下发的 portals → 运行期结构。非法条目跳过（坏一条不连坐整批）。
 static func parse_server_portals(list: Variant) -> Array:
 	if typeof(list) != TYPE_ARRAY:
@@ -2695,6 +2702,36 @@ func _step_portal() -> void:
 	if not _portal_armed:
 		return
 	enter_scene(String(hit["to_scene"]), hit["to_tile"] as Vector2i)
+
+## 为当前 _portals 各立一座传送门拱（换场景时先 _clear_portal_markers 再重建）。
+## spec 坏了就不立——世界照常能玩，只是传送点没有地标。
+func _spawn_portal_markers() -> void:
+	_clear_portal_markers()
+	for p in _portals:
+		var prop := SdfProp.from_json_file(PORTAL_MARKER_SPEC)
+		if prop == null:
+			push_warning("[portal] 传送门标记 spec 载入失败：%s" % PORTAL_MARKER_SPEC)
+			return
+		add_child(prop)
+		_portal_markers.append({ "node": prop, "logical": WorldGrid.from_tile_center(p["tile"] as Vector2i) })
+
+func _clear_portal_markers() -> void:
+	for m in _portal_markers:
+		var node: Variant = m.get("node", null)
+		if node != null and is_instance_valid(node):
+			(node as Node).queue_free()
+	_portal_markers.clear()
+
+## 逐帧把拱门摆到渲染空间（渲染原点 = focus_logical），高度取所在 tile 的台阶高。
+func _update_portal_markers() -> void:
+	for m in _portal_markers:
+		var node: Variant = m.get("node", null)
+		if node == null or not is_instance_valid(node):
+			continue
+		var logical: Vector2 = m["logical"]
+		var d := WorldGrid.shortest_delta(focus_logical, logical)
+		var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(logical))) * TerrainMap.STEP_HEIGHT
+		(node as Node3D).position = Vector3(d.x, ty, d.y)
 
 ## 过场黑幕推进：淡入 → 全黑后才发 enter_scene → 卸旧载新 → 区块铺完 → 淡出。
 func _step_transition(delta: float) -> void:
@@ -2761,6 +2798,7 @@ func _apply_scene(scene: Dictionary) -> void:
 	# 传送点同理：地形拉不下来也要认这张图的 portal（走过去还能换场景）。
 	# 没有 portal 的场景就是没有出口，_portals 置空即可（离线/老服务端下发不了 portals）。
 	_portals = parse_server_portals(scene.get("portals", []))
+	_spawn_portal_markers()
 
 	var asset := String(scene.get("terrainAsset", ""))
 	if asset.is_empty():
@@ -2871,6 +2909,7 @@ func _unload_scene() -> void:
 		chunk_manager.clear_dynamic_props()
 	world_props.clear()
 	_portals.clear() # 旧场景的出口不属于新场景；新场景的由 _apply_scene 重新下发
+	_clear_portal_markers()
 
 func _bootstrap() -> void:
 	_bootstrapping = true

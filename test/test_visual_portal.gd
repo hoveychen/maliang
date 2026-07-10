@@ -37,6 +37,11 @@ func _tick() -> void:
 					"toTile": [F_PORTAL.x, F_PORTAL.y] }])
 			_check("portals 解析出 1 个", portals.size(), 1)
 			scene.set("_portals", portals)
+			scene.call("_spawn_portal_markers")
+			_check("村庄传送点立起一座拱门", (scene.get("_portal_markers") as Array).size(), 1)
+			_check("拱门不占地（玩家能走上传送点）", OccupancyMap.prop_area_ok(V_PORTAL, 1, 1), true)
+			_check("拱门不是语音物件（长按拾不走）",
+				(scene.get("chunk_manager") as ChunkManager).dynamic_prop_at(V_PORTAL), "")
 			_place_player(FAR_TILE)
 		12:
 			_check("远离传送点后触发器已武装", scene.get("_portal_armed"), true)
@@ -69,6 +74,11 @@ func _tick() -> void:
 			var portals: Array = scene.get("_portals")
 			_check("换上森林的回程传送点", portals.size(), 1)
 			_check("回程通往 village", String((portals[0] as Dictionary)["to_scene"]), "village")
+			# 拱门跟着换场景重建：旧的一座卸掉，新场景的一座立起来，且摆在回程传送点上
+			var markers: Array = scene.get("_portal_markers")
+			_check("新场景重立一座拱门", markers.size(), 1)
+			_check("拱门站在回程传送点上",
+				WorldGrid.to_tile((markers[0] as Dictionary)["logical"]), F_PORTAL)
 			# 站在回程传送点上不该被立刻弹回去（走出半径才重新武装）
 			_check("落地站在回程传送点上，未再次触发", _count("enter_scene"), 1)
 			_check("触发器仍未武装", scene.get("_portal_armed"), false)
