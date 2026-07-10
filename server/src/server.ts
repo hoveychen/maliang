@@ -828,6 +828,9 @@ export async function createPropAsync(
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
     return;
   }
+  // 开造即报：客户端据此退出对话、就地立起魔法熔炉，孩子自由走动而不是卡在对话里干等。
+  // 必须抢在设计/校验之前发——那两步慢，等它们跑完再报，占位符就没意义了。
+  socket.send(JSON.stringify({ type: 'prop_pending', worldId, wallet: store.getWallet(worldId, playerId) }));
   let created = false;
   try {
     const check = await adapters.moderation.moderateText(description);
