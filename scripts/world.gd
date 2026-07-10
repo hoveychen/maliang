@@ -475,7 +475,7 @@ static func compute_dialog_cam(center: Vector2, speaker_logical: Vector2, base_h
 ## 对话中判定「谁在说话」：NPC 的 TTS 或（对仙子时）仙子语音在播 = npc；思考中 = idle（构图归中）；
 ## 其余（录音中 / 静待玩家开口）= player。焦点/距离据此朝对应角色偏移（见 _process 焦点块）。
 func _dialog_speaker() -> String:
-	if _tts_player.playing or _tts_pending:
+	if InteractionFsm.tts_speaking(_fsm_inputs()):
 		return "npc"
 	var fairy := _find_fairy()
 	if not fairy.is_empty() and selected == fairy.get("node") \
@@ -689,7 +689,7 @@ func _check_poi(delta: float) -> void:
 	if _poi_check_t > 0.0:
 		return
 	_poi_check_t = 2.0
-	if selected != null or _recording or thinking_label.visible or _tts_player.playing or _tts_pending:
+	if InteractionFsm.player_engaged(_fsm_inputs()):
 		return
 	for poi in POIS:
 		var pp := TerrainMap.tile_center(poi["tile"])
@@ -706,7 +706,7 @@ func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
 	if fairy_voice == null:
 		return
 	_update_fairy_bubble(fairy)
-	if selected != null or _recording or thinking_label.visible or _tts_player.playing or _tts_pending:
+	if InteractionFsm.player_engaged(_fsm_inputs()):
 		return
 	_fairy_chat_t -= delta
 	if _fairy_chat_t > 0.0:
@@ -1713,8 +1713,7 @@ func _process(delta: float) -> void:
 	_step_edge_tts(delta)
 	tp = _prof_lap(tp, "voice")
 	# 语音链路占用时压低 BGM，给人声让路（与开放麦闭麦判定同一组信号）
-	game_audio.set_ducked(_recording or thinking_label.visible or _tts_player.playing \
-			or _tts_pending or (fairy_voice != null and fairy_voice.is_playing()))
+	game_audio.set_ducked(InteractionFsm.voice_busy(_fsm_inputs()))
 	# 录音期直接静音 BGM（比 duck 更狠）：外放 BGM 会被无 AEC 的麦克风回灌，
 	# 低电平间歇声不断把 VAD 静音计数打回 0，说完话断不了句、拖到 12s 硬顶（真机 logcat 实锤）。
 	game_audio.set_music_muted(_recording)
@@ -3005,13 +3004,12 @@ func _on_local_asr_error(msg: String) -> void:
 ## 当前帧的交互标志位快照 → 喂给显式状态机（见 interaction_fsm.gd）。
 ## 字段与旧 _step_voice 的闭麦表达式逐字对应，行为等价由 test_interaction_fsm 的 64 组合护栏保证。
 func _fsm_inputs() -> InteractionFsm.Inputs:
-	var speaking := (_tts_player != null and _tts_player.playing) or _tts_pending \
-			or (fairy_voice != null and fairy_voice.is_playing())
 	return InteractionFsm.Inputs.new({
 		"in_interaction": selected != null,
 		"approaching": not _approach.is_empty(),
 		"thinking": thinking_label != null and thinking_label.visible,
-		"speaking": speaking,
+		"tts_busy": (_tts_player != null and _tts_player.playing) or _tts_pending,
+		"fairy_speaking": fairy_voice != null and fairy_voice.is_playing(),
 		"recording": _recording,
 		"in_creation": _in_creation,
 	})
@@ -3676,7 +3674,7 @@ func _on_task_complete(data: Dictionary) -> void:
 ## 得奖语音表扬（委托人音色）：正在出声就不打断——表扬是锦上添花。
 ## 老路径服务端合成给 ttsAsset；clientTts 给 text+voiceId 本地合成。
 func _on_praise_tts(data: Dictionary) -> void:
-	if _tts_player.playing or _tts_pending:
+	if InteractionFsm.tts_speaking(_fsm_inputs()):
 		return
 	var asset := String(data.get("ttsAsset", ""))
 	if not asset.is_empty():

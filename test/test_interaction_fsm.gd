@@ -9,6 +9,8 @@ func _init() -> void:
 	fails += _test_gating_equivalence()
 	fails += _test_out_of_interaction()
 	fails += _test_precedence()
+	fails += _test_fairy_speaking()
+	fails += _test_predicates()
 	if fails == 0:
 		print("interaction_fsm tests PASS")
 	else:
@@ -18,8 +20,11 @@ func _init() -> void:
 func _mk(in_i: bool, appr: bool, think: bool, speak: bool, rec: bool, crea: bool) -> InteractionFsm.Inputs:
 	return InteractionFsm.Inputs.new({
 		"in_interaction": in_i, "approaching": appr, "thinking": think,
-		"speaking": speak, "recording": rec, "in_creation": crea,
+		"tts_busy": speak, "recording": rec, "in_creation": crea,
 	})
+
+func _mk_fairy(in_i: bool, fairy: bool) -> InteractionFsm.Inputs:
+	return InteractionFsm.Inputs.new({ "in_interaction": in_i, "fairy_speaking": fairy })
 
 ## 护栏：进对话时 mic_open ⟺ not(thinking or speaking)（旧 _step_voice 的闭麦条件）；
 ## 未进对话时恒闭麦。全枚举 64 组合，一条不漏。
@@ -83,6 +88,38 @@ func _test_precedence() -> int:
 	fails += _check("CREATION 开麦", InteractionFsm.mic_open(InteractionFsm.State.CREATION), true)
 	fails += _check("THINKING 闭麦", InteractionFsm.mic_open(InteractionFsm.State.THINKING), false)
 	fails += _check("SPEAKING 闭麦", InteractionFsm.mic_open(InteractionFsm.State.SPEAKING), false)
+	return fails
+
+## 仙子预制语音也算「出声」→ 闭麦（与旧 _step_voice 的 fairy_voice.is_playing() 一致）。
+func _test_fairy_speaking() -> int:
+	var fails := 0
+	fails += _check("仙子说话 → SPEAKING",
+		InteractionFsm.derive(_mk_fairy(true, true)), InteractionFsm.State.SPEAKING)
+	fails += _check("仙子说话 → 闭麦",
+		InteractionFsm.mic_open(InteractionFsm.derive(_mk_fairy(true, true))), false)
+	fails += _check("仙子不说话 → LISTENING",
+		InteractionFsm.derive(_mk_fairy(true, false)), InteractionFsm.State.LISTENING)
+	return fails
+
+## 三个谓词各自的口径（含既存的「不含仙子」差异——固化为断言，防被无意统一）。
+func _test_predicates() -> int:
+	var fails := 0
+	var only_fairy := _mk_fairy(true, true)
+	fails += _check("voice_busy 含仙子语音", InteractionFsm.voice_busy(only_fairy), true)
+	fails += _check("tts_speaking 不含仙子语音", InteractionFsm.tts_speaking(only_fairy), false)
+	fails += _check("player_engaged 不含仙子语音(但 in_interaction 已为真)",
+		InteractionFsm.player_engaged(_mk_fairy(false, true)), false)
+
+	var rec := _mk(true, false, false, false, true, false)
+	fails += _check("voice_busy 含录音", InteractionFsm.voice_busy(rec), true)
+	fails += _check("tts_speaking 不含录音", InteractionFsm.tts_speaking(rec), false)
+	fails += _check("player_engaged 含录音", InteractionFsm.player_engaged(rec), true)
+
+	var idle := _mk(false, false, false, false, false, false)
+	fails += _check("全空 → voice_busy 假", InteractionFsm.voice_busy(idle), false)
+	fails += _check("全空 → player_engaged 假", InteractionFsm.player_engaged(idle), false)
+	fails += _check("只是进了对话 → player_engaged 真",
+		InteractionFsm.player_engaged(_mk(true, false, false, false, false, false)), true)
 	return fails
 
 func _check(name: String, got: Variant, want: Variant) -> int:

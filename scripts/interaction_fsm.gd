@@ -28,7 +28,8 @@ class Inputs extends RefCounted:
 	var in_interaction := false ## selected != null
 	var approaching := false    ## not _approach.is_empty()
 	var thinking := false       ## thinking_label.visible
-	var speaking := false       ## _tts_player.playing or _tts_pending or fairy_voice.is_playing()
+	var tts_busy := false       ## _tts_player.playing or _tts_pending（角色 TTS）
+	var fairy_speaking := false ## fairy_voice.is_playing()（仙子预制语音）
 	var recording := false      ## _recording
 	var in_creation := false    ## _in_creation
 
@@ -36,16 +37,21 @@ class Inputs extends RefCounted:
 		in_interaction = bool(p.get("in_interaction", false))
 		approaching = bool(p.get("approaching", false))
 		thinking = bool(p.get("thinking", false))
-		speaking = bool(p.get("speaking", false))
+		tts_busy = bool(p.get("tts_busy", false))
+		fairy_speaking = bool(p.get("fairy_speaking", false))
 		recording = bool(p.get("recording", false))
 		in_creation = bool(p.get("in_creation", false))
+
+	## 任何角色在出声（含仙子预制语音）。
+	func speaking() -> bool:
+		return tts_busy or fairy_speaking
 
 ## 由标志位派生当前状态。优先级顺序即闭麦语义的来源：
 ## 出声 > 思考 > 录音 > 造角色等待 > 聆听。前两者闭麦，后三者开麦——与旧 _step_voice 等价。
 static func derive(x: Inputs) -> State:
 	if not x.in_interaction:
 		return State.APPROACH if x.approaching else State.EXPLORE
-	if x.speaking:
+	if x.speaking():
 		return State.SPEAKING # 角色在出声：半双工闭麦，防自听
 	if x.thinking:
 		return State.THINKING # 等回应/施法中：闭麦
@@ -58,6 +64,26 @@ static func derive(x: Inputs) -> State:
 ## 该状态下是否应该开麦（把麦克风增量喂 VAD）。
 static func mic_open(s: State) -> bool:
 	return s == State.LISTENING or s == State.RECORDING or s == State.CREATION
+
+# ── 散落各处的门控谓词，原样收敛于此 ────────────────────────────────────────
+# 注意：这三个谓词的口径**本来就不一致**（下面两个不含仙子预制语音）。这是既存行为，
+# 本次重构只做「收敛到一处、可见」，不擅自统一——统一即改行为，得单独评估。
+# 差异本身可疑：_check_poi / _fairy_ambient 在仙子说话时不闭嘴，可能是漏判。
+
+## 语音链路占用（录音/思考/任何角色出声）→ 压低 BGM。含仙子语音。
+## 调用点：_process 的 game_audio.set_ducked。
+static func voice_busy(x: Inputs) -> bool:
+	return x.recording or x.thinking or x.speaking()
+
+## 角色 TTS 正在出声（**不含**仙子预制语音）。
+## 调用点：_dialog_speaker（构图判「谁在说话」）、_on_praise_tts（正在出声就不插播表扬）。
+static func tts_speaking(x: Inputs) -> bool:
+	return x.tts_busy
+
+## 玩家正被交互占用（在对话/录音/思考/角色 TTS 出声）→ 不打扰他（不发 POI 提醒、不起闲聊）。
+## **不含**仙子预制语音。调用点：_check_poi、_fairy_ambient。
+static func player_engaged(x: Inputs) -> bool:
+	return x.in_interaction or x.recording or x.thinking or x.tts_busy
 
 ## 调试/日志用的状态名。
 static func name_of(s: State) -> String:
