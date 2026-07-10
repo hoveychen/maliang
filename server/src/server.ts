@@ -18,8 +18,9 @@ import { validateSdfPropSpec } from './sdf_prop.ts';
 import { decodeTerrain } from './terrain.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationGoal, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
+import { findPropOption, composePropDesc } from './prop_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
@@ -816,7 +817,7 @@ async function denyForNoFlowers(
   }));
 }
 
-/** 造角色引导会话入口：先卡余额（0 花不进会话，仙子引导），够花再开会话推进第一轮。 */
+/** 引导式创造会话入口（造角色/造物共用）：先卡余额（0 花不进会话，仙子引导），够花再开会话推进第一轮。 */
 async function openCreationSession(
   socket: { send: (data: string) => void },
   session: VoiceSession,
@@ -826,12 +827,13 @@ async function openCreationSession(
   adapters: ServiceAdapters,
   store: WorldStore,
   leadIn = '', // 入口那轮 routeIntent 生成的仙子应答句（缺陷 ②：此前被丢弃）
+  goal: CreationGoal = 'character',
 ): Promise<void> {
   if (!hasFlower(store, worldId, session.playerId)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, 'character', session.clientTts);
+    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, goal === 'prop' ? 'prop' : 'character', session.clientTts);
     return;
   }
-  session.creation = newCreationState();
+  session.creation = newCreationState(goal);
   await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn);
 }
 
@@ -997,16 +999,23 @@ export async function advanceCreation(
 ): Promise<void> {
   const state = session.creation;
   if (!state) return;
+  const isProp = state.goal === 'prop';
+  // 会话目标决定汇总描述用哪套：造物 composePropDesc，造角色 describeCreationAttrs。
+  const summarize = () => isProp ? composePropDesc(state.attrs) : describeCreationAttrs(state);
+  // done 时按目标分派到对应的异步造：造物 createPropAsync，造角色 createCharacterAsync。
+  const finishCreate = (desc: string) => isProp
+    ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts)
+    : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts);
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
   let r;
   try {
-    r = await adapters.llm.guideCreation(state, childInput);
+    r = isProp ? await adapters.llm.guideProp(state, childInput) : await adapters.llm.guideCreation(state, childInput);
   } catch (err) {
-    // guideCreation 挂了：用现有属性兜底造，不让幼儿卡住
-    console.warn(`guideCreation 失败，用现有属性兜底造：${String(err)}`);
+    // guide 挂了：用现有属性兜底造，不让幼儿卡住
+    console.warn(`guide(${state.goal}) 失败，用现有属性兜底造：${String(err)}`);
     session.creation = null;
     if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
-    await createCharacterAsync(socket, worldId, session.playerId, describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
+    await finishCreate(summarize() || childInput);
     return;
   }
   // 累积这轮解析出的增量
@@ -1017,6 +1026,7 @@ export async function advanceCreation(
     if (u.size) state.attrs.size = u.size;
     if (u.personality) state.attrs.personality = u.personality;
     if (u.name) state.attrs.name = u.name;
+    if (u.motion) state.attrs.motion = u.motion;
     if (u.traits) state.attrs.traits = u.traits;
   }
   if (r.category) state.askedCategories.push(r.category);
@@ -1025,12 +1035,13 @@ export async function advanceCreation(
     session.creation = null;
     // 快捷路径：一句说全、首轮即造。没有问句可以搭载，前置话语单独念出来，别吞掉。
     if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
-    await createCharacterAsync(socket, worldId, session.playerId, r.description || describeCreationAttrs(state) || childInput, adapters, store, undefined, session.clientTts);
+    await finishCreate(r.description || summarize() || childInput);
     return;
   }
   // 追问：合成仙子问句 TTS（失败不阻塞；clientTts 时客户端自己合成）+ 下发图标选项卡
+  const lookup = isProp ? findPropOption : findOption;
   const options = (r.optionIds ?? [])
-    .map((id) => findOption(id))
+    .map((id) => lookup(id))
     .filter((o): o is NonNullable<typeof o> => !!o)
     .map((o) => ({ id: o.id, label: o.label, iconAsset: store.getCreationIcon(o.id) }));
   // 入口那轮把前置话语接在问句前面，一次念完（「好呀，我这就变出来！你想要什么样的小伙伴呀？」）。
@@ -1268,7 +1279,9 @@ export async function handleWsMessage(
     try {
       // 点选 → 用该选项的中文 label 当输入；否则用语音转写文本。
       const optId = typeof msg.optionId === 'string' ? msg.optionId : '';
-      const childInput = (optId ? (findOption(optId)?.label ?? optId) : (msg.spokenText ?? '')).trim();
+      // 点选 → 该选项中文 label 当输入；造物会话查物品图标库，造角色查角色图标库。
+      const lookup = session.creation.goal === 'prop' ? findPropOption : findOption;
+      const childInput = (optId ? (lookup(optId)?.label ?? optId) : (msg.spokenText ?? '')).trim();
       if (!childInput) {
         socket.send(JSON.stringify({ type: 'voice_failed', reason: '造角色答复为空' }));
         return;
@@ -1303,15 +1316,16 @@ export async function handleWsMessage(
         return;
       }
       const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene);
-      // 造角色入口：开引导会话，不发普通回应。
+      // 造角色/造物入口：开引导会话，不发普通回应（问句 TTS + 图标卡由会话驱动）。
       if (response.characterRequest) {
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText);
         return;
       }
-      socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
-        void createPropAsync(socket, msg.worldId ?? '', session.playerId, response.propRequest, adapters, store, session.clientTts);
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop');
+        return;
       }
+      socket.send(JSON.stringify({ type: 'character_response', ...response }));
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
     } catch (err) {
@@ -1357,15 +1371,16 @@ export async function handleWsMessage(
         session.clientTts,
         session.currentScene,
       );
-      // 造角色入口：respondToTranscript 识别到 create_character 意图但没出声，这里开引导会话，不发普通回应。
+      // 造角色/造物入口：respondToTranscript 识别到意图但没出声，这里开引导会话，不发普通回应。
       if (response.characterRequest) {
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText);
         return;
       }
-      if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
-        void createPropAsync(socket, msg.worldId ?? '', session.playerId, response.propRequest, adapters, store, session.clientTts);
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop');
+        return;
       }
+      if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
     } catch (err) {
@@ -1483,15 +1498,16 @@ export async function handleWsMessage(
         onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
       };
       const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene);
-      // 造角色入口：开引导会话，不发普通回应。
+      // 造角色/造物入口：开引导会话，不发普通回应。
       if (response.characterRequest) {
         await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store, response.replyText);
         return;
       }
-      if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       if (response.propRequest) {
-        void createPropAsync(socket, worldId, session.playerId, response.propRequest, adapters, store, session.clientTts);
+        await openCreationSession(socket, session, worldId, characterId, response.propRequest, adapters, store, response.replyText, 'prop');
+        return;
       }
+      if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       recordVisitTurn(session, worldId, playerId, characterId, response.transcript, response.replyText, adapters, store);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
