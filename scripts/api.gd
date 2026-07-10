@@ -119,6 +119,28 @@ func post_json(path: String, body: Dictionary) -> Dictionary:
 	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
 	return data if typeof(data) == TYPE_DICTIONARY else {}
 
+## 拉取资源 hash → 原始字节（地形 .mltr 等非图片资产）。失败返回空 PackedByteArray。
+## 与 fetch_texture 同样先查磁盘缓存再下载（内容寻址，缓存永不失效）。
+func fetch_bytes(asset_hash: String) -> PackedByteArray:
+	if asset_hash.is_empty():
+		return PackedByteArray()
+	var cached := _cache_read(asset_hash)
+	if not cached.is_empty():
+		return cached
+	var http := HTTPRequest.new()
+	add_child(http)
+	var err := http.request(base + "/assets/" + asset_hash)
+	if err != OK:
+		http.queue_free()
+		return PackedByteArray()
+	var res: Array = await http.request_completed
+	http.queue_free()
+	if int(res[1]) != 200:
+		return PackedByteArray()
+	var buf := res[3] as PackedByteArray
+	_cache_write(asset_hash, buf) # 落盘供下次免下载
+	return buf
+
 ## 拉取资源 hash → Texture2D（PNG/WebP/JPG）。失败返回 null。
 ## 三级取源：内存已解码缓存 → 磁盘缓存（免网络）→ 下载后落盘+进内存。资产内容寻址故缓存永不失效。
 func fetch_texture(asset_hash: String) -> Texture2D:

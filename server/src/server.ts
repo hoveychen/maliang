@@ -15,9 +15,10 @@ import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
+import { decodeTerrain } from './terrain.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
@@ -57,6 +58,7 @@ function seedFairy(worldId: string): Character {
     state: 'idle',
     behaviorScript: { commands: [{ type: 'wait', params: { duration: 1 } }], loop: true },
     position: WORLD_CENTER_TILE,
+    sceneId: DEFAULT_SCENE,
     abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop'],
     relationships: {},
   };
@@ -188,7 +190,13 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       store.addCharacter(seedFairy('default'));
     }
     if (!world) return reply.code(404).send({ error: 'world not found' });
-    return { id: world.id, characters: characterListView(store, world.id), props: store.listProps(world.id) };
+    // scenes 可能为空（地形还没入库）——客户端据此回退本地确定性生成，不影响老客户端。
+    return {
+      id: world.id,
+      characters: characterListView(store, world.id),
+      props: store.listProps(world.id),
+      scenes: store.listScenes(world.id),
+    };
   });
 
   // 为世界里的小神仙补一张真实 sprite。幂等：已有则跳过；?force=true 强制重生成；
@@ -268,6 +276,52 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       };
     },
   );
+
+  // 管理端点：场景入库（地形 + POI + portal）。地形二进制经 base64 传入，解码校验后
+  // 进内容寻址资产库；scenes 表只记 hash。同一份地形重复入库 → hash 相同 → 客户端不重下。
+  // 见 docs/multi-scene-design.md 与 tools/export_terrain.gd。
+  app.post<{
+    Body: {
+      worldId?: string;
+      sceneId?: string;
+      name?: string;
+      terrainBase64?: string;
+      pois?: ScenePoi[];
+      portals?: ScenePortal[];
+    } | null;
+  }>('/admin/scenes', { bodyLimit: 4 * 1024 * 1024 }, async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const worldId = (req.body?.worldId ?? '').trim();
+    const sceneId = (req.body?.sceneId ?? DEFAULT_SCENE).trim();
+    const b64 = req.body?.terrainBase64 ?? '';
+    if (!worldId) return reply.code(400).send({ error: 'worldId required' });
+    if (!b64) return reply.code(400).send({ error: 'terrainBase64 required' });
+    if (!store.getWorld(worldId)) return reply.code(404).send({ error: 'world not found' });
+
+    let terrain;
+    const bytes = new Uint8Array(Buffer.from(b64, 'base64'));
+    try {
+      terrain = decodeTerrain(bytes); // 坏地形在入库这一刻就拒收，别等渲染出问题才发现
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
+
+    const terrainAsset = store.putAsset({ bytes, mime: 'application/octet-stream' });
+    const scene: Scene = {
+      worldId,
+      sceneId,
+      name: (req.body?.name ?? sceneId).trim(),
+      terrainAsset,
+      gridTiles: terrain.gridW,
+      pois: req.body?.pois ?? [],
+      portals: req.body?.portals ?? [],
+    };
+    store.upsertScene(scene);
+    return { scene, bytes: bytes.length };
+  });
 
   // 管理端点：存量角色立绘「原地裁边」。把已存立绘裁到贴身盒（trimToContent）重新入库，
   // 角色 spriteAsset 指向裁后新 hash，并重触发 idle 动画重生成（用新默认 cellH=256）。
@@ -713,7 +767,7 @@ export async function createPropAsync(
       socket.send(JSON.stringify({ type: 'prop_failed', reason: validated.error }));
       return;
     }
-    const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed' };
+    const prop: WorldProp = { id: randomUUID(), spec: validated.spec, tile: null, state: 'placed', sceneId: DEFAULT_SCENE };
     store.addProp(worldId, prop);
     created = true;
     socket.send(JSON.stringify({ type: 'prop_created', worldId, prop, wallet: store.getWallet(worldId, playerId) }));
@@ -924,6 +978,8 @@ export async function handleWsMessage(
     // positions_report：客户端批量上报 tile（chars 只含本轮变化过的角色，player 可缺省）
     chars?: unknown;
     player?: unknown;
+    /** 玩家当前所在场景（缺省 village；老客户端不带）。 */
+    sceneId?: string;
     // 引导式造角色：creation_reply 幼儿点的图标 id / 说的话
     optionId?: string;
     spokenText?: string;
@@ -963,8 +1019,6 @@ export async function handleWsMessage(
         color: String(p.color ?? ''),
         spriteAsset: String(p.spriteAsset ?? ''),
         createdAt: String(p.createdAt ?? ''),
-        // profile 不带位置：整对象 upsert 会抹掉已上报的 tile，显式沿用旧值。
-        position: store.getPlayer(msg.playerId)?.position,
       };
       store.upsertPlayer(player);
     }
@@ -980,7 +1034,7 @@ export async function handleWsMessage(
       wallet: store.getWallet(worldId, session.playerId),
       activeTask: store.getActiveTask(worldId, session.playerId),
       // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
-      playerPos: session.playerId ? store.getPlayer(session.playerId)?.position : undefined,
+      playerPos: session.playerId ? store.getPlayerTile(worldId, msg.sceneId ?? DEFAULT_SCENE, session.playerId) : undefined,
     }));
     return;
   }
@@ -1309,6 +1363,7 @@ export async function handleWsMessage(
   // 静止时客户端不发；每拍只带 tile 变化过的角色。越界 tile 静默丢弃（单个坏条目不连坐整批）。
   if (msg.type === 'positions_report') {
     const worldId = msg.worldId ?? '';
+    const sceneId = (msg.sceneId ?? DEFAULT_SCENE) || DEFAULT_SCENE;
     const entries = Array.isArray(msg.chars) ? msg.chars : [];
     let applied = 0;
     for (const raw of entries) {
@@ -1317,13 +1372,13 @@ export async function handleWsMessage(
       if (typeof e.id !== 'string' || !e.id) continue;
       const tile: TilePos = { tileX: Number(e.tileX), tileY: Number(e.tileY) };
       if (!isValidTile(tile)) continue;
-      if (store.setCharacterTile(worldId, e.id, tile)) applied++;
+      if (store.setCharacterTile(worldId, e.id, tile, sceneId)) applied++;
     }
     // 玩家自己的位置（Player 表；档案未建时静默跳过——首次进世界还没上报 profile）。
     if (typeof msg.player === 'object' && msg.player !== null && session.playerId) {
       const p = msg.player as { tileX?: unknown; tileY?: unknown };
       const tile: TilePos = { tileX: Number(p.tileX), tileY: Number(p.tileY) };
-      if (isValidTile(tile)) store.setPlayerTile(session.playerId, tile);
+      if (isValidTile(tile)) store.setPlayerTile(worldId, sceneId, session.playerId, tile);
     }
     // 成功无回包（与 prop_place 一致）；整批一个角色都没落地才回 error，便于客户端察觉世界/角色 id 错配。
     if (entries.length > 0 && applied === 0) {

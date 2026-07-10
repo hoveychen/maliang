@@ -94,8 +94,9 @@ func send_leave_world(world_id: String) -> void:
 
 ## 上报世界地点名清单（POI 名，连上后一次）：意图 LLM 用来归一「去某地」的地名。
 ## profile 非空时随 world_info 上报，供服务端首见建玩家档（面向 MMO；见 server types.Player）。
-func send_world_info(world_id: String, locations: Array, profile := {}) -> void:
-	var msg := { "type": "world_info", "worldId": world_id, "locations": locations }
+## scene_id：玩家当前所在场景（模型 B）——服务端据此回读该场景的 playerPos，避免用错场景的坐标降生。
+func send_world_info(world_id: String, locations: Array, profile := {}, scene_id := "village") -> void:
+	var msg := { "type": "world_info", "worldId": world_id, "locations": locations, "sceneId": scene_id }
 	if not profile.is_empty():
 		msg["profile"] = profile
 	_send(msg)
@@ -112,9 +113,10 @@ func send_task_event(world_id: String, kind: String, extra := {}) -> void:
 
 ## 角色/玩家坐标回报：空间权威在客户端，服务端只记最后位置供下次进世界读回。
 ## chars 只带本轮 tile 变化过的角色（静止时整条消息不发）；player_tile 传 Vector2i(-1,-1) 表示不带玩家。
+## scene_id 标明这批坐标属于哪个场景（模型 B）——服务端据此按场景存位置、给角色打场景标签。
 ## 服务端成功无回包，越界 tile 静默丢弃。
-func send_positions(world_id: String, chars: Array, player_tile := Vector2i(-1, -1)) -> void:
-	var msg := { "type": "positions_report", "worldId": world_id, "chars": chars }
+func send_positions(world_id: String, chars: Array, player_tile := Vector2i(-1, -1), scene_id := "village") -> void:
+	var msg := { "type": "positions_report", "worldId": world_id, "chars": chars, "sceneId": scene_id }
 	if player_tile.x >= 0:
 		msg["player"] = { "tileX": player_tile.x, "tileY": player_tile.y }
 	_send(msg)

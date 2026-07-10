@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, TilePos, Visit, Wallet, WorldProp } from './types.ts';
-import { ANON_PLAYER, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 
@@ -55,6 +55,17 @@ export interface SpriteAnimRecord {
   meta?: SpriteSheetMeta;
 }
 
+/** scenes 表的一行原样（列名 snake_case）。 */
+interface SceneRow {
+  world_id: string;
+  scene_id: string;
+  name: string;
+  terrain_asset: string;
+  grid_tiles: number;
+  pois: string;
+  portals: string;
+}
+
 export interface World {
   id: string;
   characters: Map<string, Character>;
@@ -96,6 +107,8 @@ export class WorldStore {
       this.#migrateFromJson();
       this.#migrateLegacyMemories();
       this.#migrateLegacyChatHistory();
+      this.#migrateLegacyPlayerPositions();
+      this.#migrateLegacyEntityScenes();
       this.#loadAssets();
       this.#loadSpriteAnims();
     }
@@ -166,6 +179,27 @@ export class WorldStore {
         player_id TEXT NOT NULL,
         data TEXT NOT NULL,
         PRIMARY KEY (world_id, player_id)
+      );
+      -- 玩家位置：必须带场景。只按 playerId 存位置在多场景下毫无意义——
+      -- 「小明在 (12,30)」是村庄的池塘边还是森林的空地？
+      CREATE TABLE IF NOT EXISTS player_positions (
+        world_id  TEXT NOT NULL,
+        scene_id  TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        tile_x    INTEGER NOT NULL,
+        tile_y    INTEGER NOT NULL,
+        PRIMARY KEY (world_id, scene_id, player_id)
+      );
+      -- 场景 = 世界里的一片区域（一张地图）。地形二进制存 assets 库，这里只记 hash。
+      CREATE TABLE IF NOT EXISTS scenes (
+        world_id      TEXT NOT NULL,
+        scene_id      TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        terrain_asset TEXT NOT NULL,
+        grid_tiles    INTEGER NOT NULL,
+        pois          TEXT NOT NULL DEFAULT '[]',
+        portals       TEXT NOT NULL DEFAULT '[]',
+        PRIMARY KEY (world_id, scene_id)
       );
     `);
   }
@@ -364,18 +398,80 @@ export class WorldStore {
     return true;
   }
 
-  listProps(worldId: string): WorldProp[] {
+  /**
+   * 世界里的物件。传 sceneId 则只返回该场景的物件（缺 sceneId 的存量物件按 DEFAULT_SCENE 归入）；
+   * 不传 = 全世界所有场景（保持既有调用点行为不变）。
+   */
+  listProps(worldId: string, sceneId?: string): WorldProp[] {
     const rows = this.#db.prepare('SELECT data FROM props WHERE world_id = ?').all(worldId) as { data: string }[];
-    return rows.map((r) => JSON.parse(r.data) as WorldProp);
+    const all = rows.map((r) => JSON.parse(r.data) as WorldProp);
+    if (sceneId === undefined) return all;
+    return all.filter((p) => (p.sceneId ?? DEFAULT_SCENE) === sceneId);
   }
 
-  /** 客户端上报的世界地点名（喂给意图 LLM 让「去某地」说的是真实地名）。 */
+  /**
+   * 客户端 world_info 上报的地点名。**兼容路径**：场景已入库时不再需要它。
+   * 保留是因为老客户端仍会上报，且 POI 尚未入库的环境要能照常派委托。
+   */
   setLocations(worldId: string, names: string[]): void {
     this.#locations.set(worldId, names);
   }
 
+  /**
+   * 世界的地点名（喂给意图 LLM 让「去某地」说的是真实地名）。
+   * 权威来源是 scenes.pois——服务端说了算，不再依赖客户端上报（那个方向是反的）。
+   * POI 还没入库时回退到客户端上报的内存清单，保证旧环境不退化。
+   *
+   * 多场景时这里会把所有场景的地点摊平，委托可能指向别的场景。
+   * 步骤⑤真做 portal 时要按玩家当前场景过滤（见 docs/multi-scene-design.md 待确认项）。
+   */
   getLocations(worldId: string): string[] {
+    const fromScenes = this.listScenes(worldId)
+      .flatMap((s) => s.pois.map((p) => p.name))
+      .filter((n) => n.length > 0);
+    if (fromScenes.length > 0) return [...new Set(fromScenes)];
     return this.#locations.get(worldId) ?? [];
+  }
+
+  // ── 场景（模型 B：world 含多 scene，见 docs/multi-scene-design.md）──────────────
+
+  /** 登记/更新一个场景。地形二进制先经 putAsset 入库，这里只记它的 hash。 */
+  upsertScene(scene: Scene): void {
+    if (!this.#worldExists(scene.worldId)) throw new Error(`world not found: ${scene.worldId}`);
+    this.#db
+      .prepare(
+        'INSERT INTO scenes (world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals) VALUES (?, ?, ?, ?, ?, ?, ?) ' +
+          'ON CONFLICT(world_id, scene_id) DO UPDATE SET name = excluded.name, terrain_asset = excluded.terrain_asset, ' +
+          'grid_tiles = excluded.grid_tiles, pois = excluded.pois, portals = excluded.portals',
+      )
+      .run(
+        scene.worldId, scene.sceneId, scene.name, scene.terrainAsset, scene.gridTiles,
+        JSON.stringify(scene.pois), JSON.stringify(scene.portals),
+      );
+  }
+
+  #rowToScene(r: SceneRow): Scene {
+    return {
+      worldId: r.world_id,
+      sceneId: r.scene_id,
+      name: r.name,
+      terrainAsset: r.terrain_asset,
+      gridTiles: r.grid_tiles,
+      pois: JSON.parse(r.pois) as ScenePoi[],
+      portals: JSON.parse(r.portals) as ScenePortal[],
+    };
+  }
+
+  getScene(worldId: string, sceneId: string): Scene | undefined {
+    const row = this.#db.prepare('SELECT * FROM scenes WHERE world_id = ? AND scene_id = ?').get(worldId, sceneId) as
+      | SceneRow
+      | undefined;
+    return row ? this.#rowToScene(row) : undefined;
+  }
+
+  listScenes(worldId: string): Scene[] {
+    const rows = this.#db.prepare('SELECT * FROM scenes WHERE world_id = ? ORDER BY scene_id').all(worldId) as unknown as SceneRow[];
+    return rows.map((r) => this.#rowToScene(r));
   }
 
   // ── 奖赏系统：小红花钱包 + 进行中委托（均按 (worldId, playerId) 维度）────────────────
@@ -505,9 +601,15 @@ export class WorldStore {
     return rows.map((r) => ({ playerId: r.player_id, task: JSON.parse(r.data) as ActiveTask }));
   }
 
-  listCharacters(worldId: string): Character[] {
+  /**
+   * 世界里的角色。传 sceneId 则只返回该场景的角色（缺 sceneId 的存量角色按 DEFAULT_SCENE 归入）；
+   * 不传 = 全世界所有场景（保持既有调用点行为不变）。
+   */
+  listCharacters(worldId: string, sceneId?: string): Character[] {
     const rows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(worldId) as { data: string }[];
-    return rows.map((r) => JSON.parse(r.data) as Character);
+    const all = rows.map((r) => JSON.parse(r.data) as Character);
+    if (sceneId === undefined) return all;
+    return all.filter((c) => (c.sceneId ?? DEFAULT_SCENE) === sceneId);
   }
 
   getCharacter(worldId: string, characterId: string): Character | undefined {
@@ -520,24 +622,80 @@ export class WorldStore {
   /**
    * 角色所在 tile 的落位回报（positions_report）。空间权威在客户端，服务端只记最后位置供重载读回。
    * 角色不存在 → false 不动账。tile 合法性由调用方（server.ts）先行校验。
+   * sceneId 给了就一并更新角色所在场景——上报只带当前场景里的角色，故场景跟着位置走（模型 B）。
    */
-  setCharacterTile(worldId: string, characterId: string, tile: TilePos): boolean {
+  setCharacterTile(worldId: string, characterId: string, tile: TilePos, sceneId?: string): boolean {
     const character = this.getCharacter(worldId, characterId);
     if (!character) return false;
     character.position = tile;
+    if (sceneId !== undefined) character.sceneId = sceneId;
     this.saveCharacter(character);
     return true;
   }
 
   // ── 玩家实体（面向 MMO；身份=设备端 UUID，无鉴权，见 types.Player）──────────
 
-  /** 玩家所在 tile 的落位回报。玩家档案未建（首次进世界还没上报 profile）→ false 不动账。 */
-  setPlayerTile(playerId: string, tile: TilePos): boolean {
-    const player = this.getPlayer(playerId);
-    if (!player) return false;
-    player.position = tile;
-    this.upsertPlayer(player);
+  /**
+   * 玩家在某世界某场景的落位回报。玩家档案未建（首次进世界还没上报 profile）→ false 不动账。
+   * 键必须是 (world, scene, player)：同一个 tile 坐标在不同场景是完全不同的地方。
+   */
+  setPlayerTile(worldId: string, sceneId: string, playerId: string, tile: TilePos): boolean {
+    if (!this.getPlayer(playerId)) return false;
+    this.#db
+      .prepare(
+        'INSERT INTO player_positions (world_id, scene_id, player_id, tile_x, tile_y) VALUES (?, ?, ?, ?, ?) ' +
+          'ON CONFLICT(world_id, scene_id, player_id) DO UPDATE SET tile_x = excluded.tile_x, tile_y = excluded.tile_y',
+      )
+      .run(worldId, sceneId, playerId, tile.tileX, tile.tileY);
     return true;
+  }
+
+  /** 玩家在某世界某场景的最后位置。没去过 → undefined（客户端按小神仙旁降生）。 */
+  getPlayerTile(worldId: string, sceneId: string, playerId: string): TilePos | undefined {
+    const row = this.#db
+      .prepare('SELECT tile_x, tile_y FROM player_positions WHERE world_id = ? AND scene_id = ? AND player_id = ?')
+      .get(worldId, sceneId, playerId) as { tile_x: number; tile_y: number } | undefined;
+    return row ? { tileX: row.tile_x, tileY: row.tile_y } : undefined;
+  }
+
+  /**
+   * 存量迁移：老档案把位置塞在 players.data.position（无世界、无场景）。
+   * 单场景时代那批坐标只可能属于 default 世界的 village 场景，一次性搬过去并清掉旧字段。幂等。
+   */
+  #migrateLegacyPlayerPositions(): void {
+    const rows = this.#db.prepare('SELECT id, data FROM players').all() as { id: string; data: string }[];
+    for (const r of rows) {
+      const p = JSON.parse(r.data) as Player & { position?: TilePos };
+      if (!p.position) continue;
+      const t = p.position;
+      if (Number.isInteger(t.tileX) && Number.isInteger(t.tileY)) {
+        this.#db
+          .prepare('INSERT OR IGNORE INTO player_positions (world_id, scene_id, player_id, tile_x, tile_y) VALUES (?, ?, ?, ?, ?)')
+          .run('default', 'village', p.id, t.tileX, t.tileY);
+      }
+      delete p.position;
+      this.#db.prepare('UPDATE players SET data = ? WHERE id = ?').run(JSON.stringify(p), r.id);
+    }
+  }
+
+  /**
+   * 存量迁移：单场景时代的角色/物件 blob 里没有 sceneId 字段。
+   * 那批全部隐含属于 village，一次性补写 sceneId='village' 让数据说清自己在哪个场景。
+   * 已有 sceneId 的行跳过 → 幂等（第二次开库不改任何值）。
+   */
+  #migrateLegacyEntityScenes(): void {
+    const backfill = (table: 'characters' | 'props') => {
+      const rows = this.#db.prepare(`SELECT id, data FROM ${table}`).all() as { id: string; data: string }[];
+      const upd = this.#db.prepare(`UPDATE ${table} SET data = ? WHERE id = ?`);
+      for (const r of rows) {
+        const obj = JSON.parse(r.data) as { sceneId?: string };
+        if (obj.sceneId !== undefined) continue;
+        obj.sceneId = DEFAULT_SCENE;
+        upd.run(JSON.stringify(obj), r.id);
+      }
+    };
+    backfill('characters');
+    backfill('props');
   }
 
   /** 登记/更新玩家档案（首见即建，再见即更）。整对象 UPSERT 一行。 */

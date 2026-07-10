@@ -95,6 +95,41 @@ export interface TilePos {
   tileY: number;
 }
 
+/** 场景里的一个地点（喂意图 LLM 归一「去某地」；trigger 由客户端映射到仙子台词）。 */
+export interface ScenePoi {
+  tile: [number, number];
+  radius: number;
+  trigger: string;
+  name: string;
+  aliases: string[];
+}
+
+/** 场景之间的传送点（模型 B：同一个 world 内的区域之间走动）。 */
+export interface ScenePortal {
+  tile: [number, number];
+  radius: number;
+  toScene: string;
+  toTile: [number, number];
+}
+
+/**
+ * 场景 = 世界里的一片区域（一张地图）。见 docs/multi-scene-design.md 模型 B。
+ * terrainAsset 是地形二进制在内容寻址资产库里的 hash，同时充当版本号：
+ * 地形变了 hash 就变，客户端据此判缓存，天然不存在版本协商问题。
+ */
+export interface Scene {
+  worldId: string;
+  sceneId: string;
+  name: string;
+  terrainAsset: string;
+  gridTiles: number;
+  pois: ScenePoi[];
+  portals: ScenePortal[];
+}
+
+/** 单场景时代的场景 id：存量角色/物件全部隐含属于它。 */
+export const DEFAULT_SCENE = 'village';
+
 /** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */
 export function isValidTile(tile: TilePos): boolean {
   const inRange = (v: number) => Number.isInteger(v) && v >= 0 && v < GRID_TILES;
@@ -117,6 +152,12 @@ export interface Character {
   behaviorScript: BehaviorScript;
   /** 环面 tile 坐标。空间权威在客户端：这里存的是客户端 positions_report 上报的最后位置，重载时读回。 */
   position: TilePos;
+  /**
+   * 角色所在场景（模型 B 多场景，见 docs/multi-scene-design.md）。
+   * 缺省/undefined = DEFAULT_SCENE（单场景时代的存量角色，迁移时补齐为 village）。
+   * 随 positions_report 携带的 sceneId 更新——上报只带当前场景里的角色，故场景跟着位置走。
+   */
+  sceneId?: string;
   abilities: string[];
   relationships: Record<string, string>;
 }
@@ -131,6 +172,8 @@ export interface CreateCharacterInput {
   intentText: string; // M1 文字驱动；M2 由讯飞 ASR 产出
   byFairy: boolean;
   position?: TilePos;
+  /** 新伙伴降生的场景；缺省=DEFAULT_SCENE（单场景时代/未指定时落 village）。 */
+  sceneId?: string;
 }
 
 export interface ModerationResult {
@@ -214,6 +257,8 @@ export interface WorldProp {
   tile: [number, number] | null;
   /** placed=摆在世界（tile 有效）；bagged=收进收集册物品页（tile 置 null）。 */
   state: 'placed' | 'bagged';
+  /** 物件所在场景（模型 B）。缺省/undefined = DEFAULT_SCENE（存量物件迁移时补 village）。 */
+  sceneId?: string;
 }
 
 /**
@@ -230,9 +275,9 @@ export interface Player {
   color: string; // 喜欢的颜色名
   spriteAsset: string; // 形象资产 hash（内容寻址，服务端已有）
   createdAt: string; // ISO 时间；由前端 profile 带上，服务端不取墙上时钟
-  /** 最后所在 tile（positions_report 上报）。老档案无此字段 → 客户端按小神仙旁降生。 */
-  position?: TilePos;
 }
+// 注：玩家位置不在这里——它按 (world, scene, player) 存 player_positions 表。
+// 只按 playerId 存位置在多场景下毫无意义（同一 tile 在不同场景是不同地方）。
 
 /**
  * 一次会话（Visit）：一次「进世界到离开」，作会话结束批量抽记忆的边界（见 design §4）。
