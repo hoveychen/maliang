@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createCharacter, ModerationError } from '../src/orchestrator.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { WorldStore } from '../src/persistence.ts';
-import { GEN_STAGES, type GenStage } from '../src/types.ts';
+import { GEN_STAGES, WORLD_CENTER_TILE, type GenStage } from '../src/types.ts';
 
 test('造角色闭环：按顺序推进度、产出角色、落地世界', async () => {
   const store = new WorldStore();
@@ -21,7 +21,7 @@ test('造角色闭环：按顺序推进度、产出角色、落地世界', async
   assert.equal(character.name, '小兔');
   assert.deepEqual(stages, [...GEN_STAGES]); // spec→moderate_text→image→cutout→moderate_image→persist
   assert.ok(character.appearance.spriteAsset.length > 0, 'sprite 资源已落地');
-  assert.deepEqual(character.position, { tileX: 500, tileY: 500 });
+  assert.deepEqual(character.position, WORLD_CENTER_TILE); // 降生在世界中心，待客户端上报真坐标
   assert.equal(store.listCharacters('w1').length, 1);
 });
 

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ImageBlob, ServiceAdapters } from './adapters/types.ts';
 import { flipHorizontal, addStickerBorder, trimToContent } from './adapters/chroma_cutout.ts';
 import type { WorldStore } from './persistence.ts';
+import { WORLD_CENTER_TILE } from './types.ts';
 import type { Character, CharacterSpec, CreateCharacterInput, GenStage } from './types.ts';
 
 /** 内容审核拦截（文字环节）。 */
@@ -15,8 +16,6 @@ export class ModerationError extends Error {
 }
 
 export type ProgressFn = (stage: GenStage) => void;
-
-const DEFAULT_TILE = { tileX: 500, tileY: 500 };
 
 function buildCharacter(
   spec: CharacterSpec,
@@ -35,7 +34,7 @@ function buildCharacter(
     chatHistory: [],
     state: 'idle',
     behaviorScript: { commands: [{ type: 'wander', params: { radius: 5, duration: 8 } }], loop: true },
-    position: input.position ?? DEFAULT_TILE,
+    position: input.position ?? WORLD_CENTER_TILE,
     abilities: spec.abilities,
     relationships: {},
   };

@@ -17,7 +17,7 @@ import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, INITIAL_FLOWERS, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
+import { newCreationState, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationState, type Player, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
@@ -56,7 +56,7 @@ function seedFairy(worldId: string): Character {
     chatHistory: [],
     state: 'idle',
     behaviorScript: { commands: [{ type: 'wait', params: { duration: 1 } }], loop: true },
-    position: { tileX: 500, tileY: 500 },
+    position: WORLD_CENTER_TILE,
     abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop'],
     relationships: {},
   };
@@ -944,6 +944,8 @@ export async function handleWsMessage(
         color: String(p.color ?? ''),
         spriteAsset: String(p.spriteAsset ?? ''),
         createdAt: String(p.createdAt ?? ''),
+        // profile 不带位置：整对象 upsert 会抹掉已上报的 tile，显式沿用旧值。
+        position: store.getPlayer(msg.playerId)?.position,
       };
       store.upsertPlayer(player);
     }
