@@ -30,7 +30,7 @@ async function seededProp(store: WorldStore): Promise<{ propId: string; close: (
   await app.inject({ method: 'GET', url: '/worlds/default' });
   const sock = fakeSocket();
   await createPropAsync(sock, 'default', ANON_PLAYER, '造一个小风车', adapters, store);
-  const propId = (sock.sent[0].prop as { id: string }).id;
+  const propId = ((sock.sent.find((m) => m.type === 'prop_created'))!.prop as { id: string }).id;
   await ws(store, { type: 'prop_place', worldId: 'default', propId, tileX: 12, tileY: 34 });
   return { propId, close: () => app.close() };
 }

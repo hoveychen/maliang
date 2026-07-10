@@ -90,16 +90,17 @@ test('createPropAsync: 设计→校验→持久化→推送 / 审核拦截', asy
     const adapters = createMockAdapters();
     const sock = fakeSocket();
     await createPropAsync(sock, 'default', ANON_PLAYER, '会走路的小房子', adapters, store);
-    assert.equal(sock.sent.length, 1);
-    assert.equal(sock.sent[0].type, 'prop_created');
-    const prop = sock.sent[0].prop as { id: string; spec: { parts: unknown[] }; tile: null };
+    // sent[0] 是开造即报的 prop_pending（客户端据此立熔炉），成品跟在后面
+    assert.equal(sock.sent.length, 2);
+    assert.equal(sock.sent[1].type, 'prop_created');
+    const prop = sock.sent[1].prop as { id: string; spec: { parts: unknown[] }; tile: null };
     assert.ok(prop.spec.parts.length > 0);
     assert.equal(prop.tile, null);
     assert.equal(store.listProps('default').length, 1);
 
     const sock2 = fakeSocket();
     await createPropAsync(sock2, 'default', ANON_PLAYER, '一把恐怖的枪', adapters, store);
-    assert.equal(sock2.sent[0].type, 'prop_failed');
+    assert.equal(sock2.sent[1].type, 'prop_failed');
     assert.equal(store.listProps('default').length, 1); // 没多存
   } finally {
     await close();
@@ -162,7 +163,7 @@ test('prop_place 落位回报 + worlds.json roundtrip', async () => {
     await app.inject({ method: 'GET', url: '/worlds/default' });
     const sock = fakeSocket();
     await createPropAsync(sock, 'default', ANON_PLAYER, '造一个小风车', adapters, store);
-    const propId = (sock.sent[0].prop as { id: string }).id;
+    const propId = ((sock.sent.find((m) => m.type === 'prop_created'))!.prop as { id: string }).id;
 
     const limiter = new RateLimiter(100, 100);
     const sock2 = fakeSocket();
@@ -196,5 +197,50 @@ test('prop_place 落位回报 + worlds.json roundtrip', async () => {
   } finally {
     await app.close();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 异步施法占位符：扣花成功后立刻推 prop_pending，客户端据此退出对话、就地长出魔法熔炉，
+// 孩子自由走动而不是卡在对话里干等。设计/生图慢，这条信号必须抢在它们前面发出去。
+test('createPropAsync: 扣花后立刻推 prop_pending（先于 prop_created）', async () => {
+  const { store, close } = await seededStore();
+  try {
+    const adapters = createMockAdapters();
+    const sock = fakeSocket();
+    await createPropAsync(sock, 'default', ANON_PLAYER, '一朵小花', adapters, store);
+    assert.equal(sock.sent[0]!.type, 'prop_pending', '第一条必须是 prop_pending');
+    assert.equal(sock.sent[1]!.type, 'prop_created');
+    // 花在开造那一刻就扣掉：占位符立起来的同时钱包要对得上
+    assert.ok(sock.sent[0]!.wallet, 'prop_pending 应带上扣花后的钱包');
+  } finally {
+    await close();
+  }
+});
+
+// 造失败也要让客户端能收起熔炉：prop_pending 已经发出去了，失败必须跟一条 prop_failed。
+test('createPropAsync: 审核拦截时 prop_pending 之后跟 prop_failed', async () => {
+  const { store, close } = await seededStore();
+  try {
+    const adapters = createMockAdapters();
+    const sock = fakeSocket();
+    await createPropAsync(sock, 'default', ANON_PLAYER, '一把恐怖的枪', adapters, store);
+    assert.equal(sock.sent[0]!.type, 'prop_pending');
+    assert.equal(sock.sent[1]!.type, 'prop_failed');
+  } finally {
+    await close();
+  }
+});
+
+// 花不够时根本没开造：不该立熔炉，只推 reward_denied。
+test('createPropAsync: 小红花不足 → 不发 prop_pending', async () => {
+  const { store, close } = await seededStore();
+  try {
+    const adapters = createMockAdapters();
+    while (store.spendFlower('default', ANON_PLAYER)) { /* 花光 */ }
+    const sock = fakeSocket();
+    await createPropAsync(sock, 'default', ANON_PLAYER, '一朵小花', adapters, store);
+    assert.ok(!sock.sent.some((m) => m.type === 'prop_pending'), '没开造就不该立熔炉');
+  } finally {
+    await close();
   }
 });

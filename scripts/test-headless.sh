@@ -27,6 +27,7 @@ echo "== import（刷新类缓存）=="
 UNIT_TESTS=(
   test_sdf_math
   test_sdf_prop
+  test_placeholder_specs
   test_sdf_animator
   test_world_grid
   test_terrain_map
@@ -117,6 +118,7 @@ run_test test_visual_greeting      --fixed-fps 10 --quit-after 60
 run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
 run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
 run_test test_visual_props         --fixed-fps 10 --quit-after 120
+run_test test_casting_placeholder  --fixed-fps 10 --quit-after 120
 run_test test_visual_settings      --fixed-fps 10 --quit-after 80
 run_test test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
 run_test test_visual_scene_switch   --fixed-fps 10 --quit-after 60

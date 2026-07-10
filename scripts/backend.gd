@@ -11,6 +11,7 @@ signal gen_complete(data: Dictionary)      ## 含 character + 最新 wallet
 signal gen_denied(data: Dictionary)        ## 小红花不足，未进造角色（reason=no_flowers + 引导语 + wallet）
 ## 引导式造角色：小仙子追问一轮（含图标选项 + 仙子问句 TTS 资源）
 signal creation_prompt(data: Dictionary)
+signal prop_pending(data: Dictionary)      ## 造物开工（已扣花）：客户端立起魔法熔炉，含最新 wallet
 signal prop_created(data: Dictionary)      ## 含 prop + 最新 wallet
 signal prop_denied(data: Dictionary)       ## 小红花不足，未造物（reason=no_flowers + 引导语 + wallet）
 signal prop_failed(reason: String)
@@ -242,6 +243,8 @@ func _dispatch(data: Dictionary) -> void:
 			tts_failed.emit()
 		"scene_entered":
 			scene_entered.emit(data)
+		"prop_pending":
+			prop_pending.emit(data)
 		"prop_created":
 			prop_created.emit(data)
 		"prop_denied":
