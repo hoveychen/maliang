@@ -11,6 +11,8 @@ func _initialize() -> void:
 	fails += _test_reset_drops_segment()
 	fails += _test_level_exposed()
 	fails += _test_cap_reason()
+	fails += _test_faint_sound_no_trigger()
+	fails += _test_loud_voice_still_triggers()
 	if fails == 0:
 		print("voice_vad tests PASS")
 	else:
@@ -95,6 +97,27 @@ func _test_cap_reason() -> int:
 	var capped := events.filter(func(e: Dictionary) -> bool: return e.get("reason", "") == "cap")
 	return _check("continuous sound ends via cap", capped.size() >= 1, true)
 
+## 安静房间里的微弱稳定声（rms≈0.021：呼吸/桌面轻碰/BGM 回升尾音）不得触发开口。
+## 真机实测 thr 恒被钳在 ABS_MIN，而真人说话 rms≈0.06–0.08——下限太低就会误触发，
+## 误触发录到近静音、ASR 返回空、立刻重开麦，形成连环录（缺陷 ①⑤ 互相喂养）。
+func _test_faint_sound_no_trigger() -> int:
+	var vad := VoiceVad.new()
+	var fails := 0
+	_feed_chunked(vad, _silence(500)) # 让噪声底收敛到接近 0
+	var events := _feed_chunked(vad, _voice_amp(800, 0.03)) # rms = 0.03/√2 ≈ 0.021
+	events.append_array(_feed_chunked(vad, _silence(1200)))
+	var starts := events.filter(func(e: Dictionary) -> bool: return e["type"] == "start")
+	fails += _check("微弱稳定声不触发开口", starts.size(), 0)
+	return fails
+
+## 真人音量（幅度 0.5，rms≈0.354）必须照常触发——抬门槛不能把孩子挡在外面。
+func _test_loud_voice_still_triggers() -> int:
+	var vad := VoiceVad.new()
+	_feed_chunked(vad, _silence(500))
+	var events := _feed_chunked(vad, _voice_amp(600, 0.5))
+	var starts := events.filter(func(e: Dictionary) -> bool: return e["type"] == "start")
+	return _check("正常音量仍触发开口", starts.size(), 1)
+
 ## ── 合成 PCM 工具 ────────────────────────────────────────────────────────
 
 ## 模拟真实采集节奏：按 ~90ms 分片喂入，聚合所有事件。
@@ -114,11 +137,15 @@ func _silence(ms: int) -> PackedByteArray:
 
 ## 440Hz 正弦、幅度 0.5（RMS≈0.35，远超触发阈值）模拟人声。
 func _voice(ms: int) -> PackedByteArray:
+	return _voice_amp(ms, 0.5)
+
+## 440Hz 正弦、指定幅度（RMS = amp/√2）。用来造「微弱声」与「正常人声」两档。
+func _voice_amp(ms: int, amp: float) -> PackedByteArray:
 	var n := ms * VoiceVad.BYTES_PER_MS / 2
 	var out := PackedByteArray()
 	out.resize(n * 2)
 	for i in range(n):
-		var s := sin(TAU * 440.0 * float(i) / 16000.0) * 0.5
+		var s := sin(TAU * 440.0 * float(i) / 16000.0) * amp
 		var v := int(s * 32767.0)
 		if v < 0:
 			v += 65536

@@ -149,6 +149,10 @@ var _speak_anim_t := 0.0           ## 说话呼吸弹跳相位
 var _recording := false
 var _vad_log := false               ## 录音诊断 logcat（仅 debug）：VAD 收尾原因/阈值/静音累计
 var _vad_log_accum := 0.0           ## 录音期周期打点节流（每 1s 一行）
+# 空识别退避（缺陷 ①）：误触发录到近静音 → ASR 返回空 → 若立刻重开麦就会被噪声再触发，
+# 形成连环录。空结果不再当一轮正常结束，而是闭麦退避一段（连续空则指数退避，见 InteractionFsm）。
+var _empty_streak := 0              ## 连续空识别次数（拿到有效转写即清零）
+var _cooldown_t := 0.0              ## 退避剩余秒数（>0 即闭麦，派生为 COOLDOWN 态）
 # 奖赏系统：进行中委托 + 小红花钱包（服务端权威，world_state/task_complete 同步；见 docs/reward-flower-design.md）
 var active_task: Dictionary = {}   ## 进行中委托（空=无），见 _set_active_task
 var wallet: Dictionary = { "flowers": 0, "stampProgress": 0, "stampsTotal": 0 } ## 小红花钱包
@@ -475,7 +479,7 @@ static func compute_dialog_cam(center: Vector2, speaker_logical: Vector2, base_h
 ## 对话中判定「谁在说话」：NPC 的 TTS 或（对仙子时）仙子语音在播 = npc；思考中 = idle（构图归中）；
 ## 其余（录音中 / 静待玩家开口）= player。焦点/距离据此朝对应角色偏移（见 _process 焦点块）。
 func _dialog_speaker() -> String:
-	if _tts_player.playing or _tts_pending:
+	if InteractionFsm.tts_speaking(_fsm_inputs()):
 		return "npc"
 	var fairy := _find_fairy()
 	if not fairy.is_empty() and selected == fairy.get("node") \
@@ -689,7 +693,7 @@ func _check_poi(delta: float) -> void:
 	if _poi_check_t > 0.0:
 		return
 	_poi_check_t = 2.0
-	if selected != null or _recording or thinking_label.visible or _tts_player.playing or _tts_pending:
+	if InteractionFsm.player_engaged(_fsm_inputs()):
 		return
 	for poi in POIS:
 		var pp := TerrainMap.tile_center(poi["tile"])
@@ -706,7 +710,7 @@ func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
 	if fairy_voice == null:
 		return
 	_update_fairy_bubble(fairy)
-	if selected != null or _recording or thinking_label.visible or _tts_player.playing or _tts_pending:
+	if InteractionFsm.player_engaged(_fsm_inputs()):
 		return
 	_fairy_chat_t -= delta
 	if _fairy_chat_t > 0.0:
@@ -1713,11 +1717,12 @@ func _process(delta: float) -> void:
 	_step_edge_tts(delta)
 	tp = _prof_lap(tp, "voice")
 	# 语音链路占用时压低 BGM，给人声让路（与开放麦闭麦判定同一组信号）
-	game_audio.set_ducked(_recording or thinking_label.visible or _tts_player.playing \
-			or _tts_pending or (fairy_voice != null and fairy_voice.is_playing()))
-	# 录音期直接静音 BGM（比 duck 更狠）：外放 BGM 会被无 AEC 的麦克风回灌，
-	# 低电平间歇声不断把 VAD 静音计数打回 0，说完话断不了句、拖到 12s 硬顶（真机 logcat 实锤）。
-	game_audio.set_music_muted(_recording)
+	var fsm_in := _fsm_inputs()
+	game_audio.set_ducked(InteractionFsm.voice_busy(fsm_in))
+	# 对话期间静音 BGM（比 duck 更狠）：无 AEC 的麦克风会把外放 BGM 收进去，音乐峰值
+	# （rms≈0.046–0.085，与真人说话同量级）直接顶开 VAD，自己开录、ASR 转出空——真机 logcat 实锤。
+	# 只在角色说话时放音乐，其余对话时间一律静音（口径见 InteractionFsm.music_muted）。
+	game_audio.set_music_muted(InteractionFsm.music_muted(fsm_in))
 	tp = _prof_lap(tp, "duck")
 	_step_hop(delta)  # 进对话时玩家跳向站位（在焦点/摆位之前推进，相机随之贴合）
 	_step_phone_ui(delta)
@@ -2415,6 +2420,7 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	_mic.start()
 	_vad = VoiceVad.new()
 	_unmute_t = 0.0
+	_reset_empty_streak() # 新一场对话不继承上一场的空识别退避
 	_greet_on_enter(d) # 对方先开口打招呼（播放期间 _step_voice 自动闭麦，说完再放开）
 
 ## 进对话对方先打招呼：小仙子走预制语音（离线可用、零延迟），普通 NPC 走服务端招呼
@@ -2443,6 +2449,7 @@ func _exit_interaction() -> void:
 	_mic.stop()
 	_vad = null
 	selected = null
+	_reset_empty_streak()
 	# 中途退出时清掉未完成的小跳（保留当前位置，不瞬移回落点）
 	if not player.is_empty():
 		player.erase("_hop")
@@ -2976,6 +2983,21 @@ func _setup_local_asr() -> void:
 	_asr_local.connect("asr_error", _on_local_asr_error)
 	_asr_local.initialize()
 
+## 一次空识别：多半是 VAD 误触发。闭麦退避一段再听，连续空则指数退避——
+## 否则刚放开麦就被同一串噪声再次触发，连环录（缺陷 ①）。
+func _begin_empty_cooldown() -> void:
+	_empty_streak += 1
+	_cooldown_t = InteractionFsm.empty_cooldown(_empty_streak)
+	if _vad != null:
+		_vad.reset()
+	if _vad_log:
+		print("[vad] EMPTY streak=%d cooldown=%.1fs" % [_empty_streak, _cooldown_t])
+
+## 拿到有效转写：退避清零，恢复正常聆听节奏。
+func _reset_empty_streak() -> void:
+	_empty_streak = 0
+	_cooldown_t = 0.0
+
 func _on_local_asr_final(text: String) -> void:
 	_local_asr_session = false
 	_vt_asr_done = Time.get_ticks_msec() # 端侧识别出文本
@@ -2986,7 +3008,9 @@ func _on_local_asr_final(text: String) -> void:
 		thinking_label.visible = false
 		heard_label.text = "没听清，再说一次试试"
 		heard_label.visible = true
+		_begin_empty_cooldown()
 		return
+	_reset_empty_streak()
 	_vt_send = Time.get_ticks_msec() # 发转写 → 到 character_response 即纯 LLM 耗时
 	backend.send_voice_transcript(world_id, _selected_id(), t)
 
@@ -3002,12 +3026,34 @@ func _on_local_asr_error(msg: String) -> void:
 # ── 近身对话开放麦（VAD 自动断句：开口即录、说完即发，零按钮零模式）─────────
 
 ## 每帧驱动：角色思考/说话时闭麦（半双工防自听），其余时间把麦克风增量喂 VAD。
+## 当前帧的交互标志位快照 → 喂给显式状态机（见 interaction_fsm.gd）。
+## 字段与旧 _step_voice 的闭麦表达式逐字对应，行为等价由 test_interaction_fsm 的 64 组合护栏保证。
+func _fsm_inputs() -> InteractionFsm.Inputs:
+	return InteractionFsm.Inputs.new({
+		"in_interaction": selected != null,
+		"approaching": not _approach.is_empty(),
+		"thinking": thinking_label != null and thinking_label.visible,
+		"tts_busy": (_tts_player != null and _tts_player.playing) or _tts_pending,
+		"fairy_speaking": fairy_voice != null and fairy_voice.is_playing(),
+		"recording": _recording,
+		"in_creation": _in_creation,
+		"cooldown": _cooldown_t > 0.0,
+	})
+
+## 本帧的显式交互状态。
+func _fsm_state() -> InteractionFsm.State:
+	return InteractionFsm.derive(_fsm_inputs())
+
 func _step_voice(delta: float) -> void:
 	if _vad == null:
 		return
+	var x := _fsm_inputs()
+	# 退避只在「否则就该开麦」时倒计时：角色说话/思考期本就闭麦，别把退避空烧掉，
+	# 否则 TTS 一停麦就全开，退避形同虚设。
+	if _cooldown_t > 0.0 and not (x.thinking or x.speaking()):
+		_cooldown_t = maxf(_cooldown_t - delta, 0.0)
 	var pcm := _mic.drain_pcm16k() # 闭麦期间也持续排空采集缓冲，恢复聆听时不会吃到角色的声音
-	if thinking_label.visible or _tts_player.playing or _tts_pending \
-			or (fairy_voice != null and fairy_voice.is_playing()):
+	if not InteractionFsm.mic_open(InteractionFsm.derive(x)):
 		if _recording:
 			_utterance_cancel() # 时序兜底：闭麦瞬间还在录 → 静默丢弃
 		_vad.reset()
@@ -3135,9 +3181,11 @@ func _on_character_response(data: Dictionary) -> void:
 		if transcript.is_empty():
 			heard_label.text = "没听清，再说一次试试"
 			game_audio.play_sfx("oops")
+			_begin_empty_cooldown() # 服务端 ASR 路径的空结果，同样退避（缺陷 ①）
 		else:
 			heard_label.text = "听到：%s" % transcript
 			game_audio.play_sfx("bell")
+			_reset_empty_streak()
 		heard_label.visible = true
 	banner.text = String(data.get("replyText", ""))
 	banner.visible = true
@@ -3659,7 +3707,7 @@ func _on_task_complete(data: Dictionary) -> void:
 ## 得奖语音表扬（委托人音色）：正在出声就不打断——表扬是锦上添花。
 ## 老路径服务端合成给 ttsAsset；clientTts 给 text+voiceId 本地合成。
 func _on_praise_tts(data: Dictionary) -> void:
-	if _tts_player.playing or _tts_pending:
+	if InteractionFsm.tts_speaking(_fsm_inputs()):
 		return
 	var asset := String(data.get("ttsAsset", ""))
 	if not asset.is_empty():
