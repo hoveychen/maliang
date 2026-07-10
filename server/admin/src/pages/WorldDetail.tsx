@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { apiPost, fmtTs, useApi } from '../api.ts';
 import { MAX_FLOWERS, STAMP_GLYPHS, STAMPS_PER_FLOWER, TASK_TYPE_LABELS, type WorldDetail } from '../types.ts';
 import { AnimStatusBadge, Fallback, PageHead, RowLink, ShortId, Sprite, Stats } from '../components.tsx';
+import { playerLabel } from './Worlds.tsx';
 
 const TABS = [
   { key: 'characters', label: '角色' },
@@ -60,8 +61,8 @@ export function WorldDetailPage() {
     ? {
         characters: data.characters.length,
         props: data.props.length,
-        events: data.visits.length + (data.activeTask ? 1 : 0),
-        wallet: data.wallet.flowers,
+        events: data.visits.length + data.activeTasks.length,
+        wallet: data.wallets.length,
       }
     : {};
 
@@ -149,19 +150,20 @@ export function WorldDetailPage() {
 
           {tab === 'events' && (
             <>
-              <h2 className="sect" style={{ marginTop: 4 }}>进行中委托</h2>
-              {data.activeTask ? (
-                <div className="panel">
+              <h2 className="sect" style={{ marginTop: 4 }}>进行中委托（按玩家）</h2>
+              {data.activeTasks.length === 0 ? <div className="empty">当前没有进行中的委托</div> : data.activeTasks.map(({ playerId, task }) => (
+                <div className="panel" key={playerId} style={{ marginBottom: 8 }}>
                   <dl className="kv">
-                    <dt>类型</dt><dd><span className="badge seal">{TASK_TYPE_LABELS[data.activeTask.type] ?? data.activeTask.type}</span></dd>
-                    <dt>委托人</dt><dd>{data.activeTask.npcName} <ShortId id={data.activeTask.npcId} /></dd>
-                    {data.activeTask.targetName && <><dt>对象</dt><dd>{data.activeTask.targetName}</dd></>}
-                    {data.activeTask.locationName && <><dt>地点</dt><dd>{data.activeTask.locationName}</dd></>}
-                    {data.activeTask.message && <><dt>要带的话</dt><dd>{data.activeTask.message}</dd></>}
-                    <dt>完成盖章</dt><dd>{STAMP_GLYPHS[data.activeTask.stampStyle] ?? '❔'} {data.activeTask.stampStyle}</dd>
+                    <dt>玩家</dt><dd>{playerLabel(playerId)}</dd>
+                    <dt>类型</dt><dd><span className="badge seal">{TASK_TYPE_LABELS[task.type] ?? task.type}</span></dd>
+                    <dt>委托人</dt><dd>{task.npcName} <ShortId id={task.npcId} /></dd>
+                    {task.targetName && <><dt>对象</dt><dd>{task.targetName}</dd></>}
+                    {task.locationName && <><dt>地点</dt><dd>{task.locationName}</dd></>}
+                    {task.message && <><dt>要带的话</dt><dd>{task.message}</dd></>}
+                    <dt>完成盖章</dt><dd>{STAMP_GLYPHS[task.stampStyle] ?? '❔'} {task.stampStyle}</dd>
                   </dl>
                 </div>
-              ) : <div className="empty">当前没有进行中的委托</div>}
+              ))}
 
               <h2 className="sect">会话（Visit）</h2>
               {data.visits.length === 0 ? <div className="empty">还没有会话</div> : (
@@ -188,22 +190,23 @@ export function WorldDetailPage() {
           )}
 
           {tab === 'wallet' && (
-            <table className="grid" style={{ maxWidth: 420 }}>
-              <tbody>
-                <tr>
-                  <td>🌸 小红花</td>
-                  <td className="num-cell"><b>{data.wallet.flowers}</b><span className="aux">/{MAX_FLOWERS}</span></td>
-                </tr>
-                <tr>
-                  <td>未结算盖章</td>
-                  <td className="num-cell">{data.wallet.stampProgress}<span className="aux">/{STAMPS_PER_FLOWER}</span></td>
-                </tr>
-                <tr>
-                  <td>累计盖章</td>
-                  <td className="num-cell">{data.wallet.stampsTotal}</td>
-                </tr>
-              </tbody>
-            </table>
+            data.wallets.length === 0 ? <div className="empty">还没有玩家领过钱包（首次读取时发初始小红花）</div> : (
+              <table className="grid" style={{ maxWidth: 560 }}>
+                <thead>
+                  <tr><th>玩家</th><th>🌸 小红花</th><th>未结算盖章</th><th>累计盖章</th></tr>
+                </thead>
+                <tbody>
+                  {data.wallets.map(({ playerId, wallet }) => (
+                    <tr key={playerId}>
+                      <td>{playerLabel(playerId)}</td>
+                      <td className="num-cell"><b>{wallet.flowers}</b><span className="aux">/{MAX_FLOWERS}</span></td>
+                      <td className="num-cell">{wallet.stampProgress}<span className="aux">/{STAMPS_PER_FLOWER}</span></td>
+                      <td className="num-cell">{wallet.stampsTotal}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
           )}
         </>
       )}

@@ -1,10 +1,15 @@
 import { useApi } from '../api.ts';
 import { STAMPS_PER_FLOWER, TASK_TYPE_LABELS, type Wallet, type WorldRow } from '../types.ts';
-import { Fallback, PageHead, RowLink } from '../components.tsx';
+import { Fallback, PageHead, RowLink, ShortId } from '../components.tsx';
 
 /** 钱包一行摘要：小红花数 + 未结算盖章进度。 */
 export function walletSummary(wallet: Wallet): string {
   return `🌸×${wallet.flowers} · 章 ${wallet.stampProgress}/${STAMPS_PER_FLOWER}`;
+}
+
+/** 钱包/委托按玩家分后的行主标签：匿名连接共用 playerId=''。 */
+export function playerLabel(playerId: string) {
+  return playerId ? <ShortId id={playerId} /> : <span className="empty-cell">匿名</span>;
 }
 
 export function WorldsPage() {
@@ -32,11 +37,21 @@ export function WorldsPage() {
                 <td className="num-cell">{w.characterCount}{w.fairyCount > 0 && <span className="mono"> (仙×{w.fairyCount})</span>}</td>
                 <td className="num-cell">{w.propCount}</td>
                 <td className="num-cell">{w.activeVisitCount > 0 ? <b>{w.activeVisitCount}</b> : 0}/{w.visitCount}</td>
-                <td className="mono">{walletSummary(w.wallet)}</td>
+                <td className="mono">
+                  {w.wallets.length === 0
+                    ? <span className="empty-cell">—</span>
+                    : w.wallets.map((e) => (
+                        <div key={e.playerId}>{playerLabel(e.playerId)} {walletSummary(e.wallet)}</div>
+                      ))}
+                </td>
                 <td>
-                  {w.activeTask
-                    ? <span className="badge seal">{TASK_TYPE_LABELS[w.activeTask.type] ?? w.activeTask.type} · {w.activeTask.npcName}</span>
-                    : <span className="empty-cell">无</span>}
+                  {w.activeTasks.length === 0
+                    ? <span className="empty-cell">无</span>
+                    : w.activeTasks.map((e) => (
+                        <div key={e.playerId}>
+                          <span className="badge seal">{TASK_TYPE_LABELS[e.task.type] ?? e.task.type} · {e.task.npcName}</span>
+                        </div>
+                      ))}
                 </td>
                 <td className="mono">{w.locations.join('、') || '—'}</td>
               </RowLink>
