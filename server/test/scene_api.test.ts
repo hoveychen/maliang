@@ -143,3 +143,43 @@ test('GET /worlds/:id：还没入库场景时 scenes 为空数组（客户端据
   const world = await a.inject({ method: 'GET', url: '/worlds/w1' });
   assert.deepEqual((world.json() as { scenes: unknown[] }).scenes, []);
 });
+
+// ── POI 权威方向：服务端 scenes.pois 优先于客户端上报 ────────────────────
+
+function withScene(pois: { name: string }[]): WorldStore {
+  const s = new WorldStore();
+  s.createWorld('w1');
+  s.upsertScene({
+    worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h', gridTiles: REQUIRED_GRID,
+    pois: pois.map((p) => ({ tile: [1, 1] as [number, number], radius: 5, trigger: 't', name: p.name, aliases: [] })),
+    portals: [],
+  });
+  return s;
+}
+
+test('getLocations：POI 入库后以服务端为准，忽略客户端上报', () => {
+  const s = withScene([{ name: '池塘' }, { name: '大山' }]);
+  s.setLocations('w1', ['客户端瞎报的地名']);
+  assert.deepEqual(s.getLocations('w1'), ['池塘', '大山']);
+});
+
+test('getLocations：POI 未入库时回退到客户端上报（旧环境不退化）', () => {
+  const s = new WorldStore();
+  s.createWorld('w1');
+  s.setLocations('w1', ['池塘', '风车']);
+  assert.deepEqual(s.getLocations('w1'), ['池塘', '风车']);
+});
+
+test('getLocations：跨场景摊平并去重', () => {
+  const s = withScene([{ name: '池塘' }, { name: '池塘' }]);
+  s.upsertScene({
+    worldId: 'w1', sceneId: 'forest', name: '森林', terrainAsset: 'h2', gridTiles: REQUIRED_GRID,
+    pois: [{ tile: [2, 2], radius: 5, trigger: 't2', name: '树屋', aliases: [] }], portals: [],
+  });
+  assert.deepEqual(s.getLocations('w1').sort(), ['树屋', '池塘']);
+});
+
+test('getLocations：空名字的 POI 不进地名表', () => {
+  const s = withScene([{ name: '' }, { name: '池塘' }]);
+  assert.deepEqual(s.getLocations('w1'), ['池塘']);
+});

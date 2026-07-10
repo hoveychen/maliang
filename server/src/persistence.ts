@@ -391,12 +391,27 @@ export class WorldStore {
     return rows.map((r) => JSON.parse(r.data) as WorldProp);
   }
 
-  /** 客户端上报的世界地点名（喂给意图 LLM 让「去某地」说的是真实地名）。 */
+  /**
+   * 客户端 world_info 上报的地点名。**兼容路径**：场景已入库时不再需要它。
+   * 保留是因为老客户端仍会上报，且 POI 尚未入库的环境要能照常派委托。
+   */
   setLocations(worldId: string, names: string[]): void {
     this.#locations.set(worldId, names);
   }
 
+  /**
+   * 世界的地点名（喂给意图 LLM 让「去某地」说的是真实地名）。
+   * 权威来源是 scenes.pois——服务端说了算，不再依赖客户端上报（那个方向是反的）。
+   * POI 还没入库时回退到客户端上报的内存清单，保证旧环境不退化。
+   *
+   * 多场景时这里会把所有场景的地点摊平，委托可能指向别的场景。
+   * 步骤⑤真做 portal 时要按玩家当前场景过滤（见 docs/multi-scene-design.md 待确认项）。
+   */
   getLocations(worldId: string): string[] {
+    const fromScenes = this.listScenes(worldId)
+      .flatMap((s) => s.pois.map((p) => p.name))
+      .filter((n) => n.length > 0);
+    if (fromScenes.length > 0) return [...new Set(fromScenes)];
     return this.#locations.get(worldId) ?? [];
   }
 
