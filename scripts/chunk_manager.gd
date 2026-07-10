@@ -14,8 +14,8 @@ const CHUNKS_PER_SIDE := WorldGrid.GRID_TILES / CHUNK_TILES            ## 3（75
 const R := 1                                                          ## 半径(区块)→ 3×3 = 正好整个小世界一遍，无重复
 const RENDER_RADIUS := 110.0                                          ## 圆形渲染半径，覆盖全部 3×3（远处由雾渐隐）
 ## world-bending 在 GPU 位移顶点，但视锥裁剪按原始 AABB → 高处/远处网格会被误剔除。
-## 给所有弯曲网格设大裁剪边距，避免接近屏幕边缘时整块消失。
-const CULL_MARGIN := 220.0
+## 外扩量的推导见 BendMat.CULL_MARGIN（最坏下压 30m，取 35）。
+const CULL_MARGIN := BendMat.CULL_MARGIN
 
 ## KayKit CC0 资产（见 assets/kaykit/*/License）。Hexagon 建筑是微缩比例，需放大。
 ## 树/灌木改用 SDF 烘焙棉花糖布景（assets/sdf_props/*.json → tools/bake_sdf_deco.gd 产
@@ -109,10 +109,13 @@ var _water_mat: ShaderMaterial = null
 ## wrapped 区块 → 已向 OccupancyMap 登记的占地 [[origin_tile, w, h], ...]，重刷时释放。
 var _claims: Dictionary = {}
 
-## AdaptiveQuality 低配档：地形省掉路/崖壁的第二张细节贴图采样（见 terrain_ground.gdshader）。
+## AdaptiveQuality 低配档：地形省掉路/崖壁的第二张细节贴图采样（见 terrain_ground.gdshader），
+## 水面省掉第二层错速细节采样（见 water_surface.gdshader）。
 func set_terrain_low_detail(on: bool) -> void:
 	if _ground_mat != null:
 		_ground_mat.set_shader_parameter("low_detail", on)
+	if _water_mat != null:
+		_water_mat.set_shader_parameter("low_detail", on)
 ## 语音生成的动态 SDF 物件（运行时登记，区块重刷幸存）：
 ## { "spec_data": Dictionary, "tile": Vector2i(全局), "yaw": float, "wander": float }
 var _dynamic_props: Array = []

@@ -3,19 +3,21 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://of7bccm6iq8l"
-path="res://.godot/imported/story_door.png-baaaafc75e1a7969f597c496aca74a85.ctex"
+path.s3tc="res://.godot/imported/story_door.png-baaaafc75e1a7969f597c496aca74a85.s3tc.ctex"
+path.etc2="res://.godot/imported/story_door.png-baaaafc75e1a7969f597c496aca74a85.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/ui/story_door.png"
-dest_files=["res://.godot/imported/story_door.png-baaaafc75e1a7969f597c496aca74a85.ctex"]
+dest_files=["res://.godot/imported/story_door.png-baaaafc75e1a7969f597c496aca74a85.s3tc.ctex", "res://.godot/imported/story_door.png-baaaafc75e1a7969f597c496aca74a85.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0

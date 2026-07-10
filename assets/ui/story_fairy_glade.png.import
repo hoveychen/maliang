@@ -3,19 +3,21 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dvvqroccd1p83"
-path="res://.godot/imported/story_fairy_glade.png-735d5b96b42d6b5750f509967a5c0989.ctex"
+path.s3tc="res://.godot/imported/story_fairy_glade.png-735d5b96b42d6b5750f509967a5c0989.s3tc.ctex"
+path.etc2="res://.godot/imported/story_fairy_glade.png-735d5b96b42d6b5750f509967a5c0989.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/ui/story_fairy_glade.png"
-dest_files=["res://.godot/imported/story_fairy_glade.png-735d5b96b42d6b5750f509967a5c0989.ctex"]
+dest_files=["res://.godot/imported/story_fairy_glade.png-735d5b96b42d6b5750f509967a5c0989.s3tc.ctex", "res://.godot/imported/story_fairy_glade.png-735d5b96b42d6b5750f509967a5c0989.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0

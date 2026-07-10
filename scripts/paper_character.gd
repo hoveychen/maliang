@@ -19,6 +19,21 @@ const SUBDIV_H := 12
 static var _shader: Shader = null
 static var _xray_shader: Shader = null
 
+## X 光穿透剪影开关（AdaptiveQuality 档位驱动，同 SdfProp._snap_iters 模式）：
+## 该 pass 每角色每帧多画一个全 quad 透明面并逐像素采样深度图，老 Mali 上深度采样
+## 打断 tiled 渲染快路径。默认全平台开——角色走到房子/树后面仍见剪影是体验的一部分
+## （老板拍板 T1 保留），只有 T2 最弱档由 AdaptiveQuality 摘除。
+static var _xray_enabled := true
+
+## 换档入口：作用于已存在（paper_chars 组）与后续创建的所有角色。
+static func set_xray_enabled(on: bool, tree: SceneTree) -> void:
+	_xray_enabled = on
+	for n in tree.get_nodes_in_group("paper_chars"):
+		var p := n as PaperCharacter
+		if p != null:
+			p._mat.next_pass = p._xray_mat if on else null
+			p._pm_flutter = INF  # 重挂后强制下次 set_paper_motion 补齐 X 光 pass 的参数
+
 var texture: Texture2D = null:
 	set(v):
 		texture = v
@@ -54,12 +69,16 @@ func _init() -> void:
 	_mat.shader = _shader
 	_xray_mat = ShaderMaterial.new()
 	_xray_mat.shader = _xray_shader
-	_mat.next_pass = _xray_mat  # 穿透剪影作为主材质的 next_pass，排在不透明之后读深度
+	if _xray_enabled:
+		_mat.next_pass = _xray_mat  # 穿透剪影作为主材质的 next_pass，排在不透明之后读深度
 	var q := QuadMesh.new()
 	q.subdivide_width = SUBDIV_W
 	q.subdivide_depth = SUBDIV_H
 	mesh = q
 	material_override = _mat
+
+func _enter_tree() -> void:
+	add_to_group("paper_chars")  # set_xray_enabled 换档批量寻址用
 
 func setup(tex: Texture2D, color: Color, cname: String) -> void:
 	char_name = cname
@@ -73,12 +92,26 @@ func setup(tex: Texture2D, color: Color, cname: String) -> void:
 	# 脚下伪影（替代实时阴影，见 BlobShadow 注释）；换贴图重设尺寸时同步重挂
 	BlobShadow.attach(self, clampf(float(tex.get_width()) * pixel_size * 0.38, 0.4, 1.4))
 
+## 演出参数量化步长（米）：4mm 对 45mm 的慢呼吸卷曲肉眼不可辨，
+## 却把待机时的 uniform 上传从每帧降到 ~1/5——旧版每角色每帧 4 次 set_shader_parameter。
+const PM_STEP := 0.004
+var _pm_flutter := INF
+var _pm_curl := INF
+
 ## 纸片演出参数（world.gd 每帧驱动）：走路飘动幅度 / 待机呼吸卷曲，单位米。
+## 量化脏检查：值未跨过步长格子就不重传；X 光 pass 摘除时也不给游离材质上传。
 func set_paper_motion(flutter_amp: float, curl: float) -> void:
-	_mat.set_shader_parameter("flutter_amp", flutter_amp)
-	_mat.set_shader_parameter("curl", curl)
-	_xray_mat.set_shader_parameter("flutter_amp", flutter_amp)
-	_xray_mat.set_shader_parameter("curl", curl)
+	var qf := snappedf(flutter_amp, PM_STEP)
+	var qc := snappedf(curl, PM_STEP)
+	if qf == _pm_flutter and qc == _pm_curl:
+		return
+	_pm_flutter = qf
+	_pm_curl = qc
+	_mat.set_shader_parameter("flutter_amp", qf)
+	_mat.set_shader_parameter("curl", qc)
+	if _mat.next_pass != null:
+		_xray_mat.set_shader_parameter("flutter_amp", qf)
+		_xray_mat.set_shader_parameter("curl", qc)
 
 ## 从静态立绘切到 idle 动画图集。meta 为服务端 SpriteSheetMeta（cols/rows/frameCount/fps/cellW/cellH）。
 ## world_height：期望世界高度（米），与切换前静态立绘保持一致，观感不跳。phase：相位偏移（秒）。

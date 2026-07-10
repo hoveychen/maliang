@@ -80,7 +80,7 @@ func _init() -> void:
 		var mat := prop.material_override as ShaderMaterial
 		fails += _check("prop main material", mat != null, true)
 		fails += _check("prop outline pass", (mat.next_pass as ShaderMaterial) != null, true)
-		fails += _check("prop cull margin", prop.extra_cull_margin > 100.0, true)
+		fails += _check("prop cull margin", prop.extra_cull_margin == BendMat.CULL_MARGIN, true)
 		var pos: PackedVector4Array = mat.get_shader_parameter("prim_pos")
 		fails += _check("uniform prim_pos size", pos.size(), prop.prims.size())
 		var cnt: int = mat.get_shader_parameter("prim_count")

@@ -12,6 +12,10 @@ var game_audio: GameAudio
 var _leaving := false
 
 func _ready() -> void:
+	# 移动端全局限帧（Engine.max_fps 跨场景持久，menu 是主场景入口一次设够）：
+	# 长期运行不发热是硬诉求，30fps 单帧功耗近乎减半。桌面不限。
+	if OS.has_feature("mobile"):
+		Engine.max_fps = AdaptiveQuality.FPS_CAP
 	_setup_background()
 	_setup_fairy()
 	_setup_title()

@@ -7,7 +7,7 @@ render_mode cull_back, diffuse_lambert, specular_disabled, world_vertex_coords;
 // 逻辑/数据仍是纯平铺环面，只有渲染弯曲。
 
 uniform vec3 albedo : source_color = vec3(0.46, 0.72, 0.40);
-uniform sampler2D albedo_tex : source_color, hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D albedo_tex : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;  // 调色板/平色块贴图，各向异性无收益
 uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap, repeat_enable;
 uniform float normal_depth : hint_range(-2.0, 2.0) = 0.0;
 uniform float roughness : hint_range(0.0, 1.0) = 0.95;

@@ -176,8 +176,10 @@ func _advance(delta: float) -> void:
 		fading.volume_db = lerpf(target, -40.0, t)
 		if _fade_left == 0.0:
 			fading.stop()
-	else:
-		active.volume_db = lerpf(active.volume_db, target, minf(delta * DUCK_LERP, 1.0))
+	elif not is_equal_approx(active.volume_db, target):
+		# 已在目标音量就不再逐帧写 volume_db（每次赋值都触达 AudioServer）
+		active.volume_db = target if absf(active.volume_db - target) < 0.05 \
+				else lerpf(active.volume_db, target, minf(delta * DUCK_LERP, 1.0))
 
 func _begin_crossfade() -> void:
 	step_index = (step_index + 1) % _steps.size()

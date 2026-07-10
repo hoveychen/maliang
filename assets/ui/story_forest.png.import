@@ -3,19 +3,21 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://blj08xogw32dv"
-path="res://.godot/imported/story_forest.png-3a9c1ff1fec47670268b7ede25a91995.ctex"
+path.s3tc="res://.godot/imported/story_forest.png-3a9c1ff1fec47670268b7ede25a91995.s3tc.ctex"
+path.etc2="res://.godot/imported/story_forest.png-3a9c1ff1fec47670268b7ede25a91995.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/ui/story_forest.png"
-dest_files=["res://.godot/imported/story_forest.png-3a9c1ff1fec47670268b7ede25a91995.ctex"]
+dest_files=["res://.godot/imported/story_forest.png-3a9c1ff1fec47670268b7ede25a91995.s3tc.ctex", "res://.godot/imported/story_forest.png-3a9c1ff1fec47670268b7ede25a91995.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
