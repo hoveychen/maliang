@@ -21,9 +21,9 @@ static var _xray_shader: Shader = null
 
 ## X 光穿透剪影开关（AdaptiveQuality 档位驱动，同 SdfProp._snap_iters 模式）：
 ## 该 pass 每角色每帧多画一个全 quad 透明面并逐像素采样深度图，老 Mali 上深度采样
-## 打断 tiled 渲染快路径，而绝大多数时间角色根本没被遮挡。移动端默认关（T1/T2 档），
-## T0 强机档由 AdaptiveQuality 重新启用；桌面恒开。
-static var _xray_enabled := not OS.has_feature("mobile")
+## 打断 tiled 渲染快路径。默认全平台开——角色走到房子/树后面仍见剪影是体验的一部分
+## （老板拍板 T1 保留），只有 T2 最弱档由 AdaptiveQuality 摘除。
+static var _xray_enabled := true
 
 ## 换档入口：作用于已存在（paper_chars 组）与后续创建的所有角色。
 static func set_xray_enabled(on: bool, tree: SceneTree) -> void:

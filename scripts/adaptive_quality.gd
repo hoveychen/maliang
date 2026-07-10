@@ -3,7 +3,7 @@ extends Node
 ## 移动端自适应画质：进世界后按真机实测帧时定档一次，持久化到 user://quality.cfg。
 ## 桌面不挂本节点（天然满配）。档位与旋钮（按真机分解扫频账单排序）：
 ##   T0 强机:  3D 原生分辨率、SDF 吸附 4/4、地形全细节、角色 X 光穿透剪影开
-##   T1 默认:  0.7 降采样、吸附 2/1、地形全细节、X 光关
+##   T1 默认:  0.7 降采样、吸附 2/1、地形全细节、X 光开
 ##   T2 弱机:  0.6 降采样、吸附 2/1、地形+水面低细节（免第二张细节采样）、X 光关、SDF 描边关
 ## 定档：无存档时忽略前 WARMUP 秒（加载/首帧 shader 编译尖峰），随后 WINDOW 秒
 ## 平均帧时 >T2_MS 落 T2、<T0_MS 升 T0，否则 T1；应用后存档，之后每次启动直接用
@@ -71,8 +71,9 @@ func _apply(tier: int) -> void:
 	_world.get_viewport().scaling_3d_scale = SCALES[tier]
 	SdfProp.set_snap_iters(4 if tier == 0 else 2, 4 if tier == 0 else 1, get_tree())
 	_chunks.set_terrain_low_detail(tier == 2)
-	# X 光穿透剪影只留给 T0 强机（每角色每帧全 quad 深度采样，弱机砍掉）
-	PaperCharacter.set_xray_enabled(tier == 0, get_tree())
+	# X 光穿透剪影仅 T2 最弱档摘除（每角色每帧全 quad 深度采样；T1 保留——老板拍板
+	# 角色走到房后仍见剪影的体验优先）
+	PaperCharacter.set_xray_enabled(tier != 2, get_tree())
 	# T2 弱机摘掉 SDF 物件描边 pass（inverted-hull 让每物件画两遍）
 	SdfProp.set_outline_enabled(tier != 2, get_tree())
 
