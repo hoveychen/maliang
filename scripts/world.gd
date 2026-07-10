@@ -1895,7 +1895,7 @@ func _step_positions_report(delta: float) -> void:
 
 	if moved.is_empty() and player_tile.x < 0:
 		return # 全静止：零流量
-	backend.send_positions(world_id, moved, player_tile, SCENE_ID)
+	backend.send_positions(world_id, moved, player_tile, _scene_id)
 
 func _step_executors(delta: float) -> void:
 	for ex in _executors:
@@ -2586,6 +2586,7 @@ func _setup_backend() -> void:
 	backend.prop_denied.connect(_on_reward_denied)
 	backend.gen_denied.connect(_on_reward_denied)
 	backend.failed.connect(_on_failed)
+	backend.scene_entered.connect(_on_scene_entered) # 走 portal 换场景：卸旧场景、载新场景
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
 	# 也在 THINK_TIMEOUT 秒后自动解卡——这是无论后端如何都不再永久卡死的最后一道保险。
 	_think_timer = Timer.new()
@@ -2612,22 +2613,27 @@ func _on_failed(reason: String) -> void:
 
 ## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含小神仙）。离线则保留占位 NPC。
 ## _bootstrapping 全程置位，无论在线/离线都在收尾清零——world_ready 就绪判定据此知道引导已结束。
-## 当前场景 id（模型 B：world 含多 scene；步骤①②只有 village 一个）。
-const SCENE_ID := "village"
+## 当前场景 id（模型 B：world 含多 scene）。进世界时按初始场景置初值，走 portal（enter_scene）时更新。
+var _scene_id := "village"
 
-## 从服务端下发的场景里取地形并载入。任何一步不成就静默保留本地 _paint()——
-## 离线、老服务端、地形未入库、载荷损坏，都必须能照常进世界。
+## 从服务端下发的场景数组里取当前场景并载入（初始进世界用）。任何一步不成就静默保留本地
+## _paint()——离线、老服务端、地形未入库、载荷损坏，都必须能照常进世界。
 func _load_server_terrain(scenes: Variant) -> void:
 	if typeof(scenes) != TYPE_ARRAY or (scenes as Array).is_empty():
 		return # 地形还没入库：走本地确定性生成，与改动前一致
 	var scene: Dictionary = {}
 	for s in scenes:
-		if typeof(s) == TYPE_DICTIONARY and String((s as Dictionary).get("sceneId", "")) == SCENE_ID:
+		if typeof(s) == TYPE_DICTIONARY and String((s as Dictionary).get("sceneId", "")) == _scene_id:
 			scene = s
 			break
 	if scene.is_empty():
 		return
+	await _apply_scene(scene)
 
+## 应用单个场景的 POI + 地形（初始进世界与换场景 enter_scene 共用）。terrain 变了就重铺全图
+## 区块——见 docs/multi-scene-design.md 步骤⑤边界1：地形必须在 chunk 重铺之前就位（本函数
+## load_from_bytes 先落地、changed 时才 rebuild），玩家落位在调用方于地形就位后再定。
+func _apply_scene(scene: Dictionary) -> void:
 	# POI 先应用：与地形字节相互独立，地形拉取失败不该把地点名一起丢了。
 	# 解析不出任何合法 POI 时保留内置常量——绝不让世界变成没有地点的空壳。
 	var sp := parse_server_pois(scene.get("pois", []))
@@ -2639,20 +2645,92 @@ func _load_server_terrain(scenes: Variant) -> void:
 		return
 	var buf: PackedByteArray = await api.fetch_bytes(asset)
 	if buf.is_empty():
-		push_warning("[terrain] 拉取地形 %s 失败，沿用本地生成" % asset)
+		push_warning("[terrain] 拉取地形 %s 失败，沿用现有地形" % asset)
 		return
 	var r := TerrainMap.load_from_bytes(buf)
 	if not r["ok"]:
-		push_warning("[terrain] 服务端地形非法(%s)，沿用本地生成" % r["error"])
+		push_warning("[terrain] 服务端地形非法(%s)，沿用现有地形" % r["error"])
 		return
 	if r["changed"]:
-		# 服务端地形与本地 _paint() 不同：chunk_manager 首铺用的是本地地形，得整图重铺
-		# 才能反映服务端地形（见 docs/multi-scene-design.md 步骤⑤边界1）。今天导出字节 ==
-		# _paint() 输出，changed 恒为 false，此分支只在真有第二张地图/两端画法漂了时触发。
-		# 玩家落位由换场景流程（portal→enter_scene，P4）按目标场景重定，这里只管地形网格。
-		push_warning("[terrain] 服务端地形与本地生成不一致，重铺全图区块")
+		# 地形与当前 chunk 首铺用的不同：chunk_manager 缓存的区块 mesh 得整图重铺才能反映新地形
+		# （初始进世界：首铺用本地 _paint()，今天导出字节 == _paint() 输出故 changed 恒 false；
+		# 换场景：目标场景地形必然不同，changed=true）。玩家/角色落位由调用方在地形就位后再定。
+		push_warning("[terrain] 地形与当前区块不一致，重铺全图区块")
 		if chunk_manager != null:
 			chunk_manager.rebuild()
+
+## 走 portal 换场景的入口（P6 的 portal 触发区调用）：向服务端请求进入目标场景，
+## 服务端回 scene_entered → _on_scene_entered 卸旧载新。离线/未连时静默忽略。
+func enter_scene(scene_id: String) -> void:
+	if scene_id.is_empty() or scene_id == _scene_id:
+		return
+	if online and backend != null:
+		backend.send_enter_scene(world_id, scene_id)
+
+## 收到 scene_entered：卸载当前场景的角色/物件 → 上新地形并重铺区块 → 生成新场景角色/物件
+## → 按该场景玩家最后位置落位。顺序保证「地形在 chunk 重铺、角色/玩家落位之前就位」
+## （docs/multi-scene-design.md 步骤⑤边界1）。
+func _on_scene_entered(data: Dictionary) -> void:
+	var sid := String(data.get("sceneId", ""))
+	if sid.is_empty():
+		return
+	_unload_scene()
+
+	# 地形先就位（_apply_scene changed 时会 rebuild 区块）；scene 为 null 表示该场景未入库，
+	# 保留当前地形（离线/未入库容错）。
+	var scene: Variant = data.get("scene", null)
+	if typeof(scene) == TYPE_DICTIONARY:
+		await _apply_scene(scene as Dictionary)
+	_scene_id = sid
+
+	# 新场景角色：与初始进世界同一条并发预取 + 顺序降生链路。
+	var chars: Array = data.get("characters", [])
+	var prefetched := await _prefetch_characters(chars)
+	for c in chars:
+		await _spawn_server_character(c as Dictionary, Vector2.INF, prefetched)
+
+	# 新场景物件（placed 的落地，bagged 的留背包）。
+	_restore_world_props(data.get("props", []))
+
+	# 玩家落位：优先该场景的最后位置（服务端下发），否则留在当前逻辑位（就近找空位避让新地形）。
+	var target := focus_logical
+	var pp: Variant = data.get("playerPos", null)
+	if typeof(pp) == TYPE_DICTIONARY:
+		var tile := Vector2i(int((pp as Dictionary).get("tileX", -1)), int((pp as Dictionary).get("tileY", -1)))
+		if WorldGrid.is_valid_tile(tile):
+			target = WorldGrid.from_tile_center(tile)
+	if not player.is_empty():
+		OccupancyMap.char_unregister(PLAYER_ID)
+		var spot := _find_free_spot(target, PLAYER_SPAN)
+		player["logical"] = spot
+		OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+		focus_logical = spot
+	# 新场景就位后向服务端重报地点名（意图 LLM 认新场景的 POI）。
+	if online:
+		_send_world_info()
+
+## 卸载当前场景的所有角色与物件（换场景时调用）。玩家节点跨场景保留（同一个小朋友）。
+func _unload_scene() -> void:
+	if selected != null:
+		_exit_interaction() # 交互中切场景：先干净退出（清麦/相机/HUD/选中态）
+	# 停掉所有 NPC 自主行为 + 玩家当前移动（都指向即将释放的节点）
+	_executors.clear()
+	_player_executor = null
+	_approach = {}
+	_stopped = {}
+	for n in npcs:
+		if not bool(n.get("is_fairy", false)):
+			OccupancyMap.char_unregister(String(n.get("id", "")))
+		var node: Variant = n.get("node", null)
+		if node != null and is_instance_valid(node):
+			(node as Node).queue_free()
+	npcs.clear()
+	_villager_count = 0
+	_reported_tiles.clear() # 位置去重重置：新场景角色从头全报一次
+	# 语音物件：释放占地 + 清运行时清单（rebuild 后不再把旧场景物件重生成到新场景）
+	if chunk_manager != null:
+		chunk_manager.clear_dynamic_props()
+	world_props.clear()
 
 func _bootstrap() -> void:
 	_bootstrapping = true
@@ -3838,7 +3916,7 @@ func _send_world_info() -> void:
 	var names: Array = []
 	for poi in pois:
 		names.append(String(poi.get("name", "")))
-	backend.send_world_info(world_id, names, PlayerProfile.upload_dict(), SCENE_ID) # 带档案供服务端首见建玩家；SCENE_ID 让服务端回读本场景 playerPos
+	backend.send_world_info(world_id, names, PlayerProfile.upload_dict(), _scene_id) # 带档案供服务端首见建玩家；_scene_id 让服务端回读本场景 playerPos
 
 # ── 奖赏系统：委托状态 / 提示 chip / 完成判定 ──────────────────────────────
 

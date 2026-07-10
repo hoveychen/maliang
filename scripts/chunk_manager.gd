@@ -222,6 +222,24 @@ func rebuild() -> void:
 	for slot in _slots:
 		slot["skinned"] = false
 
+## 清空语音生成的动态物件（换场景卸旧时调用）。释放它们登记的占地、free 掉节点、
+## 清空运行时清单——否则 rebuild() 后 _skin 会照旧清单把上一个场景的物件重生成到新场景。
+## 手工锚点物件（SDF_PROPS/LANDMARKS 常量表）随新地形重铺自然重摆，不在此列。
+func clear_dynamic_props() -> void:
+	for dp in _dynamic_props:
+		var tile: Vector2i = dp.get("tile", Vector2i(-999, -999))
+		if tile.x > -900:
+			var wrapped := Vector2i(tile.x / CHUNK_TILES, tile.y / CHUNK_TILES)
+			OccupancyMap.free_rect(OccupancyMap.tile_to_cell(tile), 2, 2)
+			var claims: Array = _claims.get(wrapped, [])
+			for c in range(claims.size() - 1, -1, -1):
+				if claims[c][0] == tile:
+					claims.remove_at(c)
+		var node = dp.get("node", null)
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+	_dynamic_props.clear()
+
 func update(player_logical: Vector2) -> void:
 	var pcx := int(floor(player_logical.x / CHUNK_WORLD))
 	var pcz := int(floor(player_logical.y / CHUNK_WORLD))

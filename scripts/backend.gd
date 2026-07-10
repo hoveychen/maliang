@@ -22,6 +22,9 @@ signal praise_tts(data: Dictionary)
 ## tts_request 降级流（客户端 edge-tts 失败求服务端合成）：tts_start 带 mime，随后 tts_chunk/tts_end 同一通道
 signal tts_start(mime: String)
 signal tts_failed
+## 换场景（模型 B，走 portal）：收到目标场景的地形 hash + 角色 + 物件 + pois + 该场景玩家最后位置。
+## data = { worldId, sceneId, scene:Dictionary|null, characters:Array, props:Array, playerPos:Dictionary|null }
+signal scene_entered(data: Dictionary)
 ## 出站消息观测（连接未开也发射）：headless 测试/调试用，正常逻辑不要依赖它
 signal sent(msg: Dictionary)
 
@@ -100,6 +103,11 @@ func send_world_info(world_id: String, locations: Array, profile := {}, scene_id
 	if not profile.is_empty():
 		msg["profile"] = profile
 	_send(msg)
+
+## 走 portal 换场景（模型 B）：请求进入目标场景，服务端换 currentScene 并回 scene_entered
+## （该场景的地形/角色/物件/pois + 玩家在该场景的最后位置）。触发点见 world.gd enter_scene。
+func send_enter_scene(world_id: String, scene_id: String) -> void:
+	_send({ "type": "enter_scene", "worldId": world_id, "sceneId": scene_id })
 
 ## edge-tts 本地合成失败的逐句降级：文本+voiceId 交服务端合成，回 tts_start(mime)+tts_chunk+tts_end。
 func send_tts_request(text: String, voice_id: String) -> void:
@@ -191,6 +199,8 @@ func _dispatch(data: Dictionary) -> void:
 			tts_start.emit(String(data.get("ttsMime", "")))
 		"tts_failed":
 			tts_failed.emit()
+		"scene_entered":
+			scene_entered.emit(data)
 		"prop_created":
 			prop_created.emit(data)
 		"prop_denied":
