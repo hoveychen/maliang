@@ -1717,10 +1717,12 @@ func _process(delta: float) -> void:
 	_step_edge_tts(delta)
 	tp = _prof_lap(tp, "voice")
 	# 语音链路占用时压低 BGM，给人声让路（与开放麦闭麦判定同一组信号）
-	game_audio.set_ducked(InteractionFsm.voice_busy(_fsm_inputs()))
-	# 录音期直接静音 BGM（比 duck 更狠）：外放 BGM 会被无 AEC 的麦克风回灌，
-	# 低电平间歇声不断把 VAD 静音计数打回 0，说完话断不了句、拖到 12s 硬顶（真机 logcat 实锤）。
-	game_audio.set_music_muted(_recording)
+	var fsm_in := _fsm_inputs()
+	game_audio.set_ducked(InteractionFsm.voice_busy(fsm_in))
+	# 对话期间静音 BGM（比 duck 更狠）：无 AEC 的麦克风会把外放 BGM 收进去，音乐峰值
+	# （rms≈0.046–0.085，与真人说话同量级）直接顶开 VAD，自己开录、ASR 转出空——真机 logcat 实锤。
+	# 只在角色说话时放音乐，其余对话时间一律静音（口径见 InteractionFsm.music_muted）。
+	game_audio.set_music_muted(InteractionFsm.music_muted(fsm_in))
 	tp = _prof_lap(tp, "duck")
 	_step_hop(delta)  # 进对话时玩家跳向站位（在焦点/摆位之前推进，相机随之贴合）
 	_step_phone_ui(delta)

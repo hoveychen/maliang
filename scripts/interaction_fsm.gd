@@ -101,6 +101,16 @@ static func tts_speaking(x: Inputs) -> bool:
 static func player_engaged(x: Inputs) -> bool:
 	return x.in_interaction or x.recording or x.thinking or x.tts_busy
 
+## 对话期间是否静音 BGM。
+## 无 AEC 的麦克风只要开着，就会把外放 BGM 收进去——真机 logcat 实证：音乐峰值
+## （rms≈0.046–0.085，与真人说话同量级）直接顶开 VAD，自己开录、ASR 转出空。
+##
+## 判据取「在对话里且角色没在说话」，而非严格的 mic_open：THINKING/COOLDOWN 虽然闭麦，
+## 但麦随时会重开，若此时音乐已回到满音量，麦一开正赶上音乐淡出，峰值又会触发一次。
+## 于是音乐只在角色说话（SPEAKING）时响，垫在人声下面；其余对话时间一律静音。
+static func music_muted(x: Inputs) -> bool:
+	return x.in_interaction and not x.speaking()
+
 ## 调试/日志用的状态名。
 static func name_of(s: State) -> String:
 	match s:

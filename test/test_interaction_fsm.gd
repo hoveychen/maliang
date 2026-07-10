@@ -13,6 +13,7 @@ func _init() -> void:
 	fails += _test_predicates()
 	fails += _test_cooldown()
 	fails += _test_empty_backoff()
+	fails += _test_music_muted()
 	if fails == 0:
 		print("interaction_fsm tests PASS")
 	else:
@@ -159,6 +160,31 @@ func _test_empty_backoff() -> int:
 	fails += _check("streak 3 → 4×BASE", InteractionFsm.empty_cooldown(3), 3.2)
 	fails += _check("streak 4 → 封顶", InteractionFsm.empty_cooldown(4), InteractionFsm.EMPTY_COOLDOWN_MAX)
 	fails += _check("streak 9 → 仍封顶", InteractionFsm.empty_cooldown(9), InteractionFsm.EMPTY_COOLDOWN_MAX)
+	return fails
+
+## BGM 静音口径：对话里、角色没说话时一律静音（含 THINKING/COOLDOWN 这些闭麦但麦随时重开的态），
+## 只有角色说话时音乐才回来垫在人声下。世界里（未进对话）音乐照常。
+func _test_music_muted() -> int:
+	var fails := 0
+	fails += _check("EXPLORE 不静音",
+		InteractionFsm.music_muted(_mk(false, false, false, false, false, false)), false)
+	fails += _check("APPROACH 不静音",
+		InteractionFsm.music_muted(_mk(false, true, false, false, false, false)), false)
+	fails += _check("LISTENING 静音",
+		InteractionFsm.music_muted(_mk(true, false, false, false, false, false)), true)
+	fails += _check("RECORDING 静音",
+		InteractionFsm.music_muted(_mk(true, false, false, false, true, false)), true)
+	fails += _check("CREATION 静音",
+		InteractionFsm.music_muted(_mk(true, false, false, false, false, true)), true)
+	fails += _check("THINKING 静音(麦随时重开,防淡出期被顶开)",
+		InteractionFsm.music_muted(_mk(true, false, true, false, false, false)), true)
+	fails += _check("COOLDOWN 静音(同上)",
+		InteractionFsm.music_muted(InteractionFsm.Inputs.new({
+			"in_interaction": true, "cooldown": true })), true)
+	fails += _check("SPEAKING 不静音(音乐垫在人声下)",
+		InteractionFsm.music_muted(_mk(true, false, false, true, false, false)), false)
+	fails += _check("仙子说话也算 SPEAKING,不静音",
+		InteractionFsm.music_muted(_mk_fairy(true, true)), false)
 	return fails
 
 func _check(name: String, got: Variant, want: Variant) -> int:
