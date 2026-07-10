@@ -1895,7 +1895,7 @@ func _step_positions_report(delta: float) -> void:
 
 	if moved.is_empty() and player_tile.x < 0:
 		return # 全静止：零流量
-	backend.send_positions(world_id, moved, player_tile)
+	backend.send_positions(world_id, moved, player_tile, SCENE_ID)
 
 func _step_executors(delta: float) -> void:
 	for ex in _executors:
@@ -3834,7 +3834,7 @@ func _send_world_info() -> void:
 	var names: Array = []
 	for poi in pois:
 		names.append(String(poi.get("name", "")))
-	backend.send_world_info(world_id, names, PlayerProfile.upload_dict()) # 带档案供服务端首见建玩家
+	backend.send_world_info(world_id, names, PlayerProfile.upload_dict(), SCENE_ID) # 带档案供服务端首见建玩家；SCENE_ID 让服务端回读本场景 playerPos
 
 # ── 奖赏系统：委托状态 / 提示 chip / 完成判定 ──────────────────────────────
 

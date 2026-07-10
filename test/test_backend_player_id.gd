@@ -20,16 +20,18 @@ func _init() -> void:
 	b.send_voice_chunk("AAAA")
 	fails += _check("voice_chunk 注入 playerId", (captured[-1] as Dictionary).get("playerId", ""), "pid-abc")
 
-	# world_info 带 profile
-	b.send_world_info("w1", ["风车"], { "name": "朵朵", "spriteAsset": "h1" })
+	# world_info 带 profile + 显式场景
+	b.send_world_info("w1", ["风车"], { "name": "朵朵", "spriteAsset": "h1" }, "forest")
 	var wi: Dictionary = captured[-1]
 	fails += _check("world_info type", wi.get("type", ""), "world_info")
 	fails += _check("world_info 带 playerId", wi.get("playerId", ""), "pid-abc")
 	fails += _check("world_info 带 profile.name", (wi.get("profile", {}) as Dictionary).get("name", ""), "朵朵")
+	fails += _check("world_info 带 sceneId", wi.get("sceneId", ""), "forest")
 
-	# world_info 空 profile：不带 profile 键
+	# world_info 空 profile：不带 profile 键；scene_id 缺省 village
 	b.send_world_info("w1", [])
 	fails += _check("空 profile 不带 profile 键", (captured[-1] as Dictionary).has("profile"), false)
+	fails += _check("scene_id 缺省 village", (captured[-1] as Dictionary).get("sceneId", ""), "village")
 
 	# leave_world：离开世界显式收尾会话（Visit），带 worldId + playerId
 	b.send_leave_world("w1")

@@ -49,17 +49,19 @@ func _init() -> void:
 	b.sent.connect(func(m: Dictionary) -> void: captured.append(m))
 	b.player_id = "pid-abc"
 
-	b.send_positions("w1", [{ "id": "c1", "tileX": 1, "tileY": 2 }], Vector2i(7, 8))
+	b.send_positions("w1", [{ "id": "c1", "tileX": 1, "tileY": 2 }], Vector2i(7, 8), "forest")
 	var m: Dictionary = captured[-1]
 	fails += _check("type", m.get("type", ""), "positions_report")
 	fails += _check("worldId", m.get("worldId", ""), "w1")
 	fails += _check("注入 playerId", m.get("playerId", ""), "pid-abc")
 	fails += _check("chars 长度", (m.get("chars", []) as Array).size(), 1)
 	fails += _check("带 player", (m.get("player", {}) as Dictionary).get("tileX", -1), 7)
+	fails += _check("带 sceneId", m.get("sceneId", ""), "forest")
 
-	# 不带玩家位置时（Vector2i(-1,-1)）不发 player 键
+	# 不带玩家位置时（Vector2i(-1,-1)）不发 player 键；scene_id 缺省 village
 	b.send_positions("w1", [{ "id": "c1", "tileX": 1, "tileY": 2 }])
 	fails += _check("无玩家位置不带 player 键", (captured[-1] as Dictionary).has("player"), false)
+	fails += _check("scene_id 缺省 village", (captured[-1] as Dictionary).get("sceneId", ""), "village")
 
 	b.free()
 	print("test_positions_report: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
