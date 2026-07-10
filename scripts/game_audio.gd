@@ -50,6 +50,15 @@ var _section_left := 0.0       # 距下次换段剩余秒
 var _fade_left := 0.0          # 交叉淡化剩余秒
 var ducked := false
 var muted := false             # 录音期静音 BGM（盖过 duck），录完恢复
+var _sfx_bleed_left := 0.0     # 自播音效还会响多久(秒)；开麦逻辑据此屏蔽 VAD，见 sfx_bleeding()
+
+## 自播音效是否仍在出声。开麦期间必须据此屏蔽 VAD——平板无 AEC，外放音效会被自己的
+## 麦克风收回去，被听成「孩子开口」（enter=212ms、bell=123ms，都长过 VAD 的 START_MS=90ms）。
+## SFX 常态 -6dB，比已被真机 logcat 实证能顶开 VAD 的 BGM(-14dB) 还响 8dB。
+## 自己记账而非查 _sfx_players[].playing：headless dummy 音频 playing 永真（见文件头）。
+func sfx_bleeding() -> bool:
+	return _sfx_bleed_left > 0.0
+
 static func _ensure_bus(bus_name: String) -> void:
 	if AudioServer.get_bus_index(bus_name) == -1:
 		var idx := AudioServer.bus_count
@@ -90,10 +99,14 @@ func play_sfx(sfx_name: String) -> bool:
 		else:
 			_sfx_streams[path] = load(path)
 	var player := _pick_sfx_player()
-	player.stream = _sfx_streams[path]
+	var stream: AudioStream = _sfx_streams[path]
+	player.stream = stream
 	player.pitch_scale = randf_range(0.96, 1.04)
 	player.play()
 	_sfx_last[sfx_name] = 0.0
+	# 记账这条音效还会外放多久：开麦逻辑靠它屏蔽 VAD（sfx_bleeding）。
+	# pitch_scale 最低 0.96 会把音效拉长，按最坏情况折算，宁可多屏蔽几毫秒。
+	_sfx_bleed_left = maxf(_sfx_bleed_left, stream.get_length() / 0.96)
 	return true
 
 func _pick_sfx_player() -> AudioStreamPlayer:
@@ -158,6 +171,7 @@ func _process(delta: float) -> void:
 # 拆出来供 headless 测试直接推进虚拟时间
 func _advance(delta: float) -> void:
 	_poll_bgm_load()  # BGM 段线程加载就绪则起播（不阻塞）
+	_sfx_bleed_left = maxf(_sfx_bleed_left - delta, 0.0)
 	for key in _sfx_last:
 		_sfx_last[key] += delta
 	if step_index < 0:

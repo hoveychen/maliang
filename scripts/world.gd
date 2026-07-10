@@ -3783,6 +3783,16 @@ func _step_voice(delta: float) -> void:
 		_vad.reset()
 		_unmute_t = UNMUTE_GRACE # 闭麦刚结束的残响尾音不算开口
 		return
+	# 自播音效正在外放：平板无 AEC，它会被自己的麦克风收回去，被 VAD 听成「孩子开口」
+	# （enter=212ms、bell=123ms，都长过 START_MS=90ms）→ 凭空一轮空录音 → ASR 返回空
+	# → COOLDOWN 退避。SFX 是 -6dB，比已被真机 logcat 实证能顶开 VAD 的 BGM(-14dB) 更响，
+	# 而 set_music_muted 只压 Music bus，SFX bus 从未受保护。
+	# 只在「还没开口」时挡：录音中屏蔽会吃掉孩子正在说的话（mic_on 那 139ms 混音是已知取舍，
+	# 此时 VAD 已 speaking，音效不会再造成误判开口，只是混进 PCM 开头）。
+	if not _recording and game_audio != null and game_audio.sfx_bleeding():
+		_vad.reset()
+		_unmute_t = UNMUTE_GRACE # 音效外放的余响同样不算开口（0.3s > 最长开麦态音效 0.22s）
+		return
 	if _unmute_t > 0.0:
 		_unmute_t -= delta
 		return
