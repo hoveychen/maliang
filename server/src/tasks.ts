@@ -21,6 +21,7 @@ function pick<T>(arr: readonly T[], rand: () => number): T {
 /**
  * 生成一个可发起的委托候选：无进行中委托、按世界现状挑可行类型
  * （没有其他村民就没有带话/带人，没有地点就没有探访）。完成奖励统一是盖 1 章（stampStyle 纯演出）。
+ * sceneId 给了就只在该场景内挑目标角色/地点——委托不再跨场景指人指地（消化「委托指向别场景」的边界）。
  */
 export function pickTaskCandidate(
   worldId: string,
@@ -28,12 +29,13 @@ export function pickTaskCandidate(
   playerId: string,
   store: WorldStore,
   rand: () => number = Math.random,
+  sceneId?: string,
 ): ActiveTask | null {
   if (store.getActiveTask(worldId, playerId)) return null;
   const npc = store.getCharacter(worldId, npcId);
   if (!npc || npc.isFairy) return null;
-  const others = store.listCharacters(worldId).filter((c) => c.id !== npcId && !c.isFairy);
-  const locations = store.getLocations(worldId);
+  const others = store.listCharacters(worldId, sceneId).filter((c) => c.id !== npcId && !c.isFairy);
+  const locations = store.getLocations(worldId, sceneId);
   const types: TaskType[] = [];
   if (others.length > 0) types.push('deliver', 'bring');
   if (locations.length > 0) types.push('visit');

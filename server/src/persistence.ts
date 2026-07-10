@@ -422,14 +422,17 @@ export class WorldStore {
    * 权威来源是 scenes.pois——服务端说了算，不再依赖客户端上报（那个方向是反的）。
    * POI 还没入库时回退到客户端上报的内存清单，保证旧环境不退化。
    *
-   * 多场景时这里会把所有场景的地点摊平，委托可能指向别的场景。
-   * 步骤⑤真做 portal 时要按玩家当前场景过滤（见 docs/multi-scene-design.md 待确认项）。
+   * sceneId 给了就只返回该场景的地点（消化「委托指向别场景」的边界）；不传=全世界摊平（debug/兼容）。
+   * 世界已有场景数据但指定场景无 POI → 返回空（不泄漏别场景地点）；世界完全没入库场景 → 回退客户端上报。
    */
-  getLocations(worldId: string): string[] {
-    const fromScenes = this.listScenes(worldId)
-      .flatMap((s) => s.pois.map((p) => p.name))
-      .filter((n) => n.length > 0);
-    if (fromScenes.length > 0) return [...new Set(fromScenes)];
+  getLocations(worldId: string, sceneId?: string): string[] {
+    const scenes = this.listScenes(worldId);
+    if (scenes.length > 0) {
+      const relevant = sceneId === undefined ? scenes : scenes.filter((s) => s.sceneId === sceneId);
+      const names = relevant.flatMap((s) => s.pois.map((p) => p.name)).filter((n) => n.length > 0);
+      if (names.length > 0) return [...new Set(names)];
+      if (sceneId !== undefined) return []; // 指定场景无 POI：空，别摊平到别场景
+    }
     return this.#locations.get(worldId) ?? [];
   }
 
