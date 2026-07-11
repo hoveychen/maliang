@@ -1,7 +1,7 @@
 extends SceneTree
 ## 基础交互的 world 层集成断言：performer 点名路由 / follow 持续跟随玩家 /
 ## stop_follow / do_action 契约键 / chat_with 全过程（走位→面对→气泡→散场）/
-## 地点名与「玩家」解析。离线 demo 世界（小蓝/小绿/小黄），注入 _on_character_response
+## 地点名与「玩家」解析。离线 demo 世界（舞舞兔/灵狐小围巾/花环小鹿），注入 _on_character_response
 ## 模拟服务端指令下发，与真实链路同路。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 10 \
 ##       --quit-after 420 --script res://test/test_visual_interactions.gd
@@ -68,15 +68,15 @@ func _tick() -> void:
 		200:
 			_check("do_action key cleared after duration", green.has("paper_action"), false)
 		205:
-			_freeze_and_place(yellow, green, Vector2(8.0, 0.0)) # 小黄定点等着，只考小绿走位
-			_inject(green, { "commands": [{ "type": "chat_with", "params": { "character_name": "小黄" } }], "loop": false })
+			_freeze_and_place(yellow, green, Vector2(8.0, 0.0)) # 花环小鹿定点等着，只考灵狐小围巾走位
+			_inject(green, { "commands": [{ "type": "chat_with", "params": { "character_name": "花环小鹿" } }], "loop": false })
 		310:
 			_check("chat happened", chat_started > 0, true)
 		312:
-			# 点名指派传话链路：设玩家正与小绿对话，点名小蓝跳——小绿应跑腿传话，小蓝收到才动。
-			# 小蓝固定摆到 10 单位外：距离太近曾让传话在断言前就完成（假阳"被遥控"）。
-			# 再把小蓝钉住（in_chat 拦住 _step_executors 的「跑完恢复闲逛」）：这条断言量的是
-			# 小绿送达时站得够不够近，小蓝自己的闲逛漂移只是噪声，会把边界阈值顶成 flaky。
+			# 点名指派传话链路：设玩家正与灵狐小围巾对话，点名舞舞兔跳——灵狐小围巾应跑腿传话，舞舞兔收到才动。
+			# 舞舞兔固定摆到 10 单位外：距离太近曾让传话在断言前就完成（假阳"被遥控"）。
+			# 再把舞舞兔钉住（in_chat 拦住 _step_executors 的「跑完恢复闲逛」）：这条断言量的是
+			# 灵狐小围巾送达时站得够不够近，舞舞兔自己的闲逛漂移只是噪声，会把边界阈值顶成 flaky。
 			_freeze_and_place(blue, green, Vector2(10.0, 0.0))
 			blue["in_chat"] = true
 			scene.set("selected", green["node"])
@@ -84,10 +84,10 @@ func _tick() -> void:
 			(scene.get("_tts_player") as AudioStreamPlayer).stop()
 			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false }, "")
 		313:
-			# 跑腿也是「立去系」：小绿得亲自走过去传话，所以先把这句回应说完再动身。
+			# 跑腿也是「立去系」：灵狐小围巾得亲自走过去传话，所以先把这句回应说完再动身。
 			_check("performer not remote-controlled", blue.has("paper_action"), false)
 			_check("跑腿先武装延迟退出", (scene.get("_pending_leave") as Dictionary).is_empty(), false)
-			_check("说完之前小绿还没动身", scene.call("_has_executor_for", green), false)
+			_check("说完之前灵狐小围巾还没动身", scene.call("_has_executor_for", green), false)
 			# 收听 HUD 重设计：头顶耳朵已删除（不再有 ear_icon 盖脸）；选中角色时底部 AIGC
 			# 边框 HUD（hud_listen）显示，声波柱嵌在边框内板。（须在延迟退出释放前查，那之后对话已关）
 			_check("ear_icon removed (no head sprite)", scene.get("ear_icon"), null)
@@ -96,8 +96,8 @@ func _tick() -> void:
 			var hud_frame := vw.get_child(0) as TextureRect
 			_check("HUD frame texture present", hud_frame != null and hud_frame.texture != null, true)
 		325:
-			# 宽限过后（这轮没 TTS 可等）：小绿动身跑腿，近身对话随之关闭——
-			# 此前这条分支既不延迟也不关对话，小绿转身走了、横幅和相机还锁在他身上。
+			# 宽限过后（这轮没 TTS 可等）：灵狐小围巾动身跑腿，近身对话随之关闭——
+			# 此前这条分支既不延迟也不关对话，灵狐小围巾转身走了、横幅和相机还锁在他身上。
 			_check("speaker runs errand", scene.call("_has_executor_for", green), true)
 			_check("跑腿后关对话（selected 清空）", scene.get("selected"), null)
 		395:
@@ -108,7 +108,7 @@ func _tick() -> void:
 			else:
 				printerr("visual_interactions FAILED: %d" % fails)
 			quit(fails)
-	# 传话到达时刻不定：小蓝出现动作键（点头应答/跳）即传到，此刻小绿应已跑到小蓝旁。
+	# 传话到达时刻不定：舞舞兔出现动作键（点头应答/跳）即传到，此刻灵狐小围巾应已跑到舞舞兔旁。
 	# 阈值 = 送达半径 2.6 + 追踪节流 0.5s 内对方闲逛再挪的余量（~8*0.5*漫步占比）
 	if frame > 312 and relay_done == 0 and blue.has("paper_action"):
 		relay_done = frame
@@ -134,9 +134,9 @@ func _tick() -> void:
 func _find_npcs() -> void:
 	for n in (scene.get("npcs") as Array):
 		match (n["node"] as PaperCharacter).char_name:
-			"小蓝": blue = n
-			"小绿": green = n
-			"小黄": yellow = n
+			"舞舞兔": blue = n
+			"灵狐小围巾": green = n
+			"花环小鹿": yellow = n
 	_check("demo npcs found", not blue.is_empty() and not green.is_empty() and not yellow.is_empty(), true)
 
 ## 地点名 / 角色名解析（语音指令的目标落地基础）。
@@ -147,7 +147,7 @@ func _test_resolvers() -> void:
 	_check("resolve 月球 fails", scene.call("_resolve_location", "月球") == Vector2.INF, true)
 	var player: Dictionary = scene.get("player")
 	_check("resolve 玩家", scene.call("_resolve_char_pos", "玩家"), player["logical"])
-	_check("resolve npc by name", scene.call("_resolve_char_pos", "小黄"), yellow["logical"])
+	_check("resolve npc by name", scene.call("_resolve_char_pos", "花环小鹿"), yellow["logical"])
 
 ## 模拟服务端 character_response（performerId 点名路由），与真实 WS 回包同路。
 ## reply 留空 = 这轮没有 TTS 可等，「说完再走」只由起播宽限决定（动身时刻可预期）。

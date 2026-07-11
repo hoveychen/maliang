@@ -716,19 +716,28 @@ func _step_hop(delta: float) -> void:
 		_hop_t = -1.0
 		OccupancyMap.char_register(PLAYER_ID, _stage_player_logical, PLAYER_SPAN)
 
+## 离线/intro 的 demo 村民：用打包的 seed 村民图集（VillagerAssets）以 idle 动画降生，
+## 不再是染色 critter 静态占位。id 用 demo_<slug>（demo_ 前缀 → _LOCAL_ONLY_IDS 本地专属、
+## 绝不上报）；转正（在线 bootstrap）时清掉、换成服务端村民（同款 seed 则视觉无缝，见设计 D2）。
 func _setup_npcs() -> void:
-	var defs := [
-		{ "logical": Vector2(10.0, -10.0), "color": Color(0.62, 0.80, 1.0), "name": "小蓝" },
-		{ "logical": Vector2(-11.0, -9.0), "color": Color(0.70, 1.0, 0.62), "name": "小绿" },
-		{ "logical": Vector2(1.0, -18.0), "color": Color(1.0, 0.82, 0.5), "name": "小黄" },
-	]
-	for d in defs:
+	var positions := [Vector2(10.0, -10.0), Vector2(-11.0, -9.0), Vector2(1.0, -18.0)]
+	var seed: Array = VillagerAssets.SEED
+	for i in range(positions.size()):
+		var v: Dictionary = seed[i % seed.size()]
 		var npc := PaperCharacter.new()
 		add_child(npc)
-		npc.setup(critter_tex, d["color"], d["name"])
-		var lg := WorldGrid.wrap_pos(d["logical"])
-		npcs.append({ "node": npc, "logical": lg, "id": "demo_%s" % d["name"] })
-		OccupancyMap.char_register("demo_%s" % d["name"], lg, 2)
+		# 先用 critter 占位跑通 setup（内部归一尺寸 + 挂脚下暗斑），再切村民图集动画。
+		# 图集加载失败（理论上不会）则保留占位，不崩。
+		npc.setup(critter_tex, Color.WHITE, String(v["name"]))
+		var atlas := load(String(v["atlas"])) as Texture2D
+		if atlas != null:
+			# 相位按序错开，避免三只同帧起跳的机械感（31帧/8fps ≈ 3.9s 循环），与 _spawn_server_character 一致
+			var phase := float(i) / float(positions.size()) * 3.9
+			npc.play_idle(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
+		var lg := WorldGrid.wrap_pos(positions[i])
+		var did := "demo_%s" % String(v["slug"])
+		npcs.append({ "node": npc, "logical": lg, "id": did })
+		OccupancyMap.char_register(did, lg, 2)
 		_start_ambient_wander(npcs[npcs.size() - 1])
 
 ## 让角色自主活动：循环「等一会 → 就近 wander」。

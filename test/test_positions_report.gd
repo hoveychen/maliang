@@ -33,7 +33,7 @@ func _init() -> void:
 
 	# ── 离线占位 id 永不上报 ──────────────────────────────────────────────
 	var local_entries := [
-		{ "id": "demo_小蓝", "tile": Vector2i(1, 1) },
+		{ "id": "demo_wuwu_rabbit", "tile": Vector2i(1, 1) },
 		{ "id": "fairy_local", "tile": Vector2i(2, 2) },
 		{ "id": "real-uuid", "tile": Vector2i(3, 3) },
 	]
@@ -41,7 +41,7 @@ func _init() -> void:
 	moved = W.collect_moved(local_entries, fresh)
 	fails += _check("只报服务端角色", moved.size(), 1)
 	fails += _check("报的是真 id", (moved[0] as Dictionary).get("id", ""), "real-uuid")
-	fails += _check("占位 id 不进 reported", fresh.has("demo_小蓝"), false)
+	fails += _check("占位 id 不进 reported", fresh.has("demo_wuwu_rabbit"), false)
 
 	# ── Backend.send_positions 报文形状 ──────────────────────────────────
 	var b := Backend.new()

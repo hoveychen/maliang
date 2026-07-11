@@ -82,8 +82,10 @@ func _check_staged() -> void:
 			is_equal_approx(float(player.get("paper_face", -9.0)), PI), true)
 
 func _check_framing() -> void:
-	# 双方占位形象都是 3.2 单位（PLACEHOLDER_HEIGHT）→ 基础构图距离 = 3.2 / (2*0.5*tan25°) ≈ 6.86
-	var expect := 3.2 / (2.0 * 0.5 * 0.4663077)
+	# 构图距离由双方立绘世界高度反算（见 compute_dialog_cam）：demo 村民现在是真 seed 村民（6 单位）、
+	# 玩家占位 3.2 单位，故不再是双 3.2 时的 6.86。直接对齐当前 _dialog_camera 的目标距离，断言相机
+	# 已缓动到构图目标——不写死数值（免村民资产高度变化时脆断；formula 数值正确性由 test_dialog_camera 覆盖）。
+	var expect := float((scene.call("_dialog_camera") as Dictionary).get("dist", 0.0))
 	var dist := float(scene.get("_cur_dist"))
 	_check("camera dist eased to framing (dist=%.2f, want≈%.2f)" % [dist, expect], absf(dist - expect) < 1.5, true)
 	# 对话态允许比 god 态 ZOOM_MIN(16) 近得多
