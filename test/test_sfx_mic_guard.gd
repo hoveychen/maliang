@@ -78,18 +78,19 @@ func _enter_interaction_with_npc() -> void:
 		printerr("  FAIL 场景里没有非仙子 NPC，无法在 LISTENING 态验证")
 		return
 	scene.call("_enter_interaction", target["node"])
-	_check("进对话后开放麦已就绪", scene.get("_vad") != null, true)
+	_check("进对话后开放麦已就绪", scene.get("_vc").is_open(), true)
 
 ## 核心断言：音效仍在外放时，开麦态的 VAD 必须处于屏蔽窗口内。
 func _assert_vad_guarded_while_sfx_plays() -> void:
-	if scene.get("_vad") == null:
+	var vc: Object = scene.get("_vc")
+	if not vc.is_open():
 		return
 	# 屏蔽须发生在开麦态。若这里是 SPEAKING/THINKING，闭麦分支也会设 _unmute_t，断言失去意义。
 	var state: int = scene.call("_fsm_state")
 	_check("非仙子离线进对话停在 LISTENING（开麦态）",
 		InteractionFsm.name_of(state), "LISTENING")
-	_check("音效外放期间不得误开录音", scene.get("_recording"), false)
-	var guard: float = scene.get("_unmute_t")
+	_check("音效外放期间不得误开录音", vc.is_recording(), false)
+	var guard: float = vc.get("_unmute_t")
 	_check("开麦态播音效必须屏蔽 VAD (_unmute_t=%.3f > 0)" % guard, guard > 0.0, true)
 
 func _check(name: String, got: Variant, want: Variant) -> void:

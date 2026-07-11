@@ -151,8 +151,10 @@ func _test_prop_goal_lights_forge() -> void:
 
 ## 语音答复（没点卡，直接说）：断句提交时也飞一个气泡进炉——两条答复路径视觉一致。
 func _test_voice_answer_flies_in() -> void:
-	scene.set("_recording", true)
-	scene.call("_utterance_commit")
+	# 模拟「开口→说完断句」：走 VoiceCapture 一轮，committed 触发 world 的 _throw_voice_answer。
+	var vc: Object = scene.get("_vc")
+	vc.call("_utterance_begin", PackedByteArray())
+	vc.call("_utterance_commit")
 	_check("语音答复也起飞了气泡", _throw_fx().size() >= 1, true)
 
 ## 服务端判「算了/不要了」→ creation_cancelled：收视图 + 收炉 + 退出对话（老板拍板：取消=退出这个状态）。

@@ -40,10 +40,11 @@ UNIT_TESTS=(
   test_edge_tts
   test_fairy_voice
   test_prebaked_voice
-  test_onboarding_audio
+  test_onboarding_bgm_mute
   test_onboarding_asr_gate
   test_onboarding_vad
   test_voice_vad
+  test_voice_capture
   test_game_audio
   test_sdf_static_baker
   test_paper_idle
