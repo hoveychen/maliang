@@ -194,6 +194,82 @@ test('positions_report 纯 tile（无 x,y）不触发转发（维持旧持久化
   assert.deepEqual(store.getCharacter('w1', 'c1')?.position, { tileX: 1, tileY: 1 });
 });
 
+test('positions_report 流式：不同场景的同世界连接收不到转发（跨场景幽灵）', async () => {
+  const { store, conn } = relayHarness();
+  seedChar(store, 'c1');
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa', sceneId: 'village' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb', sceneId: 'forest' });
+  b.sent.length = 0;
+
+  await a.say({
+    type: 'positions_report', worldId: 'w1', sceneId: 'village', playerId: 'pa', t: 1,
+    chars: [{ id: 'c1', tileX: 10, tileY: 20, x: 100.5, y: 200.25 }],
+    player: { tileX: 5, tileY: 6, x: 50.0, y: 60.0 },
+  });
+
+  assert.equal(b.ofType('positions_relay').length, 0, '森林里的 B 不该看见村里 A 的位置流');
+});
+
+test('positions_report 流式：同场景照常转发（场景过滤不误伤）', async () => {
+  const { store, conn } = relayHarness();
+  seedChar(store, 'c1');
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa', sceneId: 'forest' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb', sceneId: 'forest' });
+  b.sent.length = 0;
+
+  await a.say({
+    type: 'positions_report', worldId: 'w1', sceneId: 'forest', playerId: 'pa', t: 7,
+    chars: [{ id: 'c1', tileX: 10, tileY: 20, x: 1.5, y: 2.5 }],
+  });
+
+  const relay = b.ofType('positions_relay');
+  assert.equal(relay.length, 1, '同一场景仍要互见');
+  assert.deepEqual(relay[0].chars, [{ id: 'c1', x: 1.5, y: 2.5 }]);
+});
+
+test('positions_report 流式：走 portal 换场景后，位置流跟着新场景走', async () => {
+  const { store, conn } = relayHarness();
+  seedChar(store, 'c1');
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa', sceneId: 'village' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb', sceneId: 'forest' });
+  // A 走 portal 去森林 → 与 B 同场景
+  await a.say({ type: 'enter_scene', worldId: 'w1', sceneId: 'forest' });
+  b.sent.length = 0;
+
+  await a.say({
+    type: 'positions_report', worldId: 'w1', sceneId: 'forest', playerId: 'pa', t: 9,
+    chars: [{ id: 'c1', tileX: 3, tileY: 3, x: 3.5, y: 3.5 }],
+  });
+
+  assert.equal(b.ofType('positions_relay').length, 1, 'enter_scene 后 hub 里的场景要跟着更新');
+});
+
+test('positions_report 流式：不带 sceneId（高频流的真实载荷）时按 session 所在场景落盘', async () => {
+  const { store, conn } = relayHarness();
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa', sceneId: 'village' });
+  await a.say({ type: 'enter_scene', worldId: 'w1', sceneId: 'forest' });
+
+  // 高频流（backend.gd send_positions_stream）不带 sceneId —— 不能因此把位置写回 village
+  await a.say({
+    type: 'positions_report', worldId: 'w1', playerId: 'pa', t: 3,
+    chars: [], player: { tileX: 8, tileY: 9, x: 8.5, y: 9.5 },
+  });
+
+  assert.deepEqual(store.getPlayerTile('w1', 'forest', 'pa'), { tileX: 8, tileY: 9 }, '应落在 forest');
+  assert.equal(store.getPlayerTile('w1', DEFAULT_SCENE, 'pa'), undefined, '不该漏写进 village');
+});
+
 test('positions_report：角色 id 属于别的世界 → 不跨世界写入', async () => {
   const { store, sent, send } = harness();
   store.createWorld('w2');
