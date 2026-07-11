@@ -44,6 +44,7 @@ UNIT_TESTS=(
   test_onboarding_asr_gate
   test_onboarding_vad
   test_voice_vad
+  test_voice_capture
   test_game_audio
   test_sdf_static_baker
   test_paper_idle

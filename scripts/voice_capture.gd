@@ -1,0 +1,251 @@
+class_name VoiceCapture
+extends Node
+## 开放麦编排：把 MicRecorder + VoiceVad + 端侧/服务端 ASR + 自听防护 + BGM 门控 这套
+## 「旁白/角色说完 → 开麦 → VAD 断句 → 端侧识别或服务端上传」的编排循环收敛到一处。
+## 此前 world.gd 与 onboarding.gd 各手抄一份，口径漂移（BGM 静音只在 world 修对，onboarding
+## 漏了开麦等待窗），本模块是单一真相。设计见 docs/voice-capture-module-design.md。
+##
+## 宿主用法（像 GameAudio 一样 add_child）：
+##   var vc := VoiceCapture.new(); vc.game_audio = game_audio; add_child(vc)
+##   vc.should_capture = func() -> bool: return <该不该喂麦（宿主门禁：思考/说话/退避/就绪…）>
+##   vc.is_speaking   = func() -> bool: return <此刻有没有角色/旁白在出声（BGM 让位判据）>
+##   vc.open()   # 进对话 / 旁白说完进入聆听窗
+##   vc.close()  # 退对话 / 提交后
+##   # 宿主 _process 每帧： vc.step(delta)
+## 并接信号决定识别产物去向（world=WS 流式，onboarding=攒整段单发 POST）。
+##
+## 分工：本模块吃「机械核」——单例接线、就绪门禁、mic drain+VAD、自听防护(unmute_grace+
+## sfx_bleeding)、分片、端侧会话生命周期、VAD 事件分发、**set_music_muted 门控**。
+## 宿主留「业务策略」——sink（信号）、开麦门禁（should_capture）、以及 set_ducked（音量微降，
+## 各宿主口径不同且非 ASR 关键，故不并入，避免改动 world 既有行为）。
+
+## VAD 判定开口：宿主亮录音态 UI、起耗时打点。
+signal utterance_begin
+## 服务端 sink：一片 PCM 就绪（端侧路径不发，内部直喂插件）。宿主流式上传或攒整段。
+signal chunk(pcm: PackedByteArray)
+## 端侧识别出最终文本（端侧路径专有）。宿主判空/退避/中继/送对话。
+signal local_final(text: String)
+## 说完（静音断句/硬顶）：残片已 flush。宿主发 voice_end / POST 整段 / 亮思考态。
+signal committed
+## 太短的误触 / 中途闭麦：静默丢弃本段。宿主发 voice_cancel。
+signal cancelled
+## 端侧模型异步加载完成（宿主用于日志/状态图标）。名不用 ready：与 Node 内置信号撞名。
+signal asr_ready
+
+const UNMUTE_GRACE := 0.3         ## 旁白/音效结束后的静默恢复期：残响尾音不算开口（同旧两处）
+const CHUNK_FLUSH_SECS := 0.15    ## 分片喂 ASR/上传的节奏：不每帧碎喂
+
+## ── 宿主注入的策略 ──────────────────────────────────────────────────────────
+var game_audio: GameAudio = null                       ## BGM 门控 + mic 音效；可为 null（测试）
+var should_capture: Callable = func() -> bool: return false  ## 每帧门禁：该不该把麦喂 VAD
+var is_speaking: Callable = func() -> bool: return false      ## 此刻有无人声在放（BGM 让位）
+var os_name := OS.get_name()                           ## 平台名（headless 测试可覆盖成 "Android"）
+
+## ── 内部状态 ───────────────────────────────────────────────────────────────
+var _mic: MicRecorder = null
+var _asr: Object = null            ## 端侧 ASR（Android MaliangAsr 单例），null=服务端识别
+var _vad: VoiceVad = null          ## 开麦期间非 null（close 置空）
+var _open := false                 ## 聆听窗是否打开（open→close 之间；BGM 静音据此）
+var _recording := false            ## VAD 已判定开口、正在收录一段
+var _local_session := false        ## 本段路由是否走端侧会话（begin 定格）
+var _pending_pcm := PackedByteArray()  ## 未 flush 的分片（攒够 150ms 再喂/发）
+var _chunk_accum := 0.0            ## 分片计时
+var _unmute_t := 0.0               ## 闭麦恢复期剩余秒数
+
+func _ready() -> void:
+	if _mic == null:
+		_mic = MicRecorder.new()
+		_mic.name = "MicRecorder"
+		add_child(_mic)
+	if _asr == null: # 测试可预注入 fake，跳过单例接线
+		_setup_local_asr()
+
+## 端侧 ASR（Android 插件 MaliangAsr）：有则异步加载模型；桌面/编辑器无单例走服务端识别。
+func _setup_local_asr() -> void:
+	if not Engine.has_singleton("MaliangAsr"):
+		# Android/导出 macOS 没有单例 = 导出漏带端侧 ASR（坏包），硬报错拒进游戏；
+		# editor/headless 从源码跑无模型随包，合法走服务端识别（is_template 为假不致命）。
+		if AsrGuard.is_fatal(os_name, false, OS.has_feature("template")):
+			AsrGuard.block(get_tree(), AsrGuard.MSG_MISSING)
+		return
+	_asr = Engine.get_singleton("MaliangAsr")
+	_asr.connect("final_result", _on_local_final)
+	_asr.connect("asr_ready", _on_local_ready)
+	_asr.connect("asr_error", _on_local_error)
+	_asr.initialize()
+
+func _exit_tree() -> void:
+	# 场景切走：关麦 + 断插件信号，别留开着的麦 / 未关的本地会话到节点释放为止。
+	close()
+	# _asr 可能是真单例（有这些信号）、null、或测试注入的 fake（无信号）——has_signal 先挡。
+	if _asr != null:
+		for pair in [["final_result", _on_local_final], ["asr_ready", _on_local_ready], ["asr_error", _on_local_error]]:
+			var sig := String(pair[0])
+			var cb := pair[1] as Callable
+			if _asr.has_signal(sig) and _asr.is_connected(sig, cb):
+				_asr.disconnect(sig, cb)
+
+# ── 查询 ────────────────────────────────────────────────────────────────────
+
+## 端侧 ASR 是否可用于本次 utterance。Android 未就绪即禁止开麦（绝不回落服务端）。
+func is_ready() -> bool:
+	return _asr != null and _asr.isReady()
+
+func is_recording() -> bool:
+	return _recording
+
+## 是否处于聆听窗（open→close 之间）——宿主构图/门禁可用。
+func is_open() -> bool:
+	return _open
+
+## 最近一帧归一化响度（供声波条 UI）。
+func level() -> float:
+	return _vad.level if _vad != null else 0.0
+
+## 端侧模型未就绪、Android 上必须等（不开麦、绝不回落上传）。宿主 should_capture 可复用。
+func must_wait_for_ready() -> bool:
+	return AsrGuard.must_wait_for_ready(os_name, is_ready(), OS.has_feature("template"))
+
+# ── 开麦 / 关麦 ─────────────────────────────────────────────────────────────
+
+## 进对话 / 旁白说完进入聆听窗：起麦 + 新建 VAD。幂等。
+func open() -> void:
+	if _open:
+		return
+	_open = true
+	if _mic != null:
+		_mic.start()
+	_vad = VoiceVad.new()
+	_unmute_t = 0.0
+
+## 退对话 / 提交后：录音中先静默取消，停麦 + 弃 VAD。幂等。
+func close() -> void:
+	if not _open:
+		return
+	if _recording:
+		_cancel_utterance()
+	if _mic != null:
+		_mic.stop()
+	_vad = null
+	_open = false
+
+# ── 每帧驱动 ────────────────────────────────────────────────────────────────
+
+## 宿主每帧调用。BGM 门控无条件先跑（即便闭麦也要保证静音口径），随后按门禁喂 VAD。
+func step(delta: float) -> void:
+	_update_bgm()
+	if _vad == null:
+		return
+	var pcm := _mic.drain_pcm16k() if _mic != null else PackedByteArray()
+	# 闭麦期间也持续排空采集缓冲，恢复聆听时不会吃到角色/旁白的声音。
+	if not should_capture.call():
+		if _recording:
+			_cancel_utterance() # 时序兜底：闭麦瞬间还在录 → 静默丢弃
+		_vad.reset()
+		_unmute_t = UNMUTE_GRACE # 闭麦刚结束的残响尾音不算开口
+		return
+	# 自播音效正在外放：无 AEC 的麦会把它收回去被 VAD 听成「开口」（enter=212ms 长过 START_MS）。
+	# 只在「还没开口」时挡：录音中屏蔽会吃掉孩子正在说的话（已知取舍）。
+	if not _recording and game_audio != null and game_audio.sfx_bleeding():
+		_vad.reset()
+		_unmute_t = UNMUTE_GRACE
+		return
+	if _unmute_t > 0.0:
+		_unmute_t -= delta
+		return
+	_feed(pcm)
+	if _recording:
+		_chunk_accum += delta
+		if _chunk_accum >= CHUNK_FLUSH_SECS:
+			_flush() # 上传/直喂与说话重叠，断句时音频已基本传完
+			_chunk_accum = 0.0
+
+## BGM 静音门控（本模块的单一真相，此前漂移点）：麦一开（聆听窗内）就静音，只在有人声时放行。
+## 无 AEC 的麦只要开着就会把外放 BGM 收进去——真机 logcat 实证：满音量 BGM 峰值
+## （rms≈0.05–0.085，与真人同量级）直接顶开 VAD、自己开录、ASR 转出空。
+## 口径取「聆听窗内且没人在说话」而非严格 recording：等待孩子开口的这段麦也开着，同样要静音。
+## set_ducked（音量微降）留宿主：各宿主口径不同（world 含 thinking）、非 ASR 关键，不并入。
+func _update_bgm() -> void:
+	if game_audio == null:
+		return
+	game_audio.set_music_muted(_open and not is_speaking.call())
+
+# ── VAD 事件分发（独立函数：headless 测试注入合成 PCM 走同一链路）──────────────
+
+func _feed(pcm: PackedByteArray) -> void:
+	if _vad == null:
+		return
+	for ev in _vad.feed(pcm):
+		match String(ev["type"]):
+			"start":
+				_utterance_begin(ev["pcm"] as PackedByteArray)
+			"speech":
+				_pending_pcm.append_array(ev["pcm"] as PackedByteArray)
+			"end":
+				_utterance_commit()
+			"cancel":
+				_cancel_utterance()
+
+## 开口：路由定格（端侧就绪走本地，否则服务端），预录头块先送（首音节不丢）。
+func _utterance_begin(head: PackedByteArray) -> void:
+	if _recording:
+		return
+	_recording = true
+	if game_audio != null:
+		game_audio.play_sfx("mic_on")
+	_pending_pcm = head.duplicate()
+	_chunk_accum = 0.0
+	_local_session = is_ready()
+	if _local_session:
+		_asr.startSession()
+	utterance_begin.emit()
+	_flush()
+
+## 说完（静音断句/硬顶）：残片发出，触发识别/回复。
+func _utterance_commit() -> void:
+	if not _recording:
+		return
+	_recording = false
+	if game_audio != null:
+		game_audio.play_sfx("mic_off")
+	_flush()
+	if _local_session:
+		_asr.stopSession() # final_result 信号回来后走 local_final
+	committed.emit()
+
+## 太短的误触 / 中途闭麦：静默丢弃本段，双 ASR 路径都不产生回复。
+func _cancel_utterance() -> void:
+	if not _recording:
+		return
+	_recording = false
+	_pending_pcm = PackedByteArray()
+	if _local_session:
+		_local_session = false # 弃会话即可：插件下次 startSession 自动释放旧流
+	cancelled.emit()
+
+func _flush() -> void:
+	if _pending_pcm.is_empty():
+		return
+	if _local_session:
+		_asr.feedPcm(_pending_pcm) # 端侧：原始 PCM 直喂插件，不上传
+	else:
+		chunk.emit(_pending_pcm)   # 服务端：宿主流式上传 / 攒整段
+	_pending_pcm = PackedByteArray()
+
+# ── 端侧 ASR 信号 ───────────────────────────────────────────────────────────
+
+func _on_local_final(text: String) -> void:
+	_local_session = false
+	local_final.emit(text)
+
+func _on_local_ready() -> void:
+	asr_ready.emit()
+
+func _on_local_error(msg: String) -> void:
+	_local_session = false
+	# Android/导出 macOS 上端侧 ASR 是硬依赖：失败即模型问题，硬报错，绝不静默回落。
+	if AsrGuard.is_fatal(os_name, false, OS.has_feature("template")):
+		AsrGuard.block(get_tree(), AsrGuard.MSG_INIT_FAILED % msg)
+		return
+	push_warning("端侧 ASR 出错，本次运行回落服务端识别: %s" % msg)
+	_asr = null
