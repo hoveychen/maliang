@@ -1257,6 +1257,59 @@ function describeCreationAttrs(state: CreationState): string {
   return parts.join('，');
 }
 
+/**
+ * 在场玩家的对外视图：presence 快照 / actor_join 共用。
+ * 位置流只在人动起来时才发，静止的玩家在别人屏幕上根本不存在——presence 让进场即可见，
+ * 并把 spriteAsset 带过去，对端才能渲染真实立绘而不是一个泛蓝的占位小人。
+ */
+export interface ActorPresence {
+  playerId: string;
+  name: string;
+  spriteAsset: string;
+  tile?: TilePos;
+}
+
+function presenceOf(store: WorldStore, worldId: string, sceneId: string, playerId: string): ActorPresence {
+  const p = store.getPlayer(playerId);
+  return {
+    playerId,
+    name: p?.name ?? '',
+    spriteAsset: p?.spriteAsset ?? '',
+    tile: store.getPlayerTile(worldId, sceneId, playerId),
+  };
+}
+
+/** 同世界同场景的其他在场玩家（排除自己）。 */
+function presenceSnapshot(
+  hub: WorldHub, store: WorldStore, worldId: string, sceneId: string, exceptClientId: string,
+): ActorPresence[] {
+  return hub
+    .membersInScene(worldId, sceneId, exceptClientId)
+    .filter((m) => m.playerId)
+    .map((m) => presenceOf(store, worldId, sceneId, m.playerId));
+}
+
+/**
+ * 进场景（首次进世界 / 走 portal）：给自己发同场景名单，给同场景其他人广播 actor_join。
+ * 无 playerId（旧客户端/直连）时只发快照，不向别人宣告一个没有身份的连接。
+ */
+function announceSceneEntry(
+  hub: WorldHub, store: WorldStore, socket: { send: (data: string) => void },
+  worldId: string, sceneId: string, connKey: string, playerId: string,
+): void {
+  socket.send(JSON.stringify({
+    type: 'actors_snapshot',
+    sceneId,
+    actors: presenceSnapshot(hub, store, worldId, sceneId, connKey),
+  }));
+  if (!playerId) return;
+  hub.broadcastScene(
+    worldId, sceneId,
+    { type: 'actor_join', sceneId, actor: presenceOf(store, worldId, sceneId, playerId) },
+    connKey,
+  );
+}
+
 /** 连接退场(leave_world/断连)时摘出 hub；换 host 通知新 host，世界清空则杀掉进行中的演出。 */
 export function notifyHubLeave(hub: WorldHub, connKey: string, stages?: StageDirector, playerId?: string): void {
   const left = hub.leave(connKey);
@@ -1265,8 +1318,9 @@ export function notifyHubLeave(hub: WorldHub, connKey: string, stages?: StageDir
   if (stages && hub.membersIn(left.worldId).length === 0) {
     stages.onWorldEmpty(left.worldId);
   } else if (playerId) {
-    // 世界还有人：通知他们即时清掉离场者的远端副本（否则要等 3s 插值缓冲陈旧才消失）。
-    hub.broadcast(left.worldId, { type: 'actor_leave', playerId }, connKey);
+    // 世界还有人：通知【同场景】的人即时清掉离场者的远端副本（否则要等 3s 插值缓冲陈旧才消失）。
+    // 隔壁场景的人本来就看不见它，没必要收。
+    hub.broadcastScene(left.worldId, left.sceneId, { type: 'actor_leave', playerId, sceneId: left.sceneId }, connKey);
   }
 }
 
@@ -1404,6 +1458,8 @@ export async function handleWsMessage(
       });
       joined.departed?.newHost?.send({ type: 'world_host', isHost: true });
       socket.send(JSON.stringify({ type: 'world_host', isHost: joined.isHost }));
+      // presence：拿同场景在场名单 + 向他们宣告自己进场（静止的人也能被看见）。
+      announceSceneEntry(hub, store, socket, worldId, session.currentScene, connKey, session.playerId);
     }
     socket.send(JSON.stringify({
       type: 'world_state',
@@ -1789,8 +1845,17 @@ export async function handleWsMessage(
   if (msg.type === 'enter_scene') {
     const worldId = msg.worldId ?? '';
     const sceneId = (msg.sceneId ?? DEFAULT_SCENE) || DEFAULT_SCENE;
+    const prevScene = session.currentScene;
     session.currentScene = sceneId;
-    hub?.setScene(connKey, sceneId); // 位置流/降生广播按新场景定向（否则还在按旧场景发）
+    // 走 portal：先跟旧场景的人告别（他们要即时清掉我的副本），再把 hub 里的场景切过去，
+    // 位置流/降生广播才会按新场景定向。
+    if (hub && prevScene !== sceneId) {
+      if (session.playerId) {
+        hub.broadcastScene(worldId, prevScene, { type: 'actor_leave', playerId: session.playerId, sceneId: prevScene }, connKey);
+      }
+      hub.setScene(connKey, sceneId);
+      announceSceneEntry(hub, store, socket, worldId, sceneId, connKey, session.playerId);
+    }
     const scene = store.getScene(worldId, sceneId);
     socket.send(JSON.stringify({
       type: 'scene_entered',

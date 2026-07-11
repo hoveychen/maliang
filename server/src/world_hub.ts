@@ -14,6 +14,8 @@ export interface HubMember {
 
 export interface HubLeaveResult {
   worldId: string;
+  /** 离开者所在场景(摘出前记下)——actor_leave 要按场景定向,隔壁场景本来就看不见它。 */
+  sceneId: string;
   /** 离开者曾是 host 且世界还有人 ⇒ 新任 host(需要通知它接管 NPC 模拟)。 */
   newHost: HubMember | null;
 }
@@ -44,14 +46,15 @@ export class WorldHub {
     if (!worldId) return null;
     this.#clientWorld.delete(clientId);
     const members = this.#worlds.get(worldId);
-    if (!members) return { worldId, newHost: null };
+    if (!members) return { worldId, sceneId: '', newHost: null };
     const wasHost = this.hostOf(worldId)?.clientId === clientId;
+    const sceneId = members.get(clientId)?.sceneId ?? '';
     members.delete(clientId);
     if (members.size === 0) {
       this.#worlds.delete(worldId);
-      return { worldId, newHost: null };
+      return { worldId, sceneId, newHost: null };
     }
-    return { worldId, newHost: wasHost ? this.hostOf(worldId) : null };
+    return { worldId, sceneId, newHost: wasHost ? this.hostOf(worldId) : null };
   }
 
   membersIn(worldId: string): HubMember[] {
