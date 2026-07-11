@@ -30,8 +30,8 @@ func _run(scene: Node) -> void:
 	_check(pui != null and pui is PhoneUi, "phone_ui 存在")
 	if phone == null or pui == null:
 		return
-	_check(phone.state == PaperPhone.State.STOWED, "初始手机收起(STOWED)")
-	_check(not phone.visible, "初始隐藏")
+	_check(phone.state == PaperPhone.State.DOCKED, "初始停靠态(DOCKED)")
+	_check(not phone.visible, "首次停靠贴合前隐藏（ready 时机早于首帧 _step_phone_ui）")
 	_check(scene.get("_phone_scrim") != null, "_phone_scrim（点外部收起遮罩）存在")
 	_check(pui.get("_phone_signal") != null, "_phone_signal（状态栏信号格）存在")
 	# 两块屏幕视口按 PhoneUi 尺寸就绪
@@ -126,7 +126,7 @@ func _run(scene: Node) -> void:
 
 	# 收起：状态复位 + 两块视口停更新 + 遮罩隐藏
 	scene._close_phone()
-	_check(phone.state == PaperPhone.State.STOWED, "收起回 STOWED")
+	_check(phone.state == PaperPhone.State.DOCKED, "收起回停靠态(DOCKED)")
 	_check(not (scene.get("_phone_scrim") as Control).visible, "收起后遮罩隐藏")
 	_check(phone.front_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED \
 			and phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED,
