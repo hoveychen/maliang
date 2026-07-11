@@ -714,13 +714,20 @@ func _setup_player() -> void:
 
 ## 档案里有生成形象时，从服务端拉取替换占位（离线/失败静默保留占位）。
 func _apply_player_sprite() -> void:
+	if player.is_empty():
+		return
 	var asset := String(PlayerProfile.load_profile().get("sprite_asset", ""))
-	if asset.is_empty() or player.is_empty():
+	_apply_player_sprite_to(player["node"] as PaperCharacter, asset)
+
+## 把某张玩家立绘应用到一个 PaperCharacter：本地玩家与远端玩家共用同一套归一化与 idle 轮询，
+## 别人看到的我 = 我看到的我。node 可能中途被销毁（换场景/离场），每步 is_instance_valid 守卫。
+## fire-and-forget 调用（不 await）：跑到首个 await 就返回，图到了再替换占位。
+func _apply_player_sprite_to(node: PaperCharacter, asset: String) -> void:
+	if asset.is_empty() or not is_instance_valid(node):
 		return
 	var tex := await api.fetch_texture(asset)
-	if tex == null or player.is_empty():
+	if tex == null or not is_instance_valid(node):
 		return
-	var node := player["node"] as PaperCharacter
 	node.texture = tex
 	# 生成图按高度归一化到 5 单位（小朋友比 6 单位的村民略矮），脚底对齐
 	node.pixel_size = 5.0 / float(tex.get_height())
@@ -2017,6 +2024,10 @@ var _remote_actors: Dictionary = {}
 ## 非 host 端被 host 复制驱动的本地 NPC 的插值缓冲：char_id -> RemoteActorBuffer。
 ## 该 NPC 收到复制位置后转「replicated」：本端停模拟（取消执行器、不 wander），logical 改由缓冲插值。
 var _replicated_bufs: Dictionary = {}
+## 同场景在场玩家名单（服务端 actors_snapshot/actor_join 下发）：playerId -> {playerId,name,spriteAsset,tile?}。
+## 位置流只在人动起来时才发，只靠它的话静止的玩家在本端根本不存在；presence 让进场即可见，
+## 并提供 spriteAsset —— 远端玩家据此渲染真实立绘，而不是一个泛蓝的占位小生物。
+var _presence: Dictionary = {}
 
 static func _is_local_only_id(id: String) -> bool:
 	for prefix in _LOCAL_ONLY_IDS:
@@ -2142,7 +2153,9 @@ func _apply_replicated(id: String, pos: Vector2, t: int, now_local: int, is_play
 		# 本端没有的 NPC（角色列表没同步到）→ 落到远端副本渲染
 	var ra: Dictionary = _remote_actors.get(id, {})
 	if ra.is_empty():
-		ra = _spawn_remote_actor(id, pos)
+		# presence 通常已经先把副本立起来了；这里是兜底（快照丢了/本端还没收到 join）。
+		var p: Dictionary = _presence.get(id, {})
+		ra = _spawn_remote_actor(id, pos, String(p.get("spriteAsset", "")), String(p.get("name", "")))
 		_remote_actors[id] = ra
 	(ra["buf"] as RemoteActorBuffer).push(t, pos, now_local)
 
@@ -2161,12 +2174,53 @@ func _halt_npc_for_replication(n: Dictionary) -> void:
 	_stage_holds = _stage_holds.filter(func(e: BehaviorExecutor) -> bool: return not e.drives(n))
 	_stage_drives = _stage_drives.filter(func(m: Dictionary) -> bool: return not (m["ex"] as BehaviorExecutor).drives(n))
 
-## 远端玩家 avatar 的渲染副本（占位外观：真实立绘按 profile 拉取留后续）。
-func _spawn_remote_actor(id: String, pos: Vector2) -> Dictionary:
+## 远端玩家 avatar 的渲染副本。先用占位立起来（网络往返期间也得有个人在那儿），
+## 拿到 presence 的 spriteAsset 就换成那个小朋友的真实立绘（与本地玩家同一套归一化）。
+func _spawn_remote_actor(id: String, pos: Vector2, sprite := "", disp_name := "") -> Dictionary:
 	var node := PaperCharacter.new()
 	add_child(node)
-	node.setup(critter_tex, Color(0.86, 0.92, 1.0), id) # setup 内部归一尺寸 + 挂脚下暗斑
+	var label := disp_name if not disp_name.is_empty() else id
+	node.setup(critter_tex, Color(0.86, 0.92, 1.0), label) # setup 内部归一尺寸 + 挂脚下暗斑
+	_apply_player_sprite_to(node, sprite) # fire-and-forget：空 asset 直接返回，图到了替换占位
 	return { "node": node, "logical": pos, "id": id, "buf": RemoteActorBuffer.new(), "is_remote": true }
+
+## 在场名单（进世界/换场景一次性下发）：把同场景的其他小朋友立起来——包括站着不动的。
+func _on_actors_snapshot(data: Dictionary) -> void:
+	if String(data.get("sceneId", "")) != _scene_id:
+		return
+	for a in data.get("actors", []):
+		_upsert_presence(a as Dictionary)
+
+## 某玩家进场：立起他的副本（带真实立绘）。
+func _on_actor_join(data: Dictionary) -> void:
+	if String(data.get("sceneId", "")) != _scene_id:
+		return
+	_upsert_presence(data.get("actor", {}) as Dictionary)
+
+## 记下在场玩家并立刻立起副本。初始位置用服务端存的 tile（没有就落在镜头焦点附近），
+## 之后由 positions_relay 的插值缓冲接管——所以这里只需要一个「不突兀」的起点。
+func _upsert_presence(a: Dictionary) -> void:
+	var pid := String(a.get("playerId", ""))
+	if pid.is_empty() or pid == backend.player_id:
+		return # 自己不建副本
+	_presence[pid] = a
+	if _remote_actors.has(pid):
+		return
+	var tile: Variant = a.get("tile", null)
+	var pos := focus_logical
+	if tile is Dictionary and (tile as Dictionary).has("tileX"):
+		pos = Vector2(float(tile["tileX"]), float(tile["tileY"]))
+	_remote_actors[pid] = _spawn_remote_actor(pid, pos, String(a.get("spriteAsset", "")), String(a.get("name", "")))
+
+## 别人造出了新伙伴：本端就地降生（否则要重进场景才看得到它）。
+func _on_character_spawned(data: Dictionary) -> void:
+	if String(data.get("sceneId", "")) != _scene_id:
+		return
+	var c: Dictionary = data.get("character", {})
+	var cid := String(c.get("id", ""))
+	if cid.is_empty() or not _find_npc(cid).is_empty():
+		return # 已经有了（自己造的那份走 gen_complete 降生）
+	await _spawn_server_character(c, Vector2.INF)
 
 ## 升任 host（原 host 掉线重指派）：立即收回本端被复制驱动的 NPC，恢复本端自主模拟。
 ## 非升任（降为非 host，理论不发生——host 只增不减直到掉线）时不动。
@@ -2185,6 +2239,7 @@ func _on_world_host_changed(is_host: bool) -> void:
 func _on_actor_leave(player_id: String) -> void:
 	if player_id.is_empty():
 		return
+	_presence.erase(player_id)
 	var ra: Dictionary = _remote_actors.get(player_id, {})
 	if ra.is_empty():
 		return
@@ -2192,6 +2247,16 @@ func _on_actor_leave(player_id: String) -> void:
 	if is_instance_valid(node):
 		node.queue_free()
 	_remote_actors.erase(player_id)
+
+## 清掉所有远端副本与在场名单（换场景时调用：旧场景的人不在新场景里）。
+func _clear_remote_actors() -> void:
+	for id in _remote_actors.keys():
+		var node: Variant = (_remote_actors[id] as Dictionary).get("node", null)
+		if node != null and is_instance_valid(node):
+			(node as Node).queue_free()
+	_remote_actors.clear()
+	_replicated_bufs.clear()
+	_presence.clear()
 
 ## 每帧：按插值缓冲推进被复制的本地 NPC 与远端副本的 logical；缓冲陈旧（拥有者停流/掉线）则回收/恢复自主。
 func _step_remote_actors(_delta: float) -> void:
@@ -2992,6 +3057,9 @@ func _setup_backend() -> void:
 	backend.time_sync.connect(_stage.on_time_sync)
 	backend.positions_relay.connect(_on_positions_relay) # 多人位置复制：远端 actor 插值渲染
 	backend.actor_leave.connect(_on_actor_leave)         # 玩家离场：即时清掉其远端副本
+	backend.actors_snapshot.connect(_on_actors_snapshot) # 在场名单：静止的小朋友也立起来
+	backend.actor_join.connect(_on_actor_join)           # 玩家进场：带真实立绘立副本
+	backend.character_spawned.connect(_on_character_spawned) # 别人造的新伙伴：就地降生
 	backend.scene_entered.connect(_on_scene_entered) # 走 portal 换场景：卸旧场景、载新场景
 	backend.terrain_patch.connect(_on_terrain_patch) # 地形矩阵增量更新（tile 编辑广播）
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
@@ -3409,6 +3477,8 @@ func _unload_scene() -> void:
 		chunk_manager.clear_dynamic_props()
 	_portals.clear() # 旧场景的出口不属于新场景；新场景的由 _apply_scene 重新下发
 	_clear_portal_markers()
+	# 旧场景的其他小朋友不在新场景里：清掉副本，等新场景的 actors_snapshot 重新立
+	_clear_remote_actors()
 
 ## 初载角色过滤：只留当前场景的角色（仙女恒随，与 enter_scene 同款约定）。get_world 回的是
 ## 全库角色，不过滤会把别场景的角色全生在村里，positions_report 随后把它们拖成 village

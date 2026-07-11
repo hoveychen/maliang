@@ -35,6 +35,13 @@ signal world_host(is_host: bool)       ## 多人所有权：本连接是否为 h
 signal time_sync(data: Dictionary)     ## 时间握手回执：{t0, serverMs}（倒计时/插值时间戳用）
 signal positions_relay(data: Dictionary) ## 其他端复制位置：{t, chars:[{id,x,y}], player?:{id,x,y}}（远端演员插值渲染）
 signal actor_leave(player_id: String)  ## 某玩家离场：即时清掉其远端副本（不等插值缓冲陈旧）
+## 在场玩家名单（进世界/换场景时一次性下发）：{ sceneId, actors:[{playerId,name,spriteAsset,tile?}] }。
+## 位置流只在人动起来时才发，光靠它静止的玩家在本端根本不存在——presence 让进场即可见。
+signal actors_snapshot(data: Dictionary)
+## 某玩家进场：{ sceneId, actor:{playerId,name,spriteAsset,tile?} }。带 spriteAsset，据此渲染真实立绘。
+signal actor_join(data: Dictionary)
+## 别人造出了新伙伴：{ sceneId, character }。本端据此就地降生（否则要重进场景才看得到）。
+signal character_spawned(data: Dictionary)
 ## 换场景（模型 B，走 portal）：收到目标场景的地形 + 角色 + items 实体 + pois + 该场景玩家最后位置。
 ## data = { worldId, sceneId, scene:Dictionary|null, characters:Array, items:Array, playerPos:Dictionary|null }
 ## （摆着的造物在场景矩阵物品层里，不再单发 props）
@@ -275,5 +282,11 @@ func _dispatch(data: Dictionary) -> void:
 			positions_relay.emit(data)
 		"actor_leave":
 			actor_leave.emit(String(data.get("playerId", "")))
+		"actors_snapshot":
+			actors_snapshot.emit(data)
+		"actor_join":
+			actor_join.emit(data)
+		"character_spawned":
+			character_spawned.emit(data)
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))
