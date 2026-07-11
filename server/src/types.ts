@@ -252,7 +252,9 @@ export interface IntentContext {
   characterName: string;
   personality: string;
   abilities: string[];
-  recentHistory?: ChatTurn[]; // 近 N 轮对话，给角色上下文让回应连贯
+  recentHistory?: ChatTurn[]; // 当前 session 的对话（WS 路径整段回喂；旧路径为持久历史截尾）
+  /** session 超长压缩的产物：更早轮次的中文摘要（有则注入，让角色不忘本段更早聊过的事）。 */
+  sessionSummary?: string;
   /** 角色对当前玩家的长期记忆（带分类，注入时按 kind 分组）。 */
   memory?: { text: string; kind: MemoryKind }[];
   /** 世界里的其他角色花名册（不含自己/小神仙）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
@@ -265,6 +267,16 @@ export interface IntentContext {
   taskCandidate?: ActiveTask;
   /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing，命中 prompt cache。 */
   cacheKey?: string;
+}
+
+/** session 超长压缩（compactSession）的上下文：把较旧轮次压成一段中文摘要，session 内继续对话时注入。 */
+export interface SessionCompactionContext {
+  characterName: string;
+  personality: string;
+  /** 上一次压缩的摘要（若有）：新摘要要把它并进去，不丢更早的信息。 */
+  previousSummary?: string;
+  /** 这次要被压缩掉的较旧轮次（时间正序）。 */
+  turns: ChatTurn[];
 }
 
 /** 会话（Visit）结束时让角色「自己决定记什么」的上下文（extractMemory 用）。 */
@@ -346,10 +358,11 @@ export interface Visit {
   endedAt: number | null;
 }
 
-/** 记忆分类型（对齐 extractMemory 抽取口径：名字/喜好/约定/发生的事/关系）。 */
-export type MemoryKind = 'identity' | 'preference' | 'promise' | 'event' | 'relation';
+/** 记忆分类型（对齐 extractMemory 抽取口径：名字/喜好/约定/发生的事/关系；
+ *  creation 不走抽取，由造物完成时程序化写入——「帮小朋友造过什么」，支持「帮我造刚才的小动物」）。 */
+export type MemoryKind = 'identity' | 'preference' | 'promise' | 'event' | 'relation' | 'creation';
 
-export const MEMORY_KINDS: readonly MemoryKind[] = ['identity', 'preference', 'promise', 'event', 'relation'];
+export const MEMORY_KINDS: readonly MemoryKind[] = ['identity', 'preference', 'promise', 'event', 'relation', 'creation'];
 
 /**
  * 一条结构化长期记忆（P3：取代 Character.memory: string[]，落 memories 独立表）。
@@ -395,8 +408,14 @@ export interface CreationState {
   active: boolean;
   goal: CreationGoal;        // 这次会话在造什么（缺省 character，兼容存量调用点）
   attrs: CreationAttrs;
-  askedCategories: string[]; // 已问过的类别，避免重复问
+  askedCategories: string[]; // 已问过的类别（mock 确定性解析用；LLM 路径靠 dialog 自带上下文）
   turnCount: number;         // 兜底：超上限强制造
+  // 本次创造会话的完整对话（child=小朋友的请求/回答，npc=仙子的追问），按标准多轮 messages 回放给
+  // guide LLM——上下文完整，再笨的模型也不会重复问已问过的问题、也能看懂「毛毛」是在答名字。
+  dialog: ChatTurn[];
+  // 仙子最近帮这个小朋友造过的东西（kind='creation' 记忆，开会话时填入）：
+  // 注入 guide prompt，支持「帮我造刚才的小动物，但是会飞的」这类指代。
+  recentCreations?: string[];
 }
 
 /** 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。 */
@@ -423,5 +442,5 @@ export interface GuideCreationResult {
 
 /** 引导式创造会话的初始空状态（缺省造角色，兼容存量调用点）。 */
 export function newCreationState(goal: CreationGoal = 'character'): CreationState {
-  return { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0 };
+  return { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0, dialog: [] };
 }

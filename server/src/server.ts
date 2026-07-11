@@ -20,7 +20,7 @@ import { BUILTIN_ITEMS, creationItemDef, validateTerrainItems } from './items.ts
 import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrain_edit.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationGoal, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type ChatTurn, type CreationGoal, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
@@ -725,6 +725,64 @@ export interface VisitState {
   worldId: string;
   playerId: string;
   pending: Map<string, { child: string; npc: string }[]>; // characterId → 尚未抽取的对话增量
+  // characterId → 本段 Visit 与该角色的完整对话（不随中途 flush 清空）。整段回喂 routeIntent：
+  // session 内上下文完整、不截尾；Visit 结束即弃，重进世界从零开始（长期记忆走 memories）。
+  history: Map<string, ChatTurn[]>;
+  // characterId → 超长压缩的摘要（history 只留近尾，更早轮次折叠在这里）
+  summary: Map<string, string>;
+  // 正在后台压缩的角色（防同一角色并发压两次）
+  compacting: Set<string>;
+}
+
+/** 当前 Visit 里与某角色的 session 上下文：完整对话 + 超长压缩摘要（无 Visit/首轮 → 空=全新 session）。 */
+export function visitContext(session: VoiceSession, characterId: string): { history: ChatTurn[]; summary?: string } {
+  return {
+    history: session.visit?.history.get(characterId) ?? [],
+    summary: session.visit?.summary.get(characterId),
+  };
+}
+
+/** session 压缩阈值：history+摘要总字数超过即触发（中文≈1字/token，200k 字≈200k token 上下文）。 */
+const SESSION_COMPACT_CHARS = Number(process.env.SESSION_COMPACT_CHARS ?? 200_000);
+/** 压缩后保留的最近条数（child+npc 各算一条，10 条=5 个来回），更早的折叠进摘要。 */
+const COMPACT_KEEP_TAIL = 10;
+
+/**
+ * session 上下文超阈值时后台压缩一轮：较旧轮次（并入上次摘要）→ compactSession 出新摘要，
+ * history 原地只留近尾。失败只影响这次压缩（下轮再试），绝不影响对话回复。
+ */
+export async function maybeCompactVisit(
+  session: VoiceSession,
+  characterId: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  threshold = SESSION_COMPACT_CHARS,
+): Promise<void> {
+  const visit = session.visit;
+  if (!visit || visit.compacting.has(characterId)) return;
+  const hist = visit.history.get(characterId);
+  if (!hist || hist.length <= COMPACT_KEEP_TAIL) return;
+  const prev = visit.summary.get(characterId) ?? '';
+  const total = prev.length + hist.reduce((n, t) => n + t.text.length, 0);
+  if (total <= threshold) return;
+  const cut = hist.length - COMPACT_KEEP_TAIL;
+  const older = hist.slice(0, cut);
+  visit.compacting.add(characterId);
+  try {
+    const character = store.getCharacter(visit.worldId, characterId);
+    const summary = await adapters.llm.compactSession({
+      characterName: character?.name ?? '',
+      personality: character?.personality ?? '',
+      previousSummary: prev || undefined,
+      turns: older,
+    });
+    if (summary) visit.summary.set(characterId, summary);
+    hist.splice(0, cut); // 原地删已压缩的旧轮次（await 期间新 push 的仍在尾部，不丢）
+  } catch (err) {
+    console.warn(`session 压缩失败（下轮再试，不影响对话）：${String(err)}`);
+  } finally {
+    visit.compacting.delete(characterId);
+  }
 }
 
 /** 边说边识别的单连接语音会话：voice_start 开识别流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
@@ -765,7 +823,7 @@ export function startSessionVisit(
   now: number,
 ): void {
   if (session.visit) void endSessionVisit(session, adapters, store, now); // 收尾旧的（同步排空 pending，抽取后台跑）
-  session.visit = { id: store.startVisit(worldId, playerId, now), worldId, playerId, pending: new Map() };
+  session.visit = { id: store.startVisit(worldId, playerId, now), worldId, playerId, pending: new Map(), history: new Map(), summary: new Map(), compacting: new Set() };
 }
 
 /** 记一轮对话进当前 Visit 的增量；单角色超阈值即中途 flush 兜底（后台跑，不阻塞回复路径）。 */
@@ -781,9 +839,15 @@ export function recordVisitTurn(
 ): void {
   // 兜底：没经 world_info 起过 Visit（旧客户端/直连）时惰性开一段。
   if (!session.visit) {
-    session.visit = { id: store.startVisit(worldId, playerId, Date.now()), worldId, playerId, pending: new Map() };
+    session.visit = { id: store.startVisit(worldId, playerId, Date.now()), worldId, playerId, pending: new Map(), history: new Map(), summary: new Map(), compacting: new Set() };
   }
   const visit = session.visit;
+  // session 全量历史：供下一轮 routeIntent 整段回喂（不随中途 flush 清空，Visit 结束即弃）。
+  const hist = visit.history.get(characterId) ?? [];
+  hist.push({ role: 'child', text: transcript, ts: 0 }, { role: 'npc', text: replyText, ts: 0 });
+  visit.history.set(characterId, hist);
+  // 超阈值后台压缩（不阻塞回复路径；失败下轮再试）
+  void maybeCompactVisit(session, characterId, adapters, store).catch(() => {});
   const turns = visit.pending.get(characterId) ?? [];
   turns.push({ child: transcript, npc: replyText });
   visit.pending.set(characterId, turns);
@@ -884,6 +948,9 @@ async function openCreationSession(
     return;
   }
   session.creation = newCreationState(goal);
+  // 仙子最近帮这个小朋友造过的东西：注入 guide，「帮我造刚才的小动物」这类指代能对上
+  const creations = store.getMemories(fairyId, session.playerId).filter((m) => m.kind === 'creation');
+  if (creations.length > 0) session.creation.recentCreations = creations.slice(-5).map((m) => m.text);
   await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn);
 }
 
@@ -920,6 +987,7 @@ export async function createPropAsync(
   adapters: ServiceAdapters,
   store: WorldStore,
   clientTts = false,
+  creatorId = '', // 造物的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
@@ -945,6 +1013,10 @@ export async function createPropAsync(
     store.upsertItem(def);
     store.bagAdd(worldId, playerId, def.id);
     created = true;
+    // 造物记忆：仙子记下帮这个小朋友变过什么，下次「帮我变刚才那个」能对上
+    if (creatorId) {
+      store.addMemory(creatorId, { text: `帮小朋友变过「${def.name}」（${description.slice(0, 60)}）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
+    }
     socket.send(JSON.stringify({
       type: 'item_created',
       worldId,
@@ -971,6 +1043,7 @@ export async function createCharacterAsync(
   store: WorldStore,
   toSpriteSheet?: ToSpriteSheet,
   clientTts = false,
+  creatorId = '', // 造角色的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'character', clientTts);
@@ -986,6 +1059,10 @@ export async function createCharacterAsync(
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
     );
     created = true;
+    // 造物记忆：仙子记下帮这个小朋友造过谁，下次「帮我造刚才的小动物，但是会飞的」能对上
+    if (creatorId) {
+      store.addMemory(creatorId, { text: `帮小朋友造过新伙伴「${character.name}」（${description.slice(0, 60)}）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
+    }
     socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId, playerId) }));
     // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     if (character.appearance.spriteAsset) {
@@ -1053,6 +1130,9 @@ export async function generateCreationIcons(
  *   - 快捷路径（首轮即 done）：单独念出来，别吞掉
  * 只有入口那一次传 leadIn；后续每轮 creation_reply 都不带。
  */
+/** 引导式创造的追问轮数上限：到线仍未 done 就用现有属性强制造（与 mock 的 turnCount>=5 同值）。 */
+const CREATION_MAX_TURNS = 5;
+
 export async function advanceCreation(
   socket: { send: (data: string) => void },
   session: VoiceSession,
@@ -1070,9 +1150,17 @@ export async function advanceCreation(
   const summarize = () => isProp ? composePropDesc(state.attrs) : describeCreationAttrs(state);
   // done 时按目标分派到对应的异步造：造物 createPropAsync，造角色 createCharacterAsync。
   const finishCreate = (desc: string) => isProp
-    ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts)
-    : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts);
+    ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId)
+    : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId);
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
+  // 超轮兜底（适配器无关）：已追问满上限还没 done，就用现有属性直接造——绝不无限追问。
+  // 此前只有 mock 在 turnCount>=5 时强制 done，线上 LLM 属性解析不进去就会原地循环。
+  if (state.turnCount >= CREATION_MAX_TURNS) {
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finishCreate(summarize() || childInput);
+    return;
+  }
   let r;
   try {
     r = isProp ? await adapters.llm.guideProp(state, childInput) : await adapters.llm.guideCreation(state, childInput);
@@ -1096,6 +1184,9 @@ export async function advanceCreation(
     if (u.traits) state.attrs.traits = u.traits;
   }
   if (r.category) state.askedCategories.push(r.category);
+  // 会话对话入账：这轮小朋友说的 + 仙子接下来的追问，下一轮按多轮 messages 回放给 guide。
+  state.dialog.push({ role: 'child', text: childInput, ts: 0 });
+  if (!r.done) state.dialog.push({ role: 'npc', text: r.question ?? r.replyText, ts: 0 });
   state.turnCount += 1;
   if (r.done) {
     session.creation = null;
@@ -1340,7 +1431,7 @@ export async function handleWsMessage(
       return;
     }
     try {
-      await createCharacterAsync(socket, msg.worldId ?? '', session.playerId, msg.intentText ?? '', adapters, store, undefined, session.clientTts);
+      await createCharacterAsync(socket, msg.worldId ?? '', session.playerId, msg.intentText ?? '', adapters, store, undefined, session.clientTts, msg.characterId ?? '');
     } finally {
       gate.release();
     }
@@ -1363,7 +1454,19 @@ export async function handleWsMessage(
       const optId = typeof msg.optionId === 'string' ? msg.optionId : '';
       // 点选 → 该选项中文 label 当输入；造物会话查物品图标库，造角色查角色图标库。
       const lookup = session.creation.goal === 'prop' ? findPropOption : findOption;
-      const childInput = (optId ? (lookup(optId)?.label ?? optId) : (msg.spokenText ?? '')).trim();
+      const picked = optId ? lookup(optId) : undefined;
+      // 点选路径确定性入账：option 自带 category，服务端直接写 attrs，不依赖 LLM 把 label 解析进
+      // updatedAttrs——此前解析失败属性不进账，guide 看到的状态不变，就会重复问同一个问题。
+      if (picked) {
+        const a = session.creation.attrs;
+        if (picked.category === 'kind') a.kind = picked.label;
+        else if (picked.category === 'color') a.color = picked.label;
+        else if (picked.category === 'size') a.size = picked.label;
+        else if (picked.category === 'personality') a.personality = picked.label;
+        else if (picked.category === 'motion') a.motion = picked.label;
+        else if (picked.category === 'trait' && !a.traits.includes(picked.label)) a.traits.push(picked.label);
+      }
+      const childInput = (optId ? (picked?.label ?? optId) : (msg.spokenText ?? '')).trim();
       if (!childInput) {
         socket.send(JSON.stringify({ type: 'voice_failed', reason: '造角色答复为空' }));
         return;
@@ -1397,7 +1500,7 @@ export async function handleWsMessage(
         await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store);
         return;
       }
-      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene);
+      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene, visitContext(session, msg.characterId ?? ''));
       // 造角色/造物入口：开引导会话，不发普通回应（问句 TTS + 图标卡由会话驱动）。
       if (response.characterRequest) {
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText);
@@ -1452,6 +1555,7 @@ export async function handleWsMessage(
         ttsHooks,
         session.clientTts,
         session.currentScene,
+        visitContext(session, msg.characterId ?? ''),
       );
       // 造角色/造物入口：respondToTranscript 识别到意图但没出声，这里开引导会话，不发普通回应。
       if (response.characterRequest) {
@@ -1579,7 +1683,7 @@ export async function handleWsMessage(
         onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
         onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
       };
-      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene);
+      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene, visitContext(session, characterId));
       // 造角色/造物入口：开引导会话，不发普通回应。
       if (response.characterRequest) {
         await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store, response.replyText);

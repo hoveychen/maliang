@@ -7,6 +7,7 @@ import type {
   IntentResult,
   MemoryExtractionContext,
   ModerationResult,
+  SessionCompactionContext,
 } from '../types.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
 
@@ -37,6 +38,8 @@ export interface LLMAdapter {
   guideProp(state: CreationState, childInput: string): Promise<GuideCreationResult>;
   /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条，各带分类 kind；去重、归属玩家由 voice 落地）。 */
   extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]>;
+  /** session 超长压缩：把较旧轮次（并入上次摘要）压成一段中文摘要，session 内继续对话时注入。 */
+  compactSession(ctx: SessionCompactionContext): Promise<string>;
   /** onboarding 自我介绍：从小朋友的转写里提取名字与称呼（提取不到均返回空串）。 */
   extractProfile(transcript: string): Promise<{ name: string; nickname: string }>;
   respond(prompt: string): Promise<string>;

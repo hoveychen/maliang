@@ -11,6 +11,7 @@ import {
   type IntentContext,
   type IntentResult,
   type MemoryExtractionContext,
+  type SessionCompactionContext,
 } from '../types.ts';
 import { CREATION_OPTIONS, optionsByCategory } from '../creation_options.ts';
 import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
@@ -268,6 +269,13 @@ export function createMockAdapters(): ServiceAdapters {
         const likeM = /我喜欢([^\s，。!！?？]{1,12})/.exec(child);
         if (likeM) facts.push({ text: `小朋友喜欢${likeM[1]}`, kind: 'preference' });
         return facts.filter((f) => !ctx.existingMemory.includes(f.text));
+      },
+      async compactSession(ctx: SessionCompactionContext): Promise<string> {
+        // mock：确定性摘要——并入上次摘要 + 报被压缩的轮数与首末句，供测试断言
+        const head = ctx.turns[0]?.text ?? '';
+        const tail = ctx.turns.at(-1)?.text ?? '';
+        const prev = ctx.previousSummary ? `${ctx.previousSummary}；` : '';
+        return `${prev}（压缩了${ctx.turns.length}条：从「${head.slice(0, 10)}」到「${tail.slice(0, 10)}」）`;
       },
       async extractProfile(transcript: string): Promise<{ name: string; nickname: string }> {
         // mock：确定性从「我叫X / 我是X」提取；真实接 LLM 自由理解（含称呼、小名）

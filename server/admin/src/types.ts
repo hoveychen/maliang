@@ -252,6 +252,7 @@ export const MEMORY_KIND_LABELS: Record<string, string> = {
   promise: '约定',
   event: '事件',
   relation: '关系',
+  creation: '造物',
 };
 
 export const TASK_TYPE_LABELS: Record<string, string> = {
