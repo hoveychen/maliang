@@ -32,6 +32,7 @@ UNIT_TESTS=(
   test_world_grid
   test_terrain_map
   test_terrain_atlas
+  test_scifi_items
   test_autotile
   test_occupancy_map
   test_pathfinder

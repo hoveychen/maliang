@@ -91,6 +91,24 @@ const KAYKIT_NODES := {
 	"windmill": { "scene": WINDMILL_SCENE, "scale": HOUSE_SCALE },
 }
 
+## 未来机器人主题独立节点（world-themes P2；Quaternius 机器人 + Kenney Space Kit，全 CC0）。
+## renderRef 'scifi:<key>' 的 key → { scene, scale }。scale 为首版目测值，真机手感调参留 P5。
+## 键与服务端 BUILTIN_ITEMS 的 scifi renderRef 后段一一对应（robot_* + Kenney 原名）。
+const SCIFI_NODES := {
+	"robot_animated": { "scene": preload("res://assets/scifi/robots/robot_animated.glb"), "scale": 2.4 },
+	"robot_enemy": { "scene": preload("res://assets/scifi/robots/robot_enemy.glb"), "scale": 2.4 },
+	"robot_flying": { "scene": preload("res://assets/scifi/robots/robot_flying.glb"), "scale": 2.0 },
+	"robot_legs_gun": { "scene": preload("res://assets/scifi/robots/robot_legs_gun.glb"), "scale": 2.4 },
+	"robot_flying_gun": { "scene": preload("res://assets/scifi/robots/robot_flying_gun.glb"), "scale": 2.0 },
+	"robot_large": { "scene": preload("res://assets/scifi/robots/robot_large.glb"), "scale": 3.0 },
+	"mech": { "scene": preload("res://assets/scifi/robots/mech.glb"), "scale": 3.0 },
+	"hangar_smallA": { "scene": preload("res://assets/scifi/props/hangar_smallA.glb"), "scale": 3.5 },
+	"machine_generatorLarge": { "scene": preload("res://assets/scifi/props/machine_generatorLarge.glb"), "scale": 3.0 },
+	"satelliteDish_large": { "scene": preload("res://assets/scifi/props/satelliteDish_large.glb"), "scale": 3.0 },
+	"barrel": { "scene": preload("res://assets/scifi/props/barrel.glb"), "scale": 1.8 },
+	"rock_crystals": { "scene": preload("res://assets/scifi/props/rock_crystals.glb"), "scale": 2.0 },
+}
+
 ## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, water:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
 ## wrapped 区块索引 → 逐 tile autotile 地面 ArrayMesh。全世界只有 3×3 个
@@ -370,8 +388,8 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 			var key := rref.get_slice(":", 1)
 			if BAKED_MESHES.has(key) or KAYKIT_SCATTER.has(key):
 				_batch(batches, key, pos, _jitter_scale(key, hk), yaw)
-			elif KAYKIT_NODES.has(key):
-				var nb: Dictionary = KAYKIT_NODES[key]
+			elif KAYKIT_NODES.has(key) or SCIFI_NODES.has(key):
+				var nb: Dictionary = KAYKIT_NODES[key] if KAYKIT_NODES.has(key) else SCIFI_NODES[key]
 				var inst := _spawn(deco, nb["scene"], pos, float(nb["scale"]), yaw)
 				var ext := _visual_extent(inst, float(nb["scale"]))
 				building_shadows.append([inst.position, ext.x, ext.y])

@@ -169,6 +169,7 @@ export interface ItemDef {
    * 渲染引用，前缀分发：
    *   'baked:<name>'   客户端 SDF 烘焙 mesh（assets/sdf_props/baked/<name>.res，MultiMesh 合批）
    *   'kaykit:<name>'  KayKit gltf 场景（客户端 preload 映射表）
+   *   'scifi:<name>'   科幻主题 gltf 场景（Quaternius/Kenney CC0，客户端 SCIFI_NODES 表）
    *   'sdf_res:<name>' 打包内 SDF spec（assets/sdf_props/<name>.json）
    *   'sdf_inline'     spec 字段内联（语音造物）
    */
@@ -184,6 +185,12 @@ export interface ItemDef {
   pathOk: boolean;
   /** SDF 物件围绕锚点的游走半径（米），0 = 不动。 */
   wander: number;
+  /**
+   * 主题软标签（world-themes：'scifi'/'medieval'/'kitchen'…），可多主题共用。
+   * 仅供造世界引导按主题过滤候选、admin 分类；渲染/摆放/占用逻辑一律无视。
+   * 缺省 = 无标签（草/路/水时代的内置布景不带）。
+   */
+  themes?: string[];
 }
 
 /** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */

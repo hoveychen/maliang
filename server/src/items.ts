@@ -44,10 +44,31 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   builtin('paper_note', '纸条', 'sdf_res:paper_note', 1, true),
   builtin('crayon', '蜡笔', 'sdf_res:crayon', 1, true),
   builtin('village_sign', '村口路牌', 'sdf_res:village_sign', 1, true),
+
+  // ── 未来机器人主题（world-themes P2 打样；全 CC0：Quaternius 机器人 + Kenney Space Kit）──
+  // 机器人（Quaternius，assets/scifi/robots/*.glb）
+  scifi('robot_animated', '机器人', 'scifi:robot_animated', 3, true),
+  scifi('robot_enemy', '守卫机器人', 'scifi:robot_enemy', 3, true),
+  scifi('robot_flying', '飞行机器人', 'scifi:robot_flying', 1, true),
+  scifi('robot_legs_gun', '巡逻机器人', 'scifi:robot_legs_gun', 3, true),
+  scifi('robot_flying_gun', '哨戒机', 'scifi:robot_flying_gun', 1, true),
+  scifi('robot_large', '大型机器人', 'scifi:robot_large', 3, true),
+  scifi('mech', '机甲', 'scifi:mech', 3, true),
+  // 科幻环境物（Kenney Space Kit，assets/scifi/props/*.glb）
+  scifi('scifi_hangar', '机库', 'scifi:hangar_smallA', 3, true),
+  scifi('scifi_generator', '发电机', 'scifi:machine_generatorLarge', 3, true),
+  scifi('scifi_satellite', '卫星天线', 'scifi:satelliteDish_large', 3, true),
+  scifi('scifi_barrel', '燃料桶', 'scifi:barrel', 1, true),
+  scifi('scifi_crystals', '能量晶簇', 'scifi:rock_crystals', 1, true),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
   return { id, worldId: null, name, renderRef, footprintW: span, footprintH: span, blocking, pathOk: false, wander: 0 };
+}
+
+/** 主题布景（带 themes 软标签；语义同 builtin，仅多一个分类标签）。 */
+function scifi(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
+  return { id, worldId: null, name, renderRef, footprintW: span, footprintH: span, blocking, pathOk: false, wander: 0, themes: ['scifi'] };
 }
 
 /**
