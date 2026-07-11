@@ -7,6 +7,9 @@ extends SceneTree
 
 var scene: Node
 var frame := 0
+var seen := -1    ## 仙子第一次出现的帧；她随后还会被真立绘替换（节点重建），故再等 STABLE 帧才进交互
+var entered := -1 ## 进交互的那一帧
+const STABLE := 60
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
@@ -16,11 +19,24 @@ func _initialize() -> void:
 
 func _tick() -> void:
 	frame += 1
-	if frame == 20:
+	if entered < 0:
+		if frame > 900:
+			push_error("仙子始终没出现，放弃截图")
+			quit(1)
+			return
 		var fairy: Dictionary = scene.call("_find_fairy")
-		if not fairy.is_empty():
-			scene.call("_enter_interaction", fairy["node"])
-	if frame == 40:
+		if fairy.is_empty():
+			return
+		if seen < 0:
+			seen = frame
+			return
+		if frame - seen < STABLE:
+			return # 世界还在铺，立绘一换节点就 free，这时进交互会拿到个死引用
+		scene.call("_enter_interaction", fairy["node"])
+		entered = frame
+		return
+	var t := frame - entered
+	if t == 20:
 		scene.call("_on_creation_prompt", {
 			"goal": "character", # 造角色 → 仙子身旁立降生蛋（造物则是魔法熔炉）
 			"replyText": "它是什么颜色的呀？", "question": "它是什么颜色的呀？", "category": "color",
@@ -32,13 +48,13 @@ func _tick() -> void:
 			],
 			"ttsAsset": "", "voiceId": "",
 		})
-	if frame == 90: # 等相机推近缓动到位
+	if t == 70: # 等相机推近缓动到位
 		_shot("creation_view")
-	if frame == 92: # 点第一张卡 → 它飞向蛋
+	if t == 72: # 点第一张卡 → 它飞向蛋
 		var cards := scene.get("_creation_cards") as GridContainer
 		if cards.get_child_count() > 0:
 			scene.call("_on_creation_card", "red", cards.get_child(0))
-	if frame == 102: # 飞行中途（THROW_TIME=0.55s，此刻约走了三分之一）
+	if t == 82: # 飞行中途（THROW_TIME=0.55s，此刻约走了三分之一）
 		_shot("creation_throw")
 		quit(0)
 
