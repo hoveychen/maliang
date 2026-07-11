@@ -198,6 +198,16 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('cn_archway', '牌坊', 'ancient_china:torii', 3, true, ['ancient_china']),
   themed('cn_pavilion', '古亭', 'ancient_china:shrine_a', 3, true, ['ancient_china']),
   themed('cn_shrine', '神龛', 'ancient_china:shrine_b', 3, true, ['ancient_china']),
+
+  // ── 侏罗纪时代主题（world-themes 补遗第 12 主题；全 CC0：Quaternius Animated Dinosaurs）──
+  // renderRef 'dino:<key>' → 客户端 assets/packs/dino/pack.json（node 类）。全 3×3。
+  // 地面可搭配 P1 tile 地基（草地/沙地）。物种按 AABB 形状匹配，见 assets/dino/SOURCES.txt。
+  themed('dino_trex', '霸王龙', 'dino:trex', 3, true, ['jurassic']),
+  themed('dino_raptor', '迅猛龙', 'dino:raptor', 3, true, ['jurassic']),
+  themed('dino_triceratops', '三角龙', 'dino:triceratops', 3, true, ['jurassic']),
+  themed('dino_parasaur', '鸭嘴龙', 'dino:parasaur', 3, true, ['jurassic']),
+  themed('dino_stego', '剑龙', 'dino:stego', 3, true, ['jurassic']),
+  themed('dino_apato', '腕龙', 'dino:apato', 3, true, ['jurassic']),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
