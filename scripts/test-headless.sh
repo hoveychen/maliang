@@ -72,6 +72,7 @@ UNIT_TESTS=(
   test_adaptive_fps_cap
   test_paper_xray_gate
   test_scatter_shadows
+  test_actor_shadow
 )
 fails=0
 

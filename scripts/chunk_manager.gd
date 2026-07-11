@@ -177,6 +177,8 @@ func _make_slot() -> Dictionary:
 	var tile := MeshInstance3D.new()
 	tile.material_override = _ground_mat
 	tile.extra_cull_margin = CULL_MARGIN
+	# 地面不投影（只接收角色实时阴影）：平地自投无意义，且大网格进 shadow pass 是主开销
+	tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(tile)
 	tile.add_to_group("perf_terrain")  # PerfSweep 分解扫频用（debug 诊断）
 	var water := MeshInstance3D.new()
@@ -799,6 +801,8 @@ func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, ya
 	BendMat.wrap_scene(inst)
 	for mi in inst.find_children("*", "MeshInstance3D", true, false):
 		mi.extra_cull_margin = CULL_MARGIN
+		# 建筑不投实时阴影：CHARACTER_SHADOWS 实验聚焦「只角色投影」，建筑靠自身明暗立体
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return inst
 
 ## L1 摆放核心：把场景吸附到 tile 中心。anchor 是区块内 tile 索引(0..24)²，

@@ -8,6 +8,10 @@ extends Object
 ## world._place_on_bent_ground CPU 预下压的角色（再弯一次会双重下坠钻进地里）。
 static var _meshes := {}
 
+## world 开实时角色阴影(CHARACTER_SHADOWS)时置真：落地角色(bend=false)改用真实定向
+## 投影，脚下暗斑让位避免双影；SdfProp(bend=true)不投实时阴影，仍保留脚下 blob。
+static var suppress_actor_blob := false
+
 static func _shared_mesh(bend: bool) -> QuadMesh:
 	if not _meshes.has(bend):
 		var m := ShaderMaterial.new()
@@ -25,6 +29,8 @@ static func attach(parent: Node3D, radius: float, bend := false) -> void:
 	var old := parent.get_node_or_null("BlobShadow")
 	if old != null:
 		old.queue_free()
+	if suppress_actor_blob and not bend:
+		return  # 落地角色改用实时定向阴影，不挂脚下暗斑（避免双影）
 	var mi := MeshInstance3D.new()
 	mi.name = "BlobShadow"
 	mi.mesh = _shared_mesh(bend)
