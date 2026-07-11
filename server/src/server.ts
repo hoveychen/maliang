@@ -1053,6 +1053,9 @@ export async function generateCreationIcons(
  *   - 快捷路径（首轮即 done）：单独念出来，别吞掉
  * 只有入口那一次传 leadIn；后续每轮 creation_reply 都不带。
  */
+/** 引导式创造的追问轮数上限：到线仍未 done 就用现有属性强制造（与 mock 的 turnCount>=5 同值）。 */
+const CREATION_MAX_TURNS = 5;
+
 export async function advanceCreation(
   socket: { send: (data: string) => void },
   session: VoiceSession,
@@ -1073,6 +1076,14 @@ export async function advanceCreation(
     ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts)
     : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts);
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
+  // 超轮兜底（适配器无关）：已追问满上限还没 done，就用现有属性直接造——绝不无限追问。
+  // 此前只有 mock 在 turnCount>=5 时强制 done，线上 LLM 属性解析不进去就会原地循环。
+  if (state.turnCount >= CREATION_MAX_TURNS) {
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finishCreate(summarize() || childInput);
+    return;
+  }
   let r;
   try {
     r = isProp ? await adapters.llm.guideProp(state, childInput) : await adapters.llm.guideCreation(state, childInput);
@@ -1096,6 +1107,7 @@ export async function advanceCreation(
     if (u.traits) state.attrs.traits = u.traits;
   }
   if (r.category) state.askedCategories.push(r.category);
+  if (!r.done) state.lastQuestion = r.question ?? r.replyText; // 下一轮 guide 带上，LLM 才知道答案在答什么
   state.turnCount += 1;
   if (r.done) {
     session.creation = null;
@@ -1363,7 +1375,19 @@ export async function handleWsMessage(
       const optId = typeof msg.optionId === 'string' ? msg.optionId : '';
       // 点选 → 该选项中文 label 当输入；造物会话查物品图标库，造角色查角色图标库。
       const lookup = session.creation.goal === 'prop' ? findPropOption : findOption;
-      const childInput = (optId ? (lookup(optId)?.label ?? optId) : (msg.spokenText ?? '')).trim();
+      const picked = optId ? lookup(optId) : undefined;
+      // 点选路径确定性入账：option 自带 category，服务端直接写 attrs，不依赖 LLM 把 label 解析进
+      // updatedAttrs——此前解析失败属性不进账，guide 看到的状态不变，就会重复问同一个问题。
+      if (picked) {
+        const a = session.creation.attrs;
+        if (picked.category === 'kind') a.kind = picked.label;
+        else if (picked.category === 'color') a.color = picked.label;
+        else if (picked.category === 'size') a.size = picked.label;
+        else if (picked.category === 'personality') a.personality = picked.label;
+        else if (picked.category === 'motion') a.motion = picked.label;
+        else if (picked.category === 'trait' && !a.traits.includes(picked.label)) a.traits.push(picked.label);
+      }
+      const childInput = (optId ? (picked?.label ?? optId) : (msg.spokenText ?? '')).trim();
       if (!childInput) {
         socket.send(JSON.stringify({ type: 'voice_failed', reason: '造角色答复为空' }));
         return;

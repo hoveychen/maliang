@@ -397,6 +397,7 @@ export interface CreationState {
   attrs: CreationAttrs;
   askedCategories: string[]; // 已问过的类别，避免重复问
   turnCount: number;         // 兜底：超上限强制造
+  lastQuestion?: string;     // 上一轮追问的问题，喂回 guide 让 LLM 有上下文解读答案（如「毛毛」是在答名字）
 }
 
 /** 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。 */
