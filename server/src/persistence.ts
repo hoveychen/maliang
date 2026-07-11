@@ -2,8 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import { getBuiltinItem } from './items.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 
@@ -190,6 +191,15 @@ export class WorldStore {
         tile_y    INTEGER NOT NULL,
         PRIMARY KEY (world_id, scene_id, player_id)
       );
+      -- 物品实体（万物皆物品，docs/scene-item-refactor-design.md §2.1）：
+      -- 只存语音造物（world 归属）；内置定义是代码常量（items.ts BUILTIN_ITEMS），不落库。
+      -- 地形矩阵 palette / 背包引用的都是本表（或内置）的 id。
+      CREATE TABLE IF NOT EXISTS items (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_items_world ON items(world_id);
       -- 场景 = 世界里的一片区域（一张地图）。地形二进制存 assets 库，这里只记 hash。
       CREATE TABLE IF NOT EXISTS scenes (
         world_id      TEXT NOT NULL,
@@ -396,6 +406,42 @@ export class WorldStore {
     prop.tile = tile;
     this.#saveProp(worldId, prop);
     return true;
+  }
+
+  // ── 物品实体（items 表，只存语音造物；内置定义见 items.ts）─────────────
+
+  /** 新增/更新物品实体（语音造物）。内置 id 由 upsert 侧拒绝，防止覆盖代码常量。 */
+  upsertItem(def: ItemDef): void {
+    if (def.worldId === null) throw new Error(`builtin item 不入库: ${def.id}`);
+    if (getBuiltinItem(def.id)) throw new Error(`item id 与内置冲突: ${def.id}`);
+    if (!this.#worldExists(def.worldId)) throw new Error(`world not found: ${def.worldId}`);
+    this.#db
+      .prepare(
+        'INSERT INTO items (id, world_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
+      )
+      .run(def.id, def.worldId, JSON.stringify(def));
+  }
+
+  /** 物品实体定义：先查内置常量，再查该 world 的造物行。 */
+  getItemDef(worldId: string, id: string): ItemDef | undefined {
+    const b = getBuiltinItem(id);
+    if (b) return b;
+    const row = this.#db.prepare('SELECT data FROM items WHERE id = ? AND world_id = ?').get(id, worldId) as
+      | { data: string }
+      | undefined;
+    return row ? (JSON.parse(row.data) as ItemDef) : undefined;
+  }
+
+  /** 该 world 的造物实体（不含内置）。 */
+  listWorldItems(worldId: string): ItemDef[] {
+    const rows = this.#db.prepare('SELECT data FROM items WHERE world_id = ? ORDER BY id').all(worldId) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as ItemDef);
+  }
+
+  /** 地形矩阵校验用的实体解析器（内置 + 该 world 造物）。 */
+  itemResolver(worldId: string): (id: string) => ItemDef | undefined {
+    return (id) => this.getItemDef(worldId, id);
   }
 
   /**

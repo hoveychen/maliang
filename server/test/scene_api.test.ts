@@ -3,16 +3,11 @@ import assert from 'node:assert/strict';
 import { buildServer } from '../src/server.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
-import { encodeTerrain, REQUIRED_GRID, DEFAULT_TILE_SIZE, T_WATER, type Terrain } from '../src/terrain.ts';
+import { emptyTerrain, encodeTerrain, REQUIRED_GRID, T_WATER, type Terrain } from '../src/terrain.ts';
 import { DEFAULT_SCENE } from '../src/types.ts';
 
-const N = REQUIRED_GRID * REQUIRED_GRID;
-
 function terrainB64(mut?: (t: Terrain) => void): string {
-  const t: Terrain = {
-    gridW: REQUIRED_GRID, gridH: REQUIRED_GRID, tileSize: DEFAULT_TILE_SIZE,
-    types: new Uint8Array(N), heights: new Uint8Array(N), depths: new Uint8Array(N),
-  };
+  const t = emptyTerrain();
   t.types[0] = T_WATER; t.depths[0] = 2;
   mut?.(t);
   return Buffer.from(encodeTerrain(t)).toString('base64');
@@ -53,7 +48,7 @@ test('POST /admin/scenes：入库后 GET /worlds/:id 带上 scenes，地形可�
     });
     assert.equal(res.statusCode, 200);
     const body = res.json() as { scene: { terrainAsset: string; gridTiles: number }; bytes: number };
-    assert.equal(body.bytes, 16886);
+    assert.equal(body.bytes, 11 + 9 * REQUIRED_GRID * REQUIRED_GRID + 1); // v2 空 palette
     assert.equal(body.scene.gridTiles, REQUIRED_GRID);
     assert.ok(body.scene.terrainAsset.length > 0);
 
@@ -69,7 +64,7 @@ test('POST /admin/scenes：入库后 GET /worlds/:id 带上 scenes，地形可�
     const asset = await a.inject({ method: 'GET', url: `/assets/${body.scene.terrainAsset}` });
     assert.equal(asset.statusCode, 200);
     assert.equal(asset.headers['content-type'], 'application/octet-stream');
-    assert.equal(asset.rawPayload.length, 16886);
+    assert.equal(asset.rawPayload.length, 11 + 9 * REQUIRED_GRID * REQUIRED_GRID + 1);
     assert.deepEqual(new Uint8Array(asset.rawPayload), new Uint8Array(Buffer.from(terrainB64(), 'base64')));
 
     assert.equal(store.getScene('w1', DEFAULT_SCENE)!.pois[0]!.name, '池塘');

@@ -145,6 +145,40 @@ export interface Scene {
 /** 单场景时代的场景 id：存量角色/物件全部隐含属于它。 */
 export const DEFAULT_SCENE = 'village';
 
+/**
+ * 物品实体定义（万物皆物品，见 docs/scene-item-refactor-design.md §2.1）。
+ * 内置布置物（树/民居/水井…）与语音造物同一张表：内置项是代码常量 seed（items.ts），
+ * 语音造物落 items 表（world_id 归属）。其它一切地方（地形矩阵 palette、背包）
+ * 都只是对本实体 id 的引用——同一实体可被任意多个 tile 引用（克隆）。
+ */
+export interface ItemDef {
+  /** 内置项用众所周知 id（'tree_puff_a'…），造物用生成 id。 */
+  id: string;
+  /** null = 内置全局定义；非空 = 该 world 的语音造物。 */
+  worldId: string | null;
+  /** 显示名（"苹果树"/孩子起的名字）。 */
+  name: string;
+  /**
+   * 渲染引用，前缀分发：
+   *   'baked:<name>'   客户端 SDF 烘焙 mesh（assets/sdf_props/baked/<name>.res，MultiMesh 合批）
+   *   'kaykit:<name>'  KayKit gltf 场景（客户端 preload 映射表）
+   *   'sdf_res:<name>' 打包内 SDF spec（assets/sdf_props/<name>.json）
+   *   'sdf_inline'     spec 字段内联（语音造物）
+   */
+  renderRef: string;
+  /** sdf_inline 时的 SDF spec（结构见 sdf_prop.ts）。 */
+  spec?: import('./sdf_prop.ts').SdfPropSpec;
+  /** 占地（tile），锚点居中展开（奇数边）；1×1 / 3×3。 */
+  footprintW: number;
+  footprintH: number;
+  /** false = 可穿行纯点缀（草丛），不参与占用。 */
+  blocking: boolean;
+  /** 允许压在路面上（水井坐镇广场）。 */
+  pathOk: boolean;
+  /** SDF 物件围绕锚点的游走半径（米），0 = 不动。 */
+  wander: number;
+}
+
 /** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */
 export function isValidTile(tile: TilePos): boolean {
   const inRange = (v: number) => Number.isInteger(v) && v >= 0 && v < GRID_TILES;
