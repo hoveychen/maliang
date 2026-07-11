@@ -25,7 +25,7 @@ const PANEL_T := 0.032            ## 卡纸厚度（厚切边=硬卡纸手工感
 const FACE_EPS := 0.002           ## 贴面浮出板面的间隙（防 z-fighting）
 const FLIP_DUR := 0.45            ## 翻转+展开动画时长
 const MOVE_DUR := 0.40            ## 停靠位↔持机位搬移动画时长
-const DOCK_ROT := Vector3(0.10, -0.44, 0.05) ## 停靠侧摆角(rad):侧身~25°+微俯仰,一眼立体手机
+const DOCK_ROT := Vector3(0.10, 0.44, -0.05) ## 停靠侧摆角(rad):脸朝屏幕中心(用户方向)侧身~25°,一眼立体手机
 
 ## 贴面 id（射线拾取返回、set_face_texture 寻址）
 const FACE_FRONT := "front"        ## A 外面：手机正面壳
