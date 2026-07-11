@@ -48,6 +48,7 @@ func _run_once() -> void:
 	fails += _test_local_path()
 	fails += _test_server_path()
 	fails += _test_short_cancel()
+	fails += _test_sfx_guard()
 	if fails == 0:
 		print("test_voice_capture: 全部通过")
 	else:
@@ -137,8 +138,8 @@ func _test_server_path() -> int:
 	var begins := [0]
 	var commits := [0]
 	vc.chunk.connect(func(pcm: PackedByteArray) -> void: chunks.append(pcm))
-	vc.utterance_begin.connect(func() -> void: begins[0] += 1)
-	vc.committed.connect(func() -> void: commits[0] += 1)
+	vc.utterance_begin.connect(func(_is_local: bool) -> void: begins[0] += 1)
+	vc.committed.connect(func(_is_local: bool) -> void: commits[0] += 1)
 	vc.open()
 
 	for i in 20:
@@ -165,7 +166,7 @@ func _test_short_cancel() -> int:
 	vc.should_capture = func() -> bool: return true
 	var commits := [0]
 	var cancels := [0]
-	vc.committed.connect(func() -> void: commits[0] += 1)
+	vc.committed.connect(func(_is_local: bool) -> void: commits[0] += 1)
 	vc.cancelled.connect(func() -> void: cancels[0] += 1)
 	vc.open()
 
@@ -181,4 +182,22 @@ func _test_short_cancel() -> int:
 
 	vc.close()
 	vc.queue_free()
+	return f
+
+# ⑤ 自听防护：开麦态自播音效外放（sfx_bleeding）时 step 必须屏蔽 VAD（防被音效顶开开口）。
+func _test_sfx_guard() -> int:
+	print("[自听防护]")
+	var f := 0
+	var ga := GameAudio.new()
+	root.add_child(ga)
+	var vc := _make(null, ga)
+	vc.should_capture = func() -> bool: return true
+	vc.open()
+	ga.play_sfx("confirm") # 290ms > VAD START_MS(90ms)
+	f += _check("前提：音效记账为正在出声", ga.sfx_bleeding(), true)
+	vc.step(0.0)
+	f += _check("开麦态播音效必须屏蔽 VAD（_unmute_t 起）", vc._unmute_t > 0.0, true)
+	vc.close()
+	vc.queue_free()
+	ga.queue_free()
 	return f

@@ -19,14 +19,16 @@ extends Node
 ## 宿主留「业务策略」——sink（信号）、开麦门禁（should_capture）、以及 set_ducked（音量微降，
 ## 各宿主口径不同且非 ASR 关键，故不并入，避免改动 world 既有行为）。
 
-## VAD 判定开口：宿主亮录音态 UI、起耗时打点。
-signal utterance_begin
+## VAD 判定开口：宿主亮录音态 UI、起耗时打点。is_local=本段是否走端侧会话（begin 定格）：
+## 服务端路径宿主据此发 voice_start（端侧/喊话不发）。
+signal utterance_begin(is_local: bool)
 ## 服务端 sink：一片 PCM 就绪（端侧路径不发，内部直喂插件）。宿主流式上传或攒整段。
 signal chunk(pcm: PackedByteArray)
-## 端侧识别出最终文本（端侧路径专有）。宿主判空/退避/中继/送对话。
+## 端侧识别出最终文本（端侧路径专有终局）。宿主判空/退避/中继/送对话。
 signal local_final(text: String)
-## 说完（静音断句/硬顶）：残片已 flush。宿主发 voice_end / POST 整段 / 亮思考态。
-signal committed
+## 说完（静音断句/硬顶）：残片已 flush。两路都发（宿主亮思考/收尾 UI）。
+## is_local=本段是否走端侧：服务端路径宿主据此发 voice_end / POST 整段；端侧等 local_final。
+signal committed(is_local: bool)
 ## 太短的误触 / 中途闭麦：静默丢弃本段。宿主发 voice_cancel。
 signal cancelled
 ## 端侧模型异步加载完成（宿主用于日志/状态图标）。名不用 ready：与 Node 内置信号撞名。
@@ -198,7 +200,7 @@ func _utterance_begin(head: PackedByteArray) -> void:
 	_local_session = is_ready()
 	if _local_session:
 		_asr.startSession()
-	utterance_begin.emit()
+	utterance_begin.emit(_local_session)
 	_flush()
 
 ## 说完（静音断句/硬顶）：残片发出，触发识别/回复。
@@ -209,9 +211,10 @@ func _utterance_commit() -> void:
 	if game_audio != null:
 		game_audio.play_sfx("mic_off")
 	_flush()
+	var was_local := _local_session
 	if _local_session:
 		_asr.stopSession() # final_result 信号回来后走 local_final
-	committed.emit()
+	committed.emit(was_local)
 
 ## 太短的误触 / 中途闭麦：静默丢弃本段，双 ASR 路径都不产生回复。
 func _cancel_utterance() -> void:
