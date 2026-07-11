@@ -115,13 +115,22 @@ function SceneMap({ scene, characters, overlay = false }: { scene: Scene; charac
         );
       })}
 
-      {/* 角色（仙子跨场景，全场景都画） */}
+      {/* 角色（仙子跨场景，全场景都画）：点 + 名字。名字画在点下方，与 POI 的右侧
+          标签错开方向，减少撞字；白描边保证压在深色地貌上也读得出。 */}
       {characters.map((c) => {
         const { tileX: x, tileY: y } = c.position;
+        const color = c.isFairy ? MAP_COLORS.fairy : MAP_COLORS.character;
         return (
           <g key={`char${c.id}`}>
             <title>{`${c.name}${c.isFairy ? '（仙）' : ''}\n位置 (${x},${y}) 状态 ${c.state}`}</title>
-            <circle cx={x} cy={y} r={dot * 1.05} fill={c.isFairy ? MAP_COLORS.fairy : MAP_COLORS.character} stroke="#fff" strokeWidth={sw} />
+            <circle cx={x} cy={y} r={dot * 1.05} fill={color} stroke="#fff" strokeWidth={sw} />
+            <text
+              x={x} y={y + dot * 3.1} textAnchor="middle"
+              fontSize={Math.max(1.6, n / 32)} fill={color}
+              stroke="#fff" strokeWidth={sw * 4} paintOrder="stroke"
+            >
+              {c.name}
+            </text>
           </g>
         );
       })}
