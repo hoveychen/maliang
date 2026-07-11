@@ -1668,5 +1668,117 @@
     "themes": [
       "hospital"
     ]
+  },
+  {
+    "id": "roman_arch",
+    "worldId": null,
+    "name": "拱门",
+    "renderRef": "roman:roman_arch",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_wall",
+    "worldId": null,
+    "name": "石墙",
+    "renderRef": "roman:roman_wall",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_wall_corner",
+    "worldId": null,
+    "name": "石墙拐角",
+    "renderRef": "roman:roman_wall_corner",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_watchtower",
+    "worldId": null,
+    "name": "哨塔",
+    "renderRef": "roman:roman_watchtower",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_tower",
+    "worldId": null,
+    "name": "石塔",
+    "renderRef": "roman:roman_tower",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_tower_b",
+    "worldId": null,
+    "name": "瞭望石塔",
+    "renderRef": "roman:roman_tower_b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_column_base",
+    "worldId": null,
+    "name": "石柱基",
+    "renderRef": "roman:roman_column_base",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_fort",
+    "worldId": null,
+    "name": "罗马要塞",
+    "renderRef": "roman:roman_fort",
+    "footprintW": 5,
+    "footprintH": 5,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
   }
 ]

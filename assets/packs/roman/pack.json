@@ -1,0 +1,13 @@
+{
+  "_comment": "罗马主题资产包（world-themes P6 硬缺口主题）。全 node 类。老板拍板：无现成 CC0 罗马低多边形包，用中世纪石建近似——复用已装 KayKit Medieval Hexagon + Builder 的石塔/石墙/拱门件（path 指向 assets/medieval/，零新资产、零新许可、全 CC0 作者 Kay Lousberg，来源见 assets/medieval/SOURCES.txt）。key 用 roman_ 前缀独立命名（renderRef 全局唯一，与 medieval 包的键不撞，但可指向同一 glb）。scale=7.0 与中世纪一致。不地道但保画风统一（design §8.2）。",
+  "entries": {
+    "roman_arch":        { "category": "node", "path": "res://assets/medieval/builder/wall_gate.glb",              "scale": 7.0 },
+    "roman_wall":        { "category": "node", "path": "res://assets/medieval/builder/wall_straight.glb",          "scale": 7.0 },
+    "roman_wall_corner": { "category": "node", "path": "res://assets/medieval/builder/wall_corner.glb",            "scale": 7.0 },
+    "roman_watchtower":  { "category": "node", "path": "res://assets/medieval/builder/watchtower.glb",             "scale": 7.0 },
+    "roman_tower":       { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_A_blue.gltf",    "scale": 7.0 },
+    "roman_tower_b":     { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_B_blue.gltf",    "scale": 7.0 },
+    "roman_column_base": { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_base_blue.gltf", "scale": 7.0 },
+    "roman_fort":        { "category": "node", "path": "res://assets/medieval/hexagon/building_castle_blue.gltf",     "scale": 7.0 }
+  }
+}

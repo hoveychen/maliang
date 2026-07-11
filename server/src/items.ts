@@ -177,6 +177,18 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('hosp_supply_cabinet', '器械柜', 'hospital:supplyCabinet', 1, true, ['hospital']),
   themed('hosp_waste_bin', '医疗垃圾桶', 'hospital:wasteBin', 1, true, ['hospital']),
   themed('hosp_floor_lamp', '落地灯', 'hospital:floorLamp', 1, true, ['hospital']),
+
+  // ── 罗马主题（world-themes P6 硬缺口；全 CC0：复用已装 KayKit 石件近似）──
+  // 老板拍板无 CC0 罗马包→用中世纪石塔/石墙/拱门近似，renderRef 'roman:<key>' 指向
+  // assets/medieval/ 同一 glb（零新资产）。见 assets/packs/roman/pack.json。不地道但保画风。
+  themed('roman_arch', '拱门', 'roman:roman_arch', 3, true, ['roman']),
+  themed('roman_wall', '石墙', 'roman:roman_wall', 3, true, ['roman']),
+  themed('roman_wall_corner', '石墙拐角', 'roman:roman_wall_corner', 3, true, ['roman']),
+  themed('roman_watchtower', '哨塔', 'roman:roman_watchtower', 3, true, ['roman']),
+  themed('roman_tower', '石塔', 'roman:roman_tower', 3, true, ['roman']),
+  themed('roman_tower_b', '瞭望石塔', 'roman:roman_tower_b', 3, true, ['roman']),
+  themed('roman_column_base', '石柱基', 'roman:roman_column_base', 3, true, ['roman']),
+  themed('roman_fort', '罗马要塞', 'roman:roman_fort', 5, true, ['roman']),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
