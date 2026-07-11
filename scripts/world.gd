@@ -207,6 +207,7 @@ const PHONE_NDC := Vector2(0.52, 0.0)        ## 正面态中心 NDC
 const PHONE_SPREAD_FILL := 0.80     ## 跨页态机身高占屏比
 const PHONE_SPREAD_NDC := Vector2(0.28, 0.0) ## 跨页态中心 NDC
 var _phone_fit_vp := Vector2.ZERO   ## 上次贴合时的视口尺寸（窗口 resize 触发重贴合）
+var _phone_dock_t := 0.0            ## 停靠态低频渲帧计时（60s 一帧，熄屏画面时钟走字）
 ## 手机近身相机：开手机时按玩家立绘高度反算距离，让玩家（自适应身高）占屏高约 70%，
 ## 并把焦点右移，使玩家落在屏幕偏左、右侧留给手机（PHONE_PLAYER_NDC_X 方向若反了取负）。
 const PHONE_CAM_FILL := 0.70        ## 玩家立绘占屏高约 70%（按 _char_top 反算距离，自适应身高）
@@ -1173,7 +1174,7 @@ func _fit_phone_dock() -> void:
 	var ndc := Vector2(c.x / vp.x * 2.0 - 1.0, 1.0 - c.y / vp.y * 2.0)
 	paper_phone.fit_dock(camera, r.size.y / vp.y, ndc)
 
-## 每帧驱动手机：resize/首帧重贴合；停靠态熄屏零开销（黑屏无时钟，不用低频刷）；
+## 每帧驱动手机：resize/首帧重贴合；停靠态 60s 低频渲一帧（熄屏画面的时钟走字）；
 ## 使用态跑 banner 秒刷 + 图标分页贴合。
 func _step_phone_ui(delta: float) -> void:
 	if paper_phone == null:
@@ -1182,8 +1183,13 @@ func _step_phone_ui(delta: float) -> void:
 		var was_hidden := not paper_phone.visible
 		_fit_phone(paper_phone.state == PaperPhone.State.SPREAD) # 首帧按钮布局就绪前 visible=false，逐帧兜底
 		if was_hidden and paper_phone.visible:
-			paper_phone.refresh_dock_screen() # 首次现身渲一帧熄屏黑底（视口从未渲过是垃圾纹理）
+			_phone_dock_t = 0.0 # 首次现身立即渲一帧熄屏画面（视口从未渲过是垃圾纹理）
 	if paper_phone.state == PaperPhone.State.DOCKED:
+		_phone_dock_t -= delta
+		if _phone_dock_t <= 0.0:
+			_phone_dock_t = 60.0
+			phone_ui.refresh_banner() # 熄屏 AOD 时钟走字
+			paper_phone.refresh_dock_screen()
 		return
 	phone_ui.tick(delta)
 
