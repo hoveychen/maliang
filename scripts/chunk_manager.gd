@@ -22,7 +22,7 @@ const CULL_MARGIN := BendMat.CULL_MARGIN
 ## 树"浮在地上"的锚定感。石/草太矮太碎不铺（影子小到看不出，徒增几何）。
 ## 斜阳投影不在物体正下方（会被树冠盖住看不见），而是沿光照射方向拖到背光侧、并被拉成
 ## 椭圆——方向唯一取自 BlobShadow.sun_ground_dir（场景那盏光），与场景明暗同一个太阳。
-const SHADOW_STRENGTH := 0.40    ## 加深到能看清（旧 0.22 又淡又被树冠盖，实测等于没有）
+const SHADOW_STRENGTH := 0.50    ## 加深到能看清（旧 0.22 又淡又被树冠盖，实测等于没有）
 const SHADOW_RADIUS_FACTOR := 0.6  ## 树/灌木短半轴 = 树冠水平半尺寸 × 此（垂直光方向）
 const SHADOW_COT := 0.70         ## cot(太阳仰角 55°)：影子沿地面伸出长度 = 物体高 × 此
                                  ## ——偏移/拉长由高度定(不是半径),高树/房影拖远才看得见
@@ -742,19 +742,19 @@ func _flush_batches(parent: Node3D, batches: Dictionary) -> void:
 		parent.add_child(mmi)
 		mmi.add_to_group("perf_scatter")  # PerfSweep 分解扫频用（debug 诊断）
 
-## 单个贴片影的实例变换（树/灌木/建筑共用）：按斜阳几何投影——影子沿光方向从物体脚伸出
-## reach = 物体高 × cot(仰角)，椭圆长轴覆盖 [脚, 脚+reach]、短轴 = 水平半径，影心挪到中点。
-## 方向唯一取 sun_ground_dir（场景那盏光）；矮物影短、高树/房影拖得远，物理一致、看得见。
-## 必须 rot * scale（local 轴缩放后再旋转）：Basis.scaled 是 diag*R（世界轴缩放），椭圆
-## 长轴不跟 yaw 转、方向错，get_scale 也分解不出长短轴。纯函数、CPU 侧可单测。
+## 单个贴片影的实例变换（树/灌木/建筑共用）：斜阳椭圆，从物体脚沿光方向拖出。
+## reach = 物体高 × cot(仰角)。关键：影心必须挪到物体半径**之外**才露得出来——否则矮胖树
+## (半径 2.3 > 影长一半)影心还压在树冠正下方、被自己盖住看不见（实测踩坑）。故取
+## 长半轴 = offset = short_r + reach/2：影从脚(pos)拖到 pos+2·offset，中心落在物体边外。
+## 方向唯一取 sun_ground_dir（场景那盏光）；rot * scale（local 轴缩放再旋转）——Basis.scaled
+## 是 diag*R（世界轴缩放）椭圆长轴不跟 yaw 转、方向错。纯函数、CPU 侧可单测。
 func _shadow_xform(pos: Vector3, short_r: float, height: float) -> Transform3D:
 	var sun := BlobShadow.sun_ground_dir
 	var yaw := atan2(sun.x, sun.z)  # 使 local +Z 对齐光方向 → 长轴沿光方向
-	var reach := height * SHADOW_COT        # 影子沿地面伸出的长度（由高度定，不是半径）
-	var long_r := (reach + short_r) * 0.5   # 长半轴：覆盖脚 pos 到影端 pos+reach
-	var offset := long_r - short_r          # 影心从脚沿光方向挪到椭圆中心
-	var b := Basis(Vector3.UP, yaw) * Basis.from_scale(Vector3(short_r * 2.0, 1.0, long_r * 2.0))
-	var center := pos + sun * offset + Vector3(0.0, SHADOW_LIFT, 0.0)
+	var reach := height * SHADOW_COT             # 影子沿地面伸出的长度（由高度定，不是半径）
+	var half := short_r + reach * 0.5            # 长半轴 = 影心偏移：影从脚拖到 2·half，心在物体边外
+	var b := Basis(Vector3.UP, yaw) * Basis.from_scale(Vector3(short_r * 2.0, 1.0, half * 2.0))
+	var center := pos + sun * half + Vector3(0.0, SHADOW_LIFT, 0.0)
 	return Transform3D(b, center)
 
 ## 散布树/灌木影斑变换（CPU 侧、可单测——headless 下 MultiMesh 的 transform 走
