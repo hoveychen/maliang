@@ -4,6 +4,7 @@ extends Node3D
 ## 一张对折的"卡纸"：两块带厚度的面板 A/B，铰链在 A 左缘。
 ##   合拢态(FRONT)  = B 叠在 A 背后，A 外面就是手机正面（屏幕+贴纸图标）。
 ##   展开态(SPREAD) = 整机绕 Y 翻 180° 同时铰链摊平，两个内面变成双倍宽跨页。
+##   停靠态(DOCKED) = 手机常驻屏幕：缩小停在左下角当"图标"，点击搬到持机位放大。
 ## 本类只管 3D 载体：几何/状态机/动画/射线拾取，不懂任何业务（app 内容由
 ## SubViewport 贴上来，见 phone_ui.gd）。挂为 Camera3D 子节点，fit_to_camera 定位。
 ##
@@ -15,7 +16,7 @@ extends Node3D
 
 signal state_changed(new_state: int)
 
-enum State { STOWED, FRONT, SPREAD }
+enum State { DOCKED, FRONT, SPREAD }
 
 const PANEL_ASPECT := 2.10        ## 机身高:宽 ≈ iPhone 直板比例
 const PANEL_H := 1.0              ## 面板高（本地基准，勿改：fit 按此反算 scale）
@@ -23,7 +24,7 @@ const PANEL_W := PANEL_H / PANEL_ASPECT
 const PANEL_T := 0.032            ## 卡纸厚度（厚切边=硬卡纸手工感，侧面纸芯白最卖"纸做的"）
 const FACE_EPS := 0.002           ## 贴面浮出板面的间隙（防 z-fighting）
 const FLIP_DUR := 0.45            ## 翻转+展开动画时长
-const STOW_DUR := 0.28            ## 掏出/收起动画时长
+const MOVE_DUR := 0.40            ## 停靠位↔持机位搬移动画时长
 
 ## 贴面 id（射线拾取返回、set_face_texture 寻址）
 const FACE_FRONT := "front"        ## A 外面：手机正面壳
@@ -33,7 +34,7 @@ const FACE_SPREAD_R := "spread_r"  ## B 内面：跨页右页
 const FACE_SCREEN := "screen"      ## A 外面的屏幕区（正面壳内嵌，SubViewport 贴上来）
 const SCREEN_FRAC := Vector2(0.90, 0.94)  ## 正面屏占面板比例（四周留纸质 bezel）
 
-var state: int = State.STOWED
+var state: int = State.DOCKED
 
 var _pivot: Node3D                 ## 整机翻转（yaw）+ 跨页居中平移
 var _hinge: Node3D                 ## 铰链（fold）
@@ -46,14 +47,18 @@ var _drag_face := ""               ## 拖拽捕获中的贴面 id（按下命中
 var _fold_deg := 180.0
 var _yaw_deg := 0.0
 var _tween: Tween
-var _fit_scale := 1.0              ## fit_to_camera 算出的整体 scale（stow 动画要用）
+var _hand_pos := Vector3.ZERO      ## 持机位（fit_hand 算出）
+var _hand_scale := 1.0
+var _dock_pos := Vector3.ZERO      ## 停靠位（fit_dock 算出；首次贴合前手机隐藏防闪原点）
+var _dock_scale := 0.2
+var _dock_fitted := false          ## 停靠位是否已按真实布局贴合过（首帧 Control 布局后才有）
 var _sway_t := 0.0                 ## 持机微摆相位
 
 # 在 _init 建几何而非 _ready：headless 测试在 SceneTree._initialize 阶段节点尚未进树、
 # _ready 会延迟到首帧，_init 保证 new() 出来即可用（show_front/pick 不依赖树状态）。
 func _init() -> void:
 	_build()
-	visible = false
+	visible = false # 首次 fit_dock 前藏着（防止在相机原点闪现）
 	_apply_pose(180.0, 0.0)
 
 ## 持机微摆：纸片"活着"的感觉（Origami King 的 paper-in-motion 极简版）。
@@ -181,6 +186,7 @@ func spread_viewport() -> SubViewport:
 
 ## 只让可见屏更新：正面态跑主屏、跨页态跑跨页、收起全停。
 func _update_screen_activity() -> void:
+	# 停靠态两块都停（时钟走字靠 refresh_dock_screen 低频 UPDATE_ONCE），使用态只跑可见屏
 	if _front_vp != null:
 		_front_vp.render_target_update_mode = \
 			SubViewport.UPDATE_ALWAYS if state == State.FRONT else SubViewport.UPDATE_DISABLED
@@ -256,19 +262,20 @@ func _face_uv_unclamped(id: String, ro: Vector3, rd: Vector3) -> Variant:
 
 ## ── 状态机 ──────────────────────────────────────────────────────────────────
 
+## 搬到持机位（正面合拢态）：从停靠位=位移+放大；从跨页=原位翻回正面。
 func show_front(animate := true) -> void:
 	if state == State.FRONT:
 		return
-	var from_stow := state == State.STOWED
+	var from_dock := state == State.DOCKED
 	_set_state(State.FRONT)
-	visible = true
 	if not animate:
-		scale = Vector3.ONE * _fit_scale
 		_apply_pose(180.0, 0.0)
+		position = _hand_pos
+		scale = Vector3.ONE * _hand_scale
 		return
-	if from_stow:
+	if from_dock:
 		_apply_pose(180.0, 0.0)
-		_animate_stow(true)
+		_animate_move(_hand_pos, _hand_scale, false)
 	else:
 		_animate_flip(180.0, 0.0)
 
@@ -276,21 +283,25 @@ func show_spread(animate := true) -> void:
 	if state == State.SPREAD:
 		return
 	_set_state(State.SPREAD)
-	visible = true
 	if not animate:
-		scale = Vector3.ONE * _fit_scale
+		position = _hand_pos
+		scale = Vector3.ONE * _hand_scale
 		_apply_pose(0.0, 180.0)
 		return
 	_animate_flip(0.0, 180.0)
 
-func stow(animate := true) -> void:
-	if state == State.STOWED:
+## 搬回停靠位（合拢正面朝屏的小手机）：跨页态时合拢+翻正与搬移并行。
+func dock(animate := true) -> void:
+	if state == State.DOCKED:
 		return
-	_set_state(State.STOWED)
+	var was_spread := state == State.SPREAD
+	_set_state(State.DOCKED)
 	if not animate:
-		visible = false
+		_apply_pose(180.0, 0.0)
+		position = _dock_pos
+		scale = Vector3.ONE * _dock_scale
 		return
-	_animate_stow(false)
+	_animate_move(_dock_pos, _dock_scale, was_spread)
 
 func _set_state(s: int) -> void:
 	state = s
@@ -312,7 +323,7 @@ func _apply_pose(fold_deg: float, yaw_deg: float) -> void:
 
 func _animate_flip(fold_to: float, yaw_to: float) -> void:
 	_kill_tween()
-	scale = Vector3.ONE * _fit_scale
+	scale = Vector3.ONE * _hand_scale
 	var fold_from := _fold_deg
 	var yaw_from := _yaw_deg
 	_tween = create_tween()
@@ -320,18 +331,21 @@ func _animate_flip(fold_to: float, yaw_to: float) -> void:
 		_apply_pose(lerpf(fold_from, fold_to, t), lerpf(yaw_from, yaw_to, t)),
 		0.0, 1.0, FLIP_DUR).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
-## 掏出/收起：整体缩放弹入/弹出（收起完把节点藏掉，SubViewport 才好停更新）。
-func _animate_stow(appearing: bool) -> void:
+## 停靠位↔持机位搬移：位移+缩放并行 tween（带一点回弹的"拿起/放回"手感）；
+## fold_back=true 时（从跨页收）合拢+翻回正面与搬移并行。
+func _animate_move(to_pos: Vector3, to_scale: float, fold_back: bool) -> void:
 	_kill_tween()
-	_tween = create_tween()
-	if appearing:
-		scale = Vector3.ONE * _fit_scale * 0.05
-		_tween.tween_property(self, "scale", Vector3.ONE * _fit_scale, STOW_DUR) \
-			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	else:
-		_tween.tween_property(self, "scale", Vector3.ONE * _fit_scale * 0.05, STOW_DUR) \
-			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-		_tween.tween_callback(func() -> void: visible = false)
+	_tween = create_tween().set_parallel(true)
+	_tween.tween_property(self, "position", to_pos, MOVE_DUR) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_tween.tween_property(self, "scale", Vector3.ONE * to_scale, MOVE_DUR) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if fold_back:
+		var fold_from := _fold_deg
+		var yaw_from := _yaw_deg
+		_tween.tween_method(func(t: float) -> void:
+			_apply_pose(lerpf(fold_from, 180.0, t), lerpf(yaw_from, 0.0, t)),
+			0.0, 1.0, MOVE_DUR).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 func _kill_tween() -> void:
 	if _tween != null and _tween.is_valid():
@@ -342,14 +356,44 @@ func _kill_tween() -> void:
 ## 挂相机子节点后按竖直 FOV 反算大小/位置：机身高占屏 fill，中心落在 NDC(ndc.x, ndc.y)。
 ## dist 取小（默认 0.42）让手机比一切世界物件都近，天然不被树/山挡（近平面 0.05 仍有余量：
 ## 翻转扫掠半径 ~PANEL_W*scale < dist-near）。
-func fit_to_camera(cam: Camera3D, fill: float, ndc: Vector2, dist := 0.42) -> void:
+static func _fit(cam: Camera3D, fill: float, ndc: Vector2, dist: float) -> Dictionary:
 	var tanhalf := tan(deg_to_rad(cam.fov * 0.5))
 	var vpn := cam.get_viewport()
 	var vp := vpn.get_visible_rect().size if vpn != null else Vector2.ZERO
 	var aspect := (vp.x / vp.y) if vp.y > 1.0 else (16.0 / 9.0)
-	_fit_scale = fill * 2.0 * dist * tanhalf / PANEL_H
-	scale = Vector3.ONE * _fit_scale
-	position = Vector3(ndc.x * dist * tanhalf * aspect, ndc.y * dist * tanhalf, -dist)
+	return {
+		"scale": fill * 2.0 * dist * tanhalf / PANEL_H,
+		"pos": Vector3(ndc.x * dist * tanhalf * aspect, ndc.y * dist * tanhalf, -dist),
+	}
+
+## 贴合持机位（使用态目标）；当前就在手上且没在动画中则立即应用。
+func fit_hand(cam: Camera3D, fill: float, ndc: Vector2, dist := 0.42) -> void:
+	var t := _fit(cam, fill, ndc, dist)
+	_hand_pos = t["pos"]
+	_hand_scale = t["scale"]
+	if state != State.DOCKED and not _tween_running():
+		position = _hand_pos
+		scale = Vector3.ONE * _hand_scale
+
+## 贴合停靠位（左下角"图标"目标）；停靠中则立即应用。首次贴合才现身（防原点闪现）。
+func fit_dock(cam: Camera3D, fill: float, ndc: Vector2, dist := 0.42) -> void:
+	var t := _fit(cam, fill, ndc, dist)
+	_dock_pos = t["pos"]
+	_dock_scale = t["scale"]
+	if state == State.DOCKED and not _tween_running():
+		position = _dock_pos
+		scale = Vector3.ONE * _dock_scale
+	if not _dock_fitted:
+		_dock_fitted = true
+		visible = true
+
+func _tween_running() -> bool:
+	return _tween != null and _tween.is_valid() and _tween.is_running()
+
+## 停靠态低频刷一帧正面屏（时钟走字用；渲染一次自动回 DISABLED）。
+func refresh_dock_screen() -> void:
+	if state == State.DOCKED and _front_vp != null:
+		_front_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 ## ── 射线拾取 ────────────────────────────────────────────────────────────────
 
@@ -379,7 +423,7 @@ func _pickable_faces() -> Array:
 			return [FACE_SCREEN, FACE_FRONT] if _faces.has(FACE_SCREEN) else [FACE_FRONT]
 		State.SPREAD:
 			return [FACE_SPREAD_L, FACE_SPREAD_R]
-	return []
+	return [] # DOCKED：点击走透明热区按钮（world），机身不拾取
 
 ## 拾取：世界系射线 → 命中的贴面 id + uv。未中返回 {}。
 func pick(ro: Vector3, rd: Vector3) -> Dictionary:
