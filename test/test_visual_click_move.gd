@@ -119,21 +119,23 @@ func _check_interaction() -> void:
 	_check("banner visible", (scene.get("banner") as Label).visible, true)
 
 ## 开放麦·短促噪声：触发开口但有声段太短 → 静默取消（不进思考、继续聆听）。
-## 注入合成 PCM 走 _feed_voice_pcm 全链路（VAD 事件 → 会话开/取消），与真实麦克风同路。
+## 注入合成 PCM 走 VoiceCapture._feed 全链路（VAD 事件 → 会话开/取消），与真实麦克风同路。
 func _test_voice_short_burst() -> void:
-	_check("open mic on enter (vad ready)", scene.get("_vad") != null, true)
-	scene.call("_feed_voice_pcm", _voice_pcm(150))
-	_check("burst opens utterance", scene.get("_recording"), true)
-	scene.call("_feed_voice_pcm", _silence_pcm(1200))
-	_check("burst cancels silently", scene.get("_recording"), false)
+	var vc: Object = scene.get("_vc")
+	_check("open mic on enter (vad ready)", vc.is_open(), true)
+	vc.call("_feed", _voice_pcm(150))
+	_check("burst opens utterance", vc.is_recording(), true)
+	vc.call("_feed", _silence_pcm(1200))
+	_check("burst cancels silently", vc.is_recording(), false)
 	_check("burst no thinking", (scene.get("thinking_label") as Label).visible, false)
 
 ## 开放麦·正常说话：说完静音自动断句发送——退出录音、进入思考态、横幅收起。
 func _test_voice_utterance() -> void:
-	scene.call("_feed_voice_pcm", _voice_pcm(800))
-	_check("speech opens utterance", scene.get("_recording"), true)
-	scene.call("_feed_voice_pcm", _silence_pcm(1200))
-	_check("silence auto-commits", scene.get("_recording"), false)
+	var vc: Object = scene.get("_vc")
+	vc.call("_feed", _voice_pcm(800))
+	_check("speech opens utterance", vc.is_recording(), true)
+	vc.call("_feed", _silence_pcm(1200))
+	_check("silence auto-commits", vc.is_recording(), false)
 	_check("auto-commit enters thinking", (scene.get("thinking_label") as Label).visible, true)
 	_check("auto-commit hides banner", (scene.get("banner") as Label).visible, false)
 

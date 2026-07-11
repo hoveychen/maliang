@@ -167,7 +167,7 @@ func _test_short_cancel() -> int:
 	var commits := [0]
 	var cancels := [0]
 	vc.committed.connect(func(_is_local: bool) -> void: commits[0] += 1)
-	vc.cancelled.connect(func() -> void: cancels[0] += 1)
+	vc.cancelled.connect(func(_is_local: bool) -> void: cancels[0] += 1)
 	vc.open()
 
 	for i in 20:

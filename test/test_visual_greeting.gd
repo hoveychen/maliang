@@ -60,8 +60,8 @@ func _enter_npc_and_check() -> void:
 	if greet.size() >= 1:
 		_check("voice_greeting 带该 NPC id", String(greet[0].get("characterId", "")), npc_id)
 	# 招呼期间开放麦已就绪但未在录音（半双工：对方说话时闭麦）
-	_check("进对话即开放麦(vad 就绪)", scene.get("_vad") != null, true)
-	_check("招呼期间不在录玩家", scene.get("_recording"), false)
+	_check("进对话即开放麦(vad 就绪)", scene.get("_vc").is_open(), true)
+	_check("招呼期间不在录玩家", scene.get("_vc").is_recording(), false)
 
 ## 点小仙子：走预制 fairy_voice greet（离线可用），不发 voice_greeting。
 func _enter_fairy_and_check() -> void:

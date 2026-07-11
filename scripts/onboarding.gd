@@ -138,7 +138,7 @@ func _on_capture_local_final(text: String) -> void:
 	_submit_intro(text.strip_edges(), PackedByteArray())
 
 ## 误触（说太短）：图标回「在听」，麦克风继续开着（VoiceCapture 内部保持聆听）。
-func _on_capture_cancelled() -> void:
+func _on_capture_cancelled(_is_local: bool) -> void:
 	if _intro_status != null:
 		_intro_status.texture = UiAssets.tex("ic_mic")
 
