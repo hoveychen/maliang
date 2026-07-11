@@ -2,8 +2,9 @@ extends Node
 class_name GameAudio
 # 背景音乐 + 音效管理器。惯例同 MicRecorder：class_name + 各场景 _ready 里实例化。
 # 运行时确保 Music/SFX 两条 bus（幂等，场景切换重进不重复建）。
-# BGM 现用单条长 loop（bgm_main.wav ~68s 连续曲，导入开 loop 无缝循环）；录音/思考/TTS 时 duck 压低音乐。
-# 双播放器交叉淡化机制保留：传入多条 step 会按 SECTION_SECS 轮换串接，但生产只喂单条 → 不轮换、纯 loop。
+# BGM 现用 3 首暖色原声曲轮播（happy_boy/carefree/cheery_monday，CC-BY Kevin MacLeod）；录音/思考/TTS 时 duck 压低音乐。
+# 双播放器交叉淡化机制：多段时**按各曲实际时长播完整首再交叉淡化**到下一首（非旧的固定 19.2s 切段——
+# 那会把完整曲砍成碎片，choppy 且永远播不完）。单段则一直 loop，不轮换。
 # 注意 headless dummy 音频 playing 永真，逻辑状态一律自己记账，不依赖 playing 翻转。
 
 const SFX := {
@@ -27,7 +28,9 @@ const SFX := {
 	"reveal": "res://assets/audio/kenney_jingles/jingles_PIZZI03.ogg",  # 形象揭晓
 }
 const BGM_STEPS := [
-	"res://assets/audio/bgm/bgm_main.wav", # 单条 ~68s 连续曲，原地无缝 loop（不再三段轮换）
+	"res://assets/audio/bgm/bgm_carefree.wav",       # 尤克里里+口哨，阳光轻快（~204s，菜单也垫这首）
+	"res://assets/audio/bgm/bgm_cheery_monday.wav",  # 明快俏皮（~78s）
+	"res://assets/audio/bgm/bgm_happy_boy.wav",      # 暖调收尾主题（~52s）
 ]
 
 const SFX_POOL := 4
@@ -37,7 +40,7 @@ const SFX_DB := -6.0
 const DUCK_DB := -12.0         # duck 时在常态上再压这么多
 const MUTE_DB := -80.0         # 静音(录音时)：等效关掉，防外放 BGM 回灌麦克风把 VAD 顶到 12s
 const DUCK_LERP := 6.0         # duck 渐变速率(每秒 dB 权重)
-const SECTION_SECS := 19.2     # 多段模式下每段播这么久后轮换（单条模式不生效）
+const SECTION_SECS := 19.2     # 多段轮换的最短段时长下限（曲子比这短才用它兜底；正常按整首时长播完再切）
 const CROSSFADE_SECS := 1.2
 
 var _sfx_players: Array[AudioStreamPlayer] = []
@@ -148,7 +151,7 @@ func _poll_bgm_load() -> void:
 		return
 	step_index = 0
 	_active_is_a = true
-	_section_left = SECTION_SECS
+	_section_left = _step_secs(0)
 	_fade_left = 0.0
 	_music_a.stream = _steps[0]
 	_music_a.volume_db = MUSIC_DB + (DUCK_DB if ducked else 0.0)
@@ -198,9 +201,13 @@ func _advance(delta: float) -> void:
 		active.volume_db = target if absf(active.volume_db - target) < 0.05 \
 				else lerpf(active.volume_db, target, minf(delta * DUCK_LERP, 1.0))
 
+# 当前段应播多久后轮换：整首时长，短于下限则用 SECTION_SECS 兜底（避免过短曲频繁切换）。
+func _step_secs(i: int) -> float:
+	return maxf(_steps[i].get_length(), SECTION_SECS)
+
 func _begin_crossfade() -> void:
 	step_index = (step_index + 1) % _steps.size()
-	_section_left += SECTION_SECS
+	_section_left += _step_secs(step_index)
 	_fade_left = CROSSFADE_SECS
 	_active_is_a = not _active_is_a
 	var incoming := _music_a if _active_is_a else _music_b
