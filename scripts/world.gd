@@ -85,6 +85,7 @@ var _target_dist := GOD_DIST
 var _cur_focus_y := 0.0             ## 相机焦点高度 = focus 所在 tile 的台阶高度（缓动，防上台阶时画面跳变）
 var _env: Environment               ## 世界环境（深度雾起止随 _cur_focus_y 补偿，山顶视角不整体变浓雾）
 var _sun: DirectionalLight3D        ## 太阳灯（画质「角色实时阴影」开关切 shadow_enabled；_setup_environment 存下）
+var _gfx_buttons := {}              ## 画质开关按钮 {key: Button}（设置页；toggled → 应用 + 存档）
 var _locked: PaperCharacter = null ## lock 跟随的角色（null=god 自由模式）
 var _stage_player_logical := Vector2.ZERO ## 对话玩家站位（小跳落点）
 var _hop_from := Vector2.ZERO      ## 小跳起点 logical
@@ -374,8 +375,11 @@ func _ready() -> void:
 	# canvas 仍原生分辨率），随后 AdaptiveQuality 按实测帧时自动升/降档并持久化
 	if OS.has_feature("mobile"):
 		get_viewport().scaling_3d_scale = 0.7
-		if not FileAccess.file_exists("user://perf_sweep"):  # 扫频诊断时不许换档搅数据
+		# 用户在画质设置里显式存过档就不自动定档（用户接管，免自适应覆盖其 override）
+		if not FileAccess.file_exists("user://perf_sweep") and not GraphicsSettings.has_saved():
 			add_child(AdaptiveQuality.make(self, chunk_manager))
+	# 画质档启动恢复：在自适应/默认之后应用用户 override（节点已就绪：_sun/chunk_manager/_gfx_buttons）
+	_apply_saved_graphics()
 	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
 	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
 		Engine.max_fps = 0  # 扫频要真实帧时，解除 menu 设的移动端限帧
@@ -477,6 +481,14 @@ func _apply_saved_graphics() -> void:
 	var g := GraphicsSettings.load_all()
 	for key in GraphicsSettings.KEYS:
 		_apply_graphics_key(key, bool(g[key]))
+
+## 设置页画质开关切换：即时应用到场景 + 把当前全部按钮态存进 profile（重启恢复）。
+func _on_graphics_toggled(on: bool, key: String) -> void:
+	_apply_graphics_key(key, on)
+	var settings := {}
+	for k: String in _gfx_buttons:
+		settings[k] = (_gfx_buttons[k] as Button).button_pressed
+	GraphicsSettings.save_all(settings)
 
 ## 白天动态天空：渐变 + 卡通云漂移 + 太阳光晕（shaders/sky_day.gdshader）。
 ## ambient 走纯色源不依赖天空 radiance，radiance 取最小档 + 仅材质变更时重烘
@@ -1213,6 +1225,29 @@ func _setup_hud() -> void:
 	_avatar_preview.add_child(avatar_row)
 	_avatar_preview.visible = false
 	settings_page.add_child(_avatar_preview)
+	# —— 画质分区：GraphicsSettings 的 6 个开关，toggle 即时应用 + 存 profile（重启恢复）——
+	# 内容区自带竖向滚动（scroll），多加几行不撑破手机壳。
+	var gfx_title := Label.new()
+	gfx_title.text = "画质"
+	gfx_title.add_theme_font_size_override("font_size", 26)
+	gfx_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	settings_page.add_child(gfx_title)
+	var gfx_labels := {
+		"actor_shadows": "角色阴影", "ground_shadows": "地面阴影", "hi_res": "高清画质",
+		"fog": "远景雾", "outline": "描边", "prop_anim": "会动物件",
+	}
+	var gfx_now := GraphicsSettings.load_all()
+	_gfx_buttons = {}
+	for key: String in GraphicsSettings.KEYS:
+		var b := Button.new()
+		b.text = String(gfx_labels[key])
+		b.toggle_mode = true  # 按下=开（style_card_button 给 pressed 态上暖黄底）
+		b.button_pressed = bool(gfx_now[key])
+		b.add_theme_font_size_override("font_size", 24)
+		UiAssets.style_card_button(b)
+		b.toggled.connect(_on_graphics_toggled.bind(key))
+		settings_page.add_child(b)
+		_gfx_buttons[key] = b
 	_album_pages = { "flowers": flowers_page, "items": items_page, "settings": settings_page }
 	for pid in _album_pages:
 		var pg := _album_pages[pid] as Control
