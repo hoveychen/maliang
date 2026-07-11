@@ -1,0 +1,9 @@
+Kenney City Kit (Commercial) 2.1 — CC0 1.0 — https://kenney.nl/assets/city-kit-commercial
+（Creative Commons Zero，可商用/可改，署名非强制。原始 License.txt 见下载包。）
+
+注意：这些 glb 引用外部贴图 Textures/colormap.png（UnityGLTF 导出，非内嵌），
+故 Textures/colormap.png 必须与 glb 同目录保留，Godot 导入按相对路径解析。
+
+world-themes P4「现代城市」主题选用的 12 件（Kenney 原名，node 类）：
+  building-a .. building-g          商铺/临街建筑 7 件
+  building-skyscraper-a .. -e       高楼 5 件

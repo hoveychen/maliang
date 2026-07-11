@@ -1,0 +1,17 @@
+{
+  "_comment": "厨房主题（world-themes P4）。全 node 类厨电。全 CC0：与玩具房间同一 Kenney Furniture Kit（assets/furniture/，另一策展子集），来源见 assets/furniture/SOURCES.txt。scale=3.5 与玩具房间一致（同一 kit、同一放大量级），真机手感微调留 P5。",
+  "entries": {
+    "kitchenFridge":        { "category": "node", "path": "res://assets/furniture/kitchenFridge.glb",        "scale": 3.5 },
+    "kitchenStove":         { "category": "node", "path": "res://assets/furniture/kitchenStove.glb",         "scale": 3.5 },
+    "kitchenSink":          { "category": "node", "path": "res://assets/furniture/kitchenSink.glb",          "scale": 3.5 },
+    "kitchenMicrowave":     { "category": "node", "path": "res://assets/furniture/kitchenMicrowave.glb",     "scale": 3.5 },
+    "kitchenCabinet":       { "category": "node", "path": "res://assets/furniture/kitchenCabinet.glb",       "scale": 3.5 },
+    "kitchenCabinetDrawer": { "category": "node", "path": "res://assets/furniture/kitchenCabinetDrawer.glb", "scale": 3.5 },
+    "kitchenCoffeeMachine": { "category": "node", "path": "res://assets/furniture/kitchenCoffeeMachine.glb", "scale": 3.5 },
+    "kitchenBlender":       { "category": "node", "path": "res://assets/furniture/kitchenBlender.glb",       "scale": 3.5 },
+    "toaster":              { "category": "node", "path": "res://assets/furniture/toaster.glb",              "scale": 3.5 },
+    "hoodModern":           { "category": "node", "path": "res://assets/furniture/hoodModern.glb",           "scale": 3.5 },
+    "kitchenBar":           { "category": "node", "path": "res://assets/furniture/kitchenBar.glb",           "scale": 3.5 },
+    "stoolBar":             { "category": "node", "path": "res://assets/furniture/stoolBar.glb",             "scale": 3.5 }
+  }
+}

@@ -576,5 +576,341 @@
     "themes": [
       "toyroom"
     ]
+  },
+  {
+    "id": "city_shop_a",
+    "worldId": null,
+    "name": "临街商铺·甲",
+    "renderRef": "city:building-a",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_b",
+    "worldId": null,
+    "name": "临街商铺·乙",
+    "renderRef": "city:building-b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_c",
+    "worldId": null,
+    "name": "临街商铺·丙",
+    "renderRef": "city:building-c",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_d",
+    "worldId": null,
+    "name": "临街商铺·丁",
+    "renderRef": "city:building-d",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_e",
+    "worldId": null,
+    "name": "临街商铺·戊",
+    "renderRef": "city:building-e",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_f",
+    "worldId": null,
+    "name": "临街商铺·己",
+    "renderRef": "city:building-f",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_g",
+    "worldId": null,
+    "name": "临街商铺·庚",
+    "renderRef": "city:building-g",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_a",
+    "worldId": null,
+    "name": "高楼·甲",
+    "renderRef": "city:building-skyscraper-a",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_b",
+    "worldId": null,
+    "name": "高楼·乙",
+    "renderRef": "city:building-skyscraper-b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_c",
+    "worldId": null,
+    "name": "高楼·丙",
+    "renderRef": "city:building-skyscraper-c",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_d",
+    "worldId": null,
+    "name": "高楼·丁",
+    "renderRef": "city:building-skyscraper-d",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_e",
+    "worldId": null,
+    "name": "高楼·戊",
+    "renderRef": "city:building-skyscraper-e",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "kit_fridge",
+    "worldId": null,
+    "name": "冰箱",
+    "renderRef": "kitchen:kitchenFridge",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_stove",
+    "worldId": null,
+    "name": "灶台",
+    "renderRef": "kitchen:kitchenStove",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_sink",
+    "worldId": null,
+    "name": "水槽",
+    "renderRef": "kitchen:kitchenSink",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_microwave",
+    "worldId": null,
+    "name": "微波炉",
+    "renderRef": "kitchen:kitchenMicrowave",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_cabinet",
+    "worldId": null,
+    "name": "橱柜",
+    "renderRef": "kitchen:kitchenCabinet",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_cabinet_drawer",
+    "worldId": null,
+    "name": "抽屉柜",
+    "renderRef": "kitchen:kitchenCabinetDrawer",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_coffee",
+    "worldId": null,
+    "name": "咖啡机",
+    "renderRef": "kitchen:kitchenCoffeeMachine",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_blender",
+    "worldId": null,
+    "name": "榨汁机",
+    "renderRef": "kitchen:kitchenBlender",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_toaster",
+    "worldId": null,
+    "name": "烤面包机",
+    "renderRef": "kitchen:toaster",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_hood",
+    "worldId": null,
+    "name": "抽油烟机",
+    "renderRef": "kitchen:hoodModern",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_bar",
+    "worldId": null,
+    "name": "吧台",
+    "renderRef": "kitchen:kitchenBar",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_stool",
+    "worldId": null,
+    "name": "吧凳",
+    "renderRef": "kitchen:stoolBar",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
   }
 ]

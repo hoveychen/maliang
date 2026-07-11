@@ -75,6 +75,36 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('toy_plant', '盆栽', 'furniture:pottedPlant', 1, true, ['toyroom']),
   themed('toy_tv', '电视机', 'furniture:televisionModern', 1, true, ['toyroom']),
   themed('toy_box', '纸箱', 'furniture:cardboardBoxOpen', 1, true, ['toyroom']),
+
+  // ── 现代城市主题（world-themes P4；全 CC0：Kenney City Kit Commercial）──
+  // renderRef 'city:<Kenney 原名>' → 客户端 assets/packs/city/pack.json（node 类）
+  themed('city_shop_a', '临街商铺·甲', 'city:building-a', 3, true, ['city']),
+  themed('city_shop_b', '临街商铺·乙', 'city:building-b', 3, true, ['city']),
+  themed('city_shop_c', '临街商铺·丙', 'city:building-c', 3, true, ['city']),
+  themed('city_shop_d', '临街商铺·丁', 'city:building-d', 3, true, ['city']),
+  themed('city_shop_e', '临街商铺·戊', 'city:building-e', 3, true, ['city']),
+  themed('city_shop_f', '临街商铺·己', 'city:building-f', 3, true, ['city']),
+  themed('city_shop_g', '临街商铺·庚', 'city:building-g', 3, true, ['city']),
+  themed('city_tower_a', '高楼·甲', 'city:building-skyscraper-a', 3, true, ['city']),
+  themed('city_tower_b', '高楼·乙', 'city:building-skyscraper-b', 3, true, ['city']),
+  themed('city_tower_c', '高楼·丙', 'city:building-skyscraper-c', 3, true, ['city']),
+  themed('city_tower_d', '高楼·丁', 'city:building-skyscraper-d', 3, true, ['city']),
+  themed('city_tower_e', '高楼·戊', 'city:building-skyscraper-e', 3, true, ['city']),
+
+  // ── 厨房主题（world-themes P4；全 CC0：同 Kenney Furniture Kit 的厨电子集）──
+  // renderRef 'kitchen:<Kenney 原名>' → 客户端 assets/packs/kitchen/pack.json（node 类）
+  themed('kit_fridge', '冰箱', 'kitchen:kitchenFridge', 1, true, ['kitchen']),
+  themed('kit_stove', '灶台', 'kitchen:kitchenStove', 1, true, ['kitchen']),
+  themed('kit_sink', '水槽', 'kitchen:kitchenSink', 1, true, ['kitchen']),
+  themed('kit_microwave', '微波炉', 'kitchen:kitchenMicrowave', 1, true, ['kitchen']),
+  themed('kit_cabinet', '橱柜', 'kitchen:kitchenCabinet', 1, true, ['kitchen']),
+  themed('kit_cabinet_drawer', '抽屉柜', 'kitchen:kitchenCabinetDrawer', 1, true, ['kitchen']),
+  themed('kit_coffee', '咖啡机', 'kitchen:kitchenCoffeeMachine', 1, true, ['kitchen']),
+  themed('kit_blender', '榨汁机', 'kitchen:kitchenBlender', 1, true, ['kitchen']),
+  themed('kit_toaster', '烤面包机', 'kitchen:toaster', 1, true, ['kitchen']),
+  themed('kit_hood', '抽油烟机', 'kitchen:hoodModern', 1, true, ['kitchen']),
+  themed('kit_bar', '吧台', 'kitchen:kitchenBar', 1, true, ['kitchen']),
+  themed('kit_stool', '吧凳', 'kitchen:stoolBar', 1, true, ['kitchen']),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
