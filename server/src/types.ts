@@ -252,7 +252,9 @@ export interface IntentContext {
   characterName: string;
   personality: string;
   abilities: string[];
-  recentHistory?: ChatTurn[]; // 近 N 轮对话，给角色上下文让回应连贯
+  recentHistory?: ChatTurn[]; // 当前 session 的对话（WS 路径整段回喂；旧路径为持久历史截尾）
+  /** session 超长压缩的产物：更早轮次的中文摘要（有则注入，让角色不忘本段更早聊过的事）。 */
+  sessionSummary?: string;
   /** 角色对当前玩家的长期记忆（带分类，注入时按 kind 分组）。 */
   memory?: { text: string; kind: MemoryKind }[];
   /** 世界里的其他角色花名册（不含自己/小神仙）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
@@ -265,6 +267,16 @@ export interface IntentContext {
   taskCandidate?: ActiveTask;
   /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing，命中 prompt cache。 */
   cacheKey?: string;
+}
+
+/** session 超长压缩（compactSession）的上下文：把较旧轮次压成一段中文摘要，session 内继续对话时注入。 */
+export interface SessionCompactionContext {
+  characterName: string;
+  personality: string;
+  /** 上一次压缩的摘要（若有）：新摘要要把它并进去，不丢更早的信息。 */
+  previousSummary?: string;
+  /** 这次要被压缩掉的较旧轮次（时间正序）。 */
+  turns: ChatTurn[];
 }
 
 /** 会话（Visit）结束时让角色「自己决定记什么」的上下文（extractMemory 用）。 */

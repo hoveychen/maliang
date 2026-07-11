@@ -64,10 +64,10 @@ export async function respondToTranscript(
   hooks?: TTSStreamHooks,
   clientTts = false,
   sceneId?: string,
-  // 当前 session（Visit）里与该角色的完整对话（WS 层从 VisitState 取）。给了就整段回喂——
-  // session 内上下文完整、跨 session 不串（重进世界=新 session，长期记忆走 memories）。
+  // 当前 session（Visit）里与该角色的上下文（WS 层从 VisitState 取）：完整对话 + 超长压缩摘要。
+  // 给了就整段回喂——session 内上下文完整、跨 session 不串（重进世界=新 session，长期记忆走 memories）。
   // 不给（旧 HTTP 路径/直调）退回持久 chat_turns 截尾的老行为。
-  sessionHistory?: ChatTurn[],
+  sessionCtx?: { history: ChatTurn[]; summary?: string },
 ): Promise<VoiceResponse> {
   const character = store.getCharacter(worldId, characterId);
   if (!character) throw new CharacterNotFoundError(worldId, characterId);
@@ -90,7 +90,8 @@ export async function respondToTranscript(
     personality: character.personality,
     // 基础集 ∪ 角色自带；小仙子减去需要走动的能力——她不会走，给了也兑现不了
     abilities: effectiveAbilities(character),
-    recentHistory: sessionHistory ?? store.getRecentTurns(characterId, playerId, RECENT_TURNS),
+    recentHistory: sessionCtx?.history ?? store.getRecentTurns(characterId, playerId, RECENT_TURNS),
+    sessionSummary: sessionCtx?.summary,
     memory: memories,
     worldCharacters: roster,
     locations: store.getLocations(worldId, sceneId),

@@ -728,11 +728,61 @@ export interface VisitState {
   // characterId → 本段 Visit 与该角色的完整对话（不随中途 flush 清空）。整段回喂 routeIntent：
   // session 内上下文完整、不截尾；Visit 结束即弃，重进世界从零开始（长期记忆走 memories）。
   history: Map<string, ChatTurn[]>;
+  // characterId → 超长压缩的摘要（history 只留近尾，更早轮次折叠在这里）
+  summary: Map<string, string>;
+  // 正在后台压缩的角色（防同一角色并发压两次）
+  compacting: Set<string>;
 }
 
-/** 取当前 Visit 里与某角色的完整对话（无 Visit/首轮 → 空数组=全新 session）。 */
-export function visitHistory(session: VoiceSession, characterId: string): ChatTurn[] {
-  return session.visit?.history.get(characterId) ?? [];
+/** 当前 Visit 里与某角色的 session 上下文：完整对话 + 超长压缩摘要（无 Visit/首轮 → 空=全新 session）。 */
+export function visitContext(session: VoiceSession, characterId: string): { history: ChatTurn[]; summary?: string } {
+  return {
+    history: session.visit?.history.get(characterId) ?? [],
+    summary: session.visit?.summary.get(characterId),
+  };
+}
+
+/** session 压缩阈值：history+摘要总字数超过即触发（中文≈1字/token，200k 字≈200k token 上下文）。 */
+const SESSION_COMPACT_CHARS = Number(process.env.SESSION_COMPACT_CHARS ?? 200_000);
+/** 压缩后保留的最近条数（child+npc 各算一条，10 条=5 个来回），更早的折叠进摘要。 */
+const COMPACT_KEEP_TAIL = 10;
+
+/**
+ * session 上下文超阈值时后台压缩一轮：较旧轮次（并入上次摘要）→ compactSession 出新摘要，
+ * history 原地只留近尾。失败只影响这次压缩（下轮再试），绝不影响对话回复。
+ */
+export async function maybeCompactVisit(
+  session: VoiceSession,
+  characterId: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  threshold = SESSION_COMPACT_CHARS,
+): Promise<void> {
+  const visit = session.visit;
+  if (!visit || visit.compacting.has(characterId)) return;
+  const hist = visit.history.get(characterId);
+  if (!hist || hist.length <= COMPACT_KEEP_TAIL) return;
+  const prev = visit.summary.get(characterId) ?? '';
+  const total = prev.length + hist.reduce((n, t) => n + t.text.length, 0);
+  if (total <= threshold) return;
+  const cut = hist.length - COMPACT_KEEP_TAIL;
+  const older = hist.slice(0, cut);
+  visit.compacting.add(characterId);
+  try {
+    const character = store.getCharacter(visit.worldId, characterId);
+    const summary = await adapters.llm.compactSession({
+      characterName: character?.name ?? '',
+      personality: character?.personality ?? '',
+      previousSummary: prev || undefined,
+      turns: older,
+    });
+    if (summary) visit.summary.set(characterId, summary);
+    hist.splice(0, cut); // 原地删已压缩的旧轮次（await 期间新 push 的仍在尾部，不丢）
+  } catch (err) {
+    console.warn(`session 压缩失败（下轮再试，不影响对话）：${String(err)}`);
+  } finally {
+    visit.compacting.delete(characterId);
+  }
 }
 
 /** 边说边识别的单连接语音会话：voice_start 开识别流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
@@ -773,7 +823,7 @@ export function startSessionVisit(
   now: number,
 ): void {
   if (session.visit) void endSessionVisit(session, adapters, store, now); // 收尾旧的（同步排空 pending，抽取后台跑）
-  session.visit = { id: store.startVisit(worldId, playerId, now), worldId, playerId, pending: new Map(), history: new Map() };
+  session.visit = { id: store.startVisit(worldId, playerId, now), worldId, playerId, pending: new Map(), history: new Map(), summary: new Map(), compacting: new Set() };
 }
 
 /** 记一轮对话进当前 Visit 的增量；单角色超阈值即中途 flush 兜底（后台跑，不阻塞回复路径）。 */
@@ -789,13 +839,15 @@ export function recordVisitTurn(
 ): void {
   // 兜底：没经 world_info 起过 Visit（旧客户端/直连）时惰性开一段。
   if (!session.visit) {
-    session.visit = { id: store.startVisit(worldId, playerId, Date.now()), worldId, playerId, pending: new Map(), history: new Map() };
+    session.visit = { id: store.startVisit(worldId, playerId, Date.now()), worldId, playerId, pending: new Map(), history: new Map(), summary: new Map(), compacting: new Set() };
   }
   const visit = session.visit;
   // session 全量历史：供下一轮 routeIntent 整段回喂（不随中途 flush 清空，Visit 结束即弃）。
   const hist = visit.history.get(characterId) ?? [];
   hist.push({ role: 'child', text: transcript, ts: 0 }, { role: 'npc', text: replyText, ts: 0 });
   visit.history.set(characterId, hist);
+  // 超阈值后台压缩（不阻塞回复路径；失败下轮再试）
+  void maybeCompactVisit(session, characterId, adapters, store).catch(() => {});
   const turns = visit.pending.get(characterId) ?? [];
   turns.push({ child: transcript, npc: replyText });
   visit.pending.set(characterId, turns);
@@ -1433,7 +1485,7 @@ export async function handleWsMessage(
         await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store);
         return;
       }
-      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene, visitHistory(session, msg.characterId ?? ''));
+      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene, visitContext(session, msg.characterId ?? ''));
       // 造角色/造物入口：开引导会话，不发普通回应（问句 TTS + 图标卡由会话驱动）。
       if (response.characterRequest) {
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText);
@@ -1488,7 +1540,7 @@ export async function handleWsMessage(
         ttsHooks,
         session.clientTts,
         session.currentScene,
-        visitHistory(session, msg.characterId ?? ''),
+        visitContext(session, msg.characterId ?? ''),
       );
       // 造角色/造物入口：respondToTranscript 识别到意图但没出声，这里开引导会话，不发普通回应。
       if (response.characterRequest) {
@@ -1616,7 +1668,7 @@ export async function handleWsMessage(
         onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
         onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
       };
-      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene, visitHistory(session, characterId));
+      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene, visitContext(session, characterId));
       // 造角色/造物入口：开引导会话，不发普通回应。
       if (response.characterRequest) {
         await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store, response.replyText);
