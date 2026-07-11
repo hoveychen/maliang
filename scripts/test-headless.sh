@@ -48,6 +48,7 @@ UNIT_TESTS=(
   test_sdf_static_baker
   test_paper_idle
   test_player_profile
+  test_graphics_settings
   test_backend_player_id
   test_stage_agent
   test_screenplay_replay
