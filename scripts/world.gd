@@ -27,6 +27,8 @@ const STAGE_HOP_DUR := 0.32       ## 玩家跳到站位的小跳时长（秒）
 const STAGE_HOP_HEIGHT := 1.1     ## 小跳竖直弧线峰高（米）
 const DIALOG_FILL := 0.5          ## 基础构图：最高者高度占屏中间 50%（1/4 → 3/4）
 const DIALOG_ZOOM_MIN := 6.0      ## 对话态轨道距离下限（远小于 god 态 ZOOM_MIN，允许贴近构图小体型角色）
+const CREATION_CAM_DIST := 8.5    ## 创造视图特写：推近仙子单人（比双人对话更近，背景弱化）
+const CREATION_CAM_SHIFT := 3.0   ## 焦点右移量：让仙子渲染到屏幕偏左，右侧留给 2×2 大卡
 const SPEAK_SHIFT := 0.35         ## 说话人跟随：焦点朝说话方偏移的比例（0=两人中点，1=完全对准说话方）
 const SPEAK_ZOOM_BLEND := 0.45    ## 说话人跟随：轨道距离朝「说话方单独占 50%」混合的比例（小体型→距离更近→zoom 更多）
 const PICK_RADIUS_PX := 80.0
@@ -163,8 +165,15 @@ var _pending_leave: Dictionary = {}
 var active_task: Dictionary = {}   ## 进行中委托（空=无），见 _set_active_task
 var wallet: Dictionary = { "flowers": 0, "stampProgress": 0, "stampsTotal": 0 } ## 小红花钱包
 var task_chip: HBoxContainer       ## 右上角委托提示（目标图标+短名 ⇒ 盖章奖励图标）
-var _creation_cards: HBoxContainer ## 引导式造角色/造物的图标选项卡（浮在横幅上方；平时隐藏）
-var _in_creation := false          ## 正在与小仙子引导式创造（造角色或造物；期间语音/点选都是这次会话的答复）
+# 专门的「创造视图」（造角色/造物共用）：一进创造就退出普通对话构图，相机推近仙子特写、
+# 背景压暗，屏幕中央弹 2×2 大图标卡（方案 A）。平时隐藏。
+var _creation_view: Control        ## 创造视图根（全屏暗底 + 居中大卡；吃掉卡外点击）
+var _creation_cards: GridContainer ## 居中 2×2 大图标卡网格
+var _creation_q: Label             ## 顶部问题字幕（语音为主，字给家长）
+var _creation_dots: HBoxContainer  ## 顶部进度圆点（每答一轮点亮一个）
+var _creation_step := 0            ## 已走过的轮数（点亮的圆点数）
+var _creation_cam := false         ## 创造视图相机特写态（推近仙子；退出创造复位）
+var _in_creation := false          ## 正在引导式创造（造角色或造物；期间语音/点选都是这次会话的答复）
 var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
 var album_button: Button           ## 左下角手机启动器按钮（AIGC 手机图标）
@@ -892,16 +901,9 @@ func _setup_hud() -> void:
 	banner.visible = false
 	layer.add_child(banner)
 
-	# 引导式造角色的图标选项卡：一排大按钮，浮在横幅上方居中（3 岁友好大点击区）。
-	# 图标就绪前先显示文字 label（iconAsset 空）；点一下即答复小仙子。
-	_creation_cards = HBoxContainer.new()
-	_creation_cards.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_creation_cards.offset_top = -196.0
-	_creation_cards.offset_bottom = -104.0
-	_creation_cards.alignment = BoxContainer.ALIGNMENT_CENTER
-	_creation_cards.add_theme_constant_override("separation", 18)
-	_creation_cards.visible = false
-	layer.add_child(_creation_cards)
+	# 专门的创造视图（方案 A）：全屏暗底 + 顶部问题字幕/进度点 + 屏幕中央 2×2 大图标卡。
+	# 一进创造就显它、退出普通对话构图（见 _enter_creation_view）；点卡即答复小仙子。
+	_build_creation_view(layer)
 
 	# 收听 HUD：近身对话期间浮在横幅上方——AIGC 生成的奶油圆角边框贴图（hud_listen，
 	# 麦克风+音波+星饰烤进边框），一排珊瑚色声波柱嵌在边框空心内板、随音量跳动，
@@ -1851,6 +1853,12 @@ func _process(delta: float) -> void:
 		# 手机近身：焦点右移让玩家渲染到屏幕偏左、右侧留给手机；距离/抬升在 _recompute_phone_cam 定。
 		want = WorldGrid.wrap_pos(player["logical"] + Vector2(_phone_cam_shift, 0.0))
 		lift = _phone_cam_lift
+	elif _creation_cam and _locked != null and is_instance_valid(_locked):
+		# 创造视图特写：推近仙子单人（背景在暗底下弱化）。焦点右移让仙子渲染到屏幕偏左，
+		# 右侧留给 2×2 大卡（方案 A）；抬升把她框在屏幕竖直中段。
+		want = WorldGrid.wrap_pos(_find_npc_dict(_locked).get("logical", focus_logical) + Vector2(CREATION_CAM_SHIFT, 0.0))
+		_target_dist = CREATION_CAM_DIST
+		lift = _char_top(_locked) * 0.6
 	elif _locked != null and is_instance_valid(_locked) and not player.is_empty():
 		var dc := _dialog_camera()
 		want = dc["want"]
@@ -4091,17 +4099,89 @@ func _on_character_response(data: Dictionary) -> void:
 			# clientTts：服务端只给文本+voiceId，本地 edge 合成（失败内部降级 tts_request）
 			_speak_line(String(data.get("replyText", "")), String(data.get("voiceId", "")))
 
-## 引导式造角色：小仙子追问一轮 —— 念出问句(TTS) + 弹出图标选项卡；小朋友点卡或直接说都行。
-# 引导式创造追问一轮（造角色或造物共用此路径）：仙子念问句 + 弹图标选项卡；孩子点卡或直接说都行。
-# 消息 goal-agnostic：客户端只管渲染服务端给的 options、回传 optionId，造的是角色还是物件由服务端 goal 决定。
+## 构建专门的创造视图（方案 A）：全屏暗底吃掉卡外点击 + 顶部问题字幕/进度点 + 屏幕中央 2×2 大卡。
+## 造角色/造物共用；节点常驻隐藏，进创造时 _enter_creation_view 点亮。
+func _build_creation_view(host: CanvasLayer) -> void:
+	_creation_view = Control.new()
+	_creation_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_creation_view.mouse_filter = Control.MOUSE_FILTER_STOP # 吃掉卡外乱点，别穿到世界
+	_creation_view.visible = false
+	host.add_child(_creation_view)
+
+	# 暖色径向暗角：中间几乎透明（仙子+大卡看清），四周压暗——把注意力聚到中央，世界边缘退后。
+	var vig := TextureRect.new()
+	vig.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vig.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vig.stretch_mode = TextureRect.STRETCH_SCALE
+	var grad := Gradient.new()
+	grad.set_color(0, Color(0.05, 0.04, 0.02, 0.12)) # 中心：极轻压暗
+	grad.set_color(1, Color(0.05, 0.04, 0.02, 0.82)) # 边缘：明显压暗
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 1.0)
+	gt.width = 256
+	gt.height = 256
+	vig.texture = gt
+	_creation_view.add_child(vig)
+
+	# 顶部问题字幕（语音为主，字给家长）：深色药丸底 + 大白字。
+	_creation_q = Label.new()
+	_creation_q.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_creation_q.offset_top = 40.0
+	_creation_q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_creation_q.add_theme_font_size_override("font_size", 40)
+	_creation_q.add_theme_color_override("font_color", Color.WHITE)
+	_creation_q.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.7))
+	_creation_q.add_theme_constant_override("outline_size", 10)
+	_creation_q.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_creation_view.add_child(_creation_q)
+
+	# 进度圆点：每答一轮点亮一个（服务端不下发总步数，客户端本地累加）。
+	_creation_dots = HBoxContainer.new()
+	_creation_dots.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_creation_dots.offset_top = 104.0
+	_creation_dots.add_theme_constant_override("separation", 12)
+	_creation_dots.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_creation_view.add_child(_creation_dots)
+
+	# 2×2 大卡网格：居中于屏幕右侧 ~62%，把左侧让给仙子特写（方案 A：仙子左、卡在右）。
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.anchor_left = 0.38
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_creation_view.add_child(center)
+	_creation_cards = GridContainer.new()
+	_creation_cards.columns = 2
+	_creation_cards.add_theme_constant_override("h_separation", 22)
+	_creation_cards.add_theme_constant_override("v_separation", 22)
+	center.add_child(_creation_cards)
+
+## 进创造视图：退出普通对话构图（关横幅/情绪气泡/听到字幕，麦保留——孩子仍可语音答复），
+## 相机推近仙子特写、背景压暗，点亮创造视图。幂等（每轮 creation_prompt 都可安全调）。
+func _enter_creation_view() -> void:
+	_in_creation = true
+	_creation_cam = true
+	banner.visible = false          # 普通对话的横幅/提示不在创造视图里出现
+	heard_label.visible = false
+	if emotion_bubble != null:
+		emotion_bubble.visible = false # 收起头顶情绪气泡（创造视图是干净特写）
+	_emotion_life = 0.0
+	if _creation_view != null:
+		_creation_view.visible = true
+
+## 引导式创造追问一轮（造角色或造物共用此路径）：仙子念问句 + 屏幕中央弹 2×2 大卡；点卡或直接说都行。
+## 消息 goal-agnostic：客户端只管渲染服务端给的 options、回传 optionId，造角色还是物件由服务端 goal 决定。
 func _on_creation_prompt(data: Dictionary) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
 	thinking_label.visible = false
-	_in_creation = true
-	banner.text = String(data.get("replyText", data.get("question", "")))
-	banner.visible = true
-	_show_emotion("happy")
+	_enter_creation_view() # 首轮：退出普通对话构图、相机推近仙子特写、点亮创造视图
+	# 问题只给家长看的字幕（幼儿不识字，靠 TTS 念）
+	_creation_q.text = String(data.get("question", data.get("replyText", "")))
+	_creation_q.visible = true
+	_advance_creation_dots()
 	_build_creation_cards(data.get("options", []))
 	var asset := String(data.get("ttsAsset", ""))
 	if not asset.is_empty():
@@ -4110,7 +4190,7 @@ func _on_creation_prompt(data: Dictionary) -> void:
 		# clientTts：仙子问句本地 edge 合成（幼儿不识字，念不出来就降级服务端）
 		_speak_line(String(data.get("replyText", data.get("question", ""))), String(data.get("voiceId", "")))
 
-## 造一排选项卡：图标就绪(iconAsset 非空)显示图标，否则先显示中文 label。点一下即答复小仙子。
+## 填充居中 2×2 大卡：图标就绪(iconAsset 非空)显示图标，否则先显示中文 label。点一下即答复小仙子。
 func _build_creation_cards(options: Array) -> void:
 	for c in _creation_cards.get_children():
 		c.queue_free()
@@ -4121,21 +4201,17 @@ func _build_creation_cards(options: Array) -> void:
 		if oid.is_empty():
 			continue
 		var card := Button.new()
-		card.custom_minimum_size = Vector2(120.0, 92.0)
+		card.custom_minimum_size = Vector2(220.0, 168.0) # 3 岁友好大点击区
 		card.text = String((opt as Dictionary).get("label", oid))
-		# Button 也吃这些 theme override（_style_label 参数限定 Label，这里直接给按钮）
-		card.add_theme_font_size_override("font_size", 30)
-		card.add_theme_color_override("font_color", Color.WHITE)
-		card.add_theme_color_override("font_outline_color", Color.BLACK)
-		card.add_theme_constant_override("outline_size", 6)
+		UiAssets.style_card_button(card, 24.0) # 奶油圆角卡片（die-cut 贴纸风，与图标同调）
+		card.add_theme_font_size_override("font_size", 40)
 		var icon_asset := String((opt as Dictionary).get("iconAsset", ""))
 		if not icon_asset.is_empty():
 			_apply_card_icon(card, icon_asset) # 图标就绪：异步贴图（不阻塞卡片弹出）
 		card.pressed.connect(_on_creation_card.bind(oid))
 		_creation_cards.add_child(card)
-	_creation_cards.visible = _creation_cards.get_child_count() > 0
 
-## 选项卡图标（P3 生成后 iconAsset 才非空）：异步拉图贴到按钮，失败保留文字兜底。
+## 选项卡图标（生成后 iconAsset 才非空）：异步拉图贴到按钮，失败保留文字兜底。
 func _apply_card_icon(card: Button, asset: String) -> void:
 	var tex := await api.fetch_texture(asset)
 	if tex != null and is_instance_valid(card):
@@ -4143,21 +4219,35 @@ func _apply_card_icon(card: Button, asset: String) -> void:
 		card.expand_icon = true
 		card.text = "" # 有图就不显字
 
-## 点了某张选项卡：答复小仙子，收起卡片、进入思考态等下一轮/成品。
+## 点了某张大卡：答复小仙子，转「施法中…」等下一轮/成品（视图仍留着，等下一个 prompt 或退出）。
 func _on_creation_card(option_id: String) -> void:
 	if not _in_creation or selected == null:
 		return
 	game_audio.play_sfx("bell")
 	backend.send_creation_reply(world_id, _selected_id(), option_id)
-	_hide_creation_cards()
-	thinking_label.text = "施法中…"
-	thinking_label.visible = true
+	for c in _creation_cards.get_children():
+		c.queue_free()
+	_creation_q.text = "施法中…"
 
-## 收起选项卡（答复后/造好/退出）。
+## 进度圆点推进：新点亮一个（每答一轮一个）。
+func _advance_creation_dots() -> void:
+	var dot := ColorRect.new()
+	dot.custom_minimum_size = Vector2(14.0, 14.0)
+	dot.color = Color(1.0, 0.82, 0.29) # 暖黄=已走到的一步
+	_creation_dots.add_child(dot)
+	_creation_step += 1
+
+## 收起整个创造视图（答复完成/造好/退出）+ 复位相机特写态。所有退出路径（gen_progress/
+## prop_pending/gen_complete/reward_denied/_exit_interaction）都调它，故相机一定会拉回。
 func _hide_creation_cards() -> void:
 	for c in _creation_cards.get_children():
 		c.queue_free()
-	_creation_cards.visible = false
+	for d in _creation_dots.get_children():
+		d.queue_free()
+	_creation_step = 0
+	_creation_cam = false # 松开特写：后续按 _locked（对话两景）或 GOD（已 _exit_interaction）复位
+	if _creation_view != null:
+		_creation_view.visible = false
 
 ## 流式 TTS：character_response 先到，PCM 分片随 tts_chunk 推来，边收边播（首包即出声）。
 func _start_tts_stream(rate: int) -> void:
