@@ -156,6 +156,38 @@ func fetch_bytes(asset_hash: String) -> PackedByteArray:
 	_cache_write(asset_hash, buf) # 落盘供下次免下载
 	return buf
 
+## 拉取场景地形矩阵（v2 blob）。返回 { bytes: PackedByteArray, version: int }；
+## 失败 bytes 为空。version 已知（scene.terrainVersion）时按 (world,scene,version)
+## 磁盘缓存；version<=0（patch 版本对不上后的全量重拉）时跳缓存直连，
+## 以响应头 x-terrain-version 为准。
+func fetch_terrain(world_id: String, scene_id: String, version := 0) -> Dictionary:
+	var none := { "bytes": PackedByteArray(), "version": 0 }
+	var cache_key := "terrain_%s_%s_v%d" % [world_id, scene_id, version]
+	if version > 0:
+		var cached := _cache_read(cache_key)
+		if not cached.is_empty():
+			return { "bytes": cached, "version": version }
+	var http := HTTPRequest.new()
+	add_child(http)
+	http.timeout = REQUEST_TIMEOUT_SEC
+	var err := http.request("%s/worlds/%s/scenes/%s/terrain" % [base, world_id, scene_id])
+	if err != OK:
+		http.queue_free()
+		return none
+	var res: Array = await http.request_completed
+	http.queue_free()
+	if int(res[1]) != 200:
+		return none
+	var got_version := 0
+	for h in res[2] as PackedStringArray:
+		var hs := String(h)
+		if hs.to_lower().begins_with("x-terrain-version:"):
+			got_version = int(hs.get_slice(":", 1).strip_edges())
+	var buf := res[3] as PackedByteArray
+	if got_version > 0:
+		_cache_write("terrain_%s_%s_v%d" % [world_id, scene_id, got_version], buf)
+	return { "bytes": buf, "version": got_version }
+
 ## 拉取资源 hash → Texture2D（PNG/WebP/JPG）。失败返回 null。
 ## 三级取源：内存已解码缓存 → 磁盘缓存（免网络）→ 下载后落盘+进内存。资产内容寻址故缓存永不失效。
 func fetch_texture(asset_hash: String) -> Texture2D:

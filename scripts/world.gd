@@ -2920,6 +2920,7 @@ func _setup_backend() -> void:
 	backend.positions_relay.connect(_on_positions_relay) # 多人位置复制：远端 actor 插值渲染
 	backend.actor_leave.connect(_on_actor_leave)         # 玩家离场：即时清掉其远端副本
 	backend.scene_entered.connect(_on_scene_entered) # 走 portal 换场景：卸旧场景、载新场景
+	backend.terrain_patch.connect(_on_terrain_patch) # 地形矩阵增量更新（tile 编辑广播）
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
 	# 也在 THINK_TIMEOUT 秒后自动解卡——这是无论后端如何都不再永久卡死的最后一道保险。
 	_think_timer = Timer.new()
@@ -3087,6 +3088,76 @@ func _step_transition(delta: float) -> void:
 			and _pending_scene.is_empty() and not _await_skin:
 		_transitioning = false
 
+## 当前场景的地形矩阵版本（terrain_patch 严格 +1 对齐；0 = 打包/离线矩阵无版本）。
+var _terrain_version := 0
+
+## 地形矩阵增量更新（服务端 tile 编辑广播）。版本恰 +1 → 原地应用 + 精准重铺；
+## 乱序/漏包/应用失败 → 全量重拉兜底（gzip 几 KB，代价可忽略）。
+func _on_terrain_patch(data: Dictionary) -> void:
+	if String(data.get("sceneId", "")) != _scene_id:
+		return # 其他场景的编辑：下次进那场景时按 version 全量对齐
+	ItemCatalog.set_defs(data.get("items", [])) # 新引用的造物实体定义随 patch 带上
+	var version := int(data.get("version", 0))
+	if version == _terrain_version + 1:
+		var r: Dictionary = TerrainMap.apply_patch(data)
+		if r["ok"]:
+			_terrain_version = version
+			ItemCatalog.apply_static_occupancy()
+			if chunk_manager != null:
+				chunk_manager.rebuild_tiles(r["tiles"])
+			_relocate_illegal_actors()
+			return
+		push_warning("[terrain] patch 应用失败(%s)，全量重拉" % r["error"])
+	else:
+		push_warning("[terrain] patch 版本 %d 与本地 %d 不衔接，全量重拉" % [version, _terrain_version])
+	_refetch_terrain()
+
+## 全量重拉当前场景矩阵（patch 对不上的自愈路径）。失败保留当前矩阵（宁可旧不可乱）。
+func _refetch_terrain() -> void:
+	if not online or api == null:
+		return
+	var tr: Dictionary = await api.fetch_terrain(world_id, _scene_id, 0)
+	var buf: PackedByteArray = tr["bytes"]
+	if buf.is_empty():
+		push_warning("[terrain] 全量重拉失败，保留当前矩阵")
+		return
+	var r := TerrainMap.load_from_bytes(buf)
+	if not r["ok"]:
+		push_warning("[terrain] 全量重拉载荷非法(%s)" % r["error"])
+		return
+	_terrain_version = int(tr["version"])
+	ItemCatalog.apply_static_occupancy()
+	if r["changed"] and chunk_manager != null:
+		chunk_manager.rebuild()
+	_relocate_illegal_actors()
+
+## 地形编辑后的兜底：站进新水面/新物品占地的角色就近挪位（挖水淹角色/物品压角色）。
+## 只查脚下 tile 与占用位图，挪位复用降生同款 _find_free_spot（保守、确定性）。
+func _relocate_illegal_actors() -> void:
+	if not player.is_empty():
+		var pl: Vector2 = player["logical"]
+		if _spot_illegal(pl, PLAYER_SPAN, PLAYER_ID):
+			var spot := _find_free_spot(pl, PLAYER_SPAN)
+			player["logical"] = spot
+			OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	for n_ in npcs:
+		if bool(n_.get("is_fairy", false)):
+			continue # 仙子悬浮飞行，不受地面占用/水面影响
+		var lg: Vector2 = n_["logical"]
+		var span := int(n_.get("span", 2))
+		var nid := String(n_.get("id", ""))
+		if _spot_illegal(lg, span, nid):
+			var spot2 := _find_free_spot(lg, span)
+			n_["logical"] = spot2
+			OccupancyMap.char_register(nid, spot2, span)
+
+## 角色站位是否非法：脚下 tile 变水，或脚印撞上静态/动态物件占用。
+func _spot_illegal(pos: Vector2, span: int, _id: String) -> bool:
+	if TerrainMap.tile_type(WorldGrid.to_tile(pos)) == TerrainMap.T_WATER:
+		return true
+	var origin := OccupancyMap.footprint_origin(pos, span)
+	return not OccupancyMap.is_free_rect(origin, span, span)
+
 ## 打包默认矩阵（assets/terrain/village.mltr，导出工具产 v2）：离线/服务端未回前的
 ## 世界数据源。加载失败静默回落 _paint()（纯地貌、无物品的秃世界——极端兜底）。
 func _load_packaged_terrain() -> void:
@@ -3127,12 +3198,22 @@ func _apply_scene(scene: Dictionary) -> void:
 	_portals = parse_server_portals(scene.get("portals", []))
 	_spawn_portal_markers()
 
-	var asset := String(scene.get("terrainAsset", ""))
-	if asset.is_empty():
-		return
-	var buf: PackedByteArray = await api.fetch_bytes(asset)
+	# 地形拉取：有版本号走矩阵端点（(world,scene,version) 缓存，terrain_patch 对齐依据）；
+	# 老服务端（version 0）回落内容寻址 asset 路径。
+	var ver := int(scene.get("terrainVersion", 0))
+	var buf: PackedByteArray
+	if ver > 0:
+		var tr: Dictionary = await api.fetch_terrain(world_id, String(scene.get("sceneId", _scene_id)), ver)
+		buf = tr["bytes"]
+		if not buf.is_empty():
+			_terrain_version = int(tr["version"]) if int(tr["version"]) > 0 else ver
+	else:
+		var asset := String(scene.get("terrainAsset", ""))
+		if asset.is_empty():
+			return
+		buf = await api.fetch_bytes(asset)
 	if buf.is_empty():
-		push_warning("[terrain] 拉取地形 %s 失败，沿用现有地形" % asset)
+		push_warning("[terrain] 拉取地形失败，沿用现有地形")
 		return
 	var r := TerrainMap.load_from_bytes(buf)
 	if not r["ok"]:

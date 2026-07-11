@@ -165,6 +165,67 @@ static func load_from_bytes(buf: PackedByteArray) -> Dictionary:
 static func _load_err(msg: String) -> Dictionary:
 	return { "ok": false, "changed": false, "error": msg }
 
+## 应用服务端 terrain_patch 的增量编辑（服务端已做语义校验，这里只做边界防御）。
+## patch: { paletteAppend?: [{index,itemId}], edits: [{x,y,t?,h?,d?,item?:[ref,arg]|null,edge?:[side,ref]}] }
+## 返回 { ok, tiles: Array[Vector2i]（受影响 tile）, error }。先整体校验后应用——
+## 失败不半改（乱序/坏载荷时调用方全量重拉，本地矩阵必须保持一致）。
+static func apply_patch(patch: Dictionary) -> Dictionary:
+	_ensure_built()
+	var n := WorldGrid.GRID_TILES
+	var pal_add: Array = patch.get("paletteAppend", []) if typeof(patch.get("paletteAppend")) == TYPE_ARRAY else []
+	var edits: Array = patch.get("edits", []) if typeof(patch.get("edits")) == TYPE_ARRAY else []
+	if edits.is_empty():
+		return { "ok": false, "tiles": [], "error": "edits 为空" }
+
+	# ── 校验（palette 顺序衔接 / 坐标与取值域 / 引用不越界）────────────────
+	var pal_size := _palette.size()
+	for p in pal_add:
+		if typeof(p) != TYPE_DICTIONARY or int((p as Dictionary).get("index", -1)) != pal_size + 1 \
+				or String((p as Dictionary).get("itemId", "")).is_empty():
+			return { "ok": false, "tiles": [], "error": "paletteAppend 不衔接" }
+		pal_size += 1
+	for e in edits:
+		if typeof(e) != TYPE_DICTIONARY:
+			return { "ok": false, "tiles": [], "error": "坏 edit 条目" }
+		var d := e as Dictionary
+		var x := int(d.get("x", -1))
+		var y := int(d.get("y", -1))
+		if x < 0 or x >= n or y < 0 or y >= n:
+			return { "ok": false, "tiles": [], "error": "tile (%d,%d) 越界" % [x, y] }
+		if d.has("t") and int(d["t"]) != T_GRASS and int(d["t"]) != T_PATH and int(d["t"]) != T_WATER:
+			return { "ok": false, "tiles": [], "error": "类型 %s 非法" % str(d["t"]) }
+		for k in ["h", "d"]:
+			if d.has(k) and (int(d[k]) < 0 or int(d[k]) > 255):
+				return { "ok": false, "tiles": [], "error": "%s=%s 非法" % [k, str(d[k])] }
+		var item: Variant = d.get("item", false) # false=缺省哨兵（null 是合法值=移除）
+		if typeof(item) == TYPE_ARRAY:
+			var a := item as Array
+			if a.size() != 2 or int(a[0]) < 1 or int(a[0]) > pal_size or int(a[1]) < 0 or int(a[1]) > 255:
+				return { "ok": false, "tiles": [], "error": "item 引用非法" }
+
+	# ── 应用 ───────────────────────────────────────────────────────────────
+	for p in pal_add:
+		_palette.append(String((p as Dictionary)["itemId"]))
+	var tiles: Array = []
+	for e in edits:
+		var d := e as Dictionary
+		var i := int(d["y"]) * n + int(d["x"])
+		if d.has("t"):
+			_types[i] = int(d["t"])
+		if d.has("h"):
+			_heights[i] = int(d["h"])
+		if d.has("d"):
+			_depths[i] = int(d["d"])
+		var item: Variant = d.get("item", false)
+		if typeof(item) == TYPE_ARRAY:
+			_item_ref[i] = int((item as Array)[0])
+			_item_arg[i] = int((item as Array)[1])
+		elif item == null: # 显式 null = 移除物品
+			_item_ref[i] = 0
+			_item_arg[i] = 0
+		tiles.append(Vector2i(int(d["x"]), int(d["y"])))
+	return { "ok": true, "tiles": tiles, "error": "" }
+
 ## 世界坐标（XZ，米）→ tile 类型；直接用 tile 索引请走 tile_type。
 static func type_at(p: Vector2) -> int:
 	return tile_type(WorldGrid.to_tile(p))

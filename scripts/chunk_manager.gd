@@ -219,6 +219,25 @@ func rebuild() -> void:
 	for slot in _slots:
 		slot["skinned"] = false
 
+## 局部重铺（terrain_patch 后调用）：只失效被改 tile 波及的 wrapped 区块——
+## autotile 掩码/崖壁/水面角点色都看 ±1 邻居，故按每个 tile 的 3×3 邻域求区块并集
+## （tile 在区块边缘时连带邻区块）。清对应 mesh 缓存 + 槽位复位，update() 分帧重铺
+## （单块真机 80-200ms，一次编辑最多波及 4 块）。返回失效区块数（测试断言用）。
+func rebuild_tiles(tiles: Array) -> int:
+	var n := WorldGrid.GRID_TILES
+	var affected := {}
+	for t: Vector2i in tiles:
+		for dz in range(-1, 2):
+			for dx in range(-1, 2):
+				var q := Vector2i(posmod(t.x + dx, n), posmod(t.y + dz, n))
+				affected[Vector2i(q.x / CHUNK_TILES, q.y / CHUNK_TILES)] = true
+	for w: Vector2i in affected:
+		_chunk_meshes.erase(w)
+		_water_meshes.erase(w)
+		if not _slots.is_empty():
+			_slot_of(w)["skinned"] = false
+	return affected.size()
+
 ## 清空语音生成的动态物件（换场景卸旧时调用）。释放它们登记的占地、free 掉节点、
 ## 清空运行时清单——否则 rebuild() 后 _skin 会照旧清单把上一个场景的物件重生成到新场景。
 ## 矩阵物品层的静态布置随新地形重铺自然重摆，不在此列。
