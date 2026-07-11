@@ -76,7 +76,7 @@ func _tick() -> void:
 			_check("背包回一份", int((scene.get("bag") as Dictionary).get("i1", 0)), 1)
 			_check("横幅提示收进册子", (scene.get("banner") as Label).text.contains("收进"), true)
 		11:
-			_check("物品页上架背包物品", (scene.get("_items_grid") as GridContainer).get_child_count(), 1)
+			_check("物品页上架背包物品", ((scene.get("phone_ui") as PhoneUi).get("_items_grid") as GridContainer).get_child_count(), 1)
 			# 物品页点击再摆出（克隆语义：同实体反复引用）
 			scene.call("_place_bag_item", "i1")
 			var pl := _last_of("item_place")
@@ -90,7 +90,7 @@ func _tick() -> void:
 			_check("再摆落地", TerrainMap.tile_item_id(second_tile), "i1")
 		15:
 			# 上一帧 queue_free 的旧格子已清，此时才好数物品页
-			_check("物品页清空", (scene.get("_items_grid") as GridContainer).get_child_count(), 0)
+			_check("物品页清空", ((scene.get("phone_ui") as PhoneUi).get("_items_grid") as GridContainer).get_child_count(), 0)
 			# 拾起判定负例：内置物品（矩阵里的树/石）与空 tile 都不可拾
 			var builtin_tile := _find_builtin_tile()
 			if builtin_tile.x >= 0:

@@ -151,9 +151,14 @@ function centerCropToAspect(r, tw, th) {
 
 async function generateOne(asset, idx) {
   const isSticker = asset.kind === 'sticker';
-  const prompt = isSticker
-    ? `${asset.prompt.trim().replace(/[.。，,]+$/, '')}. ${ICON_STYLE_SUFFIX}`
-    : `${asset.prompt.trim().replace(/[.。，,]+$/, '')}. ${ILLUSTRATION_STYLE_SUFFIX}${asset.landscape === false ? '' : ', wide landscape composition'}`;
+  // 可选 asset.style 覆盖统一画风后缀（如 paper-phone 的白卡纸+铅笔蜡笔，与 kawaii 贴纸/水彩都不搭）；
+  // sticker 模式记得自带绿幕背景描述，否则抠图会失败。
+  const base = asset.prompt.trim().replace(/[.。，,]+$/, '');
+  const prompt = asset.style
+    ? `${base}. ${asset.style}`
+    : isSticker
+      ? `${base}. ${ICON_STYLE_SUFFIX}`
+      : `${base}. ${ILLUSTRATION_STYLE_SUFFIX}${asset.landscape === false ? '' : ', wide landscape composition'}`;
   const raw = await client.chatImage(cfg.imageModel, prompt);
   let raster;
   if (isSticker) {
