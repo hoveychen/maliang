@@ -44,10 +44,174 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   builtin('paper_note', '纸条', 'sdf_res:paper_note', 1, true),
   builtin('crayon', '蜡笔', 'sdf_res:crayon', 1, true),
   builtin('village_sign', '村口路牌', 'sdf_res:village_sign', 1, true),
+
+  // ── 未来机器人主题（world-themes P2 打样；全 CC0：Quaternius 机器人 + Kenney Space Kit）──
+  // 机器人（Quaternius，assets/scifi/robots/*.glb）
+  scifi('robot_animated', '机器人', 'scifi:robot_animated', 3, true),
+  scifi('robot_enemy', '守卫机器人', 'scifi:robot_enemy', 3, true),
+  scifi('robot_flying', '飞行机器人', 'scifi:robot_flying', 1, true),
+  scifi('robot_legs_gun', '巡逻机器人', 'scifi:robot_legs_gun', 3, true),
+  scifi('robot_flying_gun', '哨戒机', 'scifi:robot_flying_gun', 1, true),
+  scifi('robot_large', '大型机器人', 'scifi:robot_large', 3, true),
+  scifi('mech', '机甲', 'scifi:mech', 3, true),
+  // 科幻环境物（Kenney Space Kit，assets/scifi/props/*.glb）
+  scifi('scifi_hangar', '机库', 'scifi:hangar_smallA', 3, true),
+  scifi('scifi_generator', '发电机', 'scifi:machine_generatorLarge', 3, true),
+  scifi('scifi_satellite', '卫星天线', 'scifi:satelliteDish_large', 3, true),
+  scifi('scifi_barrel', '燃料桶', 'scifi:barrel', 1, true),
+  scifi('scifi_crystals', '能量晶簇', 'scifi:rock_crystals', 1, true),
+
+  // ── 玩具房间主题（world-themes P4；全 CC0：Kenney Furniture Kit）──
+  // renderRef 'furniture:<Kenney 原名>' → 客户端 assets/packs/toyroom/pack.json（node 类）
+  themed('toy_bear', '玩具熊', 'furniture:bear', 1, true, ['toyroom']),
+  themed('toy_bed_single', '单人床', 'furniture:bedSingle', 3, true, ['toyroom']),
+  themed('toy_bed_bunk', '双层床', 'furniture:bedBunk', 3, true, ['toyroom']),
+  themed('toy_bookcase', '书架', 'furniture:bookcaseOpen', 1, true, ['toyroom']),
+  themed('toy_sofa', '沙发', 'furniture:loungeSofa', 3, true, ['toyroom']),
+  themed('toy_chair', '圆背椅', 'furniture:chairRounded', 1, true, ['toyroom']),
+  themed('toy_table', '桌子', 'furniture:table', 3, true, ['toyroom']),
+  themed('toy_coffee_table', '茶几', 'furniture:tableCoffee', 1, true, ['toyroom']),
+  themed('toy_lamp', '落地灯', 'furniture:lampRoundFloor', 1, true, ['toyroom']),
+  themed('toy_plant', '盆栽', 'furniture:pottedPlant', 1, true, ['toyroom']),
+  themed('toy_tv', '电视机', 'furniture:televisionModern', 1, true, ['toyroom']),
+  themed('toy_box', '纸箱', 'furniture:cardboardBoxOpen', 1, true, ['toyroom']),
+
+  // ── 现代城市主题（world-themes P4；全 CC0：Kenney City Kit Commercial）──
+  // renderRef 'city:<Kenney 原名>' → 客户端 assets/packs/city/pack.json（node 类）
+  themed('city_shop_a', '临街商铺·甲', 'city:building-a', 3, true, ['city']),
+  themed('city_shop_b', '临街商铺·乙', 'city:building-b', 3, true, ['city']),
+  themed('city_shop_c', '临街商铺·丙', 'city:building-c', 3, true, ['city']),
+  themed('city_shop_d', '临街商铺·丁', 'city:building-d', 3, true, ['city']),
+  themed('city_shop_e', '临街商铺·戊', 'city:building-e', 3, true, ['city']),
+  themed('city_shop_f', '临街商铺·己', 'city:building-f', 3, true, ['city']),
+  themed('city_shop_g', '临街商铺·庚', 'city:building-g', 3, true, ['city']),
+  themed('city_tower_a', '高楼·甲', 'city:building-skyscraper-a', 3, true, ['city']),
+  themed('city_tower_b', '高楼·乙', 'city:building-skyscraper-b', 3, true, ['city']),
+  themed('city_tower_c', '高楼·丙', 'city:building-skyscraper-c', 3, true, ['city']),
+  themed('city_tower_d', '高楼·丁', 'city:building-skyscraper-d', 3, true, ['city']),
+  themed('city_tower_e', '高楼·戊', 'city:building-skyscraper-e', 3, true, ['city']),
+
+  // ── 厨房主题（world-themes P4；全 CC0：同 Kenney Furniture Kit 的厨电子集）──
+  // renderRef 'kitchen:<Kenney 原名>' → 客户端 assets/packs/kitchen/pack.json（node 类）
+  themed('kit_fridge', '冰箱', 'kitchen:kitchenFridge', 1, true, ['kitchen']),
+  themed('kit_stove', '灶台', 'kitchen:kitchenStove', 1, true, ['kitchen']),
+  themed('kit_sink', '水槽', 'kitchen:kitchenSink', 1, true, ['kitchen']),
+  themed('kit_microwave', '微波炉', 'kitchen:kitchenMicrowave', 1, true, ['kitchen']),
+  themed('kit_cabinet', '橱柜', 'kitchen:kitchenCabinet', 1, true, ['kitchen']),
+  themed('kit_cabinet_drawer', '抽屉柜', 'kitchen:kitchenCabinetDrawer', 1, true, ['kitchen']),
+  themed('kit_coffee', '咖啡机', 'kitchen:kitchenCoffeeMachine', 1, true, ['kitchen']),
+  themed('kit_blender', '榨汁机', 'kitchen:kitchenBlender', 1, true, ['kitchen']),
+  themed('kit_toaster', '烤面包机', 'kitchen:toaster', 1, true, ['kitchen']),
+  themed('kit_hood', '抽油烟机', 'kitchen:hoodModern', 1, true, ['kitchen']),
+  themed('kit_bar', '吧台', 'kitchen:kitchenBar', 1, true, ['kitchen']),
+  themed('kit_stool', '吧凳', 'kitchen:stoolBar', 1, true, ['kitchen']),
+
+  // ── 中世纪小镇主题（world-themes P4；全 CC0：KayKit Medieval Hexagon，与基础村庄同画风）──
+  // renderRef 'medieval:<KayKit 原名>' → 客户端 assets/packs/medieval_town/pack.json（node 类）
+  themed('mv_home_a', '民居·甲', 'medieval:building_home_A_blue', 3, true, ['medieval_town']),
+  themed('mv_home_b', '民居·乙', 'medieval:building_home_B_blue', 3, true, ['medieval_town']),
+  themed('mv_blacksmith', '铁匠铺', 'medieval:building_blacksmith_blue', 3, true, ['medieval_town']),
+  themed('mv_market', '集市', 'medieval:building_market_blue', 3, true, ['medieval_town']),
+  themed('mv_tavern', '酒馆', 'medieval:building_tavern_blue', 3, true, ['medieval_town']),
+  themed('mv_church', '教堂', 'medieval:building_church_blue', 3, true, ['medieval_town']),
+  themed('mv_windmill', '风车', 'medieval:building_windmill_blue', 3, true, ['medieval_town']),
+  themed('mv_watermill', '水车', 'medieval:building_watermill_blue', 3, true, ['medieval_town']),
+  themed('mv_lumbermill', '伐木场', 'medieval:building_lumbermill_blue', 3, true, ['medieval_town']),
+  themed('mv_mine', '矿场', 'medieval:building_mine_blue', 3, true, ['medieval_town']),
+  themed('mv_well', '水井', 'medieval:building_well_blue', 3, true, ['medieval_town']),
+
+  // ── 中世纪王国主题（world-themes P4；全 CC0：KayKit Medieval Hexagon 军事 + Medieval Builder 城防）──
+  themed('mk_castle', '城堡', 'medieval:building_castle_blue', 5, true, ['medieval_kingdom']),
+  themed('mk_barracks', '兵营', 'medieval:building_barracks_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_archery', '箭馆', 'medieval:building_archeryrange_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_tower_a', '塔楼·甲', 'medieval:building_tower_A_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_tower_b', '塔楼·乙', 'medieval:building_tower_B_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_tower_base', '塔基', 'medieval:building_tower_base_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_catapult', '投石塔', 'medieval:building_tower_catapult_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_gate', '城门', 'medieval:wall_gate', 3, true, ['medieval_kingdom']),
+  themed('mk_gate_closed', '闭合城门', 'medieval:wall_gate_closed', 3, true, ['medieval_kingdom']),
+  themed('mk_wall', '城墙', 'medieval:wall_straight', 3, true, ['medieval_kingdom']),
+  themed('mk_wall_corner', '城墙拐角', 'medieval:wall_corner', 3, true, ['medieval_kingdom']),
+  themed('mk_watchtower', '瞭望塔', 'medieval:watchtower', 3, true, ['medieval_kingdom']),
+
+  // ── 海底主题（world-themes P5 半覆盖；全 CC0：Quaternius Animated Fish）──
+  // renderRef 'underwater:<key>' → 客户端 assets/packs/underwater/pack.json（node 类）。
+  // 地面走 P1 tile 地基 T_SAND(沙地)+T_WATER(水体)。小鱼 1×1，大型生物 3×3。
+  themed('sea_fish_a', '小鱼·甲', 'underwater:fish_a', 1, true, ['underwater']),
+  themed('sea_fish_b', '小鱼·乙', 'underwater:fish_b', 1, true, ['underwater']),
+  themed('sea_fish_c', '热带鱼', 'underwater:fish_c', 3, true, ['underwater']),
+  themed('sea_dolphin', '海豚', 'underwater:dolphin', 3, true, ['underwater']),
+  themed('sea_whale', '鲸鱼', 'underwater:whale', 3, true, ['underwater']),
+  themed('sea_manta', '蝠鲼', 'underwater:manta', 3, true, ['underwater']),
+  themed('sea_shark', '鲨鱼', 'underwater:shark', 3, true, ['underwater']),
+
+  // ── 冰雪世界主题（world-themes P5 半覆盖；全 CC0：Kenney Holiday Kit）──
+  // renderRef 'winter:<key>' → 客户端 assets/packs/winter/pack.json（node 类）。
+  // 地面走 P1 tile 地基 T_SNOW(雪地)。雪堆非阻挡点缀（pathOk 无关，blocking=false）。
+  themed('snow_snowman', '雪人', 'winter:snowman', 3, true, ['winter']),
+  themed('snow_snowman_hat', '戴帽雪人', 'winter:snowman_hat', 3, true, ['winter']),
+  themed('snow_tree_a', '雪松·甲', 'winter:tree_snow_a', 3, true, ['winter']),
+  themed('snow_tree_b', '雪松·乙', 'winter:tree_snow_b', 3, true, ['winter']),
+  themed('snow_tree_c', '雪松·丙', 'winter:tree_snow_c', 3, true, ['winter']),
+  themed('snow_tree_lit', '装饰雪树', 'winter:tree_decorated_snow', 3, true, ['winter']),
+  themed('snow_reindeer', '驯鹿', 'winter:reindeer', 3, true, ['winter']),
+  themed('snow_sled', '雪橇', 'winter:sled', 3, true, ['winter']),
+  themed('snow_pile', '雪堆', 'winter:snow_pile', 1, false, ['winter']),
+  themed('snow_present_a', '礼物盒·方', 'winter:present_a', 1, true, ['winter']),
+  themed('snow_present_b', '礼物盒·圆', 'winter:present_b', 1, true, ['winter']),
+  themed('snow_nutcracker', '胡桃夹子', 'winter:nutcracker', 1, true, ['winter']),
+
+  // ── 医院主题（world-themes P5 半覆盖；全 CC0：Kenney Furniture Kit 拼装）──
+  // renderRef 'hospital:<key>' → 客户端 assets/packs/hospital/pack.json（node 类）。
+  // 地面走 P1 tile 地基 T_TILE(瓷砖)。无现成 CC0 医疗包，老板拍板用家具拼病房/诊室
+  // （Atomic Realm 医院包因禁再分发、与本仓库 PUBLIC 冲突而弃用，见 SOURCES.txt）。
+  themed('hosp_bed', '病床', 'hospital:wardBed', 3, true, ['hospital']),
+  themed('hosp_bed_wide', '双人病床', 'hospital:wardBedWide', 3, true, ['hospital']),
+  themed('hosp_bedside', '床头柜', 'hospital:bedside', 1, true, ['hospital']),
+  themed('hosp_visitor_chair', '陪护椅', 'hospital:visitorChair', 1, true, ['hospital']),
+  themed('hosp_wait_bench', '候诊椅', 'hospital:waitBench', 1, true, ['hospital']),
+  themed('hosp_nurse_desk', '护士站', 'hospital:nurseDesk', 3, true, ['hospital']),
+  themed('hosp_doc_chair', '医生椅', 'hospital:docChair', 1, true, ['hospital']),
+  themed('hosp_sink', '洗手池', 'hospital:handSink', 1, true, ['hospital']),
+  themed('hosp_med_cabinet', '药品柜', 'hospital:medCabinet', 1, true, ['hospital']),
+  themed('hosp_supply_cabinet', '器械柜', 'hospital:supplyCabinet', 1, true, ['hospital']),
+  themed('hosp_waste_bin', '医疗垃圾桶', 'hospital:wasteBin', 1, true, ['hospital']),
+  themed('hosp_floor_lamp', '落地灯', 'hospital:floorLamp', 1, true, ['hospital']),
+
+  // ── 罗马主题（world-themes P6 硬缺口；全 CC0：复用已装 KayKit 石件近似）──
+  // 老板拍板无 CC0 罗马包→用中世纪石塔/石墙/拱门近似，renderRef 'roman:<key>' 指向
+  // assets/medieval/ 同一 glb（零新资产）。见 assets/packs/roman/pack.json。不地道但保画风。
+  themed('roman_arch', '拱门', 'roman:roman_arch', 3, true, ['roman']),
+  themed('roman_wall', '石墙', 'roman:roman_wall', 3, true, ['roman']),
+  themed('roman_wall_corner', '石墙拐角', 'roman:roman_wall_corner', 3, true, ['roman']),
+  themed('roman_watchtower', '哨塔', 'roman:roman_watchtower', 3, true, ['roman']),
+  themed('roman_tower', '石塔', 'roman:roman_tower', 3, true, ['roman']),
+  themed('roman_tower_b', '瞭望石塔', 'roman:roman_tower_b', 3, true, ['roman']),
+  themed('roman_column_base', '石柱基', 'roman:roman_column_base', 3, true, ['roman']),
+  themed('roman_fort', '罗马要塞', 'roman:roman_fort', 5, true, ['roman']),
+
+  // ── 中国古代主题（world-themes P6 硬缺口；CC-BY+CC0 东方古建散件拼凑）──
+  // 老板拍板：无 CC0 中式包（CS Studio 禁再分发），用 poly.pizza CC-BY/CC0 散件
+  // （CC-BY 允许再分发只需署名）。薄主题 4 件、画风混杂，CC-BY 作者须记入 P7 署名页。
+  // 见 assets/ancient_china/SOURCES.txt。renderRef 'ancient_china:<key>'。
+  themed('cn_pagoda', '宝塔', 'ancient_china:pagoda', 3, true, ['ancient_china']),
+  themed('cn_archway', '牌坊', 'ancient_china:torii', 3, true, ['ancient_china']),
+  themed('cn_pavilion', '古亭', 'ancient_china:shrine_a', 3, true, ['ancient_china']),
+  themed('cn_shrine', '神龛', 'ancient_china:shrine_b', 3, true, ['ancient_china']),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
   return { id, worldId: null, name, renderRef, footprintW: span, footprintH: span, blocking, pathOk: false, wander: 0 };
+}
+
+/** 主题布景（带 themes 软标签；语义同 builtin，仅多一个分类标签，供造世界引导按主题过滤）。 */
+function themed(id: string, name: string, renderRef: string, span: number, blocking: boolean, themes: string[]): ItemDef {
+  return { id, worldId: null, name, renderRef, footprintW: span, footprintH: span, blocking, pathOk: false, wander: 0, themes };
+}
+
+/** 未来机器人主题便捷封装（themes 恒为 ['scifi']）。 */
+function scifi(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
+  return themed(id, name, renderRef, span, blocking, ['scifi']);
 }
 
 /**

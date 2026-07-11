@@ -1,0 +1,18 @@
+中国古代主题资产（world-themes P6 硬缺口主题）。CC-BY + CC0 混合，散件拼凑。
+
+许可决策（2026-07-12 老板拍板）：设计初定的 CS Studio「Low Poly Chinese Style
+  Building Set 1」核其原始 LICENSE 为「You may not redistribute it」（禁再分发）+ Unity
+  Package 格式 + 仅 5 个模型，与本仓库 GitHub PUBLIC 冲突，弃用。Kenney/Quaternius/
+  OpenGameArt 均无 CC0 中式建筑包。老板选「CC-BY 宝塔拼凑」——CC-BY 允许再分发（只需
+  署名），与 PUBLIC 仓库兼容。经 poly.pizza 匿名直链下载可得的东方古建散件仅 4 件、
+  画风混杂（宝塔为唯一确信中式件，其余偏泛东亚），已如实接入；真机观感留老板验。
+
+选用 4 件（node 类，逐件 scale）：
+  pagoda.glb   宝塔  — CC-BY 3.0 — 作者 "Poly by Google" — poly.pizza/m/d1M5ncMBUDi ★需署名
+  torii.glb    牌坊  — CC-BY 3.0 — 作者 Jacques Fourie    — poly.pizza/m/cXyQGUwmlA5 ★需署名
+                       （原名 Japanese Torii，取其东方牌坊意象）
+  shrine_a.glb 古亭  — CC0 1.0   — 作者 Kay Lousberg (KayKit) — poly.pizza/m/tFxdxO5clk（署名非强制）
+  shrine_b.glb 神龛  — CC-BY 3.0 — 作者 Aidan K McLaughlin  — poly.pizza/m/a68qNnAC4m- ★需署名
+
+地面：可搭配 P1 tile 地基（草地/路/沙）；无中式专属地形。
+★ 三个 CC-BY 件的署名须汇总进 P7 docs/asset-credits.md + 游戏内鸣谢页。

@@ -1,0 +1,9 @@
+{
+  "_comment": "中国古代主题资产包（world-themes P6 硬缺口主题）。全 node 类。老板拍板：无现成 CC0 中式建筑包（CS Studio 包禁再分发、与本仓库 PUBLIC 冲突），改用 poly.pizza 上 CC-BY/CC0 东方古建散件拼凑（CC-BY 允许再分发，只需署名，与 PUBLIC 仓库兼容）。来源+作者+许可见 assets/ancient_china/SOURCES.txt，CC-BY 作者须记入 P7 docs/asset-credits.md。各件原始尺度差异极大（宝塔 8605 单位/神社 1.1/鸟居 6），故逐件 scale（非 uniform），实测 AABB 推得，真机手感调参留后续。薄主题（4 件、画风混杂），design §4 已标 ⚠️硬缺口。",
+  "entries": {
+    "pagoda":   { "category": "node", "path": "res://assets/ancient_china/pagoda.glb",   "scale": 0.0007 },
+    "torii":    { "category": "node", "path": "res://assets/ancient_china/torii.glb",    "scale": 1.0 },
+    "shrine_a": { "category": "node", "path": "res://assets/ancient_china/shrine_a.glb", "scale": 2.5 },
+    "shrine_b": { "category": "node", "path": "res://assets/ancient_china/shrine_b.glb", "scale": 3.0 }
+  }
+}

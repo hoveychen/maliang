@@ -1,0 +1,17 @@
+{
+  "_comment": "现代城市主题（world-themes P4）。全 node 类建筑。全 CC0：Kenney City Kit Commercial，来源见 assets/city/SOURCES.txt（glb 引用外部 Textures/colormap.png，已同目录保留）。scale=4.5 统一倍数（实测 AABB×4.5：商铺≈6m 与民居同量级、高楼 13~25m 拔地而起，保留真实相对高度），真机手感微调留 P5。",
+  "entries": {
+    "building-a":            { "category": "node", "path": "res://assets/city/building-a.glb",            "scale": 4.5 },
+    "building-b":            { "category": "node", "path": "res://assets/city/building-b.glb",            "scale": 4.5 },
+    "building-c":            { "category": "node", "path": "res://assets/city/building-c.glb",            "scale": 4.5 },
+    "building-d":            { "category": "node", "path": "res://assets/city/building-d.glb",            "scale": 4.5 },
+    "building-e":            { "category": "node", "path": "res://assets/city/building-e.glb",            "scale": 4.5 },
+    "building-f":            { "category": "node", "path": "res://assets/city/building-f.glb",            "scale": 4.5 },
+    "building-g":            { "category": "node", "path": "res://assets/city/building-g.glb",            "scale": 4.5 },
+    "building-skyscraper-a": { "category": "node", "path": "res://assets/city/building-skyscraper-a.glb", "scale": 4.5 },
+    "building-skyscraper-b": { "category": "node", "path": "res://assets/city/building-skyscraper-b.glb", "scale": 4.5 },
+    "building-skyscraper-c": { "category": "node", "path": "res://assets/city/building-skyscraper-c.glb", "scale": 4.5 },
+    "building-skyscraper-d": { "category": "node", "path": "res://assets/city/building-skyscraper-d.glb", "scale": 4.5 },
+    "building-skyscraper-e": { "category": "node", "path": "res://assets/city/building-skyscraper-e.glb", "scale": 4.5 }
+  }
+}

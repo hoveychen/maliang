@@ -7,7 +7,7 @@ import {
   encodeTerrain, decodeTerrain, emptyTerrain, TerrainFormatError,
   HEADER_BYTES, PLANES_V2, REQUIRED_GRID, DEFAULT_TILE_SIZE,
   TERRAIN_VERSION, TERRAIN_VERSION_1,
-  T_GRASS, T_PATH, T_WATER, type Terrain,
+  T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE, type Terrain,
 } from '../src/terrain.ts';
 
 const N = REQUIRED_GRID * REQUIRED_GRID;
@@ -142,8 +142,27 @@ test('拒收：palette 截断 / 空项 / 重复项', () => {
 
 test('拒收：非法 tile 类型', () => {
   const buf = encodeTerrain(terrain());
-  buf[HEADER_BYTES + 5] = 7; // 既不是草也不是路/水
-  assert.throws(() => decodeTerrain(buf), /tile type 7/);
+  buf[HEADER_BYTES + 5] = 8; // 8 不在合法集 {0,1,2,5,6,7}
+  assert.throws(() => decodeTerrain(buf), /tile type 8/);
+});
+
+test('拒收：3/4 是崖壁 B 码不作 tile 类型', () => {
+  // 崖唇=3/崖壁=4 只活在客户端 atlas B 通道，从不存进 types 平面
+  const buf = encodeTerrain(terrain());
+  buf[HEADER_BYTES + 5] = 3;
+  assert.throws(() => decodeTerrain(buf), /tile type 3/);
+});
+
+test('新增地表类型 sand/snow/tile 往返', () => {
+  const t = terrain();
+  // 用干净的陆地格（避开 helper 里的水/深度格），三种新地表都应无损往返
+  t.types[10] = T_SAND; t.depths[10] = 0;
+  t.types[11] = T_SNOW; t.depths[11] = 0;
+  t.types[12] = T_TILE; t.depths[12] = 0;
+  const back = decodeTerrain(encodeTerrain(t));
+  assert.equal(back.types[10], T_SAND);
+  assert.equal(back.types[11], T_SNOW);
+  assert.equal(back.types[12], T_TILE);
 });
 
 test('拒收：非水格带水深（导出端画错了）', () => {

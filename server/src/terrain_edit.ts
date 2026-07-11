@@ -7,7 +7,7 @@
 
 import {
   decodeTerrain, encodeTerrain, yawToArg, MAX_PALETTE,
-  T_GRASS, T_PATH, T_WATER, type Terrain,
+  T_WATER, VALID_TILE_TYPES, type Terrain,
 } from './terrain.ts';
 import { validateTerrainItems, type ItemResolver } from './items.ts';
 import type { WorldStore } from './persistence.ts';
@@ -67,7 +67,7 @@ export function applyTileEdits(
     const out: AppliedEdit = { x: e.x, y: e.y };
 
     if (e.t !== undefined) {
-      if (e.t !== T_GRASS && e.t !== T_PATH && e.t !== T_WATER) throw new TerrainEditError(`tile 类型 ${e.t} 非法`);
+      if (!VALID_TILE_TYPES.has(e.t)) throw new TerrainEditError(`tile 类型 ${e.t} 非法`);
       terrain.types[i] = e.t;
       out.t = e.t;
       if (e.t !== T_WATER && terrain.depths[i] !== 0) {

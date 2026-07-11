@@ -1,0 +1,22 @@
+Kenney Furniture Kit (2.0) — CC0 1.0 — https://kenney.nl/assets/furniture-kit
+（Creative Commons Zero，可商用/可改，署名非强制。原始 License.txt 见下载包，全 140 件均 CC0。）
+
+world-themes P4「玩具房间」主题选用的 12 件（Kenney 原名，node 类布景）：
+  bear             玩具熊
+  bedSingle        单人床
+  bedBunk          双层床
+  bookcaseOpen     开放书架
+  loungeSofa       沙发
+  chairRounded     圆背椅
+  table            桌子
+  tableCoffee      茶几
+  lampRoundFloor   落地灯
+  pottedPlant      盆栽
+  televisionModern 电视机
+  cardboardBoxOpen 敞口纸箱
+
+world-themes P4「厨房」主题另选用同一 Kenney Furniture Kit 的 12 件厨电（同 CC0 源，
+不同策展子集 + 不同 theme 标签，见 assets/packs/kitchen/pack.json）：
+  kitchenFridge 冰箱  kitchenStove 灶台  kitchenSink 水槽  kitchenMicrowave 微波炉
+  kitchenCabinet 橱柜  kitchenCabinetDrawer 抽屉柜  kitchenCoffeeMachine 咖啡机
+  kitchenBlender 榨汁机  toaster 烤面包机  hoodModern 抽油烟机  kitchenBar 吧台  stoolBar 吧凳

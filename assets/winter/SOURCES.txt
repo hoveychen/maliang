@@ -1,0 +1,24 @@
+冰雪世界主题资产（world-themes P5 半覆盖主题）。全 CC0，作者 Kenney。
+
+Kenney Holiday Kit — CC0 1.0（Creative Commons Zero，可商用/可改，署名非强制）
+  https://kenney.nl/assets/holiday-kit
+  原始 License.txt 见下载包，全套均 CC0。经 kenney.nl 直链 zip 下载（无需登录），
+  取 "Models/GLB format/" 子集。
+
+选用 12 件雪景布景（node 类，Kenney 原名）：
+  snowman.glb             雪人
+  snowman-hat.glb         戴帽雪人
+  tree-snow-a.glb         雪松·甲
+  tree-snow-b.glb         雪松·乙
+  tree-snow-c.glb         雪松·丙
+  tree-decorated-snow.glb 装饰雪树
+  reindeer.glb            驯鹿
+  sled.glb                雪橇
+  snow-pile.glb           雪堆（低矮点缀，非阻挡）
+  present-a-cube.glb      礼物盒·方
+  present-b-round.glb     礼物盒·圆
+  nutcracker.glb          胡桃夹子
+
+地面：复用 P1 tile 地基 T_SNOW(雪地，stone 细节贴图冷白 tint)，无新地形。
+未选用：rocks-large（原始 AABB 3.1 与其他件不同量级，破坏 uniform scale）、
+  sled-long（与 sled 重复）。

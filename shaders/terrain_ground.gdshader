@@ -22,6 +22,10 @@ uniform vec3 lip_tint : source_color = vec3(0.66, 0.55, 0.38);
 uniform vec3 wall_tint : source_color = vec3(0.60, 0.49, 0.35);
 uniform vec3 path_rim : source_color = vec3(0.95, 0.885, 0.68);
 uniform vec3 cliff_rim : source_color = vec3(0.44, 0.63, 0.37);
+// 新增地表 body-type tint（world-themes P1；ty 5=沙 6=雪 7=瓷砖，复用 dirt/stone 细节）
+uniform vec3 sand_tint : source_color = vec3(0.90, 0.80, 0.55);
+uniform vec3 snow_tint : source_color = vec3(0.93, 0.95, 0.99);
+uniform vec3 tile_tint : source_color = vec3(0.72, 0.74, 0.78);
 uniform float tile_period = 10.0;      // 贴图平铺周期（米）；须整除环面跨度 150
 uniform float detail_strength = 0.8;
 // 低配档（AdaptiveQuality T2）：路/崖壁不采第二张细节贴图改平色 tint，
@@ -43,9 +47,13 @@ void fragment() {
 	int ty = int(round(ctl.b * 8.0));
 	vec2 wuv = UV2 / tile_period;
 	vec3 base = grass_tint * detail(grass_tex, wuv, grass_mean);
-	vec3 body_tint = ty == 1 ? path_tint : (ty == 2 ? bed_tint : (ty == 3 ? lip_tint : wall_tint));
+	// body-type → tint：1 路 2 湖床 3 崖唇 4 崖壁 5 沙 6 雪 7 瓷砖
+	vec3 body_tint = ty == 1 ? path_tint : (ty == 2 ? bed_tint : (ty == 3 ? lip_tint
+			: (ty == 4 ? wall_tint : (ty == 5 ? sand_tint : (ty == 6 ? snow_tint : tile_tint)))));
+	// 细节贴图：崖壁/雪/瓷砖用 stone（石质），其余用 dirt（土质）；沙用 dirt
+	bool use_stone = (ty == 4 || ty == 6 || ty == 7);
 	vec3 body_det = low_detail ? vec3(1.0)
-			: (ty == 4 ? detail(stone_tex, wuv, stone_mean) : detail(dirt_tex, wuv, dirt_mean));
+			: (use_stone ? detail(stone_tex, wuv, stone_mean) : detail(dirt_tex, wuv, dirt_mean));
 	vec3 col = mix(base, body_tint * body_det, ctl.r);
 	col = mix(col, ty == 1 ? path_rim : cliff_rim, ctl.g);
 	col *= ctl.a * 2.0;

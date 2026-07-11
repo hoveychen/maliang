@@ -58,10 +58,23 @@ func _init() -> void:
 	var crev := _probe(img, TerrainAtlas.CLIFF_WALL, Autotile.C_NW, Autotile.V_EDGE_V, 1.0, 16.0)
 	fails += _check("wall crevice dark", 1 if crev.a < wallc.a * 0.85 else 0, 1)
 
+	# 新增可行走地表（world-themes P1）：整格 V_FULL 铺满 body（R=1, B=type/8），无描边（G=0），
+	# OUTER 角外缘是草——验证 _body_fn + uv_rect BODY_ROWS 路由 + B 通道对齐 shader ty。
+	for nt in [TerrainMap.T_SAND, TerrainMap.T_SNOW, TerrainMap.T_TILE]:
+		var full := _probe(img, nt, Autotile.C_NW, Autotile.V_FULL, 16.0, 16.0)
+		fails += _check("body full R=1 (ty=%d)" % nt, 1 if full.r > 0.95 else 0, 1)
+		fails += _check("body full B=ty (ty=%d)" % nt, _btype(full), nt)
+		fails += _check("body full no rim (ty=%d)" % nt, 1 if full.g < 0.05 else 0, 1)
+		var out_g := _probe(img, nt, Autotile.C_NW, Autotile.V_OUTER, 1.0, 1.0)
+		fails += _check("body outer grass (ty=%d)" % nt, 1 if out_g.r < 0.05 else 0, 1)
+		var out_i := _probe(img, nt, Autotile.C_NW, Autotile.V_OUTER, 28.0, 28.0)
+		fails += _check("body outer inner=body (ty=%d)" % nt, 1 if (out_i.r > 0.95 and _btype(out_i) == nt) else 0, 1)
+
 	# uv_rect 都在 [0,1] 且互不重叠（抽查全组合的中心点唯一性）
 	var centers := {}
 	var overlap := 0
-	for ty in [TerrainMap.T_PATH, TerrainMap.T_WATER, TerrainAtlas.CLIFF_RIM, TerrainAtlas.CLIFF_WALL]:
+	for ty in [TerrainMap.T_PATH, TerrainMap.T_WATER, TerrainAtlas.CLIFF_RIM, TerrainAtlas.CLIFF_WALL,
+			TerrainMap.T_SAND, TerrainMap.T_SNOW, TerrainMap.T_TILE]:
 		for c in range(4):
 			for v in range(Autotile.VARIANT_COUNT):
 				var r := TerrainAtlas.uv_rect(ty, c, v, 0)

@@ -1,0 +1,28 @@
+医院主题资产（world-themes P5 半覆盖主题）。全 CC0，作者 Kenney。
+
+Kenney Furniture Kit (2.0) — CC0 1.0（Creative Commons Zero，可商用/可改，署名非强制）
+  https://kenney.nl/assets/furniture-kit
+  与「玩具房间」「厨房」两主题同一 CC0 源（assets/furniture/），本主题另取该套 12 件
+  拼装成病房/诊室，落在独立 assets/hospital/ 目录（自包含），theme 标签 hospital。
+
+许可决策（2026-07-12 老板拍板）：原设计初判医院用 Atomic Realm Hospital 包
+  （https://atomicrealm.itch.io/hospital-assets），核其原始 LICENSE 后发现是自定义许可，
+  **明确禁止「repackage, resell or redistribute the assets（无论怎么改）」**。maliang 仓库在
+  GitHub 上为 PUBLIC，提交原始 .gltf = 公开再分发 = 违反其许可，故弃用，改以 CC0 家具拼装。
+
+选用 12 件（Kenney 原名 → 语义 key，见 assets/packs/hospital/pack.json；key 语义化以避开
+  toyroom 已占用的 bedSingle 等键）：
+  bedSingle.glb           → wardBed       病床
+  bedDouble.glb           → wardBedWide   双人病床
+  sideTableDrawers.glb    → bedside       床头柜
+  chairModernCushion.glb  → visitorChair  陪护椅
+  benchCushion.glb        → waitBench     候诊椅
+  desk.glb                → nurseDesk     护士站
+  chairDesk.glb           → docChair      医生椅
+  bathroomSink.glb        → handSink      洗手池
+  bathroomCabinet.glb     → medCabinet    药品柜
+  bookcaseClosedDoors.glb → supplyCabinet 器械柜
+  trashcan.glb            → wasteBin      医疗垃圾桶
+  lampSquareFloor.glb     → floorLamp     落地灯
+
+地面：复用 P1 tile 地基 T_TILE(瓷砖，stone 细节贴图中性灰 tint)，无新地形。

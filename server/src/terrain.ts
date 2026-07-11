@@ -42,10 +42,25 @@ export const MAX_PALETTE = 255;
 export const REQUIRED_GRID = 75;
 export const DEFAULT_TILE_SIZE = 2.0;
 
-/** 地形 tile 类型，与客户端 TerrainMap.T_* 一一对应。 */
+/**
+ * 地形 tile 类型，与客户端 TerrainMap.T_* 一一对应。
+ * 0/1/2 = 草/路/水（一期）。3/4 是客户端 TerrainAtlas 内部的崖唇/崖壁 B 通道码，
+ * 从不作为「存储的 tile 类型」出现——故新增可行走地表从 5 起编号，
+ * 与客户端 shader 的 body-type（ty=round(B*8)）5/6/7 空档一一对应（见 world-themes-expansion-design.md §1.3）。
+ */
 export const T_GRASS = 0;
 export const T_PATH = 1;
 export const T_WATER = 2;
+export const T_SAND = 5;   // 沙地（海底/沙滩；复用 dirt 细节贴图，暖 tint）
+export const T_SNOW = 6;   // 雪地（冰雪世界；复用 stone 细节贴图，冷白 tint）
+export const T_TILE = 7;   // 瓷砖地板（室内厨房/医院/玩具房间；stone 细节，中性灰 tint）
+
+/** 合法的存储 tile 类型集合（校验用；3/4 是客户端崖壁 B 码，不入此集）。 */
+export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE]);
+/** 可行走地表（非水）——新地形一律按草地行走规则；仅水阻挡。 */
+export function isWalkableTileType(t: number): boolean {
+  return VALID_TILE_TYPES.has(t) && t !== T_WATER;
+}
 
 /** 边缘平面顺序（itemRef 后的 4 张），与客户端 TerrainMap.EDGE_* 一一对应。 */
 export const EDGE_N = 0;
@@ -236,7 +251,7 @@ export function decodeTerrain(buf: Uint8Array): Terrain {
   }
 
   for (const v of t.types) {
-    if (v !== T_GRASS && v !== T_PATH && v !== T_WATER) throw new TerrainFormatError(`tile type ${v}`);
+    if (!VALID_TILE_TYPES.has(v)) throw new TerrainFormatError(`tile type ${v}`);
   }
   // 非水格不该有水深——真出现说明导出端画错了，别把错误数据喂给渲染
   for (let i = 0; i < n; i++) {

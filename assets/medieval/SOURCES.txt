@@ -1,0 +1,11 @@
+中世纪主题资产（world-themes P4，中世纪小镇 + 中世纪王国），全 CC0，作者 Kay Lousberg (KayKit)。
+
+hexagon/ — KayKit Medieval Hexagon Pack 1.0 FREE — CC0 1.0 — https://kaylousberg.itch.io/kaykit-medieval-hexagon
+  与游戏已装 assets/kaykit/hexagon（基础村庄民居）同一包同一画风。gltf 引用同名 .bin
+  + 共享贴图 hexagons_medieval.png（均 bare 相对路径，已同目录保留）。选用蓝色变体：
+  小镇 11 件：home_A/home_B/blacksmith/market/tavern/church/windmill/watermill/lumbermill/mine/well
+  王国 7 件（军事）：castle/barracks/archeryrange/tower_A/tower_B/tower_base/tower_catapult
+
+builder/ — KayKit Medieval Builder Pack — CC0 1.0 — https://kaylousberg.itch.io/kaykit-medieval-builder-pack
+  自包含内嵌 .glb（原名 *.gltf.glb，已重命名为 *.glb）。王国 5 件城防：
+  wall_gate / wall_gate_closed / wall_straight / wall_corner / watchtower
