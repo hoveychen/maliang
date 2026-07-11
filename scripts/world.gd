@@ -2872,7 +2872,7 @@ var _portals: Array = []
 ## 传送去抖：刚换完场景玩家就站在返回传送点上，必须先走出所有半径才重新武装，否则来回弹。
 var _portal_armed := false
 
-const FADE_TIME := 0.5           ## 过场遮罩淡入/淡出各自的时长（秒）；稍缓，别一闪像 bug
+const FADE_TIME := 0.35          ## 过场遮罩淡入/淡出各自的时长（秒）
 const TRANSITION_TIMEOUT := 8.0  ## 服务端不回 scene_entered / 区块铺不完时的兜底：强行淡出，别把小朋友关在黑屏里
 var _fade_rect: ColorRect        ## 过场遮罩底色（纯色兜底 + 吃掉乱点；水彩底/仙子缺素材时至少不透光）
 var _fade_a := 0.0               ## 过场遮罩当前不透明度
