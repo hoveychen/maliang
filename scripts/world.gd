@@ -963,6 +963,9 @@ func _setup_hud() -> void:
 	_fade_rect.visible = false
 	_fade_rect.modulate.a = 0.0
 	fade_layer.add_child(_fade_rect)
+	# loading 遮罩内容盖在底色之上（同层、同 _fade_a 淡）；缺素材也不崩，最差退化成纯底色黑幕。
+	_transition_overlay = _build_transition_overlay()
+	fade_layer.add_child(_transition_overlay)
 	_load_play_budget() # 恢复跨会话可玩时间预算（隔会话对账：冷却已过/长休息则刷新）
 
 	coord_label = Label.new()
@@ -2869,16 +2872,24 @@ var _portals: Array = []
 ## 传送去抖：刚换完场景玩家就站在返回传送点上，必须先走出所有半径才重新武装，否则来回弹。
 var _portal_armed := false
 
-const FADE_TIME := 0.35          ## 过场黑幕淡入/淡出各自的时长（秒）
+const FADE_TIME := 0.5           ## 过场遮罩淡入/淡出各自的时长（秒）；稍缓，别一闪像 bug
 const TRANSITION_TIMEOUT := 8.0  ## 服务端不回 scene_entered / 区块铺不完时的兜底：强行淡出，别把小朋友关在黑屏里
-var _fade_rect: ColorRect        ## 换场景黑幕（盖在 HUD 之上，过场期间吃掉乱点）
-var _fade_a := 0.0               ## 黑幕当前不透明度
-var _fade_target := 0.0          ## 黑幕目标不透明度（1=遮住，0=露出世界）
+var _fade_rect: ColorRect        ## 过场遮罩底色（纯色兜底 + 吃掉乱点；水彩底/仙子缺素材时至少不透光）
+var _fade_a := 0.0               ## 过场遮罩当前不透明度
+var _fade_target := 0.0          ## 过场遮罩目标不透明度（1=遮住，0=露出世界）
 var _transitioning := false      ## 过场进行中：禁止再次触发传送
 var _pending_scene := ""         ## 全黑之后才发 enter_scene——卸旧载新绝不在半透明时发生
 var _await_skin := false         ## 新场景已落地，等区块重铺完（all_skinned）再淡出
 var _transition_t := 0.0         ## 本次过场累计秒（超时兜底用）
 var _arrive_tile := Vector2i(-1, -1) ## 走 portal 的目标落点（优先于服务端记的该场景最后位置）
+
+# —— 过场 loading 遮罩：水彩底 + 呼吸小仙子 + 「传送中」脉动点，与 _fade_rect 同步淡入淡出，
+#    让换场景看起来像在读条而非闪屏 bug。素材复用开场加载页（Loading 的图集常量/贴图）。——
+var _transition_overlay: Control        ## loading 内容根（bg + 仙子 + 文字，整体随 _fade_a 淡）
+var _tr_fairy: TextureRect              ## 过场小仙子（idle 图集逐帧）
+var _tr_fairy_atlas: AtlasTexture       ## 取帧窗口（每帧移 region）
+var _tr_dots: Array[ColorRect] = []     ## 「传送中」后的三个脉动点
+var _tr_anim_t := 0.0                   ## 过场动画累计秒（帧步进/呼吸/脉动共用）
 
 ## 传送门视觉标记（每个 portal 一座拱门）。刻意不走 chunk_manager 的 SDF 物件通道：那条路会
 ## 登记占地（把传送点本身挡住）并进 _dynamic_props（长按就被当语音物件揣走）。这里由 world 直接
@@ -2975,6 +2986,11 @@ func _step_transition(delta: float) -> void:
 	if _fade_rect != null:
 		_fade_rect.visible = _fade_a > 0.001
 		_fade_rect.modulate.a = _fade_a
+	if _transition_overlay != null:
+		_transition_overlay.visible = _fade_a > 0.001
+		_transition_overlay.modulate.a = _fade_a
+		if _transition_overlay.visible:
+			_step_transition_fairy(delta)
 
 	# 全黑了才发报文：换场景的卸旧载新一律发生在黑幕背后
 	if not _pending_scene.is_empty() and _fade_a >= 1.0:
@@ -2997,6 +3013,85 @@ func _step_transition(delta: float) -> void:
 	if _transitioning and _fade_target <= 0.0 and _fade_a <= 0.0 \
 			and _pending_scene.is_empty() and not _await_skin:
 		_transitioning = false
+
+## 过场 loading 遮罩内容：水彩底（bg_menu，COVERED 铺满）+ 居中呼吸小仙子（idle 图集，
+## 缺图集回落静态立绘、再缺就不放）+「传送中」脉动点。整体随 _fade_a 淡入淡出（父 modulate）。
+## 素材/图集常量复用开场加载页（Loading），避免两处画风漂移；不自己造轮子。
+func _build_transition_overlay() -> Control:
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.visible = false
+	root.modulate.a = 0.0
+	# 水彩底：撑满屏、等比裁切铺满（与菜单/加载页同一张）
+	var bg_tex := UiAssets.tex("bg_menu")
+	if bg_tex != null:
+		var bg := TextureRect.new()
+		bg.texture = bg_tex
+		bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(bg)
+	# 居中一列：小仙子 +「传送中」文字+脉动点
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 18)
+	center.add_child(col)
+	# 小仙子：idle 图集逐帧（AtlasTexture 每帧移 region，见 _step_transition_fairy）
+	_tr_fairy = TextureRect.new()
+	var sheet := load("res://assets/fairy_idle.webp") as Texture2D
+	if sheet != null:
+		_tr_fairy_atlas = AtlasTexture.new()
+		_tr_fairy_atlas.atlas = sheet
+		_tr_fairy_atlas.region = Rect2(0, 0, Loading.FAIRY_CELL_W, Loading.FAIRY_CELL_H)
+		_tr_fairy.texture = _tr_fairy_atlas
+	elif ResourceLoader.exists("res://assets/fairy.png"):
+		_tr_fairy.texture = load("res://assets/fairy.png")
+	_tr_fairy.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_tr_fairy.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_tr_fairy.custom_minimum_size = Vector2(Loading.FAIRY_W, Loading.FAIRY_H)
+	_tr_fairy.pivot_offset = Vector2(Loading.FAIRY_W * 0.5, Loading.FAIRY_H * 0.5) # 呼吸缩放绕框心
+	_tr_fairy.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(_tr_fairy)
+	# 「传送中」+三个脉动点（少文字，纯 UI 提示在读条）
+	var dot_row := HBoxContainer.new()
+	dot_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	dot_row.add_theme_constant_override("separation", 10)
+	var label := Label.new()
+	label.text = "传送中"
+	UiAssets.style_card_label(label, 40)
+	label.add_theme_color_override("font_color", Color(0.42, 0.30, 0.18)) # 暖棕（水彩底上可读）
+	dot_row.add_child(label)
+	_tr_dots.clear()
+	for _i in 3:
+		var d := ColorRect.new()
+		d.color = Color(0.42, 0.30, 0.18)
+		d.custom_minimum_size = Vector2(12.0, 12.0)
+		d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		dot_row.add_child(d)
+		_tr_dots.append(d)
+	col.add_child(dot_row)
+	return root
+
+## 每帧推进过场小仙子（图集帧步进 8fps + 轻微呼吸缩放）与「传送中」三点波浪脉动。
+func _step_transition_fairy(delta: float) -> void:
+	_tr_anim_t += delta
+	if _tr_fairy_atlas != null:
+		var frame := int(_tr_anim_t * Loading.FAIRY_SHEET_FPS) % Loading.FAIRY_SHEET_FRAMES
+		var cx := (frame % Loading.FAIRY_SHEET_COLS) * Loading.FAIRY_CELL_W
+		var cy := (frame / Loading.FAIRY_SHEET_COLS) * Loading.FAIRY_CELL_H
+		_tr_fairy_atlas.region = Rect2(cx, cy, Loading.FAIRY_CELL_W, Loading.FAIRY_CELL_H)
+	if _tr_fairy != null:
+		var breath := 1.0 + 0.04 * sin(_tr_anim_t * 3.0)
+		_tr_fairy.scale = Vector2(breath, breath)
+	for i in _tr_dots.size():
+		var ph := _tr_anim_t * 3.2 - float(i) * 0.6
+		_tr_dots[i].modulate.a = 0.35 + 0.65 * (0.5 + 0.5 * sin(ph))
 
 ## 当前场景的地形矩阵版本（terrain_patch 严格 +1 对齐；0 = 打包/离线矩阵无版本）。
 var _terrain_version := 0

@@ -147,3 +147,9 @@ func _run(scene: Node) -> void:
 	var d_home := WorldGrid.shortest_delta(home_pos, WorldGrid.from_tile_center(Vector2i.ZERO)).length()
 	_check(d_home <= 20.0, "离线回家：玩家从(50,50)挪回原点附近（环面距原点 %.1f ≤ 20 单位）" % d_home)
 	_check(WorldGrid.shortest_delta(scene.get("focus_logical"), home_pos).length() < 0.01, "回家后相机聚焦跟到玩家")
+
+	# 过场 loading 遮罩：_setup_hud 建好、初始隐藏；步进一帧仙子动画不崩
+	var overlay: Control = scene.get("_transition_overlay")
+	_check(overlay != null and not overlay.visible, "过场 loading 遮罩存在且初始隐藏")
+	scene._step_transition_fairy(0.1)
+	_check(true, "_step_transition_fairy 运行不崩")
