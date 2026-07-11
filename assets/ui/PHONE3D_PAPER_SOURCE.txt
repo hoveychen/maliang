@@ -1,0 +1,6 @@
+phone3d_front_shell / phone3d_back_shell / phone3d_spread_bg / phone3d_paper
+来源：ambientCG Paper001（https://ambientcg.com，CC0 1.0 公有领域）。
+合成：Paper001 白卡纸底色（光滑细牙，非牛皮纸/皱纹纸）+ 柔和对角受光渐变
+（softlight，卖纸面哑光）+ 极淡刀切边线 + 背面简笔三摄岛（ImageMagick 矢量描）
++ 跨页中缝折痕渐变。全程 ImageMagick 确定性后期，无 AIGC 生成。
+时钟手写数字用 assets/fonts/patrick_hand（OFL 字体），灵动岛为矢量 Panel。

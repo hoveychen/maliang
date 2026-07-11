@@ -88,6 +88,11 @@ static func style_card_button(b: Button, radius := 20.0) -> void:
 	for state in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
 		b.add_theme_color_override(state, CARD_TEXT)
 
+## 奶油卡片内的文字：暖棕、无黑描边（黑描边是叠在 3D 世界上的文字用的）。
+static func style_card_label(l: Label, size: int) -> void:
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", CARD_TEXT)
+
 ## 头顶气泡 Sprite3D（billboard，替代 Label3D emoji）：height_m 为渲染高度（米）。
 static func bubble_sprite(name: String, height_m: float) -> Sprite3D:
 	var s := Sprite3D.new()

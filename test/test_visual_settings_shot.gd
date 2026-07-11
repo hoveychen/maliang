@@ -19,10 +19,9 @@ func _tick() -> void:
 		24:
 			scene.call("_open_app", "settings")
 		40:
-			var page := (scene.get("_album_pages") as Dictionary)["settings"] as Control
-			(page.get_child(0) as Button).emit_signal("pressed")
+			((scene.get("phone_ui") as PhoneUi).get("_reroll_btn") as Button).emit_signal("pressed")
 		64:
-			((scene.get("_reroll_confirm") as HBoxContainer).get_child(1) as Button).emit_signal("pressed")
+			(((scene.get("phone_ui") as PhoneUi).get("_reroll_confirm") as HBoxContainer).get_child(1) as Button).emit_signal("pressed")
 			# 真实游戏里世界是 current_scene，change_scene 会整棵释放；
 			# 本脚本手动挂的树要自己拆，否则世界 HUD 残留叠在童话书上
 			scene.queue_free()

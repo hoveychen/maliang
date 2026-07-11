@@ -14,18 +14,20 @@ func _initialize() -> void:
 	root.add_child(scene)
 	process_frame.connect(_tick)
 
+func _pui() -> PhoneUi:
+	return scene.get("phone_ui") as PhoneUi
+
 func _reroll_button() -> Button:
-	var page := (scene.get("_album_pages") as Dictionary)["settings"] as Control
-	return page.get_child(0) as Button
+	return _pui().get("_reroll_btn") as Button
 
 func _confirm_row() -> HBoxContainer:
-	return scene.get("_reroll_confirm") as HBoxContainer
+	return _pui().get("_reroll_confirm") as HBoxContainer
 
 func _avatar_button() -> Button:
-	return scene.get("_avatar_btn") as Button
+	return _pui().get("_avatar_btn") as Button
 
 func _avatar_preview() -> Control:
-	return scene.get("_avatar_preview") as Control
+	return _pui().get("_avatar_preview") as Control
 
 func _tick() -> void:
 	frame += 1
@@ -35,14 +37,14 @@ func _tick() -> void:
 		5:
 			# 打开手机：设置 app 存在，默认停在主屏（各 app 页面都收着）
 			(scene.get("album_button") as Button).emit_signal("pressed")
-			_check("phone open", (scene.get("album_panel") as Control).visible, true)
-			_check("settings app present", (scene.get("_album_pages") as Dictionary).has("settings"), true)
+			_check("phone open", (scene.get("paper_phone") as PaperPhone).state == PaperPhone.State.FRONT, true)
+			_check("settings app present", (_pui().get("_album_pages") as Dictionary).has("settings"), true)
 			_check("settings page hidden on home",
-				((scene.get("_album_pages") as Dictionary)["settings"] as Control).visible, false)
+				((_pui().get("_album_pages") as Dictionary)["settings"] as Control).visible, false)
 		10:
 			# 打开设置 app：重新捏角色按钮可见，确认行还收着
 			scene.call("_open_app", "settings")
-			var page := (scene.get("_album_pages") as Dictionary)["settings"] as Control
+			var page := (_pui().get("_album_pages") as Dictionary)["settings"] as Control
 			_check("settings page visible", page.visible, true)
 			_check("reroll button present", _reroll_button().text, "重新捏角色")
 			_check("confirm hidden before ask", _confirm_row().visible, false)
