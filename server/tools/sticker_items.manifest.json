@@ -1,0 +1,17 @@
+{
+  "comment": "贴纸物品系列（sticker-items P2，docs/sticker-items-design.md §1.2）。kind=sticker 走绿幕抠图+白描边统一画风（ICON_STYLE_SUFFIX），id 与 items.ts renderRef 'sticker:<id>' 对应。",
+  "assets": [
+    { "id": "sun", "kind": "sticker", "targetSize": 256, "prompt": "a cheerful smiling sun with wavy rays" },
+    { "id": "flower", "kind": "sticker", "targetSize": 256, "prompt": "a cute pink daisy flower with a happy face center" },
+    { "id": "star", "kind": "sticker", "targetSize": 256, "prompt": "a sparkling yellow five-pointed star with rosy cheeks" },
+    { "id": "rainbow", "kind": "sticker", "targetSize": 256, "prompt": "a small arched rainbow with fluffy clouds at both ends" },
+    { "id": "heart", "kind": "sticker", "targetSize": 256, "prompt": "a glossy red heart with a tiny highlight sparkle" },
+    { "id": "butterfly", "kind": "sticker", "targetSize": 256, "prompt": "a cute butterfly with big round patterned wings" },
+    { "id": "moon", "kind": "sticker", "targetSize": 256, "prompt": "a sleepy crescent moon with closed eyes and a nightcap" },
+    { "id": "cloud", "kind": "sticker", "targetSize": 256, "prompt": "a fluffy white cloud with a gentle smiling face" },
+    { "id": "strawberry", "kind": "sticker", "targetSize": 256, "prompt": "a plump red strawberry with tiny seeds and a leafy top" },
+    { "id": "smile", "kind": "sticker", "targetSize": 256, "prompt": "a round yellow smiley face with big happy eyes" },
+    { "id": "flag", "kind": "sticker", "targetSize": 256, "prompt": "a small triangular pennant flag on a short pole" },
+    { "id": "mushroom", "kind": "sticker", "targetSize": 256, "prompt": "a cute red mushroom with white dots and a smiling stem" }
+  ]
+}
