@@ -12,15 +12,26 @@ test('buildSpritePrompt 规整主体末尾标点与空白', () => {
   assert.equal(p, `a friendly dragon. ${SPRITE_STYLE_SUFFIX}`);
 });
 
-test('画风后缀锁定动森风格与绿幕抠图约束', () => {
-  for (const kw of ['Animal Crossing', 'chibi', '#00FF00', 'full body', 'no shadows']) {
+test('画风后缀锁定 chibi 玩具感与绿幕抠图约束', () => {
+  for (const kw of ['chibi', 'toy-like', '#00FF00', 'full body', 'no shadows']) {
     assert.ok(SPRITE_STYLE_SUFFIX.includes(kw), `缺少关键词: ${kw}`);
   }
 });
 
 test('画风后缀锁定纸片贴纸感（粗黑描边+白色贴纸边+扁平上色）', () => {
-  for (const kw of ['Paper Mario', 'bold black outline', 'white die-cut sticker border', 'flat cel shading']) {
+  for (const kw of ['die-cut', 'bold black outline', 'white sticker border', 'flat cel shading']) {
     assert.ok(SPRITE_STYLE_SUFFIX.includes(kw), `缺少关键词: ${kw}`);
+  }
+});
+
+// 曾写过 "Animal Crossing style" / "like Paper Mario"：FLUX 全系与微软 MAI 会以
+// Protected Content 为由拒绝整条请求，把生图锁死在 Google 一家。别再写回去。
+test('画风后缀不含任何 IP 名（否则 FLUX/MAI 会整条拒绝出图）', () => {
+  for (const ip of ['Animal Crossing', 'Paper Mario', 'Nintendo', 'Pokemon', 'Disney', 'Zelda']) {
+    assert.ok(
+      !SPRITE_STYLE_SUFFIX.toLowerCase().includes(ip.toLowerCase()),
+      `画风后缀里出现了 IP 名「${ip}」——会触发生图模型的版权过滤`,
+    );
   }
 });
 
