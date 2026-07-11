@@ -20,7 +20,7 @@ enum State { STOWED, FRONT, SPREAD }
 const PANEL_ASPECT := 2.10        ## 机身高:宽 ≈ iPhone 直板比例
 const PANEL_H := 1.0              ## 面板高（本地基准，勿改：fit 按此反算 scale）
 const PANEL_W := PANEL_H / PANEL_ASPECT
-const PANEL_T := 0.02             ## 纸板厚度（厚一点才有"纸糊玩具"的憨感）
+const PANEL_T := 0.032            ## 卡纸厚度（厚切边=硬卡纸手工感，侧面纸芯白最卖"纸做的"）
 const FACE_EPS := 0.002           ## 贴面浮出板面的间隙（防 z-fighting）
 const FLIP_DUR := 0.45            ## 翻转+展开动画时长
 const STOW_DUR := 0.28            ## 掏出/收起动画时长
@@ -47,6 +47,7 @@ var _fold_deg := 180.0
 var _yaw_deg := 0.0
 var _tween: Tween
 var _fit_scale := 1.0              ## fit_to_camera 算出的整体 scale（stow 动画要用）
+var _sway_t := 0.0                 ## 持机微摆相位
 
 # 在 _init 建几何而非 _ready：headless 测试在 SceneTree._initialize 阶段节点尚未进树、
 # _ready 会延迟到首帧，_init 保证 new() 出来即可用（show_front/pick 不依赖树状态）。
@@ -54,6 +55,15 @@ func _init() -> void:
 	_build()
 	visible = false
 	_apply_pose(180.0, 0.0)
+
+## 持机微摆：纸片"活着"的感觉（Origami King 的 paper-in-motion 极简版）。
+## 只动整机根节点的 x/z 微旋（pivot 的 y 旋留给翻转姿态），收起时不跑。
+func _process(delta: float) -> void:
+	if not visible:
+		return
+	_sway_t += delta
+	rotation.z = sin(_sway_t * 1.4) * 0.012
+	rotation.x = sin(_sway_t * 0.9 + 1.7) * 0.008
 
 ## ── 几何 ────────────────────────────────────────────────────────────────────
 
@@ -89,7 +99,8 @@ func _make_slab() -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.name = "Slab"
 	mi.mesh = box
-	mi.material_override = _paper_mat(Color(0.93, 0.90, 0.83)) # 纸板切边米白
+	# 纸芯亮白：Paper Mario 式"剪出来的白边"——侧面比贴图面更白更亮，一眼是纸
+	mi.material_override = _paper_mat(Color(1.0, 1.0, 0.985))
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi
 

@@ -71,12 +71,26 @@ FRONT ──点手机外/再点入口──▶ STOWED
 | `phone3d_digit_0..9/colon` | 铅笔手写数字贴片(状态栏时钟逐字拼) | AIGC pencil 模式 |
 | app 图标 | 复用现有 `app_flowers/app_items/app_settings` 贴纸 | 既有资产 |
 
-落地备注(2026-07-11 老板返工拍板):**纸壳/跨页底不用 AIGC**——AIGC 合成的"纸的照片"
-带木桌残影/光照不均/边框错位,全部换成实拍 CC0 微皱白纸(ambientCG Paper001 底色 ×
-Paper005 置换 shade 折痕,见 assets/ui/PHONE3D_PAPER_SOURCE.txt),确定性 ImageMagick
-后期。AIGC 仅保留铅笔数字/灵动岛两类透明小贴片(生成器 pencil 模式:白纸生成+亮度键抠,
-绿幕会吃掉铅笔灰细线;港区 403 走两段式 --emit-jobs → 首尔机 → --raw-dir)。
-面板侧面纸边不用贴图(米白纯色已够)。
+落地备注(2026-07-11 老板两轮返工拍板):**全部贴图不用 AIGC**。
+第一轮:AIGC 合成的"纸的照片"带木桌残影/光照不均/边框错位,全部废弃。
+第二轮:微皱纸纹看着像牛皮纸/皱纹纸——手工该用**硬卡纸**,换成 ambientCG Paper001
+光滑白卡纸底色(CC0,见 assets/ui/PHONE3D_PAPER_SOURCE.txt)。AIGC 铅笔数字/灵动岛
+贴片也一并退役,改 OFL 手写字体(Patrick Hand)时钟 + 矢量药丸灵动岛。
+(生成器的 pencil 模式与两段式 --emit-jobs → 首尔机 → --raw-dir 管线保留备用。)
+
+## "一眼是纸做的"技术清单(参考 Paper Mario: The Origami King 调研)
+
+Origami King 的纸感来源:开发组用真纸做实物 mock-up 对照;白色切边/白描边把"剪出来的
+纸片"写在剪影上;纸面是哑光平涂+柔和光照渐变(不是重纹理);"运动中的纸"(crumpled
+paper in motion)靠动画卖质感。对应落地:
+
+1. **白色纸芯切边**:面板侧面(BoxMesh 边)用比贴图面更亮的纯白,厚度加到 PANEL_T=0.032
+   ——翻转/展开时最抢眼的"纸做的"信号。
+2. **哑光卡纸面**:光滑细牙白卡纸 + softlight 对角受光渐变烘进贴图(unshaded 材质下
+   模拟纸面接光),四周一圈极淡刀切边线。
+3. **持机微摆**:开机后整机 x/z 轴 sine 微旋(±0.7°/±0.5°),纸片"活着"的 stop-motion 感。
+4. **翻转 overshoot**:TRANS_BACK 弹性,纸片翻面带一点回弹。
+5. **中缝折痕**:跨页中缝烘柔和 V 型阴影渐变(对折的物理痕迹)。
 
 屏幕区几何由代码常量定义(正面壳按固定屏占比设计),**不再用旧的"从壳贴图自动检测屏区"逻辑**。
 

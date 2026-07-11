@@ -13,6 +13,7 @@ signal back_pressed             ## 点了返回（world 翻回正面）
 
 const FRONT_PX := Vector2i(420, 920)    ## 正面屏视口（≈屏幕 quad 宽高比 0.456）
 const SPREAD_PX := Vector2i(960, 1008)  ## 跨页视口（=双面板 2W:H≈0.952）
+const HAND_FONT := "res://assets/fonts/patrick_hand/PatrickHand-Regular.ttf" ## 手写体（OFL，时钟数字用）
 
 ## 屏幕上的 app：[id, 短名, 图标资产]。图标资产缺失回退现有图标占位。
 const PHONE_APPS := [
@@ -30,8 +31,7 @@ const PHONE_PAGE_SLOTS := 9         ## 每页图标格数（3x3）
 var _w                              ## world（业务回调；动态访问，别 typed）
 
 # —— 正面主屏 ——
-var _phone_clock: Label             ## 状态栏时钟（实时；digit 贴片可用时隐藏、仅作测试锚点）
-var _clock_cells: Array = []        ## 铅笔手写数字时钟的 4 个数字位（HHMM，贴片随分钟换）
+var _phone_clock: Label             ## 状态栏时钟（实时，手写体数字）
 var _phone_signal: Control          ## 状态栏信号格（绿=WS 在线、灰=离线）
 var _phone_playpie: PlayTimePie     ## 桌面 widget 可玩时间饼图
 var _phone_flowers: Label           ## 桌面 widget 小红花数
@@ -106,34 +106,44 @@ func _build_front(vp: SubViewport) -> void:
 	# 顶部状态栏（极简 iPhone 式）：当前时间（左）+ 信号格（右）
 	var banner_bar := HBoxContainer.new()
 	banner_bar.add_theme_constant_override("separation", 6)
-	var clock_box := HBoxContainer.new()
-	clock_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	clock_box.add_theme_constant_override("separation", 2)
 	_phone_clock = Label.new()
-	UiAssets.style_card_label(_phone_clock, 26)
-	clock_box.add_child(_phone_clock)
-	var pencil_clock := _make_pencil_clock()
-	if pencil_clock != null:
-		_phone_clock.visible = false # 铅笔数字顶上；Label 仍每秒更新，测试/回退锚点
-		clock_box.add_child(pencil_clock)
-	banner_bar.add_child(clock_box)
+	_phone_clock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# 手写体时钟（OFL 字体 Patrick Hand，只用到数字/冒号）；缺字体回退卡片暖棕
+	if ResourceLoader.exists(HAND_FONT):
+		_phone_clock.add_theme_font_override("font", load(HAND_FONT) as Font)
+		_phone_clock.add_theme_font_size_override("font_size", 48)
+		_phone_clock.add_theme_color_override("font_color", Color(0.32, 0.32, 0.36)) # 石墨灰
+	else:
+		UiAssets.style_card_label(_phone_clock, 26)
+	banner_bar.add_child(_phone_clock)
 	_phone_signal = _make_signal_indicator()
 	banner_bar.add_child(_phone_signal)
 	vbox.add_child(banner_bar)
-	# 灵动岛（铅笔涂黑药丸贴片）：悬浮在视口顶部中央，与状态栏同排（仿 iPhone 构图）
-	var island_tex := UiAssets.tex("phone3d_island")
-	if island_tex != null:
-		var island := TextureRect.new()
-		island.texture = island_tex
-		island.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		island.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		island.set_anchors_preset(Control.PRESET_CENTER_TOP)
-		island.offset_left = -62.0
-		island.offset_right = 62.0
-		island.offset_top = 10.0
-		island.offset_bottom = 44.0
-		island.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		vp.add_child(island)
+	# 灵动岛：矢量黑药丸（圆角=半高）+ 右侧镜头点，悬浮视口顶部中央（仿 iPhone 构图）
+	var island := Panel.new()
+	var ist := StyleBoxFlat.new()
+	ist.bg_color = Color(0.17, 0.17, 0.20, 0.92)
+	ist.set_corner_radius_all(17)
+	island.add_theme_stylebox_override("panel", ist)
+	island.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	island.offset_left = -56.0
+	island.offset_right = 56.0
+	island.offset_top = 12.0
+	island.offset_bottom = 46.0
+	island.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var lens := Panel.new()
+	var lst := StyleBoxFlat.new()
+	lst.bg_color = Color(0.36, 0.37, 0.44)
+	lst.set_corner_radius_all(6)
+	lens.add_theme_stylebox_override("panel", lst)
+	lens.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	lens.offset_left = -24.0
+	lens.offset_right = -12.0
+	lens.offset_top = -6.0
+	lens.offset_bottom = 6.0
+	lens.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	island.add_child(lens)
+	vp.add_child(island)
 	vbox.add_child(HSeparator.new())
 	vbox.add_child(_build_phone_widget())
 	# 图标分页：横向 ScrollContainer，内含并排的页；拖拽翻页、松手贴合、圆点指示。
@@ -349,25 +359,6 @@ func _phone_dot_style(active: bool) -> StyleBoxFlat:
 	st.bg_color = Color(0.35, 0.24, 0.10, 0.85) if active else Color(0.35, 0.24, 0.10, 0.28)
 	return st
 
-## 铅笔手写数字时钟行（HH:MM 逐字贴片）；digit 资产缺失返回 null（回退 Label）。
-func _make_pencil_clock() -> Control:
-	if UiAssets.tex("phone3d_digit_0") == null or UiAssets.tex("phone3d_digit_colon") == null:
-		return null
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 2)
-	_clock_cells.clear()
-	for i in 5:
-		var r := TextureRect.new()
-		r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		r.custom_minimum_size = Vector2(20.0 if i == 2 else 34.0, 52.0)
-		if i == 2:
-			r.texture = UiAssets.tex("phone3d_digit_colon")
-		else:
-			_clock_cells.append(r)
-		row.add_child(r)
-	return row
-
 ## 状态栏信号格：三根递增小竖条；颜色由 refresh_banner 按 WS 在线态刷（绿/灰）。
 func _make_signal_indicator() -> Control:
 	var box := HBoxContainer.new()
@@ -464,10 +455,6 @@ func refresh_banner() -> void:
 	var hh := int(t.get("hour", 0))
 	var mm := int(t.get("minute", 0))
 	_phone_clock.text = "%02d:%02d" % [hh, mm]
-	if _clock_cells.size() == 4: # 铅笔手写数字时钟（贴片逐字换）
-		var digs := [hh / 10, hh % 10, mm / 10, mm % 10]
-		for i in 4:
-			(_clock_cells[i] as TextureRect).texture = UiAssets.tex("phone3d_digit_%d" % int(digs[i]))
 	if _phone_playpie != null:
 		# 可玩阶段显示绿色剩余、冷却阶段显示蓝色进度（值由 world._step_play_budget 每帧更新）。
 		_phone_playpie.set_state(_w._play_remaining_frac, _w._play_blocked, _w._play_cooldown_frac)
