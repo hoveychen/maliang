@@ -299,3 +299,31 @@ export interface IntegrityFix {
   deletedDeviceSamples?: number;
   wouldClearSpriteRefs?: Integrity['deadSpriteRefs'];
 }
+
+/** GET /debug/api/activity 的一行：会话 + 设备快照。 */
+export interface ActivityRow {
+  id: number;
+  worldId: string;
+  playerId: string;
+  playerName: string;
+  startedAt: number;
+  endedAt: number | null;
+  durationMs: number | null;
+  device: {
+    ip?: string;
+    ua?: string;
+    model?: string;
+    os?: string;
+    osVersion?: string;
+    screen?: string;
+    godot?: string;
+    app?: string;
+  } | null;
+}
+
+export interface ActivityResp {
+  total: number;
+  limit: number;
+  offset: number;
+  activity: ActivityRow[];
+}
