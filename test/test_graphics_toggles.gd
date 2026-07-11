@@ -1,7 +1,8 @@
 extends SceneTree
-## 画质设置页断言：设置 app 里有画质分区 6 个 toggle；切一个开关即时应用到场景
-## （chunk_manager 记忆态）+ 存进 profile（has_saved 变真、值往返）。
-## 备份并恢复真实档案（不污染开发机 user://profile.json）。
+## 画质设置页断言（分级模型）：设置 app 里有画质分区 9 个旋钮；点一下升一档/到顶回最省；
+## 改档即时应用到场景（chunk_manager 记忆态、viewport 缩放、SdfProp/PaperCharacter 静态态）
+## + 存进 profile（source=user、值往返）。新暴露的三个旋钮（prop_detail/terrain_detail/xray）
+## 与 hi_res 三级是本轮重点。备份并恢复真实档案（不污染开发机 user://profile.json）。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 10 \
 ##       --quit-after 40 --script res://test/test_graphics_toggles.gd
 
@@ -12,7 +13,7 @@ var _backup: Dictionary
 
 func _initialize() -> void:
 	_backup = PlayerProfile.load_profile()
-	PlayerProfile.clear()  # 干净起步：无 graphics 档 → 默认全开
+	PlayerProfile.clear()  # 干净起步：无 graphics 档 → 默认全最高档
 	scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	process_frame.connect(_tick)
@@ -28,23 +29,48 @@ func _tick() -> void:
 		8:
 			scene.call("_open_app", "settings")
 			var g := _gfx()
-			_check("画质按钮 6 个", g.size(), 6)
-			var all_toggle := true
-			for k: String in g:
-				if not (g[k] as Button).toggle_mode:
-					all_toggle = false
-			_check("都是 toggle 模式", all_toggle, true)
-			_check("默认全开：角色阴影 pressed", (g["actor_shadows"] as Button).button_pressed, true)
+			_check("画质旋钮 9 个", g.size(), 9)
+			for k: String in GraphicsSettings.KEYS:
+				if not g.has(k):
+					_check("缺旋钮 %s" % k, false, true)
+			_check("默认全最高：角色阴影按下", (g["actor_shadows"] as Button).button_pressed, true)
+			_check("文案带档名", (g["hi_res"] as Button).text, "画面清晰度：高清")
 		12:
-			# 关「地面阴影」→ 程序化改 button_pressed 会 emit toggled → 应用 + 存档
+			# 关「地面阴影」（2 级：点一下 1→0）
 			(_gfx()["ground_shadows"] as Button).button_pressed = false
 		14:
 			var cm: Object = scene.get("chunk_manager")
 			_check("地面阴影关→chunk 记忆态 false", cm.get("_ground_shadows"), false)
-			_check("存档 ground_shadows=false", GraphicsSettings.load_all()["ground_shadows"], false)
-			_check("其余项仍存为开(actor_shadows)", GraphicsSettings.load_all()["actor_shadows"], true)
+			_check("存档 ground_shadows=0", GraphicsSettings.load_all()["ground_shadows"], 0)
+			_check("其余项仍最高(actor_shadows)", GraphicsSettings.load_all()["actor_shadows"], 1)
 			_check("has_saved 变真", GraphicsSettings.has_saved(), true)
+			_check("设置页改动 = user override", GraphicsSettings.is_user_override(), true)
+			# hi_res 三级循环：高清(2) 点一下 →(2+1)%3=0 省电
+			(_gfx()["hi_res"] as Button).button_pressed = false
+		16:
+			_check("hi_res 2→0 存档", GraphicsSettings.load_all()["hi_res"], 0)
+			_check("hi_res=0 → 缩放 0.6", is_equal_approx(scene.get_viewport().scaling_3d_scale, 0.6), true)
+			_check("按钮文案跟到省电", (_gfx()["hi_res"] as Button).text, "画面清晰度：省电")
+			_check("0 档按钮非按下态", (_gfx()["hi_res"] as Button).button_pressed, false)
+			# 新暴露的三个旋钮：各关一次，断言真的落到底层静态态
+			(_gfx()["xray"] as Button).button_pressed = false
+			(_gfx()["prop_detail"] as Button).button_pressed = false
+			(_gfx()["terrain_detail"] as Button).button_pressed = false
 		18:
+			_check("xray 关 → PaperCharacter 静态态 false", PaperCharacter._xray_enabled, false)
+			_check("prop_detail 粗略 → 吸附迭代 2", SdfProp._snap_iters_main, 2)
+			_check("terrain_detail 简单 → chunk 低细节 true", scene.get("chunk_manager").get("_terrain_low_detail"), true)
+			_check("三项都存档为 0", [
+				GraphicsSettings.load_all()["xray"],
+				GraphicsSettings.load_all()["prop_detail"],
+				GraphicsSettings.load_all()["terrain_detail"],
+			], [0, 0, 0])
+			# 再点一次 xray：0→1 升回开（验证循环回绕）
+			(_gfx()["xray"] as Button).button_pressed = true
+		20:
+			_check("xray 回绕开 → 静态态 true", PaperCharacter._xray_enabled, true)
+			_check("xray 存档回 1", GraphicsSettings.load_all()["xray"], 1)
+		22:
 			if _backup.is_empty():
 				PlayerProfile.clear()
 			else:
@@ -53,7 +79,7 @@ func _tick() -> void:
 				print("graphics_toggles PASS")
 			else:
 				printerr("graphics_toggles FAILED: %d" % fails)
-		20:
+		24:
 			quit(fails)
 
 func _check(name: String, got: Variant, want: Variant) -> void:

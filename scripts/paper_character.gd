@@ -19,10 +19,10 @@ const SUBDIV_H := 12
 static var _shader: Shader = null
 static var _xray_shader: Shader = null
 
-## X 光穿透剪影开关（AdaptiveQuality 档位驱动，同 SdfProp._snap_iters 模式）：
+## X 光穿透剪影开关（画质旋钮 xray 驱动，同 SdfProp._snap_iters 模式）：
 ## 该 pass 每角色每帧多画一个全 quad 透明面并逐像素采样深度图，老 Mali 上深度采样
 ## 打断 tiled 渲染快路径。默认全平台开——角色走到房子/树后面仍见剪影是体验的一部分
-## （老板拍板 T1 保留），只有 T2 最弱档由 AdaptiveQuality 摘除。
+## （老板拍板：默认保留），只有弱机被 benchmark 定档摘除、或用户在设置页手动关。
 static var _xray_enabled := true
 
 ## 换档入口：作用于已存在（paper_chars 组）与后续创建的所有角色。
