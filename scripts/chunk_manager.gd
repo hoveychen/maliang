@@ -319,12 +319,17 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	# 森林等其它场景不铺村庄建筑（布景全交给散布 deco 与语音造物）。
 	if scene_id == "village":
 		# 先放手工地标（锚点落在本区块的），后散布——地标优先占地。
+		# 顺便收集地标落点+水平半径，末尾铺一层同款斜阳椭圆贴片影（房子也有锚定感）。
+		var building_shadows: Array = []
 		for lm in LANDMARKS:
 			var anchor: Vector2i = lm["tile"] - wrapped * CHUNK_TILES
 			if anchor.x < 0 or anchor.x >= CHUNK_TILES or anchor.y < 0 or anchor.y >= CHUNK_TILES:
 				continue
-			_spawn_on_tile(deco, wrapped, lm["scene"], anchor, lm["scale"], lm["yaw"],
+			var inst := _spawn_on_tile(deco, wrapped, lm["scene"], anchor, lm["scale"], lm["yaw"],
 				int(lm.get("reserve", 0)), int(lm.get("search", 0)), bool(lm.get("path_ok", false)))
+			if inst != null:
+				building_shadows.append([inst.position, _visual_short_r(inst, lm["scale"])])
+		_flush_building_shadows(deco, building_shadows)
 
 		# SDF 可动物件：与地标同权重的手工锚点，先于散布占地。
 		for sp in SDF_PROPS:
@@ -783,6 +788,37 @@ func _flush_shadows(parent: Node3D, batches: Dictionary) -> void:
 	parent.add_child(mmi)
 	mmi.add_to_group("perf_scatter")  # 与散布同组，PerfSweep 一并可切
 
+## 建筑水平影半径：遍历 inst 的 MeshInstance3D 取最大 mesh 水平 AABB × 实例缩放 × 影系数
+## （近似，忽略部件相对偏移；影子不需精确）。没 mesh 兜底 2m。
+func _visual_short_r(inst: Node3D, scale_f: float) -> float:
+	var span := 0.0
+	for mi: MeshInstance3D in inst.find_children("*", "MeshInstance3D", true, false):
+		if mi.mesh != null:
+			var a := mi.mesh.get_aabb()
+			span = maxf(span, maxf(a.size.x, a.size.z))
+	if span <= 0.0:
+		span = 2.0
+	return span * 0.5 * scale_f * SHADOW_RADIUS_FACTOR
+
+## 地标建筑脚下同款斜阳椭圆贴片影：入参 [[落点, 短半径], ...]，一层合并 MultiMesh
+## （一次 draw call、不投实时阴影），方向/椭圆走 _shadow_xform（与树影同一个太阳）。
+func _flush_building_shadows(parent: Node3D, centers: Array) -> void:
+	if centers.is_empty():
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = BlobShadow.multimesh_mesh(SHADOW_STRENGTH)
+	mm.instance_count = centers.size()
+	for i in range(centers.size()):
+		mm.set_instance_transform(i, _shadow_xform(centers[i][0], centers[i][1]))
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "BuildingShadows"
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.extra_cull_margin = CULL_MARGIN
+	parent.add_child(mmi)
+	mmi.add_to_group("perf_scatter")
+
 ## 散布种类注册表（懒建）：key → { mesh, mat }。
 ## 树/灌木用烘焙 mesh + SdfStaticBaker 共享材质；石/草从 KayKit 场景剥出
 ## mesh 和 bend 包裹后的材质（_wrap_material 有缓存，同调色板 atlas 只建一份）。
@@ -824,7 +860,7 @@ func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, ya
 ## 占地或压路/水时沿螺旋环向外找至多 search 圈；reserve 是占地半径（0→1×1，1→3×3）。
 ## allow_path 供地标（水井）压路。找不到空位就放弃（确定性，不摆歪）。
 ## 占地经 OccupancyMap.prop_area_ok 判定（类型+高度一致+占用）并全局登记。
-func _spawn_on_tile(parent: Node3D, wrapped: Vector2i, scene: PackedScene, anchor: Vector2i, scale_f: float, yaw_deg: float, reserve := 0, search := 0, allow_path := false) -> void:
+func _spawn_on_tile(parent: Node3D, wrapped: Vector2i, scene: PackedScene, anchor: Vector2i, scale_f: float, yaw_deg: float, reserve := 0, search := 0, allow_path := false) -> Node3D:
 	var span := reserve * 2 + 1
 	for r in range(search + 1):
 		for ti in _ring(anchor, r):
@@ -833,8 +869,8 @@ func _spawn_on_tile(parent: Node3D, wrapped: Vector2i, scene: PackedScene, ancho
 			if not OccupancyMap.prop_area_ok(origin, span, span, allow_path, false):
 				continue
 			_claim(wrapped, origin, span, span)
-			_spawn(parent, scene, _tile_local(ti, wrapped), scale_f, yaw_deg)
-			return
+			return _spawn(parent, scene, _tile_local(ti, wrapped), scale_f, yaw_deg)
+	return null
 
 ## SDF 可动物件版 _spawn_on_tile：同一套占地/螺旋找位，实例化 SdfProp 并启用锚点游走。
 ## 材质自带 world-bend 项（sdf_field.gdshaderinc），不走 BendMat.wrap_scene。
