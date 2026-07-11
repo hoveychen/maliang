@@ -18,6 +18,8 @@ signal item_created(data: Dictionary)      ## 造物落成：{ item(实体行), 
 signal prop_denied(data: Dictionary)       ## 小红花不足，未造物（reason=no_flowers + 引导语 + wallet）
 signal prop_failed(reason: String)
 signal bag_update(data: Dictionary)        ## 背包变化（摆放/拾起后）：{ worldId, bag }
+signal sticker_bought(data: Dictionary)    ## 贴纸小铺购入：{ worldId, itemId, bag, wallet }
+signal sticker_denied(data: Dictionary)    ## 小红花不足未买成：{ worldId, reason, wallet }
 signal failed(reason: String)
 # 奖赏系统：world_info 后的状态同步 / 委托完成盖章升花
 signal world_state(data: Dictionary)
@@ -205,12 +207,23 @@ func send_position_stream(world_id: String, chars: Array, player: Dictionary, t:
 
 ## 摆放：背包一份实体摆到指定 tile。服务端校验（占地/背包）→ tile 编辑 → terrain_patch 广播
 ## + bag_update 回包；失败回 error 不动账。渲染统一等广播回来落地（万物皆物品）。
-func send_item_place(world_id: String, item_id: String, tile: Vector2i, yaw_deg := 0.0) -> void:
-	_send({ "type": "item_place", "worldId": world_id, "itemId": item_id, "tileX": tile.x, "tileY": tile.y, "yawDeg": yaw_deg })
+## edge_side >= 0（0..3=N/E/S/W）= 贴纸挂 tile 边缘（docs/sticker-items-design.md §2.2）。
+func send_item_place(world_id: String, item_id: String, tile: Vector2i, yaw_deg := 0.0, edge_side := -1) -> void:
+	var msg := { "type": "item_place", "worldId": world_id, "itemId": item_id, "tileX": tile.x, "tileY": tile.y, "yawDeg": yaw_deg }
+	if edge_side >= 0:
+		msg["edgeSide"] = edge_side
+	_send(msg)
 
-## 拾起：tile 上的语音造物收进背包（内置树/石/建筑服务端拒拾）。同上等广播落地。
-func send_item_pickup(world_id: String, tile: Vector2i) -> void:
-	_send({ "type": "item_pickup", "worldId": world_id, "tileX": tile.x, "tileY": tile.y })
+## 拾起：tile 上的语音造物收进背包（内置树/石/建筑服务端拒拾；边缘贴纸例外可拾回）。
+func send_item_pickup(world_id: String, tile: Vector2i, edge_side := -1) -> void:
+	var msg := { "type": "item_pickup", "worldId": world_id, "tileX": tile.x, "tileY": tile.y }
+	if edge_side >= 0:
+		msg["edgeSide"] = edge_side
+	_send(msg)
+
+## 贴纸小铺：1 朵小红花买一张贴纸进背包（sticker_bought / sticker_denied 回包）。
+func send_sticker_buy(world_id: String, item_id: String) -> void:
+	_send({ "type": "sticker_buy", "worldId": world_id, "itemId": item_id })
 
 func _send(obj: Dictionary) -> void:
 	# 统一注入玩家身份：每条出站消息带 playerId（设备端 UUID），服务端按玩家归属记忆/Visit。
@@ -284,6 +297,10 @@ func _dispatch(data: Dictionary) -> void:
 			prop_failed.emit(String(data.get("reason", "")))
 		"bag_update":
 			bag_update.emit(data)
+		"sticker_bought":
+			sticker_bought.emit(data)
+		"sticker_denied":
+			sticker_denied.emit(data)
 		"stage_begin":
 			stage_begin.emit(data)
 		"stage_cmd":

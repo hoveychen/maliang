@@ -91,6 +91,29 @@ const KAYKIT_NODES := {
 	"windmill": { "scene": WINDMILL_SCENE, "scale": HOUSE_SCALE },
 }
 
+## 边缘贴纸贴图（renderRef 'sticker:<name>'，docs/sticker-items-design.md §3）。
+## 合批走 _batch/_flush_batches 同款 MultiMesh 路（key 用完整 'sticker:<name>' 防撞名）。
+const STICKER_TEXTURES := {
+	"sun": preload("res://assets/stickers/sun.webp"),
+	"flower": preload("res://assets/stickers/flower.webp"),
+	"star": preload("res://assets/stickers/star.webp"),
+	"rainbow": preload("res://assets/stickers/rainbow.webp"),
+	"heart": preload("res://assets/stickers/heart.webp"),
+	"butterfly": preload("res://assets/stickers/butterfly.webp"),
+	"moon": preload("res://assets/stickers/moon.webp"),
+	"cloud": preload("res://assets/stickers/cloud.webp"),
+	"strawberry": preload("res://assets/stickers/strawberry.webp"),
+	"smile": preload("res://assets/stickers/smile.webp"),
+	"flag": preload("res://assets/stickers/flag.webp"),
+	"mushroom": preload("res://assets/stickers/mushroom.webp"),
+}
+const STICKER_H := 1.0     ## 贴纸竖片世界高（米），宽按贴图比例
+const STICKER_LIFT := 0.2  ## 底边离地
+const STICKER_OUT := 0.05  ## 沿法线外移，防与台阶立面/崖壁 z-fight
+## 边缘中点偏移（半 tile，N/E/S/W 顺序=TerrainMap.EDGE_*）与竖片朝外 yaw。
+const EDGE_OFFSETS: Array[Vector2] = [Vector2(0, -0.5), Vector2(0.5, 0), Vector2(0, 0.5), Vector2(-0.5, 0)]
+const EDGE_YAWS: Array[float] = [180.0, 90.0, 0.0, 270.0]
+
 ## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, water:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
 ## wrapped 区块索引 → 逐 tile autotile 地面 ArrayMesh。全世界只有 3×3 个
@@ -376,6 +399,22 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 				_spawn_static_sdf(deco, def, rref, pos, yaw, hk)
 			elif rref.is_empty():
 				push_warning("[items] 未知物品实体 %s（catalog 未载入?），跳过渲染" % id)
+	# 边缘贴纸层：逐 tile 扫四条边（绝大多数为 0，纯 PackedByteArray 读，开销可忽略）。
+	for j in range(CHUNK_TILES):
+		for i in range(CHUNK_TILES):
+			var ti := Vector2i(i, j)
+			var gt := wrapped * CHUNK_TILES + ti
+			for side in range(4):
+				var sid := TerrainMap.edge_item_id(gt, side)
+				if sid.is_empty():
+					continue
+				var srref := String(ItemCatalog.get_def(sid).get("renderRef", ""))
+				if not srref.begins_with("sticker:"):
+					continue # 未来的墙/篱笆类边缘物走独立分支
+				var off: Vector2 = EDGE_OFFSETS[side] * WorldGrid.TILE_SIZE
+				var out_n := off.normalized() * STICKER_OUT
+				var spos := _tile_local(ti, wrapped) + Vector3(off.x + out_n.x, STICKER_LIFT, off.y + out_n.y)
+				_batch(batches, srref, spos, 1.0, EDGE_YAWS[side])
 	_flush_batches(deco, batches)
 	_flush_shadows(deco, batches)
 	_flush_building_shadows(deco, building_shadows)
@@ -752,7 +791,19 @@ func _scatter_kind(key: String) -> Dictionary:
 	if _scatter_kinds.has(key):
 		return _scatter_kinds[key]
 	var info := {}
-	if BAKED_MESHES.has(key):
+	if key.begins_with("sticker:"):
+		# 贴纸竖片：QuadMesh 底边对齐原点（center_offset 上移半高），宽按贴图比例。
+		var tex: Texture2D = STICKER_TEXTURES[key.get_slice(":", 1)]
+		var q := QuadMesh.new()
+		var w := STICKER_H * float(tex.get_width()) / float(tex.get_height())
+		q.size = Vector2(w, STICKER_H)
+		q.center_offset = Vector3(0.0, STICKER_H * 0.5, 0.0)
+		var m := ShaderMaterial.new()
+		m.shader = load("res://shaders/sticker_edge.gdshader")
+		m.set_shader_parameter("albedo_tex", tex)
+		m.set_shader_parameter("curvature", BendMat.CURVATURE)
+		info = { "mesh": q, "mat": m }
+	elif BAKED_MESHES.has(key):
 		info = { "mesh": BAKED_MESHES[key], "mat": SdfStaticBaker.material() }
 	else:
 		var scene: PackedScene = KAYKIT_SCATTER[key]
