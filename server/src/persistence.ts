@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { ActiveTask, ChatTurn, Character, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { getBuiltinItem } from './items.ts';
+import { decodeTerrain, encodeTerrain } from './terrain.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 
@@ -56,7 +57,7 @@ export interface SpriteAnimRecord {
   meta?: SpriteSheetMeta;
 }
 
-/** scenes 表的一行原样（列名 snake_case）。 */
+/** scenes 表的一行（列名 snake_case；terrain blob 单独走 getSceneTerrain，不在此）。 */
 interface SceneRow {
   world_id: string;
   scene_id: string;
@@ -65,7 +66,11 @@ interface SceneRow {
   grid_tiles: number;
   pois: string;
   portals: string;
+  terrain_version: number;
 }
+
+/** getScene/listScenes 的列清单：刻意不含 terrain blob（50KB，别随场景元数据白拉）。 */
+const SCENE_COLS = 'world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, terrain_version';
 
 export interface World {
   id: string;
@@ -112,6 +117,7 @@ export class WorldStore {
       this.#migrateLegacyEntityScenes();
       this.#loadAssets();
       this.#loadSpriteAnims();
+      this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
     }
   }
 
@@ -200,7 +206,10 @@ export class WorldStore {
         data TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_items_world ON items(world_id);
-      -- 场景 = 世界里的一片区域（一张地图）。地形二进制存 assets 库，这里只记 hash。
+      -- 场景 = 世界里的一片区域（一张地图）。
+      -- 地形矩阵 v2 起直接存 terrain 列（频繁 tile 编辑与内容寻址天然冲突），
+      -- terrain_version 单调递增供客户端缓存/patch 对齐；terrain_asset 是
+      -- 内容寻址时代的 hash，过渡期保留（老客户端仍按它拉 /assets）。
       CREATE TABLE IF NOT EXISTS scenes (
         world_id      TEXT NOT NULL,
         scene_id      TEXT NOT NULL,
@@ -209,9 +218,22 @@ export class WorldStore {
         grid_tiles    INTEGER NOT NULL,
         pois          TEXT NOT NULL DEFAULT '[]',
         portals       TEXT NOT NULL DEFAULT '[]',
+        terrain       BLOB,
+        terrain_version INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (world_id, scene_id)
       );
     `);
+    // 存量库的 scenes 表补新列（SQLite 无 IF NOT EXISTS 列语法，重复 ALTER 会抛，吞掉即可）
+    for (const ddl of [
+      'ALTER TABLE scenes ADD COLUMN terrain BLOB',
+      "ALTER TABLE scenes ADD COLUMN terrain_version INTEGER NOT NULL DEFAULT 0",
+    ]) {
+      try {
+        this.#db.exec(ddl);
+      } catch {
+        /* 列已存在 */
+      }
+    }
   }
 
   /** 引导式造角色：某选项 id 已生成图标的资产 hash（未生成返回空串）。 */
@@ -508,19 +530,58 @@ export class WorldStore {
       gridTiles: r.grid_tiles,
       pois: JSON.parse(r.pois) as ScenePoi[],
       portals: JSON.parse(r.portals) as ScenePortal[],
+      terrainVersion: r.terrain_version,
     };
   }
 
   getScene(worldId: string, sceneId: string): Scene | undefined {
-    const row = this.#db.prepare('SELECT * FROM scenes WHERE world_id = ? AND scene_id = ?').get(worldId, sceneId) as
+    const row = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? AND scene_id = ?`).get(worldId, sceneId) as
       | SceneRow
       | undefined;
     return row ? this.#rowToScene(row) : undefined;
   }
 
   listScenes(worldId: string): Scene[] {
-    const rows = this.#db.prepare('SELECT * FROM scenes WHERE world_id = ? ORDER BY scene_id').all(worldId) as unknown as SceneRow[];
+    const rows = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? ORDER BY scene_id`).all(worldId) as unknown as SceneRow[];
     return rows.map((r) => this.#rowToScene(r));
+  }
+
+  /**
+   * 存量场景迁移：terrain blob 为空但 terrain_asset 指向内容寻址库 → 把字节搬进
+   * scenes.terrain（重编码为 v2，v1 存量物品层补零），version 置 1。
+   * 幂等（blob 非空即跳过）；资产缺失/字节坏则跳过该场景（本就不可用）。
+   */
+  #migrateSceneTerrainBlobs(): void {
+    const rows = this.#db
+      .prepare("SELECT world_id, scene_id, terrain_asset FROM scenes WHERE terrain IS NULL AND terrain_asset != ''")
+      .all() as { world_id: string; scene_id: string; terrain_asset: string }[];
+    for (const r of rows) {
+      const blob = this.getAsset(r.terrain_asset);
+      if (!blob) continue;
+      try {
+        const bytes = encodeTerrain(decodeTerrain(blob.bytes));
+        this.setSceneTerrain(r.world_id, r.scene_id, bytes, 1);
+      } catch {
+        /* 坏字节：跳过，别让一个坏场景拦启动 */
+      }
+    }
+  }
+
+  /** 场景地形矩阵（v2 blob）与版本。场景未入库/无地形 → undefined。 */
+  getSceneTerrain(worldId: string, sceneId: string): { bytes: Uint8Array; version: number } | undefined {
+    const row = this.#db
+      .prepare('SELECT terrain, terrain_version FROM scenes WHERE world_id = ? AND scene_id = ?')
+      .get(worldId, sceneId) as { terrain: Uint8Array | null; terrain_version: number } | undefined;
+    if (!row || row.terrain === null) return undefined;
+    return { bytes: new Uint8Array(row.terrain), version: row.terrain_version };
+  }
+
+  /** 写入场景地形矩阵与版本（唯一写入口是 terrain_edit.ts / /admin/scenes）。 */
+  setSceneTerrain(worldId: string, sceneId: string, bytes: Uint8Array, version: number): void {
+    const r = this.#db
+      .prepare('UPDATE scenes SET terrain = ?, terrain_version = ? WHERE world_id = ? AND scene_id = ?')
+      .run(bytes, version, worldId, sceneId);
+    if (r.changes === 0) throw new Error(`scene not found: ${worldId}/${sceneId}`);
   }
 
   // ── 奖赏系统：小红花钱包 + 进行中委托（均按 (worldId, playerId) 维度）────────────────

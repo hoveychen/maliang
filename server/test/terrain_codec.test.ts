@@ -186,7 +186,7 @@ import { DEFAULT_SCENE, type Scene } from '../src/types.ts';
 function scene(over: Partial<Scene> = {}): Scene {
   return {
     worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄',
-    terrainAsset: 'abc123', gridTiles: REQUIRED_GRID,
+    terrainAsset: 'abc123', gridTiles: REQUIRED_GRID, terrainVersion: 1,
     pois: [{ tile: [24, 24], radius: 20, trigger: 'poi_pond', name: '池塘', aliases: ['湖', '水边'] }],
     portals: [],
     ...over,

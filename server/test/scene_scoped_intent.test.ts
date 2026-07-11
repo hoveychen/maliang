@@ -17,7 +17,7 @@ function char(worldId: string, id: string, sceneId: string): Character {
 
 function scene(s: WorldStore, sceneId: string, poiNames: string[]): void {
   s.upsertScene({
-    worldId: 'w1', sceneId, name: sceneId, terrainAsset: 'h-' + sceneId, gridTiles: REQUIRED_GRID,
+    worldId: 'w1', sceneId, name: sceneId, terrainAsset: 'h-' + sceneId, gridTiles: REQUIRED_GRID, terrainVersion: 1,
     pois: poiNames.map((n, i) => ({ tile: [i, i] as [number, number], radius: 5, trigger: 't' + i, name: n, aliases: [] })),
     portals: [],
   });

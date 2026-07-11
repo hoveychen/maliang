@@ -140,6 +140,11 @@ export interface Scene {
   gridTiles: number;
   pois: ScenePoi[];
   portals: ScenePortal[];
+  /**
+   * 地形矩阵版本（单调递增，tile 编辑每次 +1）。客户端缓存键与 terrain_patch
+   * 对齐依据：patch 必须恰是本地版本 +1，否则全量重拉。0 = 尚未有矩阵 blob。
+   */
+  terrainVersion: number;
 }
 
 /** 单场景时代的场景 id：存量角色/物件全部隐含属于它。 */

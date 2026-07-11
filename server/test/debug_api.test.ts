@@ -38,7 +38,7 @@ function seed(store: WorldStore): void {
   // 场景（模型 B）：debug 详情要能透出场景 + POI + 传送门的结构化数据
   store.upsertScene({
     worldId: 'w1', sceneId: 'village', name: '村庄',
-    terrainAsset: 'terrain-hash-abc', gridTiles: 75,
+    terrainAsset: 'terrain-hash-abc', gridTiles: 75, terrainVersion: 1,
     pois: [{ tile: [3, 4], radius: 2, trigger: 'pond', name: '小池塘', aliases: ['池塘', '水塘'] }],
     portals: [{ tile: [10, 10], radius: 1, toScene: 'forest', toTile: [1, 1] }],
   });

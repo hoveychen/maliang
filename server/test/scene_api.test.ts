@@ -145,7 +145,7 @@ function withScene(pois: { name: string }[]): WorldStore {
   const s = new WorldStore();
   s.createWorld('w1');
   s.upsertScene({
-    worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h', gridTiles: REQUIRED_GRID,
+    worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h', gridTiles: REQUIRED_GRID, terrainVersion: 1,
     pois: pois.map((p) => ({ tile: [1, 1] as [number, number], radius: 5, trigger: 't', name: p.name, aliases: [] })),
     portals: [],
   });
@@ -168,7 +168,7 @@ test('getLocations：POI 未入库时回退到客户端上报（旧环境不退�
 test('getLocations：跨场景摊平并去重', () => {
   const s = withScene([{ name: '池塘' }, { name: '池塘' }]);
   s.upsertScene({
-    worldId: 'w1', sceneId: 'forest', name: '森林', terrainAsset: 'h2', gridTiles: REQUIRED_GRID,
+    worldId: 'w1', sceneId: 'forest', name: '森林', terrainAsset: 'h2', gridTiles: REQUIRED_GRID, terrainVersion: 1,
     pois: [{ tile: [2, 2], radius: 5, trigger: 't2', name: '树屋', aliases: [] }], portals: [],
   });
   assert.deepEqual(s.getLocations('w1').sort(), ['树屋', '池塘']);

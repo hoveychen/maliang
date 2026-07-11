@@ -15,7 +15,9 @@ import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
-import { decodeTerrain } from './terrain.ts';
+import { decodeTerrain, encodeTerrain } from './terrain.ts';
+import { BUILTIN_ITEMS, validateTerrainItems } from './items.ts';
+import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrain_edit.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationGoal, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet, type WorldProp } from './types.ts';
@@ -198,11 +200,14 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     }
     if (!world) return reply.code(404).send({ error: 'world not found' });
     // scenes 可能为空（地形还没入库）——客户端据此回退本地确定性生成，不影响老客户端。
+    // items = 物品实体定义（内置 + 该世界造物）：矩阵 palette 引用的语义/渲染依据，
+    // 客户端凭它渲染物品层与派生占用（万物皆物品，docs/scene-item-refactor-design.md）。
     return {
       id: world.id,
       characters: characterListView(store, world.id),
       props: store.listProps(world.id),
       scenes: store.listScenes(world.id),
+      items: [...BUILTIN_ITEMS, ...store.listWorldItems(world.id)],
     };
   });
 
@@ -359,7 +364,17 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       return reply.code(400).send({ error: (e as Error).message });
     }
 
-    const terrainAsset = store.putAsset({ bytes, mime: 'application/octet-stream' });
+    // 物品语义校验（palette 可解析/占地冲突/压水压路）也在入库这一刻做——
+    // 上传的可能是 v1（物品层全零，天然通过）或导出工具产的 v2
+    try {
+      validateTerrainItems(terrain, store.itemResolver(worldId));
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
+
+    const canonical = encodeTerrain(terrain); // 统一存 v2（v1 上传重编码，物品层补零）
+    const terrainAsset = store.putAsset({ bytes: canonical, mime: 'application/octet-stream' });
+    const prev = store.getScene(worldId, sceneId);
     const scene: Scene = {
       worldId,
       sceneId,
@@ -368,9 +383,21 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       gridTiles: terrain.gridW,
       pois: req.body?.pois ?? [],
       portals: req.body?.portals ?? [],
+      terrainVersion: (prev?.terrainVersion ?? 0) + 1,
     };
     store.upsertScene(scene);
-    return { scene, bytes: bytes.length };
+    store.setSceneTerrain(worldId, sceneId, canonical, scene.terrainVersion);
+    return { scene, bytes: canonical.length };
+  });
+
+  // 场景地形矩阵全量下载（v2 blob）。响应头带版本，客户端按 (world, scene, version) 缓存；
+  // terrain_patch 版本对不上时也从这里全量重拉。
+  app.get<{ Params: { wid: string; sid: string } }>('/worlds/:wid/scenes/:sid/terrain', async (req, reply) => {
+    const rec = store.getSceneTerrain(req.params.wid, req.params.sid);
+    if (!rec) return reply.code(404).send({ error: 'scene terrain not found' });
+    reply.header('x-terrain-version', String(rec.version));
+    reply.type('application/octet-stream');
+    return reply.send(Buffer.from(rec.bytes));
   });
 
   // 管理端点：存量角色立绘「原地裁边」。把已存立绘裁到贴身盒（trimToContent）重新入库，
@@ -588,6 +615,28 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
 
   // 多人基座：world 维度的连接注册表（world_info 登记，leave_world/close 摘除）+ 演出调度台
   const hub = new WorldHub();
+
+  // 地形 tile 编辑（scene-items）：唯一写入口 editSceneTerrain——校验 → version+1 →
+  // terrain_patch 广播给同世界在场客户端。admin token 门禁（后续玩法意图也走同一函数）。
+  app.post<{
+    Params: { wid: string; sid: string };
+    Body: { edits?: TileEditInput[] } | null;
+  }>('/admin/worlds/:wid/scenes/:sid/tile-edits', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    if (!store.getWorld(req.params.wid)) return reply.code(404).send({ error: 'world not found' });
+    const edits = req.body?.edits;
+    if (!Array.isArray(edits) || edits.length === 0) return reply.code(400).send({ error: 'edits required' });
+    try {
+      const r = editSceneTerrain(store, hub, req.params.wid, req.params.sid, edits);
+      return { version: r.version, applied: r.applied.length, paletteAppend: r.paletteAppend };
+    } catch (e) {
+      if (e instanceof TerrainEditError) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+  });
   // 剧本造物：prop.create(desc) 走造物管线出 spec 并入库（供重载恢复），不扣小红花（非付费造角色）。
   // 审核挡/校验败/异常一律返回 null，execCommand 侧转 stage_abort。
   const makeStageProp: StagePropMaker = async (worldId, desc) => {
@@ -1571,6 +1620,8 @@ export async function handleWsMessage(
       scene: scene ?? null,
       characters: store.listCharacters(worldId, sceneId),
       props: store.listProps(worldId, sceneId),
+      // 物品实体定义（内置+造物）：新场景矩阵 palette 的解引用依据
+      items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
       playerPos: session.playerId ? store.getPlayerTile(worldId, sceneId, session.playerId) : undefined,
     }));
     return;
