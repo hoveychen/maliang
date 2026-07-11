@@ -137,6 +137,8 @@ func _go_to(scene_path: String) -> void:
 	game_audio.play_sfx("click")
 	await get_tree().create_timer(0.15).timeout
 	if scene_path == "res://main.tscn":
+		# 有档案直接进世界：无画质档（新 GPU）仍要跑「建造小世界」intro 定档段（should_run 判定）。
+		IntroDirector.pending = IntroDirector.should_run()
 		Loading.next_scene = scene_path
 		get_tree().change_scene_to_file("res://loading.tscn")
 	else:

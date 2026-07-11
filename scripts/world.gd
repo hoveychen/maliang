@@ -408,8 +408,16 @@ func _ready() -> void:
 	api.name = "Api"
 	add_child(api)
 	_setup_audio()
-	_bootstrap() # 在线引导（best-effort，离线则保留占位 NPC）
-	_watch_world_ready() # 首屏铺完+引导结束→发 world_ready（loading.gd 据此淡出）
+	# 分流：intro 由上游（menu/onboarding）按 IntroDirector.should_run（无画质档 / 未看过建造演出）
+	# 置 pending——与 Benchmark.pending 同款显式开关，避免每个 headless 测试都误入 intro。见分流矩阵。
+	if IntroDirector.pending:
+		IntroDirector.pending = false # 消费掉：一次就够
+		_intro_active = true
+		_intro = IntroDirector.make(self)
+		add_child(_intro) # 编排器 _ready 里早揭幕 + 后台 fetch + 建造演出 + 转正 apply + 标记 intro 已看过
+	else:
+		_bootstrap() # 在线引导（best-effort，离线则保留占位 NPC）
+		_watch_world_ready() # 首屏铺完+引导结束→发 world_ready（loading.gd 据此淡出）
 
 func _setup_audio() -> void:
 	# 麦克风采集抽到 MicRecorder（与 onboarding 共用）；TTS 播放器保留在本场景
@@ -3659,6 +3667,14 @@ func _bootstrap_apply(fetched: Dictionary) -> void:
 			player["logical"] = spot
 			OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
 	_finish_bootstrap()
+
+## intro 编排器（intro 模式下驱动 fetch/apply 与建造演出；现状路径为 null）。
+var _intro: IntroDirector = null
+var _intro_active := false
+
+## 当前是否处于「建造小世界」intro 前置阶段（loading/其它模块可据此调整揭幕节奏）。
+func intro_active() -> bool:
+	return _intro_active
 
 ## 引导收尾：里程碑置终、清 _bootstrapping（world_ready 守望据此揭幕）。fetch/apply 两条出口共用。
 func _finish_bootstrap() -> void:

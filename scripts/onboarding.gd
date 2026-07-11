@@ -660,7 +660,9 @@ func _finish() -> void:
 		profile[k] = answers[k]
 	profile["created_at"] = Time.get_datetime_string_from_system()
 	PlayerProfile.save_profile(profile)
-	# 收尾欢呼后翻进世界（经加载过场遮住首屏铺设与网络角色弹入）
+	# 收尾欢呼后翻进世界。首次进世界必走「建造小世界」intro（教学+建造+可能的定档段）——
+	# 刚写完档案但 intro_seen 仍 false，should_run 必真。
+	IntroDirector.pending = IntroDirector.should_run()
 	var dur := _play("ob_done")
 	if dur > 0.0:
 		await get_tree().create_timer(dur + 0.3).timeout
