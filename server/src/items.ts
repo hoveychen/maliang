@@ -160,6 +160,23 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('snow_present_a', '礼物盒·方', 'winter:present_a', 1, true, ['winter']),
   themed('snow_present_b', '礼物盒·圆', 'winter:present_b', 1, true, ['winter']),
   themed('snow_nutcracker', '胡桃夹子', 'winter:nutcracker', 1, true, ['winter']),
+
+  // ── 医院主题（world-themes P5 半覆盖；全 CC0：Kenney Furniture Kit 拼装）──
+  // renderRef 'hospital:<key>' → 客户端 assets/packs/hospital/pack.json（node 类）。
+  // 地面走 P1 tile 地基 T_TILE(瓷砖)。无现成 CC0 医疗包，老板拍板用家具拼病房/诊室
+  // （Atomic Realm 医院包因禁再分发、与本仓库 PUBLIC 冲突而弃用，见 SOURCES.txt）。
+  themed('hosp_bed', '病床', 'hospital:wardBed', 3, true, ['hospital']),
+  themed('hosp_bed_wide', '双人病床', 'hospital:wardBedWide', 3, true, ['hospital']),
+  themed('hosp_bedside', '床头柜', 'hospital:bedside', 1, true, ['hospital']),
+  themed('hosp_visitor_chair', '陪护椅', 'hospital:visitorChair', 1, true, ['hospital']),
+  themed('hosp_wait_bench', '候诊椅', 'hospital:waitBench', 1, true, ['hospital']),
+  themed('hosp_nurse_desk', '护士站', 'hospital:nurseDesk', 3, true, ['hospital']),
+  themed('hosp_doc_chair', '医生椅', 'hospital:docChair', 1, true, ['hospital']),
+  themed('hosp_sink', '洗手池', 'hospital:handSink', 1, true, ['hospital']),
+  themed('hosp_med_cabinet', '药品柜', 'hospital:medCabinet', 1, true, ['hospital']),
+  themed('hosp_supply_cabinet', '器械柜', 'hospital:supplyCabinet', 1, true, ['hospital']),
+  themed('hosp_waste_bin', '医疗垃圾桶', 'hospital:wasteBin', 1, true, ['hospital']),
+  themed('hosp_floor_lamp', '落地灯', 'hospital:floorLamp', 1, true, ['hospital']),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
