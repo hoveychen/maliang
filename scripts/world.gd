@@ -2858,6 +2858,11 @@ func _on_failed(reason: String) -> void:
 ## 当前场景 id（模型 B：world 含多 scene）。进世界时按初始场景置初值，走 portal（enter_scene）时更新。
 var _scene_id := "village"
 
+## 「家」= 初始世界（初始场景 village）的原点 tile(0,0)。手机「回家」app 的目的地：
+## scene_compose 保证原点 8 tile 内保持开阔空地（出生林间空地），落这里绝不会被围死。
+const HOME_SCENE := "village"
+const HOME_TILE := Vector2i.ZERO
+
 ## 当前场景的传送点（服务端 scenes[].portals / scene_entered 的 scene.portals 下发）。
 ## 运行期结构 { tile: Vector2i, radius: float, to_scene: String, to_tile: Vector2i }。
 var _portals: Array = []
@@ -3150,6 +3155,32 @@ func enter_scene(scene_id: String, arrive_tile := Vector2i(-1, -1)) -> void:
 	_fade_target = 1.0
 	if game_audio != null:
 		game_audio.play_sfx("whoosh") # 黑幕淡入时的过场滑动声
+
+## 手机「回家」app：把迷路/卡住的玩家送回初始世界原点。逃生舱语义——玩家穿传送门进森林后
+## 可能落在被密林围死的落点动不了（森林落点根因），这个 app 保证一键脱困。
+## 在线且不在 village → 走正常换场景过场（黑幕/loading 遮罩 + 服务端 scene_entered 落位），
+## 落在原点空位；已在 village 或离线（无换场景数据）→ 就地把玩家（和跟随的仙子）挪回原点
+## 附近空位解卡，不发换场景报文。
+func _go_home() -> void:
+	_close_phone() # 传送前先收起手机（近身相机/遮罩一并还原）
+	if online and backend != null and _scene_id != HOME_SCENE:
+		enter_scene(HOME_SCENE, HOME_TILE) # 跨场景：过场遮罩接管画面，_on_scene_entered 落在原点
+		return
+	# 已在家 / 离线：没有换场景数据，就地解卡——先停掉当前移动/接近，把玩家搬回原点附近空位。
+	if player.is_empty():
+		return
+	_cancel_player_move()
+	_clear_approach()
+	if game_audio != null:
+		game_audio.play_sfx("whoosh")
+	OccupancyMap.char_unregister(PLAYER_ID)
+	var spot := _find_free_spot(WorldGrid.from_tile_center(HOME_TILE), PLAYER_SPAN)
+	player["logical"] = spot
+	OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	focus_logical = spot
+	var fairy := _find_fairy()
+	if not fairy.is_empty():
+		fairy["logical"] = WorldGrid.wrap_pos(focus_logical + Vector2(2.6, 1.8))
 
 ## 收到 scene_entered：卸载当前场景的角色/物件 → 上新地形并重铺区块 → 生成新场景角色/物件
 ## → 按该场景玩家最后位置落位。顺序保证「地形在 chunk 重铺、角色/玩家落位之前就位」
