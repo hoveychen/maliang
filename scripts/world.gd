@@ -493,14 +493,17 @@ func _apply_graphics_key(key: String, lv: int) -> void:
 		"xray":  # 角色被遮挡时的 X 光穿透剪影（每角色每帧一个全 quad 深度采样）
 			PaperCharacter.set_xray_enabled(on, get_tree())
 
-## 启动应用画质档：定过档（用户/benchmark/backend）就按档应用；没定过档 = 新机器，
-## benchmark 还没跑，移动端先落保守起步档（清晰度取标准 0.7，别让首帧就卡），桌面全最高。
+## 应用当前画质档到场景 + 同步设置页控件（启动、恢复自动、backend 下发三处共用）。
+## 定过档（用户/benchmark/backend）就按档应用；没定过档 = 新机器，benchmark 还没跑，
+## 移动端先落保守起步档（清晰度取标准 0.7，别让首帧就卡），桌面全最高。
 func _apply_saved_graphics() -> void:
 	var g := GraphicsSettings.load_all()
 	if not GraphicsSettings.has_saved() and OS.has_feature("mobile"):
 		g["hi_res"] = 1
+	_gfx_levels = g
 	for key: String in GraphicsSettings.KEYS:
 		_apply_graphics_key(key, int(g[key]))
+		_refresh_gfx_button(key)  # 设置页可能还没建（_gfx_buttons 空）→ 内部自带 null 兜底
 
 ## 设置页画质旋钮改档：即时应用到场景 + 把当前全部旋钮档存进 profile（source=user，
 ## 从此不再被 backend 下发覆盖，除非用户点「恢复自动」）。
@@ -516,15 +519,21 @@ func _on_graphics_cycle(_on: bool, key: String) -> void:
 	_on_graphics_level_changed(key, next)
 	_refresh_gfx_button(key)
 
-## 按钮文案（「角色阴影：开」/「画面清晰度：高清」）+ 按下态跟随当前档。
+## 档位按钮文案（「开」/「高清」/「粗略」…，标题在卡片左侧）+ 按下态跟随当前档。
 func _refresh_gfx_button(key: String) -> void:
 	var b := _gfx_buttons.get(key) as Button
 	if b == null:
 		return
 	var lv := GraphicsSettings.clamp_level(key, int(_gfx_levels.get(key, 0)))
 	var names: Array = GraphicsSettings.LEVEL_NAMES[key]
-	b.text = "%s：%s" % [GraphicsSettings.LABELS[key], names[lv]]
+	b.text = String(names[lv])
 	b.set_pressed_no_signal(lv > 0)
+
+## 设置页「恢复自动画质」：清掉用户 override，本次会话立刻回到未定档的默认，
+## 下次启动会重新查 backend（命中同 GPU 的众包档）或跑 benchmark。
+func _on_gfx_restore_auto() -> void:
+	GraphicsSettings.clear()
+	_apply_saved_graphics()
 
 ## 白天动态天空：渐变 + 卡通云漂移 + 太阳光晕（shaders/sky_day.gdshader）。
 ## ambient 走纯色源不依赖天空 radiance，radiance 取最小档 + 仅材质变更时重烘
@@ -1268,8 +1277,9 @@ func _setup_hud() -> void:
 	_avatar_preview.add_child(avatar_row)
 	_avatar_preview.visible = false
 	settings_page.add_child(_avatar_preview)
-	# —— 画质分区：GraphicsSettings 的 9 个旋钮，点一下升一档（到顶回最省），即时应用 +
-	# 存 profile（source=user）。内容区自带竖向滚动（scroll），多加几行不撑破手机壳。——
+	# —— 画质分区：GraphicsSettings 的 9 个旋钮，每个一张卡片（标题 + 当前档按钮 + 一行
+	# 说明「这个开关到底控制了什么」）。点档位按钮升一档、到顶回最省，即时应用 + 存 profile
+	# （source=user）。内容区自带竖向滚动（scroll），多加几行不撑破手机壳。——
 	var gfx_title := Label.new()
 	gfx_title.text = "画质"
 	gfx_title.add_theme_font_size_override("font_size", 26)
@@ -1278,15 +1288,45 @@ func _setup_hud() -> void:
 	_gfx_levels = GraphicsSettings.load_all()
 	_gfx_buttons = {}
 	for key: String in GraphicsSettings.KEYS:
+		var pad := MarginContainer.new()  # 别让说明文字贴到壳的装饰边框上
+		pad.add_theme_constant_override("margin_left", 4)
+		pad.add_theme_constant_override("margin_right", 4)
+		var card := VBoxContainer.new()
+		card.add_theme_constant_override("separation", 2)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var name_lbl := Label.new()
+		name_lbl.text = String(GraphicsSettings.LABELS[key])
+		name_lbl.add_theme_font_size_override("font_size", 20)
+		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(name_lbl)
 		var b := Button.new()
 		b.toggle_mode = true  # 非 0 档 = 按下态（style_card_button 给 pressed 态上暖黄底）
-		b.add_theme_font_size_override("font_size", 24)
-		b.clip_text = true  # 文案「标题：档名」比壳宽时截断，别把手机壳撑破
+		b.add_theme_font_size_override("font_size", 18)
+		b.clip_text = true  # 档名比按钮宽时截断，别把手机壳撑破
+		b.custom_minimum_size = Vector2(72.0, 0.0)  # 壳内容区仅 ~195px：标题 + 这颗按钮必须挤得下
 		UiAssets.style_card_button(b)
 		b.toggled.connect(_on_graphics_cycle.bind(key))
-		settings_page.add_child(b)
+		row.add_child(b)
+		card.add_child(row)
+		var sub := Label.new()  # 「关掉后会看到什么」——家长照着这行就能自己权衡
+		sub.text = String(GraphicsSettings.SUBTITLES[key])
+		sub.add_theme_font_size_override("font_size", 16)
+		sub.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY  # 中文无空格，按字断行
+		sub.modulate = Color(1.0, 1.0, 1.0, 0.8)
+		card.add_child(sub)
+		pad.add_child(card)
+		settings_page.add_child(pad)
 		_gfx_buttons[key] = b
 		_refresh_gfx_button(key)
+	# 「恢复自动」：清掉用户 override，把定档权交回 benchmark / 后端下发
+	var gfx_auto := Button.new()
+	gfx_auto.text = "恢复自动画质"
+	gfx_auto.add_theme_font_size_override("font_size", 20)
+	gfx_auto.clip_text = true
+	UiAssets.style_card_button(gfx_auto)
+	gfx_auto.pressed.connect(_on_gfx_restore_auto)
+	settings_page.add_child(gfx_auto)
 	_album_pages = { "flowers": flowers_page, "items": items_page, "settings": settings_page }
 	for pid in _album_pages:
 		var pg := _album_pages[pid] as Control

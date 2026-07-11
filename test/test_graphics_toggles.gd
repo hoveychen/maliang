@@ -34,7 +34,8 @@ func _tick() -> void:
 				if not g.has(k):
 					_check("缺旋钮 %s" % k, false, true)
 			_check("默认全最高：角色阴影按下", (g["actor_shadows"] as Button).button_pressed, true)
-			_check("文案带档名", (g["hi_res"] as Button).text, "画面清晰度：高清")
+			_check("按钮只显示档名", (g["hi_res"] as Button).text, "高清")
+			_check("每个旋钮卡片带 subtitle 说明", _subtitles_present(), true)
 		12:
 			# 关「地面阴影」（2 级：点一下 1→0）
 			(_gfx()["ground_shadows"] as Button).button_pressed = false
@@ -50,7 +51,7 @@ func _tick() -> void:
 		16:
 			_check("hi_res 2→0 存档", GraphicsSettings.load_all()["hi_res"], 0)
 			_check("hi_res=0 → 缩放 0.6", is_equal_approx(scene.get_viewport().scaling_3d_scale, 0.6), true)
-			_check("按钮文案跟到省电", (_gfx()["hi_res"] as Button).text, "画面清晰度：省电")
+			_check("按钮文案跟到省电", (_gfx()["hi_res"] as Button).text, "省电")
 			_check("0 档按钮非按下态", (_gfx()["hi_res"] as Button).button_pressed, false)
 			# 新暴露的三个旋钮：各关一次，断言真的落到底层静态态
 			(_gfx()["xray"] as Button).button_pressed = false
@@ -70,6 +71,12 @@ func _tick() -> void:
 		20:
 			_check("xray 回绕开 → 静态态 true", PaperCharacter._xray_enabled, true)
 			_check("xray 存档回 1", GraphicsSettings.load_all()["xray"], 1)
+			scene.call("_on_gfx_restore_auto")  # 恢复自动：清掉 user override
+		21:
+			_check("恢复自动 → 不再是 user override", GraphicsSettings.is_user_override(), false)
+			_check("恢复自动 → 无存档（交回 benchmark/backend）", GraphicsSettings.has_saved(), false)
+			_check("恢复自动 → 场景回默认(地面阴影重开)", scene.get("chunk_manager").get("_ground_shadows"), true)
+			_check("恢复自动 → 按钮跟着回最高档", (_gfx()["hi_res"] as Button).text, "高清")
 		22:
 			if _backup.is_empty():
 				PlayerProfile.clear()
@@ -81,6 +88,17 @@ func _tick() -> void:
 				printerr("graphics_toggles FAILED: %d" % fails)
 		24:
 			quit(fails)
+
+## 每个旋钮的卡片里都要有一行 subtitle（Label 文本 = GraphicsSettings.SUBTITLES[key]）。
+func _subtitles_present() -> bool:
+	var found := {}
+	for n in scene.find_children("*", "Label", true, false):
+		found[(n as Label).text] = true
+	for k: String in GraphicsSettings.KEYS:
+		if not found.has(String(GraphicsSettings.SUBTITLES[k])):
+			printerr("  缺 subtitle: %s" % k)
+			return false
+	return true
 
 func _check(name: String, got: Variant, want: Variant) -> void:
 	if got == want:
