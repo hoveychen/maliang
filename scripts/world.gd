@@ -96,7 +96,8 @@ var _target_dist := GOD_DIST
 var _cur_focus_y := 0.0             ## 相机焦点高度 = focus 所在 tile 的台阶高度（缓动，防上台阶时画面跳变）
 var _env: Environment               ## 世界环境（深度雾起止随 _cur_focus_y 补偿，山顶视角不整体变浓雾）
 var _sun: DirectionalLight3D        ## 太阳灯（画质「角色实时阴影」开关切 shadow_enabled；_setup_environment 存下）
-var _gfx_buttons := {}              ## 画质开关按钮 {key: Button}（设置页；toggled → 应用 + 存档）
+var _gfx_buttons := {}              ## 画质旋钮控件 {key: Button}（设置页；改档 → 应用 + 存档）
+var _gfx_levels := {}               ## 画质旋钮当前档 {key: int level}（存档用的权威副本）
 var _locked: PaperCharacter = null ## lock 跟随的角色（null=god 自由模式）
 var _stage_player_logical := Vector2.ZERO ## 对话玩家站位（小跳落点）
 var _hop_from := Vector2.ZERO      ## 小跳起点 logical
@@ -389,19 +390,19 @@ func _ready() -> void:
 	# 哨兵对：括住整棵树的 _process 跨度（见 ProcProf 注释）
 	add_child(ProcProf.Sentinel.make(true))
 	add_child(ProcProf.Sentinel.make(false))
-	# 移动端 T1 默认档：3D 降采样 0.7（像素填充率是关阴影后的第二堵墙；HUD/UI 走
-	# canvas 仍原生分辨率），随后 AdaptiveQuality 按实测帧时自动升/降档并持久化
-	if OS.has_feature("mobile"):
-		get_viewport().scaling_3d_scale = 0.7
-		# 用户在画质设置里显式存过档就不自动定档（用户接管，免自适应覆盖其 override）
-		if not FileAccess.file_exists("user://perf_sweep") and not GraphicsSettings.has_saved():
-			add_child(AdaptiveQuality.make(self, chunk_manager))
-	# 画质档启动恢复：在自适应/默认之后应用用户 override（节点已就绪：_sun/chunk_manager/_gfx_buttons）
+	# 画质档启动应用（节点已就绪：_sun / chunk_manager / _env）。档位从哪来见
+	# GraphicsSettings：用户设置页 / 本机 benchmark / 后端按 GPU 下发；没定过档的新机器
+	# 在移动端落保守起步档。这里不再做任何自适应定档——那是 benchmark 场景的事。
 	_apply_saved_graphics()
 	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
 	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
 		Engine.max_fps = 0  # 扫频要真实帧时，解除 menu 设的移动端限帧
 		add_child(PerfSweep.make(self, _env))
+	# 画质 benchmark（新机器定档）：世界的渲染负载到这里已经全部就位，而后端/麦克风/引导
+	# 与渲染无关且会引入噪声（网络等待、TTS 播放）——benchmark 模式到此为止。
+	if Benchmark.pending:
+		add_child(Benchmark.make(self))
+		return
 	_setup_backend()
 	api = Api.new()
 	api.name = "Api"
@@ -469,9 +470,13 @@ func _setup_environment() -> void:
 	add_child(we)
 	_env = env
 
-## 幂等应用单个画质开关（设置页 toggle 与启动恢复共用）。self 就是 world，直接够到
-## 太阳灯 / chunk_manager / 环境。键定义见 GraphicsSettings。
-func _apply_graphics_key(key: String, on: bool) -> void:
+## hi_res 各级对应的 3D 渲染缩放（下标 = level）：0 省电 / 1 标准 / 2 高清（原生）。
+const HI_RES_SCALES := [0.6, 0.7, 1.0]
+
+## 幂等应用单个画质旋钮到某一级（设置页、启动恢复、benchmark 试档三处共用）。self 就是
+## world，直接够到太阳灯 / chunk_manager / 环境。键定义与级数见 GraphicsSettings。
+func _apply_graphics_key(key: String, lv: int) -> void:
+	var on := lv > 0  # 2 级旋钮：0 关 1 开
 	match key:
 		"actor_shadows":  # 角色实时定向阴影 ↔ 脚下暗斑
 			if _sun != null:
@@ -482,31 +487,71 @@ func _apply_graphics_key(key: String, on: bool) -> void:
 					c.refresh_ground_shadow()  # 已在场角色立即挂/摘 blob
 		"ground_shadows":  # 地面斜阳椭圆贴片影（树/灌木/建筑）
 			chunk_manager.set_ground_shadows(on)
-		"hi_res":  # 3D 原生分辨率 vs 0.7 降采样（与 AdaptiveQuality 同一旋钮）
-			get_viewport().scaling_3d_scale = 1.0 if on else 0.7
+		"hi_res":  # 3D 渲染分辨率（HUD/UI 走 canvas，恒原生）
+			get_viewport().scaling_3d_scale = HI_RES_SCALES[GraphicsSettings.clamp_level(key, lv)]
 		"fog":  # 深度雾
 			if _env != null:
 				_env.fog_enabled = on
-		"outline":  # SDF 物件描边 pass
+		"outline":  # SDF 物件描边 pass（inverted-hull，每物件画两遍）
 			SdfProp.set_outline_enabled(on, get_tree())
 		"prop_anim":  # 会动的 SDF 物件显/隐
 			chunk_manager.set_props_shown(on)
+		"prop_detail":  # SDF 顶点吸附迭代：精细 4/4，粗略 2/1（物件边缘锐利度）
+			SdfProp.set_snap_iters(4 if on else 2, 4 if on else 1, get_tree())
+		"terrain_detail":  # 地形/水面第二层错速贴图采样
+			chunk_manager.set_terrain_low_detail(not on)
+		"xray":  # 角色被遮挡时的 X 光穿透剪影（每角色每帧一个全 quad 深度采样）
+			PaperCharacter.set_xray_enabled(on, get_tree())
 
-## 读画质档并逐项应用（启动恢复用；只在用户显式存过时 override 自适应定档）。
+## 应用当前画质档到场景 + 同步设置页控件（启动、恢复自动、backend 下发三处共用）。
+## 定过档（用户/benchmark/backend）就按档应用；没定过档 = 新机器，benchmark 还没跑，
+## 移动端先落保守起步档（清晰度取标准 0.7，别让首帧就卡），桌面全最高。
 func _apply_saved_graphics() -> void:
-	if not GraphicsSettings.has_saved():
-		return
 	var g := GraphicsSettings.load_all()
-	for key in GraphicsSettings.KEYS:
-		_apply_graphics_key(key, bool(g[key]))
+	if not GraphicsSettings.has_saved() and OS.has_feature("mobile"):
+		g["hi_res"] = 1
+	_gfx_levels = g
+	for key: String in GraphicsSettings.KEYS:
+		_apply_graphics_key(key, int(g[key]))
+		_refresh_gfx_button(key)  # 设置页可能还没建（_gfx_buttons 空）→ 内部自带 null 兜底
 
-## 设置页画质开关切换：即时应用到场景 + 把当前全部按钮态存进 profile（重启恢复）。
-func _on_graphics_toggled(on: bool, key: String) -> void:
-	_apply_graphics_key(key, on)
-	var settings := {}
-	for k: String in _gfx_buttons:
-		settings[k] = (_gfx_buttons[k] as Button).button_pressed
-	GraphicsSettings.save_all(settings)
+## 设置页画质旋钮改档：即时应用到场景 + 把当前全部旋钮档存进 profile（source=user，
+## 从此不再被 backend 下发覆盖，除非用户点「恢复自动」）。
+func _on_graphics_level_changed(key: String, lv: int) -> void:
+	_apply_graphics_key(key, lv)
+	_gfx_levels[key] = GraphicsSettings.clamp_level(key, lv)
+	GraphicsSettings.save_all(_gfx_levels, "user")
+
+## 设置页点一下画质旋钮：升到下一档，到顶回最省（2 级旋钮就是开 ↔ 关）。
+## toggled 传来的 on 无意义（按钮的按下态由当前档反推，见 _refresh_gfx_button）。
+func _on_graphics_cycle(_on: bool, key: String) -> void:
+	var next := (int(_gfx_levels.get(key, 0)) + 1) % int(GraphicsSettings.LEVELS[key])
+	_on_graphics_level_changed(key, next)
+	_refresh_gfx_button(key)
+
+## 档位按钮文案（「开」/「高清」/「粗略」…，标题在卡片左侧）+ 按下态跟随当前档。
+func _refresh_gfx_button(key: String) -> void:
+	var b := _gfx_buttons.get(key) as Button
+	if b == null:
+		return
+	var lv := GraphicsSettings.clamp_level(key, int(_gfx_levels.get(key, 0)))
+	var names: Array = GraphicsSettings.LEVEL_NAMES[key]
+	b.text = String(names[lv])
+	b.set_pressed_no_signal(lv > 0)
+
+## 设置页「恢复自动画质」：清掉用户 override，本次会话立刻回到未定档的默认，
+## 下次启动会重新查 backend（命中同 GPU 的众包档）或跑 benchmark。
+func _on_gfx_restore_auto() -> void:
+	GraphicsSettings.clear()
+	_apply_saved_graphics()
+
+## 设置页「重新检测画质」：丢掉现有档（含用户 override），重进世界跑一次 benchmark 定档。
+## 换了系统版本、机器发烫、或孩子觉得卡了都可以重来一次。
+func _on_gfx_rebench() -> void:
+	GraphicsSettings.clear()
+	Benchmark.pending = true
+	Loading.next_scene = "res://main.tscn"
+	get_tree().change_scene_to_file("res://loading.tscn")
 
 ## 白天动态天空：渐变 + 卡通云漂移 + 太阳光晕（shaders/sky_day.gdshader）。
 ## ambient 走纯色源不依赖天空 radiance，radiance 取最小档 + 仅材质变更时重烘
@@ -1250,29 +1295,64 @@ func _setup_hud() -> void:
 	_avatar_preview.add_child(avatar_row)
 	_avatar_preview.visible = false
 	settings_page.add_child(_avatar_preview)
-	# —— 画质分区：GraphicsSettings 的 6 个开关，toggle 即时应用 + 存 profile（重启恢复）——
-	# 内容区自带竖向滚动（scroll），多加几行不撑破手机壳。
+	# —— 画质分区：GraphicsSettings 的 9 个旋钮，每个一张卡片（标题 + 当前档按钮 + 一行
+	# 说明「这个开关到底控制了什么」）。点档位按钮升一档、到顶回最省，即时应用 + 存 profile
+	# （source=user）。内容区自带竖向滚动（scroll），多加几行不撑破手机壳。——
 	var gfx_title := Label.new()
 	gfx_title.text = "画质"
 	gfx_title.add_theme_font_size_override("font_size", 26)
 	gfx_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	settings_page.add_child(gfx_title)
-	var gfx_labels := {
-		"actor_shadows": "角色阴影", "ground_shadows": "地面阴影", "hi_res": "高清画质",
-		"fog": "远景雾", "outline": "描边", "prop_anim": "会动物件",
-	}
-	var gfx_now := GraphicsSettings.load_all()
+	_gfx_levels = GraphicsSettings.load_all()
 	_gfx_buttons = {}
 	for key: String in GraphicsSettings.KEYS:
+		var pad := MarginContainer.new()  # 别让说明文字贴到壳的装饰边框上
+		pad.add_theme_constant_override("margin_left", 4)
+		pad.add_theme_constant_override("margin_right", 4)
+		var card := VBoxContainer.new()
+		card.add_theme_constant_override("separation", 2)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var name_lbl := Label.new()
+		name_lbl.text = String(GraphicsSettings.LABELS[key])
+		name_lbl.add_theme_font_size_override("font_size", 20)
+		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(name_lbl)
 		var b := Button.new()
-		b.text = String(gfx_labels[key])
-		b.toggle_mode = true  # 按下=开（style_card_button 给 pressed 态上暖黄底）
-		b.button_pressed = bool(gfx_now[key])
-		b.add_theme_font_size_override("font_size", 24)
+		b.toggle_mode = true  # 非 0 档 = 按下态（style_card_button 给 pressed 态上暖黄底）
+		b.add_theme_font_size_override("font_size", 18)
+		b.clip_text = true  # 档名比按钮宽时截断，别把手机壳撑破
+		b.custom_minimum_size = Vector2(72.0, 0.0)  # 壳内容区仅 ~195px：标题 + 这颗按钮必须挤得下
 		UiAssets.style_card_button(b)
-		b.toggled.connect(_on_graphics_toggled.bind(key))
-		settings_page.add_child(b)
+		b.toggled.connect(_on_graphics_cycle.bind(key))
+		row.add_child(b)
+		card.add_child(row)
+		var sub := Label.new()  # 「关掉后会看到什么」——家长照着这行就能自己权衡
+		sub.text = String(GraphicsSettings.SUBTITLES[key])
+		sub.add_theme_font_size_override("font_size", 16)
+		sub.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY  # 中文无空格，按字断行
+		sub.modulate = Color(1.0, 1.0, 1.0, 0.8)
+		card.add_child(sub)
+		pad.add_child(card)
+		settings_page.add_child(pad)
 		_gfx_buttons[key] = b
+		_refresh_gfx_button(key)
+	# 「恢复自动」：清掉用户 override，把定档权交回 benchmark / 后端下发
+	var gfx_auto := Button.new()
+	gfx_auto.text = "恢复自动画质"
+	gfx_auto.add_theme_font_size_override("font_size", 20)
+	gfx_auto.clip_text = true
+	UiAssets.style_card_button(gfx_auto)
+	gfx_auto.pressed.connect(_on_gfx_restore_auto)
+	settings_page.add_child(gfx_auto)
+	# 「重新检测」：换了系统/发烫/手感变了 → 重跑一次 benchmark 定档
+	var gfx_bench := Button.new()
+	gfx_bench.text = "重新检测画质"
+	gfx_bench.add_theme_font_size_override("font_size", 20)
+	gfx_bench.clip_text = true
+	UiAssets.style_card_button(gfx_bench)
+	gfx_bench.pressed.connect(_on_gfx_rebench)
+	settings_page.add_child(gfx_bench)
 	_album_pages = { "flowers": flowers_page, "items": items_page, "settings": settings_page }
 	for pid in _album_pages:
 		var pg := _album_pages[pid] as Control

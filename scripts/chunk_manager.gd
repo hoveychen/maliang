@@ -105,9 +105,14 @@ var _water_mat: ShaderMaterial = null
 ## wrapped 区块 → 已向 OccupancyMap 登记的占地 [[origin_tile, w, h], ...]，重刷时释放。
 var _claims: Dictionary = {}
 
-## AdaptiveQuality 低配档：地形省掉路/崖壁的第二张细节贴图采样（见 terrain_ground.gdshader），
+## 画质旋钮 terrain_detail 调低：地形省掉路/崖壁的第二张细节贴图采样（见 terrain_ground.gdshader），
 ## 水面省掉第二层错速细节采样（见 water_surface.gdshader）。
+## 记忆态：两张材质是懒建的（首个 slot 才建），启动时应用画质档可能早于建材质，
+## 且 benchmark 会反复换档——必须记住，否则这一档写空/被重建的材质打回默认。
+var _terrain_low_detail := false
+
 func set_terrain_low_detail(on: bool) -> void:
+	_terrain_low_detail = on
 	if _ground_mat != null:
 		_ground_mat.set_shader_parameter("low_detail", on)
 	if _water_mat != null:
@@ -175,6 +180,7 @@ func _make_slot() -> Dictionary:
 	if _ground_mat == null:
 		_ground_mat = _make_ground_mat()
 		_water_mat = _make_water_mat()
+		set_terrain_low_detail(_terrain_low_detail)  # 懒建材质沿用当前档（见 setter 注释）
 	var root := Node3D.new()
 	add_child(root)
 	var tile := MeshInstance3D.new()

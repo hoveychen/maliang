@@ -17,8 +17,8 @@ const SHELL_DENSITY := 0.6
 static var _snap_iters_main := 2 if OS.has_feature("mobile") else 4
 static var _snap_iters_outline := 1 if OS.has_feature("mobile") else 4
 
-## 描边 pass 开关（AdaptiveQuality T2 弱机档摘除——inverted-hull 让每个物件画两遍，
-## 且是全场景最重的逐顶点材质；桌面/T0/T1 恒开）。
+## 描边 pass 开关（画质旋钮 outline——inverted-hull 让每个物件画两遍，
+## 且是全场景最重的逐顶点材质；默认恒开，弱机由 benchmark 定档摘除）。
 static var _outline_enabled := true
 
 static func set_outline_enabled(on: bool, tree: SceneTree) -> void:
@@ -29,7 +29,7 @@ static func set_outline_enabled(on: bool, tree: SceneTree) -> void:
 			continue
 		p._mats[0].next_pass = p._mats[1] if on else null
 
-## AdaptiveQuality 换档：作用于已存在（perf_props 组）与后续创建的所有物件。
+## 换档入口（画质旋钮 prop_detail）：作用于已存在（perf_props 组）与后续创建的所有物件。
 static func set_snap_iters(main_iters: int, outline_iters: int, tree: SceneTree) -> void:
 	_snap_iters_main = main_iters
 	_snap_iters_outline = outline_iters
@@ -148,7 +148,7 @@ func push_uniforms() -> void:
 	_mats[0].set_shader_parameter("prim_pos", pos)
 	_mats[0].set_shader_parameter("prim_rot", rot)
 	_mats[0].set_shader_parameter("prim_params", par)
-	# 描边被 T2 摘除时不给游离 pass 上传（省一半 uniform 流量）；重挂后下帧自然补上
+	# 描边被摘除时不给游离 pass 上传（省一半 uniform 流量）；重挂后下帧自然补上
 	if _mats.size() > 1 and _mats[0].next_pass != null:
 		_mats[1].set_shader_parameter("prim_pos", pos)
 		_mats[1].set_shader_parameter("prim_rot", rot)
