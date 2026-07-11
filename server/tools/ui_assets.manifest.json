@@ -387,36 +387,6 @@
       "prompt": "a cheerful watercolor rolling green meadow with scattered flowers, a tiny village of round cute houses and a windmill in the distance, bright blue sky with fluffy clouds and a smiling sun peeking"
     },
     {
-      "id": "phone3d_front_shell",
-      "kind": "illustration",
-      "targetW": 480,
-      "targetH": 1008,
-      "landscape": false,
-      "candidates": 4,
-      "style": "handmade kindergarten paper craft style, plain white cardstock with subtle paper grain, hand-drawn graphite pencil lines and wax crayon coloring, childlike and charming, flat lighting, no text, no letters, no watermark",
-      "prompt": "front face of a handmade papercraft smartphone toy filling the entire frame edge to edge, a thin hand-drawn pencil rounded-rectangle bezel line traced just inside the outer edge, the area inside the bezel is a large completely blank plain white paper screen with nothing drawn on it, a small pencil-drawn pill-shaped camera island near the top center inside the screen top edge"
-    },
-    {
-      "id": "phone3d_back_shell",
-      "kind": "illustration",
-      "targetW": 480,
-      "targetH": 1008,
-      "landscape": false,
-      "candidates": 4,
-      "style": "handmade kindergarten paper craft style, plain white cardstock with subtle paper grain, hand-drawn graphite pencil lines and wax crayon coloring, childlike and charming, flat lighting, no text, no letters, no watermark",
-      "prompt": "back face of a handmade papercraft smartphone toy filling the entire frame edge to edge, a thin hand-drawn pencil rounded-rectangle outline traced just inside the outer edge, in the top-left corner a big pencil-drawn rounded-square camera island with three large circular camera lenses shaded with wax crayon, a few small crayon doodles (a star, a heart, a flower sticker) scattered on the lower half, mostly empty white cardstock"
-    },
-    {
-      "id": "phone3d_spread_bg",
-      "kind": "illustration",
-      "targetW": 960,
-      "targetH": 1008,
-      "landscape": false,
-      "candidates": 4,
-      "style": "handmade kindergarten paper craft style, plain white cardstock with subtle paper grain, hand-drawn graphite pencil lines and wax crayon coloring, childlike and charming, flat lighting, no text, no letters, no watermark",
-      "prompt": "an open blank double-page spread of a handmade paper journal filling the entire frame edge to edge, plain white cardstock pages with a soft subtle vertical fold crease down the exact center, a thin wax crayon border frame traced around each of the two pages, tiny crayon doodles in the outer corners, the pages are otherwise completely empty"
-    },
-    {
       "id": "phone3d_island",
       "kind": "pencil",
       "targetSize": 200,

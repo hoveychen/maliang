@@ -79,10 +79,20 @@ func build(front_vp: SubViewport, spread_vp: SubViewport) -> void:
 
 ## 正面主屏：状态栏（时钟+信号格）+ 桌面 widget + 3x3 图标分页 + 翻页圆点。
 func _build_front(vp: SubViewport) -> void:
-	var bg := ColorRect.new()
-	bg.color = UiAssets.CARD_BG # 奶油纸面底（P4 换白卡纸贴图后仍垫底）
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vp.add_child(bg)
+	# 屏幕底：微皱白纸（实拍 CC0 纸纹，见 assets/ui/PHONE3D_PAPER_SOURCE.txt）；缺资产回退奶油纯色
+	var paper := UiAssets.tex("phone3d_paper")
+	if paper != null:
+		var tex_bg := TextureRect.new()
+		tex_bg.texture = paper
+		tex_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tex_bg.stretch_mode = TextureRect.STRETCH_SCALE
+		tex_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		vp.add_child(tex_bg)
+	else:
+		var bg := ColorRect.new()
+		bg.color = UiAssets.CARD_BG
+		bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		vp.add_child(bg)
 	var pad := MarginContainer.new()
 	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
 	for side in ["margin_left", "margin_right"]:
@@ -147,7 +157,7 @@ func _build_front(vp: SubViewport) -> void:
 
 ## 跨页 app 视图：返回条（返回键+标题）+ 竖向滚动的页面宿主（flowers/items/settings）。
 func _build_spread(vp: SubViewport) -> void:
-	# 跨页底：AIGC 手账双联页（带中缝折痕+蜡笔边框）；缺资产回退奶油纯色
+	# 跨页底：微皱白纸+中缝折痕阴影（实拍 CC0 纸纹合成，非 AIGC）；缺资产回退奶油纯色
 	var bg_tex := UiAssets.tex("phone3d_spread_bg")
 	if bg_tex != null:
 		var tex_bg := TextureRect.new()
@@ -163,11 +173,11 @@ func _build_spread(vp: SubViewport) -> void:
 		vp.add_child(bg)
 	var pad := MarginContainer.new()
 	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# 边距贴合跨页底图的蜡笔边框（960×1008 里边框离边 ~6-8%），内容都画在框内
-	pad.add_theme_constant_override("margin_left", 64)
-	pad.add_theme_constant_override("margin_right", 64)
-	pad.add_theme_constant_override("margin_top", 44)
-	pad.add_theme_constant_override("margin_bottom", 64)
+	# 纯纸跨页无边框装饰，留呼吸边距即可
+	pad.add_theme_constant_override("margin_left", 48)
+	pad.add_theme_constant_override("margin_right", 48)
+	pad.add_theme_constant_override("margin_top", 36)
+	pad.add_theme_constant_override("margin_bottom", 48)
 	vp.add_child(pad)
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)

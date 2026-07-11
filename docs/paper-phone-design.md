@@ -61,18 +61,22 @@ FRONT ──点手机外/再点入口──▶ STOWED
 
 走 `gen_ui_assets.mjs`,新增清单项(画风统一"白卡纸+铅笔线稿+蜡笔涂色+贴纸",**prompt 禁写 iPhone/Apple 等 IP 名**,用外观描述:"rounded-corner smartphone, pill-shaped island cutout, triple camera rings in rounded square island"):
 
-| 资产 | 用途 |
-|---|---|
-| `phone3d_front_shell` | A 外面:纸质机身正面框(铅笔 bezel),屏幕区由 viewport quad 覆盖 |
-| `phone3d_back_shell` | B 外面:纸质背面(铅笔三摄岛、蜡笔贴纸;圆角外程序白化) |
-| `phone3d_spread_bg` | 跨页内页底(蓝红蜡笔双页框+装订线,裁掉木桌边) |
-| `phone3d_island` | 灵动岛石墨药丸贴片(悬浮正面视口顶部中央) |
-| `phone3d_digit_0..9/colon` | 铅笔手写数字贴片(状态栏时钟逐字拼,Label 隐藏作测试锚点) |
-| app 图标 | 复用现有 `app_flowers/app_items/app_settings` 贴纸 |
+| 资产 | 用途 | 来源 |
+|---|---|---|
+| `phone3d_front_shell` | A 外面纸壳(屏幕区由 viewport quad 覆盖) | 实拍纸纹裁切 |
+| `phone3d_back_shell` | B 外面纸壳+简笔三摄岛(ImageMagick 矢量描) | 实拍纸纹+程序描 |
+| `phone3d_spread_bg` | 跨页内页底(中缝折痕渐变) | 实拍纸纹+程序合成 |
+| `phone3d_paper` | 正面视口屏幕底纸纹 | 实拍纸纹 |
+| `phone3d_island` | 灵动岛石墨药丸贴片(悬浮正面视口顶部中央) | AIGC pencil 模式 |
+| `phone3d_digit_0..9/colon` | 铅笔手写数字贴片(状态栏时钟逐字拼) | AIGC pencil 模式 |
+| app 图标 | 复用现有 `app_flowers/app_items/app_settings` 贴纸 | 既有资产 |
 
-落地备注:面板侧面纸边不用贴图(米白纯色已够);数字/灵动岛走生成器新增的
-`pencil` 模式(白纸生成+亮度键抠,绿幕会吃掉铅笔灰细线);港区 403 时生成走
-两段式 `--emit-jobs` → 首尔机 `fetch_openrouter_images.py` → `--raw-dir`。
+落地备注(2026-07-11 老板返工拍板):**纸壳/跨页底不用 AIGC**——AIGC 合成的"纸的照片"
+带木桌残影/光照不均/边框错位,全部换成实拍 CC0 微皱白纸(ambientCG Paper001 底色 ×
+Paper005 置换 shade 折痕,见 assets/ui/PHONE3D_PAPER_SOURCE.txt),确定性 ImageMagick
+后期。AIGC 仅保留铅笔数字/灵动岛两类透明小贴片(生成器 pencil 模式:白纸生成+亮度键抠,
+绿幕会吃掉铅笔灰细线;港区 403 走两段式 --emit-jobs → 首尔机 → --raw-dir)。
+面板侧面纸边不用贴图(米白纯色已够)。
 
 屏幕区几何由代码常量定义(正面壳按固定屏占比设计),**不再用旧的"从壳贴图自动检测屏区"逻辑**。
 

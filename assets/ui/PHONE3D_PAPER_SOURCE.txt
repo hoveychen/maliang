@@ -1,0 +1,5 @@
+phone3d_front_shell / phone3d_back_shell / phone3d_spread_bg / phone3d_paper
+来源：ambientCG Paper001 + Paper005（https://ambientcg.com，CC0 1.0 公有领域）。
+合成：Paper001 白纸底色 × Paper005 置换图 shade 光照（微皱折痕），ImageMagick 确定性
+后期（裁切/背面简笔三摄岛/跨页中缝折痕渐变），无 AIGC 生成。配方见 git 历史与
+docs/paper-phone-design.md。
