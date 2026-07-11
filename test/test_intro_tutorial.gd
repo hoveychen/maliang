@@ -24,6 +24,8 @@ func _initialize() -> void:
 	var p := PlayerProfile.load_profile()
 	p["intro_seen"] = false # 首次：演教学段
 	PlayerProfile.save_profile(p)
+	# 预置画质档 → 跳过内嵌 benchmark 段：本测只驱动教学段（走路/靠近/开口），benchmark 由 test_intro_benchmark 覆盖
+	GraphicsSettings.save_all(GraphicsSettings.all_max(), "user")
 	scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	process_frame.connect(_tick)

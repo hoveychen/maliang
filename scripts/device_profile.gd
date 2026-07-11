@@ -10,7 +10,9 @@ extends RefCounted
 
 ## benchmark 口径版本。渲染管线 / 负载场景 / 旋钮集合变了就 +1，让旧样本自然作废。
 ## 必须与 server/src/device_profile.ts 的 BENCH_VERSION 一致（跨语言，只能靠这行注释互相看住）。
-const BENCH_VERSION := 1
+## v2（P5）：压测负载从染色 critter 换成 seed 村民图集（真立绘纹理+idle 动画）、采样期冻结世界动态，
+##          渲染成本口径变了 → 旧 v1 众包样本作废。
+const BENCH_VERSION := 2
 
 const DEVICE_ID_KEY := "device_id"
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregateLevels, normalizeGpu, sanitizeLevels, sanitizeSample } from '../src/device_profile.ts';
+import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeLevels, sanitizeSample } from '../src/device_profile.ts';
 import { buildServer } from '../src/server.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
@@ -100,7 +100,7 @@ test('/device-profile: 两台同 GPU 上传 → 下发逐旋钮取最保守', as
     app.inject({
       method: 'POST',
       url: '/device-profile',
-      payload: { gpu: 'Mali-G57 MC2', benchVersion: 1, deviceId, levels, p95Ms, hit: true },
+      payload: { gpu: 'Mali-G57 MC2', benchVersion: BENCH_VERSION, deviceId, levels, p95Ms, hit: true },
     });
 
   assert.equal((await post('dev-a', { actor_shadows: 1, hi_res: 2 }, 28)).statusCode, 200);

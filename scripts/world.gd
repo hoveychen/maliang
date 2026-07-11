@@ -286,6 +286,7 @@ var _executors: Array = []        ## 活跃的 BehaviorExecutor
 var _stage: StageAgent            ## 舞台协议大脑（剧本系统，见 stage_agent.gd）；_setup_backend 接线
 var _hud: HudFactory              ## 舞台 HUD 工厂（计分/倒计时/toast，见 hud_factory.gd）；_setup_hud 建
 var _stage_active := false        ## 观演/游戏态：期间吞玩家输入，StageAgent 全权调度演出
+var _bench_freeze := false         ## intro benchmark 采样期：冻结世界动态（仙子/村民/玩家输入）保证可复现帧
 var _stage_drives: Array = []     ## 进行中的完成型舞台命令 { ex:BehaviorExecutor, done:Callable }
 var _stage_holds: Array = []      ## 设置型持续驱动的执行器（follow/flee）：收场统一 cancel（永不自完成）
 var _stage_speaks: Array = []     ## 进行中的舞台念白 { done:Callable, deadline:float, started:bool }
@@ -854,6 +855,8 @@ func _setup_fairy_offline() -> void:
 ## 小仙子随从每帧驱动：悬浮漂移跟在玩家旁（玩家跑动时拖尾追赶，静止时缓慢环绕），
 ## 轻微上下浮动。永远由这里驱动，不吃行为脚本（见 _run_behavior）。
 func _update_fairy(delta: float) -> void:
+	if _bench_freeze:
+		return # benchmark 采样期：仙子凝神注魔定格（不飘、不聊、不追随），保持负载恒定
 	var fairy := _find_fairy()
 	if fairy.is_empty() or player.is_empty():
 		return
@@ -2394,6 +2397,8 @@ func _step_remote_actors(_delta: float) -> void:
 		ra["logical"] = buf2.sample(render_ms, ra["logical"])
 
 func _step_executors(delta: float) -> void:
+	if _bench_freeze:
+		return # benchmark 采样期：村民停走定格（不 step 行为脚本），保持可见负载恒定
 	for ex in _executors:
 		ex.step(delta)
 	# 单趟分拣（旧版两次 filter 每帧各分配一个数组+Callable，无人完成时纯浪费）
@@ -2683,6 +2688,10 @@ func _update_hud() -> void:
 	]
 
 func _unhandled_input(event: InputEvent) -> void:
+	# benchmark 采样期：吞掉一切玩家输入（点击移动/手势/缩放），玩家不动→相机不动→可复现帧。
+	# 注：将来若把「家长长按跳过 intro」接到输入，须让它绕过这道门（否则采样期跳不了）。
+	if _bench_freeze:
+		return
 	# 观演/游戏态：StageAgent 全权调度演出，吞掉一切玩家输入（点击移动/进对话/手势/缩放）。
 	# 唯一例外——「点角色」这类游戏规则（躲猫猫抓人/点选）仍要探测：命中被 watch 的演员即上行 tap 事件。
 	# 玩家想退场（"不玩了"）走别的通道（提词/横幅按钮），不从这里放行。
@@ -3676,6 +3685,12 @@ var _intro_active := false
 ## 当前是否处于「建造小世界」intro 前置阶段（loading/其它模块可据此调整揭幕节奏）。
 func intro_active() -> bool:
 	return _intro_active
+
+## intro 内嵌 benchmark 采样期冻结世界动态（由 Benchmark embedded 模式开关，见设计 D5）：
+## 仙子定格、村民停走、吞玩家移动输入——采样对帧时的度量要求可见负载恒定，任何飘/走/点走都会
+## 改变渲染负载 → p95 失真、贪心比的是噪声。采样窗之间画质档爬升本身即「世界越来越清晰」的建造演出。
+func set_bench_freeze(on: bool) -> void:
+	_bench_freeze = on
 
 # ── intro 教学「开口说话」步（P4）───────────────────────────────────────────
 # 只用本地 VAD 检测「孩子开口」这个手势——不建 ASR 会话、不上传任何 PCM、不理解内容
