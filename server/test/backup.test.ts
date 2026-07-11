@@ -259,4 +259,79 @@ describe('备份端点门禁', () => {
     assert.match(listing, /world\.db/);
     assert.match(listing, /manifest\.json/);
   });
+
+  it('导入无 token → 403', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/restore',
+      headers: { 'content-type': 'application/gzip' },
+      payload: Buffer.from('x'),
+    });
+    assert.equal(res.statusCode, 403);
+  });
+
+  it('导入坏包 → 400，且明确说是包的问题', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/restore',
+      headers: { 'x-admin-token': TOKEN, 'content-type': 'application/gzip' },
+      payload: Buffer.from('这不是 tar.gz'),
+    });
+    assert.equal(res.statusCode, 400);
+    assert.match(JSON.parse(res.payload).error, /有效的备份包/);
+  });
+
+  /**
+   * 端到端往返 —— 这条才是老板真正买单的那件事：
+   * 世界毁了以后，拿着导出的包，能不能把数据一模一样地拿回来。
+   */
+  it('往返：导出 → 数据被毁 → 导入 → 数据一模一样回来了', async () => {
+    // 通过公开 API 造一个真实世界（不是直接戳 store）
+    const created = await app.inject({
+      method: 'POST',
+      url: '/worlds',
+      payload: {},
+    });
+    const worldId = JSON.parse(created.payload).id as string;
+
+    // 导出
+    const dump = await app.inject({
+      method: 'GET',
+      url: '/admin/backup',
+      headers: { 'x-admin-token': TOKEN },
+    });
+    assert.equal(dump.statusCode, 200);
+    const tgz = join(dataDir, 'roundtrip.tar.gz');
+    writeFileSync(tgz, dump.rawPayload);
+    const before = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/debug/api/overview', headers: { 'x-admin-token': TOKEN } })).payload,
+    ) as { worlds: number };
+
+    // 毁数据：再造几个世界，让现状明显偏离备份那一刻
+    for (let i = 0; i < 3; i++) await app.inject({ method: 'POST', url: '/worlds', payload: {} });
+    const damaged = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/debug/api/overview', headers: { 'x-admin-token': TOKEN } })).payload,
+    ) as { worlds: number };
+    assert.equal(damaged.worlds, before.worlds + 3, '前置：数据确实被改乱了');
+
+    // 导入备份
+    const restored = await app.inject({
+      method: 'POST',
+      url: '/admin/restore',
+      headers: { 'x-admin-token': TOKEN, 'content-type': 'application/gzip' },
+      payload: readFileSync(tgz),
+    });
+    assert.equal(restored.statusCode, 200, restored.payload);
+    const body = JSON.parse(restored.payload) as { ok: boolean; preRestoreBackup: string };
+    assert.equal(body.ok, true);
+    assert.ok(existsSync(body.preRestoreBackup), '覆盖前的兜底包应真的落盘');
+
+    // 数据回到了备份那一刻：世界数一致，且备份里那个世界还在（服务端立刻可用，无需重启）
+    const after = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/debug/api/overview', headers: { 'x-admin-token': TOKEN } })).payload,
+    ) as { worlds: number };
+    assert.equal(after.worlds, before.worlds, '导入后世界数应回到备份那一刻');
+    const w = await app.inject({ method: 'GET', url: `/debug/api/worlds/${worldId}`, headers: { 'x-admin-token': TOKEN } });
+    assert.equal(w.statusCode, 200, '备份里的世界导入后应当还在，且服务端不用重启就能读到');
+  });
 });

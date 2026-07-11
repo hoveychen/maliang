@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createWriteStream, existsSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { pipeline } from 'node:stream';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
@@ -8,7 +10,10 @@ import type { ServiceAdapters, ASRStream } from './adapters/types.ts';
 import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
-import { startBackup, type BackupExport } from './backup.ts';
+import { startBackup, restoreBackup, type BackupExport } from './backup.ts';
+
+/** 上传备份包的体量兜底。正常包只有几十 MB，这个数只是防止有人拿它当上传洞。 */
+const MAX_RESTORE_UPLOAD = 2 * 1024 * 1024 * 1024;
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
 import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
@@ -614,6 +619,48 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       .header('content-disposition', `attachment; filename="${out.filename}"`)
       .header('x-backup-manifest', JSON.stringify(out.manifest))
       .send(out.stream);
+  });
+
+  // 上传的备份包直接流式落到磁盘临时文件，不进内存——fastify 默认只认 json/urlencoded，
+  // 且默认 bodyLimit 只有 1MB，几十 MB 的包必须走自定义 parser 才不会被顶回来。
+  app.addContentTypeParser('application/gzip', (_req, payload, done) => {
+    const tarPath = path.join(os.tmpdir(), `maliang-restore-${randomUUID()}.tar.gz`);
+    const ws = createWriteStream(tarPath);
+    let size = 0;
+    payload.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_RESTORE_UPLOAD) payload.destroy(new Error('备份包过大'));
+    });
+    pipeline(payload, ws, (err) => {
+      if (err) {
+        rmSync(tarPath, { force: true });
+        done(err);
+        return;
+      }
+      done(null, { tarPath });
+    });
+  });
+
+  // 全量数据导入：**破坏性**，当前数据会被整个换掉。restoreBackup 内部保证——
+  // 包坏了在校验阶段就失败（现网数据没动过），且覆盖前会先把当前数据另存一份兜底包。
+  app.post('/admin/restore', async (req, reply) => {
+    if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    const tarPath = (req.body as { tarPath?: string } | undefined)?.tarPath;
+    if (!tarPath) {
+      return reply.code(400).send({ error: '请以 content-type: application/gzip 上传 .tar.gz 备份包' });
+    }
+    try {
+      const res = await restoreBackup(store, tarPath);
+      app.log.warn(
+        { manifest: res.manifest, preRestoreBackup: res.preRestoreBackup },
+        'data restored from backup — 现网数据已被整体替换',
+      );
+      return { ok: true, manifest: res.manifest, preRestoreBackup: res.preRestoreBackup };
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    } finally {
+      rmSync(tarPath, { force: true });
+    }
   });
   // /debug 页面：优先托管 admin/dist（React 多页面管理台，Docker 多阶段构建产出）。
   // HTML/JS 是公开壳子不含数据（数据全在带门禁的 /debug/api/*），页面本身不设 token 门——
