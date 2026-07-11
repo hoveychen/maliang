@@ -46,7 +46,10 @@ export const CREATION_OPTIONS: readonly CreationOption[] = [
  */
 export const ICON_PROMPTS: Record<string, string> = {
   // kind → 生物贴纸（本就是生物,可有脸）
-  cat: 'a cute cat', dog: 'a cute puppy dog', rabbit: 'a cute bunny rabbit',
+  // rabbit 要写清毛色与细节：只说 "a cute bunny rabbit" 时模型给了一块纯色剪影，
+  // 既和同排有细节的猫狗不同调，又自带颜色会跟「颜色」那轮的选项打架。
+  cat: 'a cute cat', dog: 'a cute puppy dog',
+  rabbit: 'a cute fluffy white bunny rabbit with long ears and pink inner ears, sitting, front view, natural fur shading',
   dragon: 'a cute friendly baby dragon', bird: 'a cute little bird', fish: 'a cute goldfish',
   bear: 'a cute teddy bear', person: 'a cute cartoon kid', sprite: 'a cute magical fairy with wings',
   // color → 无脸的一滴颜料（纯色一眼可辨,绝不加脸/手脚）
@@ -55,12 +58,14 @@ export const ICON_PROMPTS: Record<string, string> = {
   blue: 'a single glossy droplet of bright blue paint, no face', purple: 'a single glossy droplet of bright purple paint, no face',
   pink: 'a single glossy droplet of bright pink paint, no face', white: 'a single glossy droplet of white paint, no face',
   black: 'a single glossy droplet of black paint, no face',
-  // size → 体型剪影（瘦/正常/胖,虚线勾边,一眼看懂大小）
-  small: 'a minimal icon of a thin skinny slim body figure silhouette drawn with a dashed dotted outline, front view, no face',
-  medium: 'a minimal icon of a normal average body figure silhouette drawn with a dashed dotted outline, front view, no face',
-  big: 'a minimal icon of a big fat round chubby body figure silhouette drawn with a dashed dotted outline, front view, no face',
+  // size → 体型剪影（瘦/正常/胖）。三张要能横着比：**同一个灰色、同一个站姿、同样全身**，
+  // 只有胖瘦不同。旧版没锁死这些，模型每张换一个颜色、中号还只画了半身，三张摆一起看不出大小。
+  small: 'a minimal icon of one full-body standing figure silhouette from head to feet, filled solid medium grey, front view, arms down at the sides, very thin narrow skinny body, identical grey color and identical standing pose to the medium and big body icons, no face',
+  medium: 'a minimal icon of one full-body standing figure silhouette from head to feet, filled solid medium grey, front view, arms down at the sides, normal average width body, identical grey color and identical standing pose to the small and big body icons, no face',
+  big: 'a minimal icon of one full-body standing figure silhouette from head to feet, filled solid medium grey, front view, arms down at the sides, very wide fat round chubby body, identical grey color and identical standing pose to the small and medium body icons, no face',
   // trait → 象征物（clean symbol,无身体无脸;会飞/会游泳要动感）
-  fly: 'a dynamic action icon of a bird soaring upward with curved speed motion lines showing flight, symbol only, no face',
+  // fly 只留翅膀：旧版说 "a bird soaring" 时模型画出了长翅膀的鱼，和隔壁「会游泳」的鱼撕不开。
+  fly: 'a dynamic action icon of a pair of feathered wings spread wide and flapping upward with curved speed motion lines, wings only, no bird, no animal body, no fish, symbol only, no face',
   swim: 'a dynamic action icon of a fish diving through curvy water waves with splash and motion lines showing swimming, symbol only, no face',
   fluffy: 'a round fuzzy furball completely covered in soft fur with many little fur tufts and spikes sticking out all around the edge, NOT a cloud, symbol only, no face',
   glow: 'a bright glowing yellow star with radiating sparkles, symbol only, no face',
