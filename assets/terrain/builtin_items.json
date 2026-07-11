@@ -1780,5 +1780,61 @@
     "themes": [
       "roman"
     ]
+  },
+  {
+    "id": "cn_pagoda",
+    "worldId": null,
+    "name": "宝塔",
+    "renderRef": "ancient_china:pagoda",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "ancient_china"
+    ]
+  },
+  {
+    "id": "cn_archway",
+    "worldId": null,
+    "name": "牌坊",
+    "renderRef": "ancient_china:torii",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "ancient_china"
+    ]
+  },
+  {
+    "id": "cn_pavilion",
+    "worldId": null,
+    "name": "古亭",
+    "renderRef": "ancient_china:shrine_a",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "ancient_china"
+    ]
+  },
+  {
+    "id": "cn_shrine",
+    "worldId": null,
+    "name": "神龛",
+    "renderRef": "ancient_china:shrine_b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "ancient_china"
+    ]
   }
 ]

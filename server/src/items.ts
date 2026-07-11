@@ -189,6 +189,15 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('roman_tower_b', '瞭望石塔', 'roman:roman_tower_b', 3, true, ['roman']),
   themed('roman_column_base', '石柱基', 'roman:roman_column_base', 3, true, ['roman']),
   themed('roman_fort', '罗马要塞', 'roman:roman_fort', 5, true, ['roman']),
+
+  // ── 中国古代主题（world-themes P6 硬缺口；CC-BY+CC0 东方古建散件拼凑）──
+  // 老板拍板：无 CC0 中式包（CS Studio 禁再分发），用 poly.pizza CC-BY/CC0 散件
+  // （CC-BY 允许再分发只需署名）。薄主题 4 件、画风混杂，CC-BY 作者须记入 P7 署名页。
+  // 见 assets/ancient_china/SOURCES.txt。renderRef 'ancient_china:<key>'。
+  themed('cn_pagoda', '宝塔', 'ancient_china:pagoda', 3, true, ['ancient_china']),
+  themed('cn_archway', '牌坊', 'ancient_china:torii', 3, true, ['ancient_china']),
+  themed('cn_pavilion', '古亭', 'ancient_china:shrine_a', 3, true, ['ancient_china']),
+  themed('cn_shrine', '神龛', 'ancient_china:shrine_b', 3, true, ['ancient_china']),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
