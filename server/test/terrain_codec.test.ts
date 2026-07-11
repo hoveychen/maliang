@@ -41,8 +41,8 @@ function v1Bytes(mut?: (t: Terrain) => void): Uint8Array {
 test('v2 round-trip：九平面 + palette 逐字节一致', () => {
   const t = terrain((x) => {
     x.palette = ['tree_puff_a', 'house_0', '小明的花'];
-    x.itemRef[100] = 1; x.itemArg[100] = 0b0110; // 变体位保留原样往返
-    x.itemRef[200] = 3; x.itemArg[200] = 2;      // yaw 180°
+    x.itemRef[100] = 1; x.itemArg[100] = 57;   // yaw ≈80°
+    x.itemRef[200] = 3; x.itemArg[200] = 128;  // yaw 180°
   });
   const back = decodeTerrain(encodeTerrain(t));
 

@@ -16,7 +16,7 @@ func _init() -> void:
 
 	# ── 森林 .mltr 合法、与村庄不同 ───────────────────────────────────────
 	var forest := FOREST.build_terrain_bytes()
-	fails += _check("森林字节长度正确", forest.size(), HEADER + 3 * n * n)
+	fails += _check("森林字节长度正确（v2 九平面+palette）", forest.size() >= HEADER + 9 * n * n + 1, true)
 
 	# 先把 TerrainMap 落成村庄地形，再载森林 → 必然 changed
 	TerrainMap.reset()

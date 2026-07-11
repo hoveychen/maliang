@@ -4,7 +4,7 @@ import {
   BUILTIN_ITEMS, getBuiltinItem, resolveBuiltin,
   footprintOrigin, rotatedFootprint, buildStaticOccupancy, validateTerrainItems,
 } from '../src/items.ts';
-import { emptyTerrain, T_PATH, T_WATER, REQUIRED_GRID } from '../src/terrain.ts';
+import { argYawDeg, yawToArg, emptyTerrain, T_PATH, T_WATER, REQUIRED_GRID } from '../src/terrain.ts';
 import { WorldStore } from '../src/persistence.ts';
 import type { ItemDef } from '../src/types.ts';
 
@@ -37,13 +37,24 @@ test('footprintOrigin：奇数边锚点居中', () => {
   assert.deepEqual(footprintOrigin(10, 20, 3, 3), [9, 19]);
 });
 
-test('rotatedFootprint：90/270 交换宽高，方形恒等', () => {
+test('rotatedFootprint：就近象限 90/270 交换宽高，方形恒等', () => {
   const def = { ...getBuiltinItem('house_0')!, footprintW: 3, footprintH: 1 };
-  assert.deepEqual(rotatedFootprint(def, 0), [3, 1]);
-  assert.deepEqual(rotatedFootprint(def, 1), [1, 3]); // 90°
-  assert.deepEqual(rotatedFootprint(def, 2), [3, 1]); // 180°
-  assert.deepEqual(rotatedFootprint(def, 3), [1, 3]); // 270°
-  assert.deepEqual(rotatedFootprint(getBuiltinItem('house_0')!, 1), [3, 3]);
+  assert.deepEqual(rotatedFootprint(def, yawToArg(0)), [3, 1]);
+  assert.deepEqual(rotatedFootprint(def, yawToArg(90)), [1, 3]);
+  assert.deepEqual(rotatedFootprint(def, yawToArg(180)), [3, 1]);
+  assert.deepEqual(rotatedFootprint(def, yawToArg(270)), [1, 3]);
+  assert.deepEqual(rotatedFootprint(def, yawToArg(100)), [1, 3], '100° 就近 90°');
+  assert.deepEqual(rotatedFootprint(getBuiltinItem('house_0')!, yawToArg(90)), [3, 3]);
+});
+
+test('yaw ↔ arg：256 档往返误差 < 1 档（手调角度不丢）', () => {
+  for (const deg of [0, 40, 90, 150, 190, 210, 270, 300, 359]) {
+    const back = argYawDeg(yawToArg(deg));
+    const diff = Math.min(Math.abs(back - deg), 360 - Math.abs(back - deg));
+    assert.ok(diff <= 360 / 256 / 2 + 1e-9, `${deg}° → ${back}°`);
+  }
+  assert.equal(yawToArg(360), 0);
+  assert.equal(yawToArg(-90), yawToArg(270));
 });
 
 // ── 派生占用 + 语义校验 ──────────────────────────────────────────────────

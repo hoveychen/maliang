@@ -12,7 +12,9 @@ func _init() -> void:
 	var fails := 0
 	var n := WorldGrid.GRID_TILES
 	var count := n * n
-	var v1 := EX.build_terrain_bytes()
+	# 导出工具已产 v2；本测试要一份纯地貌 v1 作底——裁前三平面降版即可
+	var v1 := EX.build_terrain_bytes().slice(0, HEADER + 3 * count)
+	v1[4] = TerrainMap.MLTR_VERSION_1
 
 	# ── v1 兼容：物品层补零，与本地 _paint() 一致 → changed=false ──────────
 	TerrainMap.reset()
@@ -25,7 +27,7 @@ func _init() -> void:
 	# ── v2：树挂 (10,10) 朝向 180°，边缘全空 ───────────────────────────────
 	var tile := Vector2i(10, 10)
 	var idx := tile.y * n + tile.x
-	var v2 := _v2_from_v1(v1, ["tree_puff_a", "小明的花"], { idx: [1, 2], (idx + 3): [2, 1] })
+	var v2 := _v2_from_v1(v1, ["tree_puff_a", "小明的花"], { idx: [1, 128], (idx + 3): [2, 64] })
 	TerrainMap.reset()
 	r = TerrainMap.load_from_bytes(v2)
 	fails += _check("v2 载入 ok", r["ok"], true)
@@ -43,7 +45,7 @@ func _init() -> void:
 	fails += _check("重载同 v2 changed=false", r["changed"], false)
 
 	# 物品挪一格 → changed=true（地貌三平面没变也要触发重铺）
-	var moved := _v2_from_v1(v1, ["tree_puff_a", "小明的花"], { (idx + 1): [1, 2], (idx + 3): [2, 1] })
+	var moved := _v2_from_v1(v1, ["tree_puff_a", "小明的花"], { (idx + 1): [1, 128], (idx + 3): [2, 64] })
 	r = TerrainMap.load_from_bytes(moved)
 	fails += _check("物品挪格 changed=true", r["changed"], true)
 

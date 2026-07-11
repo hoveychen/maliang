@@ -189,14 +189,15 @@ static func tile_item_id(t: Vector2i) -> String:
 	var ref := _item_ref[_idx(t)]
 	return "" if ref == 0 else _palette[ref - 1]
 
-## 物品参数字节（bits0-1 朝向四象限，其余保留）。
+## 物品参数字节（朝向全字节 256 档，与 server yawToArg 对应）。
 static func tile_item_arg(t: Vector2i) -> int:
 	_ensure_built()
 	return _item_arg[_idx(t)]
 
-## 物品语义朝向（0/90/180/270 度）。视觉抖动另由 tile hash 派生，不在此。
+## 物品朝向（256 档 ≈1.4°/档，保住地标/SDF 物件的手调角度）。
+## 缩放类视觉抖动另由 tile hash 派生，不在此。
 static func tile_item_yaw_deg(t: Vector2i) -> float:
-	return float((tile_item_arg(t) & 0b11) * 90)
+	return float(tile_item_arg(t)) * 360.0 / 256.0
 
 ## tile 某面边缘挂的物品实体 id（EDGE_N/E/S/W）；一期数据位恒空。
 static func edge_item_id(t: Vector2i, side: int) -> String:

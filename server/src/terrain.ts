@@ -17,7 +17,7 @@
  *   depths   u8[W*H]            水深（湖床下挖级数，只对水 tile 非零）
  *   -- 以下 v2 新增 --
  *   itemRef  u8[W*H]            0=无物品 / 1..count=palette 索引（多 tile 物品只写锚点）
- *   itemArg  u8[W*H]            bits0-1 朝向四象限（×90°）/ bits2-7 保留
+ *   itemArg  u8[W*H]            朝向：全字节 256 档（arg×360/256 度）
  *   edgeN/E/S/W u8[W*H] ×4      边缘挂载 palette 索引，一期恒 0
  *   palette  count u8 + count × (len u8 + item_id UTF-8)
  *
@@ -62,7 +62,7 @@ export interface Terrain {
   depths: Uint8Array;
   /** 物品引用平面：0=无 / 1..N=palette 索引（多 tile 物品只写锚点 tile）。 */
   itemRef: Uint8Array;
-  /** 物品参数平面：bits0-1 朝向四象限，其余保留。 */
+  /** 物品参数平面：朝向全字节 256 档（argYawDeg/yawToArg）。 */
   itemArg: Uint8Array;
   /** 边缘挂载平面 N/E/S/W（一期恒 0，数据位）。 */
   edges: [Uint8Array, Uint8Array, Uint8Array, Uint8Array];
@@ -89,9 +89,15 @@ export function emptyTerrain(): Terrain {
   };
 }
 
-/** itemArg 的朝向四象限（0/90/180/270 度）。 */
+/** itemArg 朝向：全字节 256 档（≈1.4°/档），保住地标/SDF 物件的手调角度。 */
 export function argYawDeg(arg: number): number {
-  return (arg & 0b11) * 90;
+  return (arg & 0xff) * (360 / 256);
+}
+
+/** 朝向角 → itemArg 字节（就近取档，任意角度归一到 [0,360)）。 */
+export function yawToArg(deg: number): number {
+  const norm = ((deg % 360) + 360) % 360;
+  return Math.round(norm / (360 / 256)) % 256;
 }
 
 function planes(t: Terrain): Uint8Array[] {

@@ -70,28 +70,16 @@ tile 矩阵（九张平面 + palette，一份自包含 blob）
 
 ### 2.1 items 实体表（统一物品定义）
 
-SQLite 新表（替代 `props` 表，见 §5 迁移）：
+统一的实体形状是 `ItemDef`（server/src/types.ts）：`id / worldId / name / renderRef /
+spec? / footprintW/H（奇数边锚点居中）/ blocking / pathOk / wander`。存放分两半：
 
-```
-items(
-  id TEXT PRIMARY KEY,       -- 内置项用众所周知 id（'tree_puff_a'…），造物用生成 id
-  world_id TEXT NULL,        -- NULL = 内置全局定义；非空 = 该 world 的语音造物
-  name TEXT,                 -- 显示名（"苹果树"/孩子起的名字）
-  render_ref TEXT,           -- 渲染引用：'baked:tree_puff_a' | 'kaykit:house_0' |
-                             --   'sdf_res:walking_hut' | 'sdf_inline'（spec 字段内联）
-  spec TEXT NULL,            -- sdf_inline 时的 LLM 生成 SDF spec JSON
-  footprint_w INT, footprint_h INT,   -- 占地（1×1 / 3×3…），锚点展开
-  blocking INT,              -- 0=可穿行(草丛) 1=占位
-  path_ok INT,               -- 允许压路（水井）
-  wander REAL,               -- SDF 物件锚点游走半径（米），0=不动
-  created_at INT
-)
-```
+- **内置定义 = 代码常量**（`server/src/items.ts` `BUILTIN_ITEMS`，22 项：tree_puff_a/b/c、
+  bush_puff、rock_0/1/2、tuft_0/1、house_0..3、well、windmill + 7 个 SDF 物件）。
+  render_ref 与客户端 preload 映射表必须联动改，本质是代码契约，不落库省掉 seed 迁移。
+- **语音造物 = SQLite `items` 表**（`id PK, world_id, data JSON`，替代 `props` 表，见 §5 迁移），
+  每个视觉变体一行（palette 空间足够，不需要 variant 位）。
 
-- **内置 seed ≈ 21 行**：tree_puff_a/b/c、bush_puff、rock_0/1/2、tuft_0/1、house_0..3、
-  well、windmill、walking_hut、hop_mailbox、nodding_flower、pinwheel、paper_note、crayon、village_sign。
-  语义（footprint/blocking/wander）从现硬编码表迁入；每个视觉变体一行（palette 空间足够，
-  不再需要 variant 位）。
+`getItemDef(worldId, id)` 先查内置常量再查该 world 造物行；矩阵校验经 `itemResolver(worldId)`。
 - **语音造物插新行**（`render_ref='sdf_inline'` + spec 内联），与内置项同表同机制——
   这就是"可克隆/引用"：同一造物可以被多个 tile 引用（孩子把一朵花种满一排）。
 - 客户端渲染绑定：`render_ref` 前缀分发——`baked:`/`kaykit:` 查 GDScript preload 映射表
@@ -112,7 +100,8 @@ types      u8[N]   0 草 / 1 路 / 2 水            （沿用 v1）
 heights    u8[N]   0..255 级台阶                 （沿用 v1）
 depths     u8[N]   水深，仅水 tile 非零           （沿用 v1）
 item_ref   u8[N]   0=无物品 / 1..255=palette 索引 （新增）
-item_arg   u8[N]   bits0-1 朝向四象限 / bits2-7 保留（新增）
+item_arg   u8[N]   朝向全字节 256 档（≈1.4°/档）——地标/SDF 物件的手调角度
+                   （40°/150°/190°…）装不进四象限，实现时定为全字节（新增）
 edge_n     u8[N]   北边缘 palette 索引，一期恒 0   （新增，数据位）
 edge_e     u8[N]   东边缘，一期恒 0
 edge_s     u8[N]   南边缘，一期恒 0
@@ -122,7 +111,8 @@ count    u8
 entry×count：len u8 + item_id UTF-8 bytes
 ```
 
-- 75×75 → 11 + 9×5625 + palette ≈ 51KB raw；gzip 预计 <3KB（item 平面大部分为 0）。
+- 75×75 → 11 + 9×5625 + palette ≈ 51KB raw；gzip 实测村庄 4.3KB / 森林 8.9KB
+  （itemArg 朝向抖动是高熵字节，比预估略大，仍可忽略）。
 - **palette 内嵌 blob**：矩阵自包含（"一份矩阵重构世界"）——客户端另需的只有 palette
   所引用的 items 定义（场景进入时随包下发/按需拉取+缓存，见 §3.1）。
 - 255 个不同物品定义/场景的上限足够（内置 21 + 该场景造物种数）；palette 可在造物被

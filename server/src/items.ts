@@ -66,10 +66,10 @@ export function footprintOrigin(x: number, y: number, w: number, h: number): [nu
   return [x - ((w - 1) >> 1), y - ((h - 1) >> 1)];
 }
 
-/** 朝向旋转后的 footprint 尺寸（90°/270° 交换宽高；当前全方形，恒等）。 */
+/** 朝向旋转后的 footprint 尺寸（就近象限，90°/270° 交换宽高；当前全方形，恒等）。 */
 export function rotatedFootprint(def: ItemDef, arg: number): [number, number] {
-  const yaw = argYawDeg(arg);
-  return yaw === 90 || yaw === 270 ? [def.footprintH, def.footprintW] : [def.footprintW, def.footprintH];
+  const quadrant = Math.round(argYawDeg(arg) / 90) % 4;
+  return quadrant === 1 || quadrant === 3 ? [def.footprintH, def.footprintW] : [def.footprintW, def.footprintH];
 }
 
 const wrap = (v: number) => ((v % GRID_TILES) + GRID_TILES) % GRID_TILES;

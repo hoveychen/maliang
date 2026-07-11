@@ -11,21 +11,21 @@ func _init() -> void:
 	var fails := 0
 	var good := EX.build_terrain_bytes()
 
-	# ── 合法载荷：载入成功，且与本地生成逐字节相同 ────────────────────────
+	# ── 合法载荷：载入成功；地貌与本地 _paint() 相同，但 v2 物品层是新增 → changed=true ──
 	TerrainMap.reset()
 	fails += _check("reset 后不是服务端地形", TerrainMap.is_server_loaded(), false)
 
 	var r: Dictionary = TerrainMap.load_from_bytes(good)
 	fails += _check("载入 ok", r["ok"], true)
-	fails += _check("与本地生成一致 → changed=false", r["changed"], false)
+	fails += _check("v2 物品层新增 → changed=true", r["changed"], true)
 	fails += _check("标记为服务端地形", TerrainMap.is_server_loaded(), true)
+	fails += _check("重载同载荷 changed=false", TerrainMap.load_from_bytes(good)["changed"], false)
 
 	# 载入后访问器仍给出同样的地形
 	fails += _check("池塘中心仍是水", TerrainMap.tile_type(Vector2i(24, 24)), TerrainMap.T_WATER)
 	fails += _check("主峰仍有高度", TerrainMap.tile_height(Vector2i(37, 6)) > 0, true)
 
-	# ── 真的不同的地形：changed=true ─────────────────────────────────────
-	TerrainMap.reset()
+	# ── 真的不同的地貌：改一格高度 → changed=true ────────────────────────
 	var diff := good.duplicate()
 	diff[HEADER + WorldGrid.GRID_TILES * WorldGrid.GRID_TILES + 300] = 7 # 改一格高度
 	r = TerrainMap.load_from_bytes(diff)
