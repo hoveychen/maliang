@@ -35,7 +35,10 @@ export function loadConfig(): Config {
     // 默认对话/意图模型：qwen3.6-flash（实测 ~1.3s 稳，中文童趣最足、自带安全意识）。
     // 旧默认 kimi-k2.6 实测 ~8s 且飘（默认开 reasoning），是语音延迟的主要变数。
     llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'qwen/qwen3.6-flash',
-    imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image',
+    // 立绘生图：gemini-3.1-flash-lite-image（Nano Banana 2 Lite）为 2026-07-11 实测选型——
+    // 对比 gemini-3.1-flash-image（旧默认）：$0.034 vs $0.068/张、3.1s vs 9.2s、风格遵循 7.7/8 vs 7.2/8，
+    // 出图质量相当。两者出图尺寸行为一致（都主要吐 1408×768）。评测见 wiki maliang/image-model-eval。
+    imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-lite-image',
     // idle 动画视频：seedance-1-5-pro 为 2026-07-08 实测选型（480p/4s $0.046/条，是能用里最便宜；
     // 首=尾帧做无缝闭合 RMSE 0.025 够用）。Google Veo 全系对幼儿角色 403 不可用；Seedance 2.0 更贵。
     videoModel: process.env.OPENROUTER_VIDEO_MODEL ?? 'bytedance/seedance-1-5-pro',
