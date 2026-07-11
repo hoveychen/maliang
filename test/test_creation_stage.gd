@@ -34,12 +34,16 @@ func _tick() -> void:
 			_test_card_flies_into_egg()
 		38:
 			_test_cancel_button_clears_stage()
+		39:
+			_enter_fairy() # 取消已退出对话：重新走过去，验下一条路径
 		40:
 			_test_prop_goal_lights_forge()
 		42:
 			_test_voice_answer_flies_in()
 		44:
 			_test_cancelled_clears_stage()
+		45:
+			_enter_fairy()
 		46:
 			_prompt("prop") # 再开一次，验走开路径
 		48:
@@ -127,7 +131,7 @@ func _test_card_flies_into_egg() -> void:
 		var d := (fx[0] as Control).global_position.distance_to(target)
 		_check("起飞点在卡片处、还没到蛋 (d=%.0f)" % d, d > 40.0, true)
 
-## 右上角圆叉：随时退出创造，蛋跟着收，且留在对话里（不是退出对话）。
+## 右上角圆叉：随时退出创造——蛋收走、视图收起，并退出对话回到自由跑动。
 func _test_cancel_button_clears_stage() -> void:
 	var btn := scene.get("_creation_cancel_btn") as Button
 	_check("创造视图上有取消按钮", btn != null, true)
@@ -137,7 +141,7 @@ func _test_cancel_button_clears_stage() -> void:
 	_check("退出引导创造态", scene.get("_in_creation"), false)
 	_check("创造视图收起", _view().visible, false)
 	_check("降生蛋已收走", _placeholders().has(PORTAL_ID), false)
-	_check("取消的是创造、不是对话（仍在仙子面前）", scene.get("selected") != null, true)
+	_check("取消即退出对话", scene.get("selected"), null)
 
 ## goal=prop 的引导：立的是魔法熔炉，不是蛋。
 func _test_prop_goal_lights_forge() -> void:
@@ -151,14 +155,14 @@ func _test_voice_answer_flies_in() -> void:
 	scene.call("_utterance_commit")
 	_check("语音答复也起飞了气泡", _throw_fx().size() >= 1, true)
 
-## 服务端判「算了/不要了」→ creation_cancelled：收视图 + 收炉，但不退出对话（孩子还能接着跟仙子说话）。
+## 服务端判「算了/不要了」→ creation_cancelled：收视图 + 收炉 + 退出对话（老板拍板：取消=退出这个状态）。
 func _test_cancelled_clears_stage() -> void:
 	scene.call("_on_creation_cancelled", { "replyText": "好呀，那我们不造啦", "ttsAsset": "", "voiceId": "" })
 	_check("退出引导创造态", scene.get("_in_creation"), false)
 	_check("创造视图收起", _view().visible, false)
 	_check("相机特写复位", scene.get("_creation_cam"), false)
 	_check("魔法熔炉已收走", _placeholders().has(FORGE_ID), false)
-	_check("取消的是创造、不是对话（仍在仙子面前）", scene.get("selected") != null, true)
+	_check("取消即退出对话", scene.get("selected"), null)
 
 ## 孩子直接走开（退出对话）：会话取消上报服务端，地上的熔炉也要收走，不留空烧的炉子。
 func _test_walk_away_clears_stage() -> void:

@@ -4336,13 +4336,15 @@ func _on_creation_prompt(data: Dictionary) -> void:
 		# clientTts：仙子问句本地 edge 合成（幼儿不识字，念不出来就降级服务端）
 		_speak_line(String(data.get("replyText", data.get("question", ""))), String(data.get("voiceId", "")))
 
-## 服务端判定小朋友说了「算了/不要了」：收创造视图 + 收蛋/炉，回到普通对话（她还站在仙子面前，
-## 可以接着说别的）。不走 _exit_interaction——取消的是这次创造，不是这场对话。
+## 服务端判定小朋友说了「算了/不要了」：收创造视图 + 收蛋/炉，并退出对话回到自由跑动
+## （老板拍板：取消 = 退出这个状态，别把孩子留在仙子面前干站着）。
 func _on_creation_cancelled(data: Dictionary) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
-	_end_creation_locally()
-	banner.text = "好呀，那我们不造啦"
+	_end_creation_locally() # 先清 _in_creation，_exit_interaction 才不会再发一次 creation_cancel
+	if selected != null:
+		_exit_interaction()
+	banner.text = "好呀，那我们不造啦" # 摆在 _exit_interaction 之后：它会先把横幅收掉
 	banner.visible = true
 	# 仙子把安抚语念出来（幼儿不识字）
 	var asset := String(data.get("ttsAsset", ""))
@@ -4477,15 +4479,16 @@ func _throw_voice_answer() -> void:
 	var from := Vector2(vp.x * 0.5 - size.x * 0.5, vp.y - 190.0) # 麦克风指示器上方
 	_throw_into_placeholder(from, size, null, "···")
 
-## 点了右上角的叉：本地立刻收摊（视图/蛋/炉全收），并告诉服务端别再等答复。
-## 与服务端语义取消（creation_cancelled）落到同一个状态：留在对话里，孩子可以接着说别的。
+## 点了右上角的叉：本地立刻收摊（视图/蛋/炉全收）+ 告诉服务端别再等答复 + 退出对话。
+## 与服务端语义取消（creation_cancelled）落到同一个状态。
 func _on_creation_cancel_pressed() -> void:
 	if not _in_creation:
 		return
-	game_audio.play_sfx("exit")
-	_end_creation_locally()
 	if online:
-		backend.send_creation_cancel()
+		backend.send_creation_cancel() # 主动上报：清 _in_creation 后 _exit_interaction 不会再发
+	_end_creation_locally()
+	if selected != null:
+		_exit_interaction() # 退出音效由它播
 	banner.text = "好呀，那我们不造啦"
 	banner.visible = true
 
