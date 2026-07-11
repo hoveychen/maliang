@@ -5,6 +5,8 @@ class_name GameAudio
 # BGM 现用 3 首暖色原声曲轮播（happy_boy/carefree/cheery_monday，CC-BY Kevin MacLeod）；录音/思考/TTS 时 duck 压低音乐。
 # 双播放器交叉淡化机制：多段时**按各曲实际时长播完整首再交叉淡化**到下一首（非旧的固定 19.2s 切段——
 # 那会把完整曲砍成碎片，choppy 且永远播不完）。单段则一直 loop，不轮换。
+# 多段起播段号随机（start_bgm 缺省 start_step=-1）：否则永远从最长的第一首(carefree ~204s)打头，
+# 孩子一次会话待不满整首就切不到后两首，感知上「总是一首」。随机起播让每次进世界大概率听到不同曲。
 # 注意 headless dummy 音频 playing 永真，逻辑状态一律自己记账，不依赖 playing 翻转。
 
 const SFX := {
@@ -50,6 +52,7 @@ var _music_a: AudioStreamPlayer
 var _music_b: AudioStreamPlayer
 var _steps: Array = []         # 当前 BGM 段列表(AudioStream)
 var _bgm_want: Array = []       # 待线程加载的 BGM 段路径(全部就绪才起播)；空=无待加载
+var _bgm_start := -1           # 起播段号：-1=随机(见文件头)；>=0=指定(测试用，确定性)
 var step_index := -1           # 当前段序号(-1=未播)
 var _active_is_a := true       # 正在出声的是 a 还是 b
 var _section_left := 0.0       # 距下次换段剩余秒
@@ -122,11 +125,13 @@ func _pick_sfx_player() -> AudioStreamPlayer:
 	return _sfx_players[0]
 
 # steps 传 BGM_STEPS 切片；单段就一直 loop，多段按 SECTION_SECS 轮换交叉淡化。
+# start_step<0 时随机选起播段（见文件头）；>=0 时从指定段起播（测试用，确定性）。
 # 线程加载：请求所有段在 worker 线程加载，全部就绪后由 _poll_bgm_load 起播——
 # 菜单 _ready 起播 68s BGM WAV 不再同步卡帧（此前 ~68s WAV 同步 load 是入场一跳）。
-func start_bgm(step_paths: Array = BGM_STEPS) -> void:
+func start_bgm(step_paths: Array = BGM_STEPS, start_step: int = -1) -> void:
 	stop_bgm()
 	_bgm_want = step_paths.duplicate()
+	_bgm_start = start_step
 	for path in _bgm_want:
 		ResourceLoader.load_threaded_request(path)
 
@@ -149,11 +154,12 @@ func _poll_bgm_load() -> void:
 	_bgm_want.clear()
 	if _steps.is_empty():
 		return
-	step_index = 0
+	# 起播段：指定则用指定(取模防越界)，否则随机——避免永远从第一首打头（见文件头）
+	step_index = (_bgm_start % _steps.size()) if _bgm_start >= 0 else (randi() % _steps.size())
 	_active_is_a = true
-	_section_left = _step_secs(0)
+	_section_left = _step_secs(step_index)
 	_fade_left = 0.0
-	_music_a.stream = _steps[0]
+	_music_a.stream = _steps[step_index]
 	_music_a.volume_db = MUSIC_DB + (DUCK_DB if ducked else 0.0)
 	_music_a.play()
 

@@ -405,7 +405,7 @@ func _setup_audio() -> void:
 	game_audio = GameAudio.new()
 	game_audio.name = "GameAudio"
 	add_child(game_audio)
-	game_audio.start_bgm() # 三段渐进 loop 轮换
+	game_audio.start_bgm() # 三段渐进 loop 轮换，随机起播（每次进世界大概率不同首）
 
 func _setup_environment() -> void:
 	var light := DirectionalLight3D.new()

@@ -83,8 +83,9 @@ func _run(ga: GameAudio) -> void:
 
 	# 多条 step 时**按各曲整首时长**播完再交叉淡化（不再是旧的固定 SECTION_SECS 切段）。
 	# 生产喂 3 首不同曲；这里用同一文件×2 覆盖轮换机制。用 0.05s 小步长模拟真实帧推进。
+	# start_step=0 固定从第 0 段起播，保证换段序列确定（随机起播见文件末尾单独用例）
 	var two: Array = [GameAudio.BGM_STEPS[0], GameAudio.BGM_STEPS[0]]
-	ga.start_bgm(two)
+	ga.start_bgm(two, 0)
 	_fails += _check("start_bgm 不同步起播(线程加载中)", ga.step_index, -1)
 	_wait_bgm(ga)
 	_fails += _check("线程加载完起播在第 0 段", ga.step_index, 0)
@@ -135,6 +136,21 @@ func _run(ga: GameAudio) -> void:
 	_fails += _check("单段不轮换", ga.step_index, 0)
 	ga.stop_bgm()
 	_fails += _check("stop 后归 -1", ga.step_index, -1)
+
+	# 起播段号：显式 start_step 从指定段起播（确定性）
+	ga.start_bgm(GameAudio.BGM_STEPS, 2)
+	_wait_bgm(ga)
+	_fails += _check("显式 start_step 起播在指定段", ga.step_index, 2)
+	ga.stop_bgm()
+	# 默认(-1)随机起播：反复起播每次都落在合法段内（不越界、不为负）
+	var range_ok := true
+	for i in 20:
+		ga.start_bgm(GameAudio.BGM_STEPS)
+		_wait_bgm(ga)
+		if ga.step_index < 0 or ga.step_index >= GameAudio.BGM_STEPS.size():
+			range_ok = false
+		ga.stop_bgm()
+	_fails += _check("随机起播始终落在合法段内", range_ok, true)
 
 	print("test_game_audio fails=%d" % _fails)
 	quit(_fails)
