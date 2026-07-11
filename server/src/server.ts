@@ -1399,6 +1399,7 @@ export async function handleWsMessage(
       const joined = hub.join(worldId, {
         clientId: connKey,
         playerId: session.playerId,
+        sceneId: session.currentScene,
         send: (m) => socket.send(JSON.stringify(m)),
       });
       joined.departed?.newHost?.send({ type: 'world_host', isHost: true });
@@ -1789,6 +1790,7 @@ export async function handleWsMessage(
     const worldId = msg.worldId ?? '';
     const sceneId = (msg.sceneId ?? DEFAULT_SCENE) || DEFAULT_SCENE;
     session.currentScene = sceneId;
+    hub?.setScene(connKey, sceneId); // 位置流/降生广播按新场景定向（否则还在按旧场景发）
     const scene = store.getScene(worldId, sceneId);
     socket.send(JSON.stringify({
       type: 'scene_entered',
@@ -1807,7 +1809,14 @@ export async function handleWsMessage(
   // 静止时客户端不发；每拍只带 tile 变化过的角色。越界 tile 静默丢弃（单个坏条目不连坐整批）。
   if (msg.type === 'positions_report') {
     const worldId = msg.worldId ?? '';
-    const sceneId = (msg.sceneId ?? DEFAULT_SCENE) || DEFAULT_SCENE;
+    // 场景单一真相 = session.currentScene（world_info/enter_scene 维护，与 hub 成员同源）。
+    // 高频流（send_positions_stream）不带 sceneId，若按 msg.sceneId?? 缺省会把森林里的位置
+    // 落回 village、并把位置流发错场景。客户端明示 sceneId 时以它为准并自愈 session/hub。
+    if (typeof msg.sceneId === 'string' && msg.sceneId && msg.sceneId !== session.currentScene) {
+      session.currentScene = msg.sceneId;
+      hub?.setScene(connKey, msg.sceneId);
+    }
+    const sceneId = session.currentScene;
     const entries = Array.isArray(msg.chars) ? msg.chars : [];
     let applied = 0;
     // 世界坐标流条目（携 x,y 时）：转发给同世界其他连接插值渲染 + 喂服务端 near 求值。tile 仍照常持久化。
@@ -1830,9 +1839,15 @@ export async function handleWsMessage(
       // 玩家复制位置以 playerId 为 actor 键（剧本 cast 里玩家演员 id 约定即 playerId）。
       if (typeof p.x === 'number' && typeof p.y === 'number') relayPlayer = { id: session.playerId, x: p.x, y: p.y };
     }
-    // 复制位置分发：广播给同世界其他成员（排除自己）+ 喂 near 求值（无演出则 no-op）。
+    // 复制位置分发：广播给同世界【同场景】其他成员（排除自己）+ 喂 near 求值（无演出则 no-op）。
+    // 场景定向：隔壁场景的人看不见你，收到位置流只会渲染出一个脚下走过的幽灵。
     if (relayChars.length > 0 || relayPlayer) {
-      hub?.broadcast(worldId, { type: 'positions_relay', t: msg.t, chars: relayChars, player: relayPlayer }, connKey);
+      hub?.broadcastScene(
+        worldId,
+        sceneId,
+        { type: 'positions_relay', sceneId, t: msg.t, chars: relayChars, player: relayPlayer },
+        connKey,
+      );
       const all = relayPlayer ? [...relayChars, relayPlayer] : relayChars;
       stages?.updatePositions(worldId, all);
     }

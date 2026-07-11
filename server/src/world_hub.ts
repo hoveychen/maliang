@@ -7,6 +7,8 @@ export interface HubMember {
   /** 连接级唯一 id(server.ts 的 connKey)。 */
   clientId: string;
   playerId: string;
+  /** 所在场景(模型 B: world 含多 scene)。world_info 置初值,enter_scene 走 portal 时经 setScene 更新。 */
+  sceneId: string;
   send(msg: Record<string, unknown>): void;
 }
 
@@ -67,10 +69,42 @@ export class WorldHub {
     return this.#clientWorld.get(clientId) ?? null;
   }
 
+  /** 走 portal 换场景:原地更新成员的 sceneId(不动加入序,故不换 host)。不在世界里则 no-op。 */
+  setScene(clientId: string, sceneId: string): void {
+    const worldId = this.#clientWorld.get(clientId);
+    if (!worldId) return;
+    const m = this.#worlds.get(worldId)?.get(clientId);
+    if (m) m.sceneId = sceneId;
+  }
+
+  /** 同世界同场景的成员(可排除一人)。presence 快照与场景定向广播共用。 */
+  membersInScene(worldId: string, sceneId: string, exceptClientId?: string): HubMember[] {
+    return this.membersIn(worldId).filter(
+      (m) => m.sceneId === sceneId && m.clientId !== exceptClientId,
+    );
+  }
+
   /** 向世界内所有成员(可排除一人)派发消息；单个死连接不拖累其他人。返回送达数。 */
   broadcast(worldId: string, msg: Record<string, unknown>, exceptClientId?: string): number {
+    return this.#send(this.membersIn(worldId), msg, exceptClientId);
+  }
+
+  /**
+   * 场景定向广播:只发给同世界【同场景】的成员。位置流/降生这类「看得见才有意义」的消息走这条,
+   * 否则隔壁场景的人会收到脚下走过的幽灵(worldId 维度的 broadcast 不区分场景)。
+   */
+  broadcastScene(
+    worldId: string,
+    sceneId: string,
+    msg: Record<string, unknown>,
+    exceptClientId?: string,
+  ): number {
+    return this.#send(this.membersInScene(worldId, sceneId), msg, exceptClientId);
+  }
+
+  #send(members: HubMember[], msg: Record<string, unknown>, exceptClientId?: string): number {
     let n = 0;
-    for (const m of this.#worlds.get(worldId)?.values() ?? []) {
+    for (const m of members) {
       if (m.clientId === exceptClientId) continue;
       try {
         m.send(msg);

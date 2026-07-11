@@ -5,9 +5,10 @@ import { createMockAdapters } from '../src/adapters/mock.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 import { handleWsMessage, newVoiceSession } from '../src/server.ts';
+import { DEFAULT_SCENE } from '../src/types.ts';
 
-function member(clientId: string, inbox: Record<string, unknown>[]): HubMember {
-  return { clientId, playerId: `p-${clientId}`, send: (m) => inbox.push(m) };
+function member(clientId: string, inbox: Record<string, unknown>[], sceneId = DEFAULT_SCENE): HubMember {
+  return { clientId, playerId: `p-${clientId}`, sceneId, send: (m) => inbox.push(m) };
 }
 
 test('双连接同世界互见: 首位是 host, 广播可排除发送者', () => {
@@ -74,7 +75,7 @@ test('重复 join 同世界: 保序不换 host, 只更新成员信息', () => {
 test('死连接不拖累广播: send 抛错跳过继续发', () => {
   const hub = new WorldHub();
   const inbox: Record<string, unknown>[] = [];
-  hub.join('w1', { clientId: 'dead', playerId: 'p', send: () => { throw new Error('closed'); } });
+  hub.join('w1', { clientId: 'dead', playerId: 'p', sceneId: DEFAULT_SCENE, send: () => { throw new Error('closed'); } });
   hub.join('w1', member('cB', inbox));
   const n = hub.broadcast('w1', { type: 'ping' });
   assert.equal(n, 1);
