@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { decodeTerrain, TERRAIN_VERSION } from '../src/terrain.ts';
-import { validateTerrainItems, resolveBuiltin, buildStaticOccupancy, getBuiltinItem } from '../src/items.ts';
+import { BUILTIN_ITEMS, validateTerrainItems, resolveBuiltin, buildStaticOccupancy, getBuiltinItem } from '../src/items.ts';
 
 /**
  * 打包默认矩阵（assets/terrain/*.mltr，Godot 导出工具产）跨端验收：
@@ -30,6 +30,12 @@ for (const scene of ['village', 'forest'] as const) {
     assert.ok(occ.reduce((s, v) => s + v, 0) > 0, '派生占用非空');
   });
 }
+
+test('builtin_items.json（客户端打包副本）与 BUILTIN_ITEMS 逐项一致', () => {
+  // 客户端离线路径吃打包 JSON；服务端是常量单源。两边漂移 = 占地/渲染语义分叉，这里锁死。
+  const packed = JSON.parse(readFileSync(join(ASSETS, 'builtin_items.json'), 'utf-8')) as unknown[];
+  assert.deepEqual(packed, BUILTIN_ITEMS.map((d) => ({ ...d })));
+});
 
 test('village.mltr：地标锚点在约定位置（well/windmill）', () => {
   const buf = new Uint8Array(readFileSync(join(ASSETS, 'village.mltr')));

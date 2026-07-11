@@ -361,6 +361,11 @@ func _ready() -> void:
 	chunk_manager = ChunkManager.new()
 	chunk_manager.name = "ChunkManager"
 	add_child(chunk_manager)
+	# 物品实体目录 + 打包默认矩阵：区块首铺/NPC 落位之前就位——离线也有完整世界
+	# （树/建筑/占用全来自矩阵；在线时服务端矩阵与打包一致则 changed=false 零重铺）。
+	ItemCatalog.ensure_builtin()
+	_load_packaged_terrain()
+	ItemCatalog.apply_static_occupancy()
 	_setup_camera()
 	_setup_npcs()
 	_setup_player()
@@ -3082,8 +3087,19 @@ func _step_transition(delta: float) -> void:
 			and _pending_scene.is_empty() and not _await_skin:
 		_transitioning = false
 
+## 打包默认矩阵（assets/terrain/village.mltr，导出工具产 v2）：离线/服务端未回前的
+## 世界数据源。加载失败静默回落 _paint()（纯地貌、无物品的秃世界——极端兜底）。
+func _load_packaged_terrain() -> void:
+	var f := FileAccess.open("res://assets/terrain/%s.mltr" % _scene_id, FileAccess.READ)
+	if f == null:
+		push_warning("[terrain] 打包矩阵缺失（%s），回落 _paint 秃世界" % _scene_id)
+		return
+	var r := TerrainMap.load_from_bytes(f.get_buffer(f.get_length()))
+	if not r["ok"]:
+		push_warning("[terrain] 打包矩阵非法(%s)，回落 _paint" % r["error"])
+
 ## 从服务端下发的场景数组里取当前场景并载入（初始进世界用）。任何一步不成就静默保留本地
-## _paint()——离线、老服务端、地形未入库、载荷损坏，都必须能照常进世界。
+## 打包矩阵——离线、老服务端、地形未入库、载荷损坏，都必须能照常进世界。
 func _load_server_terrain(scenes: Variant) -> void:
 	if typeof(scenes) != TYPE_ARRAY or (scenes as Array).is_empty():
 		return # 地形还没入库：走本地确定性生成，与改动前一致
@@ -3100,11 +3116,6 @@ func _load_server_terrain(scenes: Variant) -> void:
 ## 区块——见 docs/multi-scene-design.md 步骤⑤边界1：地形必须在 chunk 重铺之前就位（本函数
 ## load_from_bytes 先落地、changed 时才 rebuild），玩家落位在调用方于地形就位后再定。
 func _apply_scene(scene: Dictionary) -> void:
-	# 场景 id 先告诉 chunk_manager：重铺时散布 deco / 手工地标按目标场景取规则（village 分区+建筑、
-	# forest 铺满树+河岸苇+空地）。必须在 rebuild 之前置好，否则重铺仍用旧场景的 deco 规则。
-	if chunk_manager != null:
-		chunk_manager.scene_id = String(scene.get("sceneId", chunk_manager.scene_id))
-
 	# POI 先应用：与地形字节相互独立，地形拉取失败不该把地点名一起丢了。
 	# 解析不出任何合法 POI 时保留内置常量——绝不让世界变成没有地点的空壳。
 	var sp := parse_server_pois(scene.get("pois", []))
@@ -3127,6 +3138,8 @@ func _apply_scene(scene: Dictionary) -> void:
 	if not r["ok"]:
 		push_warning("[terrain] 服务端地形非法(%s)，沿用现有地形" % r["error"])
 		return
+	# 静态占用从矩阵物品层重派生（changed 与否都做：palette/实体定义可能更新）
+	ItemCatalog.apply_static_occupancy()
 	if r["changed"]:
 		# 地形与当前 chunk 首铺用的不同：chunk_manager 缓存的区块 mesh 得整图重铺才能反映新地形
 		# （初始进世界：首铺用本地 _paint()，今天导出字节 == _paint() 输出故 changed 恒 false；
@@ -3161,6 +3174,7 @@ func _on_scene_entered(data: Dictionary) -> void:
 		return
 	_portal_armed = false # 落地时多半正站在返回传送点上：走出去才重新武装（_step_portal）
 	_unload_scene()
+	ItemCatalog.set_defs(data.get("items", [])) # 新场景可能引用没见过的造物实体
 
 	# 地形先就位（_apply_scene changed 时会 rebuild 区块）；scene 为 null 表示该场景未入库，
 	# 保留当前地形（离线/未入库容错）。
@@ -3267,6 +3281,7 @@ func _bootstrap() -> void:
 	if not world.is_empty():
 		online = true
 		world_id = String(world.get("id", "default"))
+		ItemCatalog.set_defs(world.get("items", [])) # 实体定义先就位（矩阵 palette 的解引用依据）
 		await _load_server_terrain(world.get("scenes", []))
 		backend.url = (api.base as String).replace("http", "ws") + "/ws"
 		backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入

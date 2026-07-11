@@ -2,13 +2,18 @@ class_name OccupancyMap
 extends RefCounted
 ## 占用/碰撞数据层：0.5 tile（1m）分辨率的环面占用图（150×150 半格）。
 ## 层次设计：地形（类型/高度，1 tile 分辨率）在 TerrainMap，静态；
-## 动态占用在本图，分两层防所有权污染——物件层（位图，摆放登记/释放）
-## 与角色层（cell → 角色 id 字典，随移动迁移，查询可排除自己）。
+## 物件位图按位分两层防所有权污染——
+##   bit0（值1）动态层：运行时摆放登记/释放（语音造物、组装器占地推演）
+##   bit1（值2）静态层：从地形矩阵物品层派生（ItemCatalog.apply_static_occupancy
+##   整层替换；矩阵是唯一权威，静态物摆放时不再登记）
+## 另有角色层（cell → 角色 id 字典，随移动迁移，查询可排除自己）。
 ## 尺寸离散化约定：角色边长 1..4 tile @0.5 步进（半格 2..8）；
 ## 物件边长 1..16 tile @1 步进（半格 2..32）。
 
 const CELLS := WorldGrid.GRID_TILES * 2       ## 150
 const CELL_SIZE := WorldGrid.TILE_SIZE * 0.5  ## 1m
+const BIT_DYNAMIC := 1  ## 运行时摆放登记（occupy_rect/free_rect 只动这一位）
+const BIT_STATIC := 2   ## 地形矩阵派生（load_static 整层替换）
 
 static var _occ := PackedByteArray()
 static var _chars := {}       ## cell_idx → 角色 id（String）
@@ -23,6 +28,14 @@ static func clear() -> void:
 	_occ = PackedByteArray()
 	_chars = {}
 	_char_rects = {}
+
+## 静态层整层替换：cells 为 150×150 的 0/1 位图（ItemCatalog 从矩阵派生）。
+## 动态层保持不动——地形 patch 重派生时不能把语音造物的占地冲掉。
+static func load_static(cells: PackedByteArray) -> void:
+	_ensure()
+	for i in range(_occ.size()):
+		var st := BIT_STATIC if i < cells.size() and cells[i] != 0 else 0
+		_occ[i] = (_occ[i] & BIT_DYNAMIC) | st
 
 ## 拍一份不可变快照交给 worker 线程跑寻路（见 OccSnapshot）。主线程调用，
 ## 仅两次 duplicate（_occ 22500 字节 + _chars 小字典），微秒级；worker 从此
@@ -103,13 +116,16 @@ static func occupy_rect(origin: Vector2i, w: int, h: int) -> void:
 	_ensure()
 	for dz in range(h):
 		for dx in range(w):
-			_occ[_idx(origin + Vector2i(dx, dz))] = 1
+			var i := _idx(origin + Vector2i(dx, dz))
+			_occ[i] = _occ[i] | BIT_DYNAMIC
 
+## 只释放动态位——静态层来自矩阵，唯有 load_static 能整层换掉它。
 static func free_rect(origin: Vector2i, w: int, h: int) -> void:
 	_ensure()
 	for dz in range(h):
 		for dx in range(w):
-			_occ[_idx(origin + Vector2i(dx, dz))] = 0
+			var i := _idx(origin + Vector2i(dx, dz))
+			_occ[i] = _occ[i] & ~BIT_DYNAMIC
 
 ## 物件可放置判定（摆放器/未来编辑器共用）：
 ## w×h tile 内 无水、（除非 allow_path）无路、高度与原点一致（不跨崖悬空）、

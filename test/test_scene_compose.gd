@@ -90,7 +90,9 @@ func _run_scene(scene_id: String, composed: Dictionary, n: int) -> int:
 				continue # 锚点：泉石 rock 与散布 rock id 相同，凭表位置无冲突，跳过对拍
 			if scene_id == "village" and (gt == Vector2i(30, 12) or gt == Vector2i(28, 12)):
 				continue # 泉石地标（散布 id，锚点语义）
-			var kind: int = ChunkManager._deco_kind_village(gt) if scene_id == "village" else ChunkManager._deco_kind_forest(gt)
+			# P4 起运行时规则副本已删——对拍改用组装库自己的规则函数，仍验证
+			# 「组装管线（占地/覆盖豁免/变体选取）忠实于散布判定」这一层。
+			var kind: int = COMPOSE._deco_kind(scene_id, gt)
 			if kind == COMPOSE.DECO_NONE:
 				if id != "":
 					mismatch += 1

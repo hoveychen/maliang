@@ -29,10 +29,10 @@ func _xf(pos: Vector3, scale_f: float) -> Transform3D:
 func _test_shadow_xforms() -> void:
 	var cm := ChunkManager.new()
 	var batches := {
-		"tree0": [_xf(Vector3(1, 0, 1), 1.0), _xf(Vector3(3, 0, 2), 1.2)],
-		"bush": [_xf(Vector3(5, 0, 5), 1.0)],
-		"rock0": [_xf(Vector3(2, 0, 2), 1.0)],  # 石头太碎，应跳过
-		"tuft0": [_xf(Vector3(4, 0, 4), 1.0)],  # 草丛太矮，应跳过
+		"tree_puff_a": [_xf(Vector3(1, 0, 1), 1.0), _xf(Vector3(3, 0, 2), 1.2)],
+		"bush_puff": [_xf(Vector3(5, 0, 5), 1.0)],
+		"rock_0": [_xf(Vector3(2, 0, 2), 1.0)],  # 石头太碎，应跳过
+		"tuft_0": [_xf(Vector3(4, 0, 4), 1.0)],  # 草丛太矮，应跳过
 	}
 	var xforms := cm._shadow_xforms(batches)
 	_check("影斑数=树+灌木(3)、不含石/草", xforms.size(), 3)
@@ -47,10 +47,10 @@ func _test_flush_shadows() -> void:
 	var cm := ChunkManager.new()
 	var parent := Node3D.new()
 	var batches := {
-		"tree0": [_xf(Vector3(1, 0, 1), 1.0), _xf(Vector3(3, 0, 2), 1.2)],
-		"bush": [_xf(Vector3(5, 0, 5), 1.0)],
-		"rock0": [_xf(Vector3(2, 0, 2), 1.0)],
-		"tuft0": [_xf(Vector3(4, 0, 4), 1.0)],
+		"tree_puff_a": [_xf(Vector3(1, 0, 1), 1.0), _xf(Vector3(3, 0, 2), 1.2)],
+		"bush_puff": [_xf(Vector3(5, 0, 5), 1.0)],
+		"rock_0": [_xf(Vector3(2, 0, 2), 1.0)],
+		"tuft_0": [_xf(Vector3(4, 0, 4), 1.0)],
 	}
 	cm._flush_shadows(parent, batches)
 	var mmi := parent.get_node_or_null("ScatterShadows")
@@ -67,8 +67,8 @@ func _test_empty_when_no_trees() -> void:
 	var cm := ChunkManager.new()
 	var parent := Node3D.new()
 	cm._flush_shadows(parent, {
-		"rock0": [_xf(Vector3.ZERO, 1.0)],
-		"tuft0": [_xf(Vector3.ZERO, 1.0)],
+		"rock_0": [_xf(Vector3.ZERO, 1.0)],
+		"tuft_0": [_xf(Vector3.ZERO, 1.0)],
 	})
 	_check("无树/灌木时不建影节点", parent.get_node_or_null("ScatterShadows"), null)
 	parent.free()
