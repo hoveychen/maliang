@@ -408,6 +408,10 @@ func _setup_environment() -> void:
 	light.rotation_degrees = Vector3(-55.0, -40.0, 0.0)
 	light.light_color = Color(1.0, 0.96, 0.86) # 暖阳（Pokopia 式午后柔光）
 	light.light_energy = 1.25
+	# 贴片影方向唯一从这盏光推导：照射方向(-Z 轴)的水平投影 = 影子拖向的背光侧方向，
+	# 写进 BlobShadow 供散布/建筑影用，保证影方向与场景明暗同一个太阳（不会两套方向打架）。
+	var sun_fwd := -light.basis.z
+	BlobShadow.sun_ground_dir = Vector3(sun_fwd.x, 0.0, sun_fwd.z).normalized()
 	# 实时定向阴影：老移动 GPU（Mali-G76 实测）一开整帧 ~2.5 倍开销（7↔18fps），且与
 	# 投影几何量/软硬过滤/阴影图尺寸都无关——是阴影管线本身的代价，故全场景默认平光、
 	# 靠 BlobShadow 脚下暗斑承担锚定感。CHARACTER_SHADOWS 实验：只给会动的角色投实时

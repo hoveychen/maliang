@@ -20,9 +20,13 @@ const CULL_MARGIN := BendMat.CULL_MARGIN
 ## 散布布景脚下贴片阴影（预烘焙假影，非实时投影）：树/灌木脚下一层合并 MultiMesh 暗斑，
 ## 复用 BlobShadow 同 shader，一次 draw call、零光照计算——补回关掉实时阴影后散布平光、
 ## 树"浮在地上"的锚定感。石/草太矮太碎不铺（影子小到看不出，徒增几何）。
-const SHADOW_STRENGTH := 0.22   ## 比逐节点 blob(0.38)淡：散布密集、影斑常重叠，防叠成脏斑
-const SHADOW_RADIUS_FACTOR := 0.6  ## 影半径 = 树冠水平半尺寸 × 此系数（略小于树冠投影）
-const SHADOW_LIFT := 0.2        ## 抬离地面（同 BlobShadow，给深度测试留余量）
+## 斜阳投影不在物体正下方（会被树冠盖住看不见），而是沿光照射方向拖到背光侧、并被拉成
+## 椭圆——方向唯一取自 BlobShadow.sun_ground_dir（场景那盏光），与场景明暗同一个太阳。
+const SHADOW_STRENGTH := 0.40    ## 加深到能看清（旧 0.22 又淡又被树冠盖，实测等于没有）
+const SHADOW_RADIUS_FACTOR := 0.6  ## 短半轴 = 树冠水平半尺寸 × 此系数（垂直光方向那半径）
+const SHADOW_ELONGATION := 1.6   ## 椭圆长/短轴比：沿光方向拉长，模拟斜阳投影
+const SHADOW_OFFSET_FACTOR := 0.9  ## 影心沿光方向偏移 = 短半径 × 此（拖出树冠外才看得见）
+const SHADOW_LIFT := 0.2         ## 抬离地面（同 BlobShadow，给深度测试留余量）
 
 ## KayKit CC0 资产（见 assets/kaykit/*/License）。Hexagon 建筑是微缩比例，需放大。
 ## 树/灌木改用 SDF 烘焙棉花糖布景（assets/sdf_props/*.json → tools/bake_sdf_deco.gd 产
@@ -732,9 +736,22 @@ func _flush_batches(parent: Node3D, batches: Dictionary) -> void:
 		parent.add_child(mmi)
 		mmi.add_to_group("perf_scatter")  # PerfSweep 分解扫频用（debug 诊断）
 
-## 影斑实例变换的纯函数核心（CPU 侧、可单测——headless 下 MultiMesh 的 transform
-## 走 RenderingServer dummy 后端读不回，几何断言必须在这里做）：只收树/灌木，石/草跳过。
-## radius 从各 mesh 静止 AABB 的水平尺寸推、再乘该实例散布缩放；影斑抬离地面留深度余量。
+## 单个贴片影的实例变换（树/灌木/建筑共用）：以物体落点 pos + 短半径 short_r，按场景
+## 太阳方向做「影心偏移到背光侧 + 椭圆(长轴沿光方向拉长)」。方向唯一取 sun_ground_dir，
+## 与场景明暗同一个太阳。纯函数、CPU 侧可单测。
+func _shadow_xform(pos: Vector3, short_r: float) -> Transform3D:
+	var sun := BlobShadow.sun_ground_dir
+	var yaw := atan2(sun.x, sun.z)  # 使 local +Z 对齐光方向 → 长轴沿光方向
+	var long_r := short_r * SHADOW_ELONGATION
+	# 必须 rot * scale（local 轴缩放后再旋转）：Basis.scaled 是 diag*R（世界轴缩放），
+	# 椭圆长轴会不跟着 yaw 转、方向错，get_scale 也分解不出长短轴。
+	var b := Basis(Vector3.UP, yaw) * Basis.from_scale(Vector3(short_r * 2.0, 1.0, long_r * 2.0))
+	var center := pos + sun * (short_r * SHADOW_OFFSET_FACTOR) + Vector3(0.0, SHADOW_LIFT, 0.0)
+	return Transform3D(b, center)
+
+## 散布树/灌木影斑变换（CPU 侧、可单测——headless 下 MultiMesh 的 transform 走
+## RenderingServer dummy 后端读不回，几何断言必须在这里做）：只收树/灌木，石/草跳过。
+## 短半径从各 mesh 静止 AABB 的水平尺寸推、再乘该实例散布缩放。
 func _shadow_xforms(batches: Dictionary) -> Array[Transform3D]:
 	var xforms: Array[Transform3D] = []
 	for key: String in batches:
@@ -743,9 +760,7 @@ func _shadow_xforms(batches: Dictionary) -> Array[Transform3D]:
 		var aabb: AABB = _scatter_kind(key)["mesh"].get_aabb()
 		var base_r := maxf(aabb.size.x, aabb.size.z) * 0.5 * SHADOW_RADIUS_FACTOR
 		for t: Transform3D in batches[key]:
-			var r := base_r * t.basis.get_scale().x  # basis 缩放即散布 scale_f
-			var b := Basis().scaled(Vector3(r * 2.0, 1.0, r * 2.0))
-			xforms.append(Transform3D(b, t.origin + Vector3(0.0, SHADOW_LIFT, 0.0)))
+			xforms.append(_shadow_xform(t.origin, base_r * t.basis.get_scale().x))
 	return xforms
 
 ## 散布树/灌木脚下贴片阴影：把落点收成一层合并 MultiMesh 暗斑（一次 draw call、

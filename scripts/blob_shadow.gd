@@ -12,6 +12,12 @@ static var _meshes := {}
 ## 投影，脚下暗斑让位避免双影；SdfProp(bend=true)不投实时阴影，仍保留脚下 blob。
 static var suppress_actor_blob := false
 
+## 场景太阳的地面水平方向（= 定向光照射方向在 XZ 平面的投影，归一化）：散布/建筑贴片影
+## 据此朝背光侧偏移、椭圆长轴沿此方向拉长——影方向唯一从场景那盏 DirectionalLight 推导
+## （world 启动时算出写入），保证跟场景明暗同一个太阳，不会两套方向打架。默认值对应
+## world 默认 Sun 旋转 (-55,-40,0)，world 没设时也不至于零向量。
+static var sun_ground_dir := Vector3(0.643, 0.0, -0.766)
+
 static func _shared_mesh(bend: bool) -> QuadMesh:
 	if not _meshes.has(bend):
 		var m := ShaderMaterial.new()
