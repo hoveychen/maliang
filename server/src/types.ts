@@ -358,10 +358,11 @@ export interface Visit {
   endedAt: number | null;
 }
 
-/** 记忆分类型（对齐 extractMemory 抽取口径：名字/喜好/约定/发生的事/关系）。 */
-export type MemoryKind = 'identity' | 'preference' | 'promise' | 'event' | 'relation';
+/** 记忆分类型（对齐 extractMemory 抽取口径：名字/喜好/约定/发生的事/关系；
+ *  creation 不走抽取，由造物完成时程序化写入——「帮小朋友造过什么」，支持「帮我造刚才的小动物」）。 */
+export type MemoryKind = 'identity' | 'preference' | 'promise' | 'event' | 'relation' | 'creation';
 
-export const MEMORY_KINDS: readonly MemoryKind[] = ['identity', 'preference', 'promise', 'event', 'relation'];
+export const MEMORY_KINDS: readonly MemoryKind[] = ['identity', 'preference', 'promise', 'event', 'relation', 'creation'];
 
 /**
  * 一条结构化长期记忆（P3：取代 Character.memory: string[]，落 memories 独立表）。
@@ -412,6 +413,9 @@ export interface CreationState {
   // 本次创造会话的完整对话（child=小朋友的请求/回答，npc=仙子的追问），按标准多轮 messages 回放给
   // guide LLM——上下文完整，再笨的模型也不会重复问已问过的问题、也能看懂「毛毛」是在答名字。
   dialog: ChatTurn[];
+  // 仙子最近帮这个小朋友造过的东西（kind='creation' 记忆，开会话时填入）：
+  // 注入 guide prompt，支持「帮我造刚才的小动物，但是会飞的」这类指代。
+  recentCreations?: string[];
 }
 
 /** 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。 */

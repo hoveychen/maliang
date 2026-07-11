@@ -948,6 +948,9 @@ async function openCreationSession(
     return;
   }
   session.creation = newCreationState(goal);
+  // 仙子最近帮这个小朋友造过的东西：注入 guide，「帮我造刚才的小动物」这类指代能对上
+  const creations = store.getMemories(fairyId, session.playerId).filter((m) => m.kind === 'creation');
+  if (creations.length > 0) session.creation.recentCreations = creations.slice(-5).map((m) => m.text);
   await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn);
 }
 
@@ -984,6 +987,7 @@ export async function createPropAsync(
   adapters: ServiceAdapters,
   store: WorldStore,
   clientTts = false,
+  creatorId = '', // 造物的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
@@ -1009,6 +1013,10 @@ export async function createPropAsync(
     store.upsertItem(def);
     store.bagAdd(worldId, playerId, def.id);
     created = true;
+    // 造物记忆：仙子记下帮这个小朋友变过什么，下次「帮我变刚才那个」能对上
+    if (creatorId) {
+      store.addMemory(creatorId, { text: `帮小朋友变过「${def.name}」（${description.slice(0, 60)}）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
+    }
     socket.send(JSON.stringify({
       type: 'item_created',
       worldId,
@@ -1035,6 +1043,7 @@ export async function createCharacterAsync(
   store: WorldStore,
   toSpriteSheet?: ToSpriteSheet,
   clientTts = false,
+  creatorId = '', // 造角色的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'character', clientTts);
@@ -1050,6 +1059,10 @@ export async function createCharacterAsync(
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
     );
     created = true;
+    // 造物记忆：仙子记下帮这个小朋友造过谁，下次「帮我造刚才的小动物，但是会飞的」能对上
+    if (creatorId) {
+      store.addMemory(creatorId, { text: `帮小朋友造过新伙伴「${character.name}」（${description.slice(0, 60)}）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
+    }
     socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId, playerId) }));
     // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     if (character.appearance.spriteAsset) {
@@ -1137,8 +1150,8 @@ export async function advanceCreation(
   const summarize = () => isProp ? composePropDesc(state.attrs) : describeCreationAttrs(state);
   // done 时按目标分派到对应的异步造：造物 createPropAsync，造角色 createCharacterAsync。
   const finishCreate = (desc: string) => isProp
-    ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts)
-    : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts);
+    ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId)
+    : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId);
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
   // 超轮兜底（适配器无关）：已追问满上限还没 done，就用现有属性直接造——绝不无限追问。
   // 此前只有 mock 在 turnCount>=5 时强制 done，线上 LLM 属性解析不进去就会原地循环。
@@ -1418,7 +1431,7 @@ export async function handleWsMessage(
       return;
     }
     try {
-      await createCharacterAsync(socket, msg.worldId ?? '', session.playerId, msg.intentText ?? '', adapters, store, undefined, session.clientTts);
+      await createCharacterAsync(socket, msg.worldId ?? '', session.playerId, msg.intentText ?? '', adapters, store, undefined, session.clientTts, msg.characterId ?? '');
     } finally {
       gate.release();
     }
