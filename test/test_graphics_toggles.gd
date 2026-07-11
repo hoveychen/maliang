@@ -19,7 +19,7 @@ func _initialize() -> void:
 	process_frame.connect(_tick)
 
 func _gfx() -> Dictionary:
-	return scene.get("_gfx_buttons") as Dictionary
+	return (scene.get("phone_ui") as PhoneUi).get("_gfx_buttons") as Dictionary
 
 func _tick() -> void:
 	frame += 1

@@ -1,6 +1,7 @@
 extends SceneTree
-## 手机菜单（左下角）冒烟测试：实例化整关，验证手机 HUD 结构与 app 导航在真实实例化下不崩、状态正确。
-## 纯解析检查抓不到 _setup_hud 的运行期错误（空调用/类型错），故用整关实例化跑一遍关键路径。
+## 手机菜单（左下角）冒烟测试：实例化整关，验证 3D 纸糊手机（PaperPhone）+ 屏幕内容
+## （PhoneUi）在真实实例化下不崩、状态正确。纯解析检查抓不到 _setup_hud 的运行期错误
+## （空调用/类型错），故用整关实例化跑一遍关键路径。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --script res://test/test_phone_menu.gd
 
 var _fails := 0
@@ -22,21 +23,23 @@ func _initialize() -> void:
 
 func _run(scene: Node) -> void:
 	var album_button: Variant = scene.get("album_button")
-	var album_panel: Control = scene.get("album_panel")
+	var phone: PaperPhone = scene.get("paper_phone")
+	var pui: Variant = scene.get("phone_ui")
 	_check(album_button != null and album_button is Button, "album_button 是 Button")
-	_check(album_panel != null, "album_panel 存在")
-	if album_panel == null:
+	_check(phone != null, "paper_phone 存在")
+	_check(pui != null and pui is PhoneUi, "phone_ui 存在")
+	if phone == null or pui == null:
 		return
-	_check(not album_panel.visible, "初始手机面板隐藏")
-
-	var home: Control = scene.get("_phone_home")
-	_check(home != null, "_phone_home 存在")
-	# 遮罩 + 状态栏信号格存在
+	_check(phone.state == PaperPhone.State.STOWED, "初始手机收起(STOWED)")
+	_check(not phone.visible, "初始隐藏")
 	_check(scene.get("_phone_scrim") != null, "_phone_scrim（点外部收起遮罩）存在")
-	_check(scene.get("_phone_signal") != null, "_phone_signal（状态栏信号格）存在")
+	_check(pui.get("_phone_signal") != null, "_phone_signal（状态栏信号格）存在")
+	# 两块屏幕视口按 PhoneUi 尺寸就绪
+	_check(phone.front_viewport() != null and phone.front_viewport().size == PhoneUi.FRONT_PX, "正面视口尺寸")
+	_check(phone.spread_viewport() != null and phone.spread_viewport().size == PhoneUi.SPREAD_PX, "跨页视口尺寸")
 	# 主屏图标分页：3x3 网格、每页 columns=3；所有页图标总数 = 已实装 app 数（3）
-	var pager: ScrollContainer = scene.get("_phone_pager")
-	var pages_box: HBoxContainer = scene.get("_phone_pages_box")
+	var pager: ScrollContainer = pui.get("_phone_pager")
+	var pages_box: HBoxContainer = pui.get("_phone_pages_box")
 	_check(pager != null, "_phone_pager（图标分页横滚）存在")
 	_check(pages_box != null and pages_box.get_child_count() >= 1, "至少一页图标")
 	var icon_total := 0
@@ -49,42 +52,44 @@ func _run(scene: Node) -> void:
 						cols_ok = false
 					icon_total += g.get_child_count()
 	_check(cols_ok, "每页网格 columns=3 (3x3)")
-	_check(icon_total == 3, "图标总数 = 已实装 app 数 3（stickers/items/settings）")
+	_check(icon_total == 3, "图标总数 = 已实装 app 数 3（flowers/items/settings）")
 
 	scene._toggle_album()
-	_check(album_panel.visible, "打开后面板可见")
-	_check(home != null and home.visible, "打开后停在主屏")
-	var appview: Control = scene.get("_phone_app_view")
-	_check(appview != null and not appview.visible, "主屏时 app 视图隐藏")
+	_check(phone.state == PaperPhone.State.FRONT, "打开后正面态(FRONT)")
+	_check(phone.visible, "打开后可见")
+	_check(String(pui.get("_phone_open_app")) == "", "打开后停在主屏")
+	_check((scene.get("_phone_scrim") as Control).visible, "打开后遮罩可见")
+	_check(phone.front_viewport().render_target_update_mode == SubViewport.UPDATE_ALWAYS,
+		"正面态主屏视口在更新")
 
-	# 手机壳固定尺寸：打开任何 app 都不能把 album_panel 撑大（内容超出屏区应滚动/裁剪，不撑壳）。
-	var fixed_w := album_panel.custom_minimum_size.x
-	var fixed_h := album_panel.custom_minimum_size.y
-	var pages: Dictionary = scene.get("_album_pages")
+	# 打开各 app：翻转到跨页、只显示该页
+	var pages: Dictionary = pui.get("_album_pages")
 	for id in ["flowers", "items", "settings"]:
 		scene._open_app(id)
-		_check(String(scene.get("_phone_open_app")) == id, "打开 app: %s" % id)
-		_check(appview.visible and not home.visible, "%s：app 视图显示、主屏隐藏" % id)
+		_check(String(pui.get("_phone_open_app")) == id, "打开 app: %s" % id)
+		_check(phone.state == PaperPhone.State.SPREAD, "%s：翻转到跨页态" % id)
 		_check((pages[id] as Control).visible, "%s：对应页面可见" % id)
-		var cms := album_panel.get_combined_minimum_size()
-		_check(cms.x <= fixed_w + 1.0, "%s：不撑宽手机壳 (壳宽 %.0f, 内容 %.0f)" % [id, fixed_w, cms.x])
-		_check(cms.y <= fixed_h + 1.0, "%s：不撑高手机壳 (壳高 %.0f, 内容 %.0f)" % [id, fixed_h, cms.y])
+		for pid in pages:
+			if pid != id:
+				_check(not (pages[pid] as Control).visible, "%s：其它页 %s 隐藏" % [id, pid])
+	_check(phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_ALWAYS,
+		"跨页态跨页视口在更新")
 
-	scene._close_phone_app()
-	_check(home.visible and not appview.visible, "返回主屏")
-	_check(String(scene.get("_phone_open_app")) == "", "返回后 open_app 清空")
+	pui.close_app()
+	_check(phone.state == PaperPhone.State.FRONT, "返回后回正面态")
+	_check(String(pui.get("_phone_open_app")) == "", "返回后 open_app 清空")
 
 	# 小红花/集邮 app：服务端钱包驱动 3×3 花格点亮 + 盖章进度点
 	scene.set("wallet", { "flowers": 2, "stampProgress": 1, "stampsTotal": 7 })
 	scene._refresh_album()
-	var fcells: Array = scene.get("_flower_cells")
+	var fcells: Array = pui.get("_flower_cells")
 	_check(fcells.size() == 9, "小红花 3×3 = 9 格")
 	var lit := 0
 	for c in fcells:
 		if (c as TextureRect).modulate == Color.WHITE:
 			lit += 1
 	_check(lit == 2, "flowers=2 → 点亮 2 格花")
-	var dots: Array = scene.get("_stamp_dots")
+	var dots: Array = pui.get("_stamp_dots")
 	var dlit := 0
 	for d in dots:
 		if (d as TextureRect).modulate == Color.WHITE:
@@ -92,8 +97,8 @@ func _run(scene: Node) -> void:
 	_check(dlit == 1, "stampProgress=1 → 点亮 1 个盖章进度点")
 	_check(scene._red_flower_count() == 2, "banner 小红花数=钱包 flowers")
 
-	scene._update_phone_banner()
-	var clock: Label = scene.get("_phone_clock")
+	pui.refresh_banner()
+	var clock: Label = pui.get("_phone_clock")
 	_check(clock != null and String(clock.text).length() == 5 and String(clock.text).contains(":"), "banner 时钟 HH:MM")
 
 	# 可玩时间真强制状态机（tick/reconcile 纯函数，budget=100s、cooldown=60s、now=1000）
@@ -110,10 +115,17 @@ func _run(scene: Node) -> void:
 	_check(is_equal_approx(float(r1["cooldown_until"]), 1060.0), "隔会话：冷却期内重进仍锁")
 	var r2: Dictionary = scene.reconcile_play_budget(80.0, 0.0, 1000.0, 1060.0, 60.0)
 	_check(is_equal_approx(float(r2["used"]), 0.0), "隔会话：长休息(≥冷却)刷新预算")
-	var pie = scene.get("_phone_playpie")
+	var pie = pui.get("_phone_playpie")
 	_check(pie != null and pie is PlayTimePie, "widget 可玩时间饼图存在(PlayTimePie)")
 	_check(scene.get("_cooldown_overlay") != null, "冷却拦截遮罩存在")
 	# _step_phone_ui：手机开着时按节流刷新一次不崩
-	scene.set("_phone_ui_t", 0.0)
 	scene._step_phone_ui(1.0)
 	_check(true, "_step_phone_ui 运行不崩")
+
+	# 收起：状态复位 + 两块视口停更新 + 遮罩隐藏
+	scene._close_phone()
+	_check(phone.state == PaperPhone.State.STOWED, "收起回 STOWED")
+	_check(not (scene.get("_phone_scrim") as Control).visible, "收起后遮罩隐藏")
+	_check(phone.front_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED \
+			and phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED,
+		"收起后两视口停更新")

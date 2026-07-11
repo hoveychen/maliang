@@ -22,11 +22,11 @@ func _tick() -> void:
 		16:
 			scene.call("_open_app", "settings")
 		28:
-			(scene.get("_avatar_btn") as Button).emit_signal("pressed") # 假 API：观察禁用态
+			((scene.get("phone_ui") as PhoneUi).get("_avatar_btn") as Button).emit_signal("pressed") # 假 API：观察禁用态
 		40:
 			# 手动铺预览（占位用小仙子图）：QA 预览图 + ✓/✗ 行布局
-			var img := scene.get("_avatar_img") as TextureRect
+			var img := (scene.get("phone_ui") as PhoneUi).get("_avatar_img") as TextureRect
 			img.texture = load("res://assets/fairy.png")
-			(scene.get("_avatar_preview") as Control).visible = true
+			((scene.get("phone_ui") as PhoneUi).get("_avatar_preview") as Control).visible = true
 		64:
 			quit(0)

@@ -346,6 +346,10 @@ func pick(ro: Vector3, rd: Vector3) -> Dictionary:
 			best = { "face": id, "uv": hit["uv"], "dist": hit["dist"] }
 	return best
 
+## 屏幕坐标是否打在机身任一可交互面上（真机 ScreenTouch 只吞不转发时用）。
+func hit_test(cam: Camera3D, screen_pos: Vector2) -> bool:
+	return not pick(cam.project_ray_origin(screen_pos), cam.project_ray_normal(screen_pos)).is_empty()
+
 ## 贴面全局变换（测试/调试用）
 func face_transform(id: String) -> Transform3D:
 	var f: Dictionary = _faces.get(id, {})
