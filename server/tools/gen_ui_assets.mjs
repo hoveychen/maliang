@@ -39,9 +39,14 @@ const flag = (name, dflt) => {
 const only = flag('--only', '').split(',').filter(Boolean);
 const defaultCandidates = Number(flag('--candidates', '2'));
 const concurrency = Number(flag('--concurrency', '4'));
+// 港区 IP 对 Google/OpenAI 图像模型 403（见 memory: image-model-eval-and-ip-policy）时的两段式：
+//   --emit-jobs jobs.json  只导出 [{file, prompt}]，拿去首尔机器用 tools/fetch_openrouter_images.py 拉原图
+//   --raw-dir <dir>        跳过生图，从 <dir>/<id>_c<idx>.(png|jpg) 读原图走同一套抠图/裁剪后处理
+const emitJobs = flag('--emit-jobs', '');
+const rawDir = flag('--raw-dir', '');
 
 const cfg = loadConfig();
-if (!cfg.openrouterApiKey) {
+if (!cfg.openrouterApiKey && !rawDir && !emitJobs) {
   console.error('缺 OPENROUTER_API_KEY（.env）');
   process.exit(1);
 }
@@ -135,6 +140,21 @@ function resizeDown(r, tw, th) {
   return { width: tw, height: th, data: out };
 }
 
+// 白纸铅笔稿转透明贴片：亮度→alpha（纸白→透明、石墨→不透明），保留笔触本色。
+// 铅笔灰细线走绿幕抠图会被键掉/染绿（phone3d 数字实测），kind=pencil 用这条路。
+function luminanceKey(r, lo = 0.50, hi = 0.94) {
+  const out = new Uint8Array(r.data.length);
+  for (let i = 0; i < r.data.length; i += 4) {
+    const lum = (0.299 * r.data[i] + 0.587 * r.data[i + 1] + 0.114 * r.data[i + 2]) / 255;
+    const a = Math.max(0, Math.min(1, (hi - lum) / (hi - lo)));
+    out[i] = r.data[i];
+    out[i + 1] = r.data[i + 1];
+    out[i + 2] = r.data[i + 2];
+    out[i + 3] = Math.round(a * 255);
+  }
+  return { width: r.width, height: r.height, data: out };
+}
+
 function centerCropToAspect(r, tw, th) {
   const targetRatio = tw / th;
   const srcRatio = r.width / r.height;
@@ -149,19 +169,38 @@ function centerCropToAspect(r, tw, th) {
 
 // ---------- 生成 ----------
 
+// 可选 asset.style 覆盖统一画风后缀（如 paper-phone 的白卡纸+铅笔蜡笔，与 kawaii 贴纸/水彩都不搭）；
+// sticker 模式记得自带绿幕背景描述，否则抠图会失败。
+function composePrompt(asset) {
+  const base = asset.prompt.trim().replace(/[.。，,]+$/, '');
+  if (asset.style) return `${base}. ${asset.style}`;
+  return asset.kind === 'sticker'
+    ? `${base}. ${ICON_STYLE_SUFFIX}`
+    : `${base}. ${ILLUSTRATION_STYLE_SUFFIX}${asset.landscape === false ? '' : ', wide landscape composition'}`;
+}
+
+async function readRawBytes(dir, name) {
+  for (const ext of ['png', 'jpg', 'jpeg']) {
+    try {
+      return new Uint8Array(await readFile(join(dir, `${name}.${ext}`)));
+    } catch { /* 试下一个扩展名 */ }
+  }
+  throw new Error(`raw 缺图: ${name}.(png|jpg)`);
+}
+
 async function generateOne(asset, idx) {
   const isSticker = asset.kind === 'sticker';
-  // 可选 asset.style 覆盖统一画风后缀（如 paper-phone 的白卡纸+铅笔蜡笔，与 kawaii 贴纸/水彩都不搭）；
-  // sticker 模式记得自带绿幕背景描述，否则抠图会失败。
-  const base = asset.prompt.trim().replace(/[.。，,]+$/, '');
-  const prompt = asset.style
-    ? `${base}. ${asset.style}`
-    : isSticker
-      ? `${base}. ${ICON_STYLE_SUFFIX}`
-      : `${base}. ${ILLUSTRATION_STYLE_SUFFIX}${asset.landscape === false ? '' : ', wide landscape composition'}`;
-  const raw = await client.chatImage(cfg.imageModel, prompt);
+  const raw = rawDir
+    ? { bytes: await readRawBytes(rawDir, `${asset.id}_c${idx}`) }
+    : await client.chatImage(cfg.imageModel, composePrompt(asset));
   let raster;
-  if (isSticker) {
+  if (asset.kind === 'pencil') {
+    // 白纸铅笔稿：亮度键抠 → 裁包围盒 → 降采样（同 sticker 的尺寸语义）
+    raster = trimAlpha(luminanceKey(decode(raw.bytes)));
+    const size = asset.targetSize ?? 256;
+    const scale = Math.min(1, size / Math.max(raster.width, raster.height));
+    raster = resizeDown(raster, Math.max(1, Math.round(raster.width * scale)), Math.max(1, Math.round(raster.height * scale)));
+  } else if (isSticker) {
     const cut = await cutout.removeBackground(raw);
     raster = trimAlpha(decode(cut.bytes));
     const size = asset.targetSize ?? 256;
@@ -186,6 +225,12 @@ const jobs = [];
 for (const asset of assets) {
   const count = asset.candidates ?? defaultCandidates;
   for (let i = 1; i <= count; i++) jobs.push({ asset, idx: i });
+}
+if (emitJobs) {
+  const list = jobs.map(({ asset, idx }) => ({ file: `${asset.id}_c${idx}`, prompt: composePrompt(asset) }));
+  await writeFile(emitJobs, JSON.stringify({ model: cfg.imageModel, jobs: list }, null, 2));
+  console.log(`emitted ${list.length} jobs -> ${emitJobs}（拿去 fetch_openrouter_images.py 拉原图）`);
+  process.exit(0);
 }
 console.log(`assets=${assets.length} jobs=${jobs.length} model=${cfg.imageModel} concurrency=${concurrency}`);
 

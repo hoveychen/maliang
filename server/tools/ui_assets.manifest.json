@@ -1,68 +1,516 @@
 {
   "comment": "UI/HUD 素材清单：kind=sticker 走绿幕抠图裁边（替换 emoji 图标），kind=illustration 走全幅水彩（绘本插画/背景）。id 即落盘文件名前缀。",
   "assets": [
-    { "id": "opt_boy", "kind": "sticker", "targetSize": 320, "prompt": "a cheerful toddler boy with brown hair waving hello, chibi, big head, small body" },
-    { "id": "opt_girl", "kind": "sticker", "targetSize": 320, "prompt": "a cheerful toddler girl with pigtails waving hello, chibi, big head, small body" },
-    { "id": "opt_rabbit", "kind": "sticker", "targetSize": 320, "prompt": "a cute fluffy white baby rabbit sitting, long ears up" },
-    { "id": "opt_cat", "kind": "sticker", "targetSize": 320, "prompt": "a cute orange kitten sitting with a happy face" },
-    { "id": "opt_dog", "kind": "sticker", "targetSize": 320, "prompt": "a cute cream puppy sitting with tongue out" },
-    { "id": "opt_dino", "kind": "sticker", "targetSize": 320, "prompt": "a cute friendly baby green tyrannosaurus dinosaur standing" },
-    { "id": "opt_paint", "kind": "sticker", "targetSize": 320, "prompt": "a wooden artist paint palette with colorful paint blobs and a small brush" },
-    { "id": "opt_ball", "kind": "sticker", "targetSize": 320, "prompt": "a classic black and white soccer ball" },
-    { "id": "opt_music", "kind": "sticker", "targetSize": 320, "prompt": "two cheerful golden musical notes side by side" },
-    { "id": "opt_book", "kind": "sticker", "targetSize": 320, "prompt": "a small stack of three colorful storybooks with a star" },
-    { "id": "ic_mic", "kind": "sticker", "targetSize": 256, "prompt": "a cute rounded silver and coral retro singing microphone" },
-    { "id": "ic_mic_rec", "kind": "sticker", "targetSize": 256, "prompt": "a cute rounded retro microphone glowing warm red with small sound waves around it" },
-    { "id": "hud_listen", "kind": "sticker", "targetSize": 640, "prompt": "a wide horizontal rounded pill-shaped HUD banner plaque for a toddler game, a soft flat cream panel with a chunky rounded warm coral border, a tiny cute microphone with small curved sound-wave arcs on the far left end and a few small golden stars on the far right end, the entire center left completely empty as a flat blank cream panel, glossy toy-like, symmetrical" },
-    { "id": "ic_wait", "kind": "sticker", "targetSize": 256, "prompt": "a cute golden hourglass with magical sparkles floating around" },
-    { "id": "ic_wand", "kind": "sticker", "targetSize": 256, "prompt": "a magic wand with a golden star tip trailing sparkles" },
-    { "id": "ic_next", "kind": "sticker", "targetSize": 256, "prompt": "a chunky rounded golden arrow pointing right, glossy" },
-    { "id": "ic_yes", "kind": "sticker", "targetSize": 256, "prompt": "a round grass-green badge with a big white check mark" },
-    { "id": "ic_no", "kind": "sticker", "targetSize": 256, "prompt": "a round coral-red badge with a big white cross mark" },
-    { "id": "ic_retry", "kind": "sticker", "targetSize": 256, "prompt": "a round sky-blue badge with a white circular refresh arrow" },
-    { "id": "ic_question", "kind": "sticker", "targetSize": 256, "prompt": "a big friendly orange question mark with a small sparkle, rounded and chubby" },
-    { "id": "ic_book_open", "kind": "sticker", "targetSize": 256, "prompt": "an open storybook with cream pages and a few golden sparkles rising from it" },
-    { "id": "ic_gear", "kind": "sticker", "targetSize": 256, "prompt": "a chunky rounded silver-blue gear cogwheel, glossy and toy-like, friendly" },
-    { "id": "ic_phone_fairy", "kind": "sticker", "targetSize": 320, "prompt": "a cute chunky toy smartphone standing upright for a little fairy, glossy rounded body in soft mint and lavender with tiny golden stars and a delicate dragonfly-wing motif, a softly glowing cream screen, portrait orientation" },
-    { "id": "phone_shell_fairy", "kind": "sticker", "targetSize": 512, "prompt": "the front of a cute pastel fairy smartphone case in portrait orientation, soft mint and lavender rounded body with little golden star studs and delicate dragonfly-wing filigree along the edges, a large blank empty flat screen area filling the center, toy-like and glossy, symmetrical straight-on view" },
-    { "id": "app_stickers", "kind": "sticker", "targetSize": 256, "prompt": "a colorful sticker album booklet with a big shiny star sticker peeling off a corner" },
-    { "id": "app_items", "kind": "sticker", "targetSize": 256, "prompt": "a cute open treasure chest overflowing with tiny toys and a little star" },
-    { "id": "app_settings", "kind": "sticker", "targetSize": 256, "prompt": "a chunky rounded golden gear cogwheel with a small sparkle, glossy and toy-like" },
-    { "id": "app_flowers", "kind": "sticker", "targetSize": 256, "prompt": "a cute app icon of a little red reward flower with a golden smiley center resting on a small stamp collection booklet" },
-    { "id": "reward_flower", "kind": "sticker", "targetSize": 256, "prompt": "a classic kindergarten reward little red flower, a plump rounded bright red flower with six rounded petals and a cheerful golden smiling face in the center" },
-    { "id": "stamp_star", "kind": "sticker", "targetSize": 256, "prompt": "a round rubber-stamp ink impression of a chubby star inside a soft circular ring, cheerful golden-yellow ink" },
-    { "id": "stamp_smile", "kind": "sticker", "targetSize": 256, "prompt": "a round rubber-stamp ink impression of a happy smiley face inside a soft circular ring, warm orange ink" },
-    { "id": "stamp_paw", "kind": "sticker", "targetSize": 256, "prompt": "a round rubber-stamp ink impression of a cute animal paw print inside a soft circular ring, friendly teal ink" },
-    { "id": "stamp_medal", "kind": "sticker", "targetSize": 256, "prompt": "a round rubber-stamp ink impression of a little award medal with a ribbon inside a soft circular ring, cheerful red ink" },
-    { "id": "stamp_heart", "kind": "sticker", "targetSize": 256, "prompt": "a round rubber-stamp ink impression of a plump heart inside a soft circular ring, sweet pink ink" },
-    { "id": "st_flower", "kind": "sticker", "targetSize": 256, "prompt": "a pink cherry blossom flower with five petals" },
-    { "id": "st_apple", "kind": "sticker", "targetSize": 256, "prompt": "a shiny red apple with a green leaf" },
-    { "id": "st_star", "kind": "sticker", "targetSize": 256, "prompt": "a shiny golden five-pointed star with a happy sparkle" },
-    { "id": "st_shell", "kind": "sticker", "targetSize": 256, "prompt": "a pretty pink and cream seashell" },
-    { "id": "st_ladybug", "kind": "sticker", "targetSize": 256, "prompt": "a cute red ladybug with black dots and a smiling face" },
-    { "id": "st_candy", "kind": "sticker", "targetSize": 256, "prompt": "a wrapped pink swirl candy with twisted wrapper ends" },
-    { "id": "st_clover", "kind": "sticker", "targetSize": 256, "prompt": "a fresh green four-leaf clover" },
-    { "id": "st_gem", "kind": "sticker", "targetSize": 256, "prompt": "a sparkling blue diamond gemstone" },
-    { "id": "ic_gift", "kind": "sticker", "targetSize": 256, "prompt": "a red gift box with a yellow ribbon bow" },
-    { "id": "ic_chat", "kind": "sticker", "targetSize": 256, "prompt": "a rounded sky-blue speech bubble with three little dots" },
-    { "id": "ic_handshake", "kind": "sticker", "targetSize": 256, "prompt": "two cartoon hands doing a friendly handshake" },
-    { "id": "ic_pin", "kind": "sticker", "targetSize": 256, "prompt": "a rounded coral-red map location pin with a white dot" },
-    { "id": "ic_target", "kind": "sticker", "targetSize": 256, "prompt": "a red and white round archery target with a golden star in the center" },
-    { "id": "ic_ear", "kind": "sticker", "targetSize": 256, "prompt": "a cute cartoon ear with three small curved sound waves beside it" },
-    { "id": "ic_party", "kind": "sticker", "targetSize": 256, "prompt": "a golden party popper cone exploding with colorful confetti and streamers" },
-    { "id": "ic_sparkle", "kind": "sticker", "targetSize": 256, "prompt": "a cluster of three golden four-pointed sparkles" },
-    { "id": "ic_note", "kind": "sticker", "targetSize": 256, "prompt": "a single cheerful golden eighth musical note" },
-    { "id": "em_happy", "kind": "sticker", "targetSize": 256, "prompt": "a round warm yellow smiling face with rosy cheeks and closed happy eyes" },
-    { "id": "em_think", "kind": "sticker", "targetSize": 256, "prompt": "a round warm yellow thinking face looking up with a finger on chin and three small thought dots" },
-    { "id": "em_wave", "kind": "sticker", "targetSize": 256, "prompt": "a round warm yellow happy face with one small hand waving hello" },
-    { "id": "em_sad", "kind": "sticker", "targetSize": 256, "prompt": "a round warm yellow pleading face with big glossy teary puppy eyes" },
-    { "id": "em_laugh", "kind": "sticker", "targetSize": 256, "prompt": "a round warm yellow laughing face with wide open smile and squeezed happy eyes" },
-    { "id": "book_open_bg", "kind": "illustration", "targetW": 1600, "targetH": 1000, "prompt": "an open hardcover fairytale storybook lying flat facing the viewer, two blank cream paper pages with softly curled edges and visible paper grain, warm red-brown leather cover border around the pages, gold corner ornaments, perfectly symmetrical straight-on view, the blank pages fill most of the frame" },
-    { "id": "page_paper", "kind": "illustration", "targetW": 1024, "targetH": 640, "prompt": "a blank warm cream aged paper texture with very subtle watercolor stains and soft fibers, gentle vignette, nothing drawn on it" },
-    { "id": "bg_onboarding", "kind": "illustration", "targetW": 1600, "targetH": 1000, "prompt": "a soft dreamy watercolor wash background, pale blue sky melting into warm cream, a few fluffy clouds and tiny distant sparkles, very gentle and calm, mostly empty" },
-    { "id": "story_forest", "kind": "illustration", "targetW": 1024, "targetH": 560, "prompt": "a magical friendly forest meadow with round fluffy trees, colorful tulips, and a soft rainbow arching across the sky" },
-    { "id": "story_fairy_glade", "kind": "illustration", "targetW": 1024, "targetH": 560, "prompt": "a sparkling sunny forest glade with glowing fireflies, floating light sparkles and soft god rays between round fluffy trees, empty center stage" },
-    { "id": "story_door", "kind": "illustration", "targetW": 1024, "targetH": 560, "prompt": "a small magical glowing arched wooden door standing alone in a flower meadow, golden stars and colorful balloons floating around it" },
-    { "id": "bg_menu", "kind": "illustration", "targetW": 1600, "targetH": 1000, "prompt": "a cheerful watercolor rolling green meadow with scattered flowers, a tiny village of round cute houses and a windmill in the distance, bright blue sky with fluffy clouds and a smiling sun peeking" }
+    {
+      "id": "opt_boy",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a cheerful toddler boy with brown hair waving hello, chibi, big head, small body"
+    },
+    {
+      "id": "opt_girl",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a cheerful toddler girl with pigtails waving hello, chibi, big head, small body"
+    },
+    {
+      "id": "opt_rabbit",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a cute fluffy white baby rabbit sitting, long ears up"
+    },
+    {
+      "id": "opt_cat",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a cute orange kitten sitting with a happy face"
+    },
+    {
+      "id": "opt_dog",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a cute cream puppy sitting with tongue out"
+    },
+    {
+      "id": "opt_dino",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a cute friendly baby green tyrannosaurus dinosaur standing"
+    },
+    {
+      "id": "opt_paint",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a wooden artist paint palette with colorful paint blobs and a small brush"
+    },
+    {
+      "id": "opt_ball",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a classic black and white soccer ball"
+    },
+    {
+      "id": "opt_music",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "two cheerful golden musical notes side by side"
+    },
+    {
+      "id": "opt_book",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a small stack of three colorful storybooks with a star"
+    },
+    {
+      "id": "ic_mic",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute rounded silver and coral retro singing microphone"
+    },
+    {
+      "id": "ic_mic_rec",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute rounded retro microphone glowing warm red with small sound waves around it"
+    },
+    {
+      "id": "hud_listen",
+      "kind": "sticker",
+      "targetSize": 640,
+      "prompt": "a wide horizontal rounded pill-shaped HUD banner plaque for a toddler game, a soft flat cream panel with a chunky rounded warm coral border, a tiny cute microphone with small curved sound-wave arcs on the far left end and a few small golden stars on the far right end, the entire center left completely empty as a flat blank cream panel, glossy toy-like, symmetrical"
+    },
+    {
+      "id": "ic_wait",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute golden hourglass with magical sparkles floating around"
+    },
+    {
+      "id": "ic_wand",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a magic wand with a golden star tip trailing sparkles"
+    },
+    {
+      "id": "ic_next",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a chunky rounded golden arrow pointing right, glossy"
+    },
+    {
+      "id": "ic_yes",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round grass-green badge with a big white check mark"
+    },
+    {
+      "id": "ic_no",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round coral-red badge with a big white cross mark"
+    },
+    {
+      "id": "ic_retry",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round sky-blue badge with a white circular refresh arrow"
+    },
+    {
+      "id": "ic_question",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a big friendly orange question mark with a small sparkle, rounded and chubby"
+    },
+    {
+      "id": "ic_book_open",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "an open storybook with cream pages and a few golden sparkles rising from it"
+    },
+    {
+      "id": "ic_gear",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a chunky rounded silver-blue gear cogwheel, glossy and toy-like, friendly"
+    },
+    {
+      "id": "ic_phone_fairy",
+      "kind": "sticker",
+      "targetSize": 320,
+      "prompt": "a cute chunky toy smartphone standing upright for a little fairy, glossy rounded body in soft mint and lavender with tiny golden stars and a delicate dragonfly-wing motif, a softly glowing cream screen, portrait orientation"
+    },
+    {
+      "id": "phone_shell_fairy",
+      "kind": "sticker",
+      "targetSize": 512,
+      "prompt": "the front of a cute pastel fairy smartphone case in portrait orientation, soft mint and lavender rounded body with little golden star studs and delicate dragonfly-wing filigree along the edges, a large blank empty flat screen area filling the center, toy-like and glossy, symmetrical straight-on view"
+    },
+    {
+      "id": "app_stickers",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a colorful sticker album booklet with a big shiny star sticker peeling off a corner"
+    },
+    {
+      "id": "app_items",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute open treasure chest overflowing with tiny toys and a little star"
+    },
+    {
+      "id": "app_settings",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a chunky rounded golden gear cogwheel with a small sparkle, glossy and toy-like"
+    },
+    {
+      "id": "app_flowers",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute app icon of a little red reward flower with a golden smiley center resting on a small stamp collection booklet"
+    },
+    {
+      "id": "reward_flower",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a classic kindergarten reward little red flower, a plump rounded bright red flower with six rounded petals and a cheerful golden smiling face in the center"
+    },
+    {
+      "id": "stamp_star",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round rubber-stamp ink impression of a chubby star inside a soft circular ring, cheerful golden-yellow ink"
+    },
+    {
+      "id": "stamp_smile",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round rubber-stamp ink impression of a happy smiley face inside a soft circular ring, warm orange ink"
+    },
+    {
+      "id": "stamp_paw",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round rubber-stamp ink impression of a cute animal paw print inside a soft circular ring, friendly teal ink"
+    },
+    {
+      "id": "stamp_medal",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round rubber-stamp ink impression of a little award medal with a ribbon inside a soft circular ring, cheerful red ink"
+    },
+    {
+      "id": "stamp_heart",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round rubber-stamp ink impression of a plump heart inside a soft circular ring, sweet pink ink"
+    },
+    {
+      "id": "st_flower",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a pink cherry blossom flower with five petals"
+    },
+    {
+      "id": "st_apple",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a shiny red apple with a green leaf"
+    },
+    {
+      "id": "st_star",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a shiny golden five-pointed star with a happy sparkle"
+    },
+    {
+      "id": "st_shell",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a pretty pink and cream seashell"
+    },
+    {
+      "id": "st_ladybug",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute red ladybug with black dots and a smiling face"
+    },
+    {
+      "id": "st_candy",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a wrapped pink swirl candy with twisted wrapper ends"
+    },
+    {
+      "id": "st_clover",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a fresh green four-leaf clover"
+    },
+    {
+      "id": "st_gem",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a sparkling blue diamond gemstone"
+    },
+    {
+      "id": "ic_gift",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a red gift box with a yellow ribbon bow"
+    },
+    {
+      "id": "ic_chat",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a rounded sky-blue speech bubble with three little dots"
+    },
+    {
+      "id": "ic_handshake",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "two cartoon hands doing a friendly handshake"
+    },
+    {
+      "id": "ic_pin",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a rounded coral-red map location pin with a white dot"
+    },
+    {
+      "id": "ic_target",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a red and white round archery target with a golden star in the center"
+    },
+    {
+      "id": "ic_ear",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute cartoon ear with three small curved sound waves beside it"
+    },
+    {
+      "id": "ic_party",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a golden party popper cone exploding with colorful confetti and streamers"
+    },
+    {
+      "id": "ic_sparkle",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cluster of three golden four-pointed sparkles"
+    },
+    {
+      "id": "ic_note",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a single cheerful golden eighth musical note"
+    },
+    {
+      "id": "em_happy",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round warm yellow smiling face with rosy cheeks and closed happy eyes"
+    },
+    {
+      "id": "em_think",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round warm yellow thinking face looking up with a finger on chin and three small thought dots"
+    },
+    {
+      "id": "em_wave",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round warm yellow happy face with one small hand waving hello"
+    },
+    {
+      "id": "em_sad",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round warm yellow pleading face with big glossy teary puppy eyes"
+    },
+    {
+      "id": "em_laugh",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round warm yellow laughing face with wide open smile and squeezed happy eyes"
+    },
+    {
+      "id": "book_open_bg",
+      "kind": "illustration",
+      "targetW": 1600,
+      "targetH": 1000,
+      "prompt": "an open hardcover fairytale storybook lying flat facing the viewer, two blank cream paper pages with softly curled edges and visible paper grain, warm red-brown leather cover border around the pages, gold corner ornaments, perfectly symmetrical straight-on view, the blank pages fill most of the frame"
+    },
+    {
+      "id": "page_paper",
+      "kind": "illustration",
+      "targetW": 1024,
+      "targetH": 640,
+      "prompt": "a blank warm cream aged paper texture with very subtle watercolor stains and soft fibers, gentle vignette, nothing drawn on it"
+    },
+    {
+      "id": "bg_onboarding",
+      "kind": "illustration",
+      "targetW": 1600,
+      "targetH": 1000,
+      "prompt": "a soft dreamy watercolor wash background, pale blue sky melting into warm cream, a few fluffy clouds and tiny distant sparkles, very gentle and calm, mostly empty"
+    },
+    {
+      "id": "story_forest",
+      "kind": "illustration",
+      "targetW": 1024,
+      "targetH": 560,
+      "prompt": "a magical friendly forest meadow with round fluffy trees, colorful tulips, and a soft rainbow arching across the sky"
+    },
+    {
+      "id": "story_fairy_glade",
+      "kind": "illustration",
+      "targetW": 1024,
+      "targetH": 560,
+      "prompt": "a sparkling sunny forest glade with glowing fireflies, floating light sparkles and soft god rays between round fluffy trees, empty center stage"
+    },
+    {
+      "id": "story_door",
+      "kind": "illustration",
+      "targetW": 1024,
+      "targetH": 560,
+      "prompt": "a small magical glowing arched wooden door standing alone in a flower meadow, golden stars and colorful balloons floating around it"
+    },
+    {
+      "id": "bg_menu",
+      "kind": "illustration",
+      "targetW": 1600,
+      "targetH": 1000,
+      "prompt": "a cheerful watercolor rolling green meadow with scattered flowers, a tiny village of round cute houses and a windmill in the distance, bright blue sky with fluffy clouds and a smiling sun peeking"
+    },
+    {
+      "id": "phone3d_front_shell",
+      "kind": "illustration",
+      "targetW": 480,
+      "targetH": 1008,
+      "landscape": false,
+      "candidates": 4,
+      "style": "handmade kindergarten paper craft style, plain white cardstock with subtle paper grain, hand-drawn graphite pencil lines and wax crayon coloring, childlike and charming, flat lighting, no text, no letters, no watermark",
+      "prompt": "front face of a handmade papercraft smartphone toy filling the entire frame edge to edge, a thin hand-drawn pencil rounded-rectangle bezel line traced just inside the outer edge, the area inside the bezel is a large completely blank plain white paper screen with nothing drawn on it, a small pencil-drawn pill-shaped camera island near the top center inside the screen top edge"
+    },
+    {
+      "id": "phone3d_back_shell",
+      "kind": "illustration",
+      "targetW": 480,
+      "targetH": 1008,
+      "landscape": false,
+      "candidates": 4,
+      "style": "handmade kindergarten paper craft style, plain white cardstock with subtle paper grain, hand-drawn graphite pencil lines and wax crayon coloring, childlike and charming, flat lighting, no text, no letters, no watermark",
+      "prompt": "back face of a handmade papercraft smartphone toy filling the entire frame edge to edge, a thin hand-drawn pencil rounded-rectangle outline traced just inside the outer edge, in the top-left corner a big pencil-drawn rounded-square camera island with three large circular camera lenses shaded with wax crayon, a few small crayon doodles (a star, a heart, a flower sticker) scattered on the lower half, mostly empty white cardstock"
+    },
+    {
+      "id": "phone3d_spread_bg",
+      "kind": "illustration",
+      "targetW": 960,
+      "targetH": 1008,
+      "landscape": false,
+      "candidates": 4,
+      "style": "handmade kindergarten paper craft style, plain white cardstock with subtle paper grain, hand-drawn graphite pencil lines and wax crayon coloring, childlike and charming, flat lighting, no text, no letters, no watermark",
+      "prompt": "an open blank double-page spread of a handmade paper journal filling the entire frame edge to edge, plain white cardstock pages with a soft subtle vertical fold crease down the exact center, a thin wax crayon border frame traced around each of the two pages, tiny crayon doodles in the outer corners, the pages are otherwise completely empty"
+    },
+    {
+      "id": "phone3d_island",
+      "kind": "pencil",
+      "targetSize": 200,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "a single horizontal pill-shaped capsule solidly filled in with dark black graphite pencil scribble, two small round dots left white unfilled inside it, like a hand-drawn smartphone camera island"
+    },
+    {
+      "id": "phone3d_digit_0",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"0\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_1",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"1\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_2",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"2\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_3",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"3\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_4",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"4\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_5",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"5\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_6",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"6\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_7",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"7\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_8",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"8\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_9",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "the single handwritten number digit \"9\" and nothing else"
+    },
+    {
+      "id": "phone3d_digit_colon",
+      "kind": "pencil",
+      "targetSize": 96,
+      "candidates": 3,
+      "style": "childlike kindergarten handwriting drawn with a dark graphite pencil, thick soft dark pencil strokes with visible graphite texture, centered large in frame, on plain flat white paper, nothing else in frame, no watermark",
+      "prompt": "a single handwritten colon punctuation mark \":\" — two small dots stacked vertically, and nothing else"
+    }
   ]
 }

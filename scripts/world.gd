@@ -1042,6 +1042,13 @@ func _setup_hud() -> void:
 	paper_phone = PaperPhone.new()
 	camera.add_child(paper_phone)
 	paper_phone.create_screens(PhoneUi.FRONT_PX, PhoneUi.SPREAD_PX)
+	# AIGC 白卡纸壳贴图（gen_ui_assets phone3d_* 套件）；缺资产时保持程序化白卡纸占位
+	var shell_front := UiAssets.tex("phone3d_front_shell")
+	if shell_front != null:
+		paper_phone.set_face_texture(PaperPhone.FACE_FRONT, shell_front)
+	var shell_back := UiAssets.tex("phone3d_back_shell")
+	if shell_back != null:
+		paper_phone.set_face_texture(PaperPhone.FACE_BACK, shell_back)
 	phone_ui = PhoneUi.new(self)
 	phone_ui.build(paper_phone.front_viewport(), paper_phone.spread_viewport())
 	phone_ui.app_opened.connect(func(_id: String) -> void:
@@ -5096,7 +5103,9 @@ func _toggle_album() -> void:
 		_open_phone()
 
 ## 打开手机：3D 手机贴合相机弹出（正面主屏）+ 全屏遮罩，回主屏、刷新册子/banner，相机进近身。
+## 顺带关角色 X 光剪影：手机挡住的角色会把剪影画到手机纸面上（实测穿帮），收起时按画质档还原。
 func _open_phone() -> void:
+	PaperCharacter.set_xray_enabled(false, get_tree())
 	paper_phone.fit_to_camera(camera, PHONE_FILL, PHONE_NDC)
 	phone_ui.close_app() # 每次打开手机都回到主屏
 	phone_ui.refresh_album()
@@ -5114,6 +5123,8 @@ func _close_phone() -> void:
 	if _phone_scrim != null:
 		_phone_scrim.visible = false
 	_exit_phone_cam()
+	# 还原角色 X 光剪影到当前画质档（开手机时为防剪影画上纸面而临时关掉）
+	PaperCharacter.set_xray_enabled(int(_gfx_levels.get("xray", 0)) > 0, get_tree())
 
 ## 进近身相机：按玩家身高算 70% 构图参数 + 复位手势偏移（yaw=0，让 +X 焦点偏移把玩家推到屏左）。
 func _enter_phone_cam() -> void:
