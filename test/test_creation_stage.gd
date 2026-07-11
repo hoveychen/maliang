@@ -31,12 +31,20 @@ func _tick() -> void:
 		34:
 			_test_second_prompt_keeps_same_egg()
 		36:
-			_test_cancelled_clears_stage()
+			_test_card_flies_into_egg()
+		38:
+			_test_cancel_button_clears_stage()
 		40:
 			_test_prop_goal_lights_forge()
 		42:
-			_test_walk_away_clears_stage()
+			_test_voice_answer_flies_in()
+		44:
+			_test_cancelled_clears_stage()
 		46:
+			_prompt("prop") # 再开一次，验走开路径
+		48:
+			_test_walk_away_clears_stage()
+		52:
 			if fails == 0:
 				print("creation_stage PASS")
 			else:
@@ -92,12 +100,42 @@ func _test_second_prompt_keeps_same_egg() -> void:
 	_prompt("character")
 	_check("第二轮追问不重复立蛋", _placeholders()[PORTAL_ID], tile)
 
-## 服务端判「算了/不要了」→ creation_cancelled：收视图 + 收蛋，但不退出对话（孩子还能接着跟仙子说话）。
-func _test_cancelled_clears_stage() -> void:
-	scene.call("_on_creation_cancelled", { "replyText": "好呀，那我们不造啦", "ttsAsset": "", "voiceId": "" })
+## 飞行特效节点（挂 HUD 层，名字以 ThrowFx 开头；同名重复 Godot 会加后缀）。
+func _throw_fx() -> Array:
+	var found: Array = []
+	var hud := scene.get("_hud_layer") as CanvasLayer
+	if hud == null:
+		return found
+	for c in hud.get_children():
+		if String(c.name).begins_with("ThrowFx"):
+			found.append(c)
+	return found
+
+## 点一张卡：卡片被「扔」进蛋——起飞的是一张同款卡，落点是蛋的屏幕投影（孩子看见回答被吃进去）。
+func _test_card_flies_into_egg() -> void:
+	var cards := scene.get("_creation_cards") as GridContainer
+	if cards.get_child_count() == 0:
+		_fail("没有选项卡可点")
+		return
+	var card := cards.get_child(0) as Button
+	var target: Vector2 = scene.call("_placeholder_screen_pos")
+	_check("蛋在屏幕上有落点（不在镜头外）", target != Vector2.INF, true)
+	scene.call("_on_creation_card", "cat", card)
+	var fx := _throw_fx()
+	_check("答案卡已起飞（ThrowFx 在 HUD 层）", fx.size(), 1)
+	if fx.size() == 1:
+		var d := (fx[0] as Control).global_position.distance_to(target)
+		_check("起飞点在卡片处、还没到蛋 (d=%.0f)" % d, d > 40.0, true)
+
+## 右上角圆叉：随时退出创造，蛋跟着收，且留在对话里（不是退出对话）。
+func _test_cancel_button_clears_stage() -> void:
+	var btn := scene.get("_creation_cancel_btn") as Button
+	_check("创造视图上有取消按钮", btn != null, true)
+	if btn == null:
+		return
+	btn.emit_signal("pressed")
 	_check("退出引导创造态", scene.get("_in_creation"), false)
 	_check("创造视图收起", _view().visible, false)
-	_check("相机特写复位", scene.get("_creation_cam"), false)
 	_check("降生蛋已收走", _placeholders().has(PORTAL_ID), false)
 	_check("取消的是创造、不是对话（仍在仙子面前）", scene.get("selected") != null, true)
 
@@ -106,6 +144,21 @@ func _test_prop_goal_lights_forge() -> void:
 	_prompt("prop")
 	_check("造物烧起魔法熔炉", _placeholders().has(FORGE_ID), true)
 	_check("造物不立降生蛋", _placeholders().has(PORTAL_ID), false)
+
+## 语音答复（没点卡，直接说）：断句提交时也飞一个气泡进炉——两条答复路径视觉一致。
+func _test_voice_answer_flies_in() -> void:
+	scene.set("_recording", true)
+	scene.call("_utterance_commit")
+	_check("语音答复也起飞了气泡", _throw_fx().size() >= 1, true)
+
+## 服务端判「算了/不要了」→ creation_cancelled：收视图 + 收炉，但不退出对话（孩子还能接着跟仙子说话）。
+func _test_cancelled_clears_stage() -> void:
+	scene.call("_on_creation_cancelled", { "replyText": "好呀，那我们不造啦", "ttsAsset": "", "voiceId": "" })
+	_check("退出引导创造态", scene.get("_in_creation"), false)
+	_check("创造视图收起", _view().visible, false)
+	_check("相机特写复位", scene.get("_creation_cam"), false)
+	_check("魔法熔炉已收走", _placeholders().has(FORGE_ID), false)
+	_check("取消的是创造、不是对话（仍在仙子面前）", scene.get("selected") != null, true)
 
 ## 孩子直接走开（退出对话）：会话取消上报服务端，地上的熔炉也要收走，不留空烧的炉子。
 func _test_walk_away_clears_stage() -> void:
