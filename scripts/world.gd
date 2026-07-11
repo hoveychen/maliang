@@ -183,7 +183,7 @@ var _flower_cells: Array = []      ## 小红花 app 的 3×3 花格（9 个 Text
 var _stamp_dots: Array = []        ## 集邮盖章进度点（STAMPS_PER_FLOWER 个，按 stampProgress 点亮）
 var _stamps_total_label: Label     ## 集邮 app 累计盖章数展示
 # 物品系统：语音造物的物件可摆可收，收集册物品页列出收进背包的（服务端权威，state 同步）
-var world_props: Dictionary = {}   ## 语音物件 id → { "spec", "state"(placed/bagged), "tile"(Array|null) }
+var bag: Dictionary = {}           ## 背包（服务端权威）：物品实体 id → 份数（world_state/bag_update 同步）
 var _album_pages: Dictionary = {}  ## "stickers"/"items"/"settings" → Control（app 页面，挂进手机屏幕）
 # —— 手机 HUD：左下角手机菜单，点开在 HUD 里弹「手机壳 + iPhone 式屏幕」——
 # 通用换壳管线：手机皮肤 id → 启动器图标/手机壳资产；以后小朋友解锁新手机只需加一项并切
@@ -260,10 +260,10 @@ var _avatar_hash := ""             ## 待确认的新形象资产 hash（✓ 才
 var _items_grid: GridContainer     ## 物品页网格（bagged 物件动态重建）
 var _items_empty: Label            ## 物品页空态提示
 const PROP_LONG_PRESS := 0.6       ## 长按拾起阈值（秒），期间手指基本不动
-const PROP_DRAG_LIFT := 1.0        ## 拖拽中物件抬离地面的高度（「拎起来了」）
-var _prop_press_id := ""           ## 按下时指下的语音物件 id（长按候选，滑动/抬指取消）
+const NO_PRESS_TILE := Vector2i(-1, -1)
+var _prop_press_tile := NO_PRESS_TILE ## 按下时指下的可拾物品 tile（长按候选，滑动/抬指取消）
 var _prop_press_t := 0.0           ## 长按累计秒
-var _prop_drag: Dictionary = {}    ## 拖拽中 { id, spec_data, yaw, wander, node, screen, tile, origin }
+var _bag_action := ""              ## 最近一次拾/摆动作（"pickup"/"place"/""），bag_update 回包据此出横幅
 const BRING_DONE_DIST := 4.5       ## 带人：目标与委托人相邻半径
 const VISIT_DONE_DIST := 14.0      ## 探访：玩家到地点中心半径（POI 中心可能不可达，如池塘水面）
 var _executors: Array = []        ## 活跃的 BehaviorExecutor
@@ -1715,7 +1715,7 @@ func _build_cooldown_overlay() -> Control:
 	col.add_child(msg)
 	return root
 
-## 小红花数：服务端权威钱包（world_state/task_complete/prop_created/gen_complete 同步）。
+## 小红花数：服务端权威钱包（world_state/task_complete/item_created/gen_complete 同步）。
 func _red_flower_count() -> int:
 	return int(wallet.get("flowers", 0))
 
@@ -1802,7 +1802,6 @@ func _process(delta: float) -> void:
 	tp = _prof_lap(tp, "tts")
 	_step_hold_follow(delta)
 	_step_prop_press(delta)
-	_step_prop_drag()
 	tp = _prof_lap(tp, "hold/prop")
 	_step_task(delta)
 	tp = _prof_lap(tp, "task/give")
@@ -2473,14 +2472,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if _gesturing:
 		return
-	# 拖拽摆放物件中：本指事件全归拖拽（跟指吸附/松手落地），不走跟随/拾取
-	if not _prop_drag.is_empty():
-		if event is InputEventMouseMotion or event is InputEventScreenDrag:
-			_prop_drag["screen"] = event.position
-		elif (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed) \
-				or (event is InputEventScreenTouch and not event.pressed):
-			_end_prop_drag(event.position)
-		return
 	# 缩放（滚轮）
 	if event is InputEventMouseButton and event.pressed and _locked == null:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -2497,7 +2488,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_try_begin_hold_follow(event.position)
 			_begin_prop_press(event.position)
 		else:
-			_prop_press_id = "" # 抬指：长按候选作废
+			_prop_press_tile = NO_PRESS_TILE # 抬指：长按候选作废
 			if _hold_follow:
 				_end_hold_follow(event.position)
 			elif not _dragging:
@@ -2522,7 +2513,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_try_begin_hold_follow(event.position)
 			_begin_prop_press(event.position)
 		else:
-			_prop_press_id = "" # 抬指：长按候选作废
+			_prop_press_tile = NO_PRESS_TILE # 抬指：长按候选作废
 			if _hold_follow:
 				_end_hold_follow(event.position)
 			elif not _dragging:
@@ -2534,8 +2525,7 @@ func _begin_gesture() -> void:
 	_gesturing = true
 	_hold_follow = false
 	_dragging = true
-	_prop_press_id = "" # 长按候选作废；拖拽中的物件弹回原位
-	_cancel_prop_drag()
+	_prop_press_tile = NO_PRESS_TILE # 长按候选作废
 	_cancel_player_move()
 	_gest_reset_t = 0.0 # 手势进行中不倒计时，全部抬起才开始
 
@@ -2902,9 +2892,10 @@ func _setup_backend() -> void:
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.creation_prompt.connect(_on_creation_prompt)
 	backend.prop_pending.connect(_on_prop_pending)
-	backend.prop_created.connect(_on_prop_created)
+	backend.item_created.connect(_on_item_created)
 	backend.prop_failed.connect(_on_prop_failed)
 	backend.prop_denied.connect(_on_reward_denied)
+	backend.bag_update.connect(_on_bag_update)
 	backend.gen_denied.connect(_on_reward_denied)
 	backend.failed.connect(_on_failed)
 	# 舞台协议（剧本系统）：StageAgent 消费下行、经 send_stage_event 回执；world 作能力宿主。
@@ -3270,9 +3261,6 @@ func _on_scene_entered(data: Dictionary) -> void:
 	for c in chars:
 		await _spawn_server_character(c as Dictionary, Vector2.INF, prefetched)
 
-	# 新场景物件（placed 的落地，bagged 的留背包）。
-	_restore_world_props(data.get("props", []))
-
 	# 玩家落位：走 portal 来的落在传送点出口（_arrive_tile），否则用该场景的最后位置（服务端下发），
 	# 再否则留在当前逻辑位。都会就近找空位避让新地形。
 	var target := focus_logical
@@ -3333,10 +3321,10 @@ func _unload_scene() -> void:
 	npcs.clear()
 	_villager_count = 0
 	_reported_tiles.clear() # 位置去重重置：新场景角色从头全报一次
-	# 语音物件：释放占地 + 清运行时清单（rebuild 后不再把旧场景物件重生成到新场景）
+	# 动态物件（占位符/演出道具）：释放占地 + 清运行时清单（rebuild 后不再把旧场景的重生成过来）。
+	# 矩阵物品随新场景地形自然重摆；背包是全世界共享的，跨场景保留。
 	if chunk_manager != null:
 		chunk_manager.clear_dynamic_props()
-	world_props.clear()
 	_portals.clear() # 旧场景的出口不属于新场景；新场景的由 _apply_scene 重新下发
 	_clear_portal_markers()
 
@@ -3383,7 +3371,7 @@ func _bootstrap() -> void:
 			await _spawn_server_character(chars[i] as Dictionary, Vector2.INF, prefetched)
 			_boot_sub = float(i + 1) / float(total) if total > 0 else 1.0
 		_boot_status = "布置世界…"
-		_restore_world_props(world.get("props", []))
+		# 摆着的造物在场景矩阵物品层里（随地形一并就位），背包由 world_state 下发
 		# 玩家搬到小神仙旁边降生，相机跟着玩家过去
 		var fairy := _find_fairy()
 		if not fairy.is_empty():
@@ -3668,28 +3656,55 @@ func _on_prop_pending(data: Dictionary) -> void:
 	banner.text = "魔法熔炉烧起来啦！"
 	banner.visible = true
 
-## 语音造物完成：物件从熔炉所在的位置出来，落位 tile 回报服务端持久化。
-func _on_prop_created(data: Dictionary) -> void:
+## 语音造物完成（万物皆物品）：实体定义入目录 + 背包一份到手；在熔炉/玩家旁本地找位
+## 发 item_place，渲染统一等 terrain_patch 广播回来落地。找不到位/离线就留在背包
+## （物品页可再摆），成品绝不凭空消失。
+func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包
-	var prop: Dictionary = data.get("prop", {})
+	_apply_bag(data.get("bag"))
+	var item: Dictionary = data.get("item", {})
+	ItemCatalog.set_defs([item]) # 新实体先入目录（patch 回来才认得 renderRef/spec）
 	thinking_label.visible = false
-	var spec: Dictionary = prop.get("spec", {})
 	# 先收熔炉腾出格子，成品就落在那儿；熔炉没立成就退回玩家身旁
 	var tile := _clear_placeholder(PLACEHOLDER_FORGE_ID)
 	var want := tile
 	if want.x < 0:
 		var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
 		want = WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
-	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec), String(prop.get("id", "")))
-	if placed.x < 0:
-		banner.text = "这里放不下啦，换个地方试试"
+	var spot := _find_item_spot(want)
+	if spot.x < 0 or not online:
+		banner.text = "变出来啦！收在册子里咯"
 		banner.visible = true
+		_pulse_album_button()
 		return
-	world_props[String(prop.get("id", ""))] = { "spec": spec, "state": "placed", "tile": [placed.x, placed.y] }
-	backend.send_prop_place(world_id, String(prop.get("id", "")), placed)
+	_bag_action = "" # 摆放回包静默：这里已有「变出来啦」横幅
+	backend.send_item_place(world_id, String(item.get("id", "")), spot, randf() * 360.0)
 	game_audio.play_sfx("fanfare")
 	banner.text = "变出来啦！"
 	banner.visible = true
+
+## 摆放/拾起的 bag_update 回包：背包同步 + 按动作出反馈（服务端已确认动账）。
+func _on_bag_update(data: Dictionary) -> void:
+	_apply_bag(data.get("bag"))
+	match _bag_action:
+		"pickup":
+			banner.text = "收进册子啦！"
+			banner.visible = true
+			_pulse_album_button()
+			if game_audio != null:
+				game_audio.play_sfx("fanfare")
+		"place":
+			if game_audio != null:
+				game_audio.play_sfx("pop")
+			banner.text = "摆出来啦！"
+			banner.visible = true
+	_bag_action = ""
+
+## 应用服务端下发的背包（world_state/item_created/bag_update 复用）：更新状态 + 刷物品页。
+func _apply_bag(b: Variant) -> void:
+	if typeof(b) == TYPE_DICTIONARY:
+		bag = b
+	_refresh_items_page()
 
 func _on_prop_failed(_reason: String) -> void:
 	thinking_label.visible = false
@@ -3714,179 +3729,80 @@ func _prop_wander(spec: Dictionary) -> float:
 	var loco: Dictionary = spec.get("locomotion", {})
 	return 1.2 if String(loco.get("type", "none")) != "none" else 0.0
 
-# ── 物品摆放：长按拾起 + 拖拽 tile 吸附 + 松手落地/收纳（服务端状态机同步） ──────
+# ── 物品拾起/摆放（万物皆物品）：长按拾进背包、物品页点选摆出，均走服务端 tile 编辑 ──────
+# 实例身份已消解为（tile + 实体引用）：拾起 = 清 tile 引用 + 背包加一份；
+# 摆放 = 背包扣一份 + tile 挂引用。渲染统一等 terrain_patch 广播（发起者也靠广播落地）。
 
-## 服务端 props → world_props 登记；placed 且有 tile 的落进世界（重载/重启恢复）。
-## 旧服务端无 state 字段：视为已摆放。bagged 的留在收集册物品页，不进世界。
-func _restore_world_props(props: Array) -> void:
-	for p in props:
-		var pd: Dictionary = p
-		var state := String(pd.get("state", "placed"))
-		var tile: Variant = pd.get("tile", null)
-		world_props[String(pd.get("id", ""))] = { "spec": pd.get("spec", {}), "state": state, "tile": tile }
-		if state == "placed" and tile is Array and (tile as Array).size() >= 2:
-			var t := Vector2i(int(tile[0]), int(tile[1]))
-			chunk_manager.add_dynamic_prop(pd.get("spec", {}), t, float(hash(pd.get("id", "")) % 360), _prop_wander(pd.get("spec", {})), String(pd.get("id", "")))
-
-## 按下时记录指下的语音物件（长按候选）。按在 NPC/玩家上的交互优先，不算物件。
+## 按下时记录指下的可拾物品 tile（长按候选）。按在 NPC/玩家上的交互优先。
 func _begin_prop_press(screen_pos: Vector2) -> void:
-	_prop_press_id = ""
+	_prop_press_tile = NO_PRESS_TILE
 	_prop_press_t = 0.0
-	if not _prop_drag.is_empty() or _pick_npc(screen_pos) != null or _pick_player(screen_pos):
+	if _pick_npc(screen_pos) != null or _pick_player(screen_pos):
 		return
 	var ground := _pick_ground(screen_pos)
 	if ground == Vector2.INF:
 		return
-	var hit_id := chunk_manager.dynamic_prop_at(WorldGrid.to_tile(ground))
-	_prop_press_id = hit_id if _is_pickable_prop(hit_id) else ""
+	var tile := WorldGrid.to_tile(ground)
+	if _is_pickable_item(tile):
+		_prop_press_tile = tile
 
-## 这个物件能不能被长按拎起来。施法中的占位符不行——把正在传送新伙伴的传送门抱在手里，
-## 成品落位时记账就对不上了（_placeholders 还记着它，chunk_manager 里却已经没有）。
-func _is_pickable_prop(id: String) -> bool:
+## tile 上的物品能不能拾：一期只有语音造物可拾起（实体 worldId 非空）——
+## 内置树/石/建筑不可拾（服务端同样拒绝，这里提前拦省一次 error 往返）。
+func _is_pickable_item(tile: Vector2i) -> bool:
+	var id := TerrainMap.tile_item_id(tile)
 	if id.is_empty():
 		return false
-	return not _placeholders.has(id)
+	var def := ItemCatalog.get_def(id)
+	return def.get("worldId") != null
 
-## 长按累计：手指滑走（变成拖屏/跟随）即取消；到阈值把物件拎起来。
+## 长按累计：手指滑走（变成拖屏/跟随）即取消；到阈值发拾起请求（收进背包）。
 func _step_prop_press(delta: float) -> void:
-	if _prop_press_id.is_empty() or not _prop_drag.is_empty():
+	if _prop_press_tile == NO_PRESS_TILE:
 		return
 	if _dragging:
-		_prop_press_id = ""
+		_prop_press_tile = NO_PRESS_TILE
 		return
 	_prop_press_t += delta
 	if _prop_press_t >= PROP_LONG_PRESS:
-		_begin_prop_drag()
+		var tile := _prop_press_tile
+		_prop_press_tile = NO_PRESS_TILE
+		_hold_follow = false # 拾起接管本次按压，不再按住跟随
+		_cancel_player_move()
+		if online:
+			_bag_action = "pickup"
+			backend.send_item_pickup(world_id, tile)
+			if game_audio != null:
+				game_audio.play_sfx("enter")
 
-## 拾起：物件从世界摘出（占地已释放），节点归世界层跟手指走。
-func _begin_prop_drag() -> void:
-	var picked: Dictionary = chunk_manager.pickup_dynamic_prop(_prop_press_id)
-	_prop_press_id = ""
-	if picked.is_empty():
+## 物品页点一下：背包一份摆到玩家身旁（本地就近找位，服务端校验后广播落地）。
+func _place_bag_item(item_id: String) -> void:
+	if int(bag.get(item_id, 0)) < 1 or not online:
 		return
-	_hold_follow = false # 拾起接管本次按压，不再按住跟随
-	_cancel_player_move()
-	var node: Node3D = picked.get("node") if is_instance_valid(picked.get("node")) else null
-	if node == null: # 区块刚重刷节点被清：造个替身继续拖
-		node = SdfProp.from_spec(picked.get("spec_data", {}))
-		if node == null:
-			return
-		add_child(node)
-	else:
-		node.reparent(self)
-	(node as SdfProp).enable_wander(0.0) # 拖拽中钉住，不让它自己走
-	picked["node"] = node
-	picked["origin"] = picked["tile"]
-	picked["screen"] = _press_pos
-	_prop_drag = picked
-	if game_audio != null:
-		game_audio.play_sfx("enter")
-
-## 拖拽跟指（每帧）：指下地面 tile 吸附，抬高一点表示拎着；tile 记下来松手用。
-func _step_prop_drag() -> void:
-	if _prop_drag.is_empty():
-		return
-	var node: Node3D = _prop_drag["node"]
-	if not is_instance_valid(node):
-		_prop_drag = {}
-		return
-	var ground := _pick_ground(_prop_drag.get("screen", _press_pos))
-	if ground == Vector2.INF:
-		return
-	var tile := WorldGrid.to_tile(ground)
-	_prop_drag["tile"] = tile
-	var center := Vector2((float(tile.x) + 0.5) * WorldGrid.TILE_SIZE, (float(tile.y) + 0.5) * WorldGrid.TILE_SIZE)
-	var d := WorldGrid.shortest_delta(focus_logical, center)
-	var ty := float(TerrainMap.tile_height(tile)) * TerrainMap.STEP_HEIGHT
-	_place_on_bent_ground(node, Vector3(d.x, ty + PROP_DRAG_LIFT, d.y))
-
-## 松手：拖到收集册按钮上=收纳；指下 tile 有位=落地挪位；没位=弹回原处。
-func _end_prop_drag(screen_pos: Vector2) -> void:
-	if _prop_drag.is_empty():
-		return
-	var drag := _prop_drag
-	_prop_drag = {}
-	if album_button.get_global_rect().has_point(screen_pos):
-		_store_dragged_prop(drag)
-		return
-	_drop_prop(drag, drag.get("tile", drag["origin"]), true)
-
-## 手势接管/异常中断：物件弹回原位（不发 prop_move——位置没变）。
-func _cancel_prop_drag() -> void:
-	if _prop_drag.is_empty():
-		return
-	var drag := _prop_drag
-	_prop_drag = {}
-	_drop_prop(drag, drag["origin"], false)
-
-## 落地共用：目标 tile 精确摆放 → 失败弹回原位（放宽搜索兜底，原位可能被角色压住）
-## → 还不行就收进背包（物件绝不凭空消失）。摆放成功按需同步服务端。
-func _drop_prop(drag: Dictionary, target: Vector2i, notify: bool) -> void:
-	var id := String(drag.get("id", ""))
-	var spec: Dictionary = drag.get("spec_data", {})
-	var yaw := float(drag.get("yaw", 0.0))
-	var wander := float(drag.get("wander", 0.0))
-	var placed := chunk_manager.add_dynamic_prop(spec, target, yaw, wander, id, 0)
-	if placed.x < 0 and target != drag["origin"]:
-		placed = chunk_manager.add_dynamic_prop(spec, drag["origin"], yaw, wander, id, 0)
-		if notify:
-			banner.text = "这里放不下啦"
-			banner.visible = true
-	if placed.x < 0:
-		placed = chunk_manager.add_dynamic_prop(spec, drag["origin"], yaw, wander, id, 3)
-	var node: Node3D = drag["node"]
-	if is_instance_valid(node):
-		node.queue_free() # add_dynamic_prop 重新生成了正式节点，拖拽中的退场
-	if placed.x < 0: # 连原位附近都塞不下（极端）：收进背包兜底
-		_store_dragged_prop(drag) # 内含 fanfare，别再叠一层落地音
-		return
-	# 只在 notify（孩子松手落地）时出声；notify=false 是取消拖拽自动归位，不该响。
-	if notify and game_audio != null:
-		game_audio.play_sfx("pop") # drop_002 本就是「放下」音
-	if world_props.has(id):
-		world_props[id]["tile"] = [placed.x, placed.y]
-	if notify and online and placed != Vector2i(drag["origin"]):
-		backend.send_prop_move(world_id, id, placed)
-
-## 收纳：物件从世界消失进收集册物品页，同步服务端状态机。
-func _store_dragged_prop(drag: Dictionary) -> void:
-	var id := String(drag.get("id", ""))
-	var node: Node3D = drag["node"]
-	if is_instance_valid(node):
-		node.queue_free()
-	if world_props.has(id):
-		world_props[id]["state"] = "bagged"
-		world_props[id]["tile"] = null
-	if online:
-		backend.send_prop_store(world_id, id)
-	banner.text = "收进册子啦！"
-	banner.visible = true
-	_pulse_album_button()
-	if game_audio != null:
-		game_audio.play_sfx("fanfare")
-
-## 物品页点一下：物件摆回玩家身旁（就近找位），同步服务端。
-func _take_prop_out(pid: String) -> void:
-	var wp: Dictionary = world_props.get(pid, {})
-	if wp.is_empty() or String(wp.get("state", "")) != "bagged":
-		return
-	var spec: Dictionary = wp.get("spec", {})
 	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
 	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
-	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec), pid, 3)
-	if placed.x < 0:
+	var spot := _find_item_spot(want)
+	if spot.x < 0:
 		banner.text = "这里放不下啦，换个地方试试"
 		banner.visible = true
 		return
-	wp["state"] = "placed"
-	wp["tile"] = [placed.x, placed.y]
-	if online:
-		backend.send_prop_take(world_id, pid, placed)
+	_bag_action = "place"
+	backend.send_item_place(world_id, item_id, spot, randf() * 360.0)
 	if game_audio != null:
-		game_audio.play_sfx("pluck") # 从册子拈出来（对称于收进去的 fanfare）
+		game_audio.play_sfx("pluck") # 从册子拈出来
 	_close_phone() # 收起手机看物件落地（幂等，同时退近身相机）
-	banner.text = "摆出来啦！"
-	banner.visible = true
+
+## 造物落位的本地找位：want 起螺旋外扩，找可放 1×1 物品的 tile（允许路面，与实体
+## pathOk=true 对齐；查静态/动态占用与角色站位）。找不到返回 (-1,-1)。
+func _find_item_spot(want: Vector2i) -> Vector2i:
+	for r in range(0, 4):
+		for dz in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if maxi(absi(dx), absi(dz)) != r:
+					continue # 只走环上，避免重复
+				var t := Vector2i(posmod(want.x + dx, WorldGrid.GRID_TILES), posmod(want.y + dz, WorldGrid.GRID_TILES))
+				if TerrainMap.tile_item_id(t).is_empty() and OccupancyMap.prop_area_ok(t, 1, 1, true):
+					return t
+	return Vector2i(-1, -1)
 
 ## 小神仙造角色（在线）。
 func _request_create(intent: String) -> void:
@@ -5007,7 +4923,9 @@ func _on_stage_timer_done(hud_id: String) -> void:
 	if _stage != null:
 		_stage.on_timer_done(hud_id)
 
-## 服务端造好 spec 的道具落位（完成型）：near 解析为世界坐标 → 就近落位 → 持久化 → 回 done 带 id。
+## 服务端造好 spec 的道具落位（完成型）：near 解析为世界坐标 → 就近落位 → 回 done 带 id。
+## 演出道具是纯客户端临时渲染（dynamic prop 通道），演完即散——实体行在服务端 items 表
+## 只作定义，不进矩阵不占 tile，无需回报落位。
 func stage_prop_spawn(id: String, spec: Dictionary, near: Variant, done: Callable) -> void:
 	var anchor := _stage_near_pos(near)
 	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(2.0, 1.0)))
@@ -5016,29 +4934,22 @@ func stage_prop_spawn(id: String, spec: Dictionary, near: Variant, done: Callabl
 		if done.is_valid():
 			done.call(false, { "error": "道具没地方放" })
 		return
-	world_props[id] = { "spec": spec, "state": "placed", "tile": [placed.x, placed.y] }
-	backend.send_prop_place(world_id, id, placed)
 	if done.is_valid():
 		done.call(true, { "id": id })
 
 ## 已造道具挪位（脚本 prop.place）：先拾起（释放旧位/节点）再按 at 落位。
 func stage_prop_place(id: String, at: Variant) -> void:
-	var entry: Dictionary = world_props.get(id, {})
-	var spec: Dictionary = entry.get("spec", {})
+	var spec: Dictionary = {}
 	var picked := chunk_manager.pickup_dynamic_prop(id)
 	if not picked.is_empty():
 		var node: Node3D = picked.get("node")
 		if is_instance_valid(node):
 			node.queue_free()
-		if spec.is_empty():
-			spec = picked.get("spec_data", {})
+		spec = picked.get("spec_data", {})
 	if spec.is_empty():
 		return
 	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(_stage_near_pos(at)))
-	var placed := chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec), id)
-	if placed.x >= 0:
-		world_props[id] = { "spec": spec, "state": "placed", "tile": [placed.x, placed.y] }
-		backend.send_prop_place(world_id, id, placed)
+	chunk_manager.add_dynamic_prop(spec, want, randf() * 360.0, _prop_wander(spec), id)
 
 ## 移除道具（脚本 prop.remove）。
 func stage_prop_remove(id: String) -> void:
@@ -5047,7 +4958,6 @@ func stage_prop_remove(id: String) -> void:
 		var node: Node3D = picked.get("node")
 		if is_instance_valid(node):
 			node.queue_free()
-	world_props.erase(id)
 
 ## 设置型持续驱动（follow/flee）：替换该演员现有执行器，登记 _stage_holds 供收场统一 cancel。
 func _stage_hold(dict: Dictionary, script: Dictionary) -> void:
@@ -5183,9 +5093,10 @@ func _send_world_info() -> void:
 
 # ── 奖赏系统：委托状态 / 提示 chip / 完成判定 ──────────────────────────────
 
-## world_info 的回包：同步贴纸背包与进行中委托（断线重连/重启后补状态）。
+## world_info 的回包：同步钱包/背包与进行中委托（断线重连/重启后补状态）。
 func _on_world_state(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet"))
+	_apply_bag(data.get("bag"))
 	_set_active_task(data.get("activeTask"))
 	_restore_player_pos(data.get("playerPos"))
 
@@ -5208,7 +5119,7 @@ func _restore_player_pos(p: Variant) -> void:
 	OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
 	focus_logical = spot
 
-## 应用服务端下发的钱包（world_state/task_complete/prop_created/gen_complete 各处复用）：更新状态 + 刷 UI。
+## 应用服务端下发的钱包（world_state/task_complete/item_created/gen_complete 各处复用）：更新状态 + 刷 UI。
 func _apply_wallet(w: Variant) -> void:
 	if typeof(w) == TYPE_DICTIONARY:
 		wallet = w
@@ -5345,7 +5256,7 @@ func _pulse_album_button() -> void:
 
 ## 手机开合（点左下角手机按钮切换）：开→显示机身+遮罩+进近身相机；关→反之。
 ## 音效挂在这里而非 _open_phone/_close_phone：那两个是幂等内部函数，
-## _open_phone 会调 _close_phone_app 回主屏、_take_prop_out 会调 _close_phone 收起手机，
+## _open_phone 会调 _close_phone_app 回主屏、_place_bag_item 会调 _close_phone 收起手机，
 ## 挂进去就会在非用户操作时误响。这里是 album_button 的唯一入口。
 func _toggle_album() -> void:
 	if game_audio != null:
@@ -5511,26 +5422,30 @@ func _refresh_album() -> void:
 		_stamps_total_label.text = "x%d" % int(wallet.get("stampsTotal", 0))
 	_refresh_items_page()
 
-## 物品页：重建 bagged 物件网格（礼盒贴纸+物件名）。物件不多，全量重建最简单。
+## 物品页：重建背包网格（礼盒贴纸+物件名+份数）。数据源是服务端权威 bag 计数，
+## 名字/spec 从 ItemCatalog 实体定义取。物件不多，全量重建最简单。
 func _refresh_items_page() -> void:
 	if _items_grid == null:
 		return
 	for c in _items_grid.get_children():
 		c.queue_free()
-	var bagged := []
-	for pid in world_props:
-		if String(world_props[pid].get("state", "")) == "bagged":
-			bagged.append(pid)
-	_items_empty.visible = bagged.is_empty()
-	for pid in bagged:
-		var spec: Dictionary = world_props[pid].get("spec", {})
+	var ids := []
+	for item_id in bag:
+		if int(bag[item_id]) > 0:
+			ids.append(String(item_id))
+	ids.sort()
+	_items_empty.visible = ids.is_empty()
+	for item_id in ids:
+		var def := ItemCatalog.get_def(item_id)
+		var count := int(bag[item_id])
 		var cell := VBoxContainer.new()
 		cell.alignment = BoxContainer.ALIGNMENT_CENTER
 		cell.custom_minimum_size = Vector2(44.0, 0.0)
-		var glyph := UiAssets.icon_button("ic_gift", 44.0) # 点一下摆回玩家身旁
-		glyph.pressed.connect(_take_prop_out.bind(String(pid)))
+		var glyph := UiAssets.icon_button("ic_gift", 44.0) # 点一下摆到玩家身旁
+		glyph.pressed.connect(_place_bag_item.bind(String(item_id)))
 		var name_label := Label.new()
-		name_label.text = String(spec.get("name", "小玩意"))
+		var display := String(def.get("name", "小玩意"))
+		name_label.text = display if count <= 1 else "%s×%d" % [display, count]
 		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		name_label.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		name_label.custom_minimum_size = Vector2(44.0, 0.0)

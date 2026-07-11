@@ -12,7 +12,7 @@ export interface Overview {
   players: number;
   worlds: number;
   characters: number;
-  props: number;
+  items: number;
   visits: { total: number; active: number };
   creationIcons: number;
   recentVisits: Visit[];
@@ -98,7 +98,7 @@ export interface WorldRow {
   sceneCount: number;
   characterCount: number;
   fairyCount: number;
-  propCount: number;
+  itemCount: number;
   visitCount: number;
   activeVisitCount: number;
 }
@@ -139,11 +139,19 @@ export interface AdminItemDef {
   worldId: string | null;
   name: string;
   renderRef: string;
+  spec?: { name?: string; [k: string]: unknown };
   footprintW: number;
   footprintH: number;
   blocking: boolean;
   pathOk: boolean;
   wander: number;
+}
+
+/** 背包计数行（与 server listBags 对齐；playerId='' 为匿名）。 */
+export interface BagEntry {
+  playerId: string;
+  itemId: string;
+  count: number;
 }
 
 /** 场景地形矩阵（/debug/api/worlds/:id/scenes/:sid/terrain-grid 的解码 JSON）。 */
@@ -179,19 +187,13 @@ export interface CharacterSummary {
   spriteAnimStatus: string;
 }
 
-export interface WorldProp {
-  id: string;
-  spec: { name?: string; [k: string]: unknown };
-  tile: [number, number] | null;
-  state: 'placed' | 'bagged';
-  /** 物件所在场景（后端缺省归 DEFAULT_SCENE）。 */
-  sceneId?: string;
-}
-
 export interface WorldDetail extends WorldRow {
   scenes: Scene[];
   characters: CharacterSummary[];
-  props: WorldProp[];
+  /** 世界的语音造物实体（摆着的引用在场景矩阵里，见 terrain-grid）。 */
+  items: AdminItemDef[];
+  /** 各玩家背包计数。 */
+  bags: BagEntry[];
   visits: Visit[];
 }
 

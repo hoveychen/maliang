@@ -13,6 +13,7 @@
 
 import type { ItemDef, } from './types.ts';
 import { GRID_TILES } from './types.ts';
+import type { SdfPropSpec } from './sdf_prop.ts';
 import { T_PATH, T_WATER, TerrainFormatError, argYawDeg, type Terrain } from './terrain.ts';
 
 /** 内置物品定义（≈22 行）。顺序即村庄 palette 的习惯顺序，无语义。 */
@@ -47,6 +48,26 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
   return { id, worldId: null, name, renderRef, footprintW: span, footprintH: span, blocking, pathOk: false, wander: 0 };
+}
+
+/**
+ * 语音造物的实体行（spec 内联进 items 表）。占地统一 1×1（旧动态物件同款），
+ * pathOk=true——孩子把玩具摆在路上是常态，不拦；wander 与客户端 _prop_wander 同款推导
+ * （会动的物件给一点游走半径）。
+ */
+export function creationItemDef(worldId: string, id: string, spec: SdfPropSpec): ItemDef {
+  return {
+    id,
+    worldId,
+    name: spec.name || '小宝贝',
+    renderRef: 'sdf_inline',
+    spec,
+    footprintW: 1,
+    footprintH: 1,
+    blocking: true,
+    pathOk: true,
+    wander: spec.locomotion && spec.locomotion.type !== 'none' ? 1.2 : 0,
+  };
 }
 
 const BUILTIN_BY_ID = new Map(BUILTIN_ITEMS.map((d) => [d.id, d]));

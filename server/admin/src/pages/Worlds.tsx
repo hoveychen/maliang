@@ -35,7 +35,7 @@ export function WorldsPage() {
               <RowLink to={`/worlds/${w.id}`} key={w.id}>
                 <td><b>{w.id}</b></td>
                 <td className="num-cell">{w.characterCount}{w.fairyCount > 0 && <span className="mono"> (仙×{w.fairyCount})</span>}</td>
-                <td className="num-cell">{w.propCount}</td>
+                <td className="num-cell">{w.itemCount}</td>
                 <td className="num-cell">{w.activeVisitCount > 0 ? <b>{w.activeVisitCount}</b> : 0}/{w.visitCount}</td>
                 <td className="mono">
                   {w.wallets.length === 0

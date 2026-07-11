@@ -83,8 +83,8 @@ test('respondToTranscript: 无 create_character 能力不触发造角色', async
   }
 });
 
-// 异步造物：prop_created 推送 + 入库；违禁词 → prop_failed 且不入库
-test('createPropAsync: 设计→校验→持久化→推送 / 审核拦截', async () => {
+// 异步造物：item_created 推送 + items 实体行 + 背包一份；违禁词 → prop_failed 且不入库
+test('createPropAsync: 设计→校验→实体行+背包→推送 / 审核拦截', async () => {
   const { store, close } = await seededStore();
   try {
     const adapters = createMockAdapters();
@@ -92,16 +92,18 @@ test('createPropAsync: 设计→校验→持久化→推送 / 审核拦截', asy
     await createPropAsync(sock, 'default', ANON_PLAYER, '会走路的小房子', adapters, store);
     // sent[0] 是开造即报的 prop_pending（客户端据此立熔炉），成品跟在后面
     assert.equal(sock.sent.length, 2);
-    assert.equal(sock.sent[1].type, 'prop_created');
-    const prop = sock.sent[1].prop as { id: string; spec: { parts: unknown[] }; tile: null };
-    assert.ok(prop.spec.parts.length > 0);
-    assert.equal(prop.tile, null);
-    assert.equal(store.listProps('default').length, 1);
+    assert.equal(sock.sent[1].type, 'item_created');
+    const item = sock.sent[1].item as { id: string; worldId: string; renderRef: string; spec: { parts: unknown[] } };
+    assert.equal(item.worldId, 'default', '造物实体归属世界（据此可拾起）');
+    assert.equal(item.renderRef, 'sdf_inline');
+    assert.ok(item.spec.parts.length > 0);
+    assert.equal(store.listWorldItems('default').length, 1, '实体行入库');
+    assert.deepEqual(sock.sent[1].bag, { [item.id]: 1 }, '造好即入背包');
 
     const sock2 = fakeSocket();
     await createPropAsync(sock2, 'default', ANON_PLAYER, '一把恐怖的枪', adapters, store);
     assert.equal(sock2.sent[1].type, 'prop_failed');
-    assert.equal(store.listProps('default').length, 1); // 没多存
+    assert.equal(store.listWorldItems('default').length, 1); // 没多存
   } finally {
     await close();
   }
@@ -152,8 +154,9 @@ test('语音造角色端到端：respondToTranscript 摘出 → createCharacterA
   }
 });
 
-// 落位回报 + 磁盘持久化 roundtrip：重开 store 后 props 与 tile 都还在
-test('prop_place 落位回报 + worlds.json roundtrip', async () => {
+// 造物入背包 + 磁盘持久化 roundtrip：重开 store 后实体行与背包都还在；
+// GET /worlds 的 items 带上造物；场景无矩阵时摆放 → error 不动账。
+test('item_created 入背包 + 磁盘 roundtrip + 无矩阵摆放拒绝', async () => {
   const dir = join(tmpdir(), 'maliang-test-voice-prop');
   rmSync(dir, { recursive: true, force: true });
   const adapters = createMockAdapters();
@@ -163,37 +166,28 @@ test('prop_place 落位回报 + worlds.json roundtrip', async () => {
     await app.inject({ method: 'GET', url: '/worlds/default' });
     const sock = fakeSocket();
     await createPropAsync(sock, 'default', ANON_PLAYER, '造一个小风车', adapters, store);
-    const propId = ((sock.sent.find((m) => m.type === 'prop_created'))!.prop as { id: string }).id;
+    const itemId = ((sock.sent.find((m) => m.type === 'item_created'))!.item as { id: string }).id;
 
-    const limiter = new RateLimiter(100, 100);
-    const sock2 = fakeSocket();
-    await handleWsMessage(
-      sock2,
-      JSON.stringify({ type: 'prop_place', worldId: 'default', propId, tileX: 12, tileY: 34 }),
-      adapters, store, limiter, 'test', newVoiceSession(),
-    );
-    assert.equal(sock2.sent.length, 0); // 成功无回包
-    assert.deepEqual(store.listProps('default')[0].tile, [12, 34]);
-
-    // GET /worlds 带 props
+    // GET /worlds 的 items 含该造物（内置 + 世界造物）
     const world = await app.inject({ method: 'GET', url: '/worlds/default' });
-    const body = world.json() as { props: Array<{ id: string; tile: [number, number] }> };
-    assert.equal(body.props.length, 1);
-    assert.deepEqual(body.props[0].tile, [12, 34]);
+    const body = world.json() as { items: Array<{ id: string }> };
+    assert.ok(body.items.some((d) => d.id === itemId));
 
-    // 重开 store：props 从 worlds.json 恢复
+    // 重开 store：实体行与背包都在
     const store2 = new WorldStore(dir);
-    assert.equal(store2.listProps('default').length, 1);
-    assert.deepEqual(store2.listProps('default')[0].tile, [12, 34]);
+    assert.equal(store2.listWorldItems('default').length, 1);
+    assert.deepEqual(store2.getBag('default', ANON_PLAYER), { [itemId]: 1 });
 
-    // 未知 propId → error 回包
+    // default 世界此时没有场景矩阵：item_place → error，背包不动
+    const limiter = new RateLimiter(100, 100);
     const sock3 = fakeSocket();
     await handleWsMessage(
       sock3,
-      JSON.stringify({ type: 'prop_place', worldId: 'default', propId: 'nope', tileX: 1, tileY: 1 }),
+      JSON.stringify({ type: 'item_place', worldId: 'default', itemId, tileX: 1, tileY: 1 }),
       adapters, store, limiter, 'test', newVoiceSession(),
     );
     assert.equal(sock3.sent[0].type, 'error');
+    assert.deepEqual(store.getBag('default', ANON_PLAYER), { [itemId]: 1 }, '失败不动账');
   } finally {
     await app.close();
     rmSync(dir, { recursive: true, force: true });
@@ -202,14 +196,14 @@ test('prop_place 落位回报 + worlds.json roundtrip', async () => {
 
 // 异步施法占位符：扣花成功后立刻推 prop_pending，客户端据此退出对话、就地长出魔法熔炉，
 // 孩子自由走动而不是卡在对话里干等。设计/生图慢，这条信号必须抢在它们前面发出去。
-test('createPropAsync: 扣花后立刻推 prop_pending（先于 prop_created）', async () => {
+test('createPropAsync: 扣花后立刻推 prop_pending（先于 item_created）', async () => {
   const { store, close } = await seededStore();
   try {
     const adapters = createMockAdapters();
     const sock = fakeSocket();
     await createPropAsync(sock, 'default', ANON_PLAYER, '一朵小花', adapters, store);
     assert.equal(sock.sent[0]!.type, 'prop_pending', '第一条必须是 prop_pending');
-    assert.equal(sock.sent[1]!.type, 'prop_created');
+    assert.equal(sock.sent[1]!.type, 'item_created');
     // 花在开造那一刻就扣掉：占位符立起来的同时钱包要对得上
     assert.ok(sock.sent[0]!.wallet, 'prop_pending 应带上扣花后的钱包');
   } finally {
