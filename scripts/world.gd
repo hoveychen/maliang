@@ -540,6 +540,14 @@ func _on_gfx_restore_auto() -> void:
 	GraphicsSettings.clear()
 	_apply_saved_graphics()
 
+## 设置页「重新检测画质」：丢掉现有档（含用户 override），重进世界跑一次 benchmark 定档。
+## 换了系统版本、机器发烫、或孩子觉得卡了都可以重来一次。
+func _on_gfx_rebench() -> void:
+	GraphicsSettings.clear()
+	Benchmark.pending = true
+	Loading.next_scene = "res://main.tscn"
+	get_tree().change_scene_to_file("res://loading.tscn")
+
 ## 白天动态天空：渐变 + 卡通云漂移 + 太阳光晕（shaders/sky_day.gdshader）。
 ## ambient 走纯色源不依赖天空 radiance，radiance 取最小档 + 仅材质变更时重烘
 ## （REALTIME 档强制 256 且逐帧重烘，安卓平板不划算；本世界高粗糙度+关高光，反射用不上）。
@@ -1332,6 +1340,14 @@ func _setup_hud() -> void:
 	UiAssets.style_card_button(gfx_auto)
 	gfx_auto.pressed.connect(_on_gfx_restore_auto)
 	settings_page.add_child(gfx_auto)
+	# 「重新检测」：换了系统/发烫/手感变了 → 重跑一次 benchmark 定档
+	var gfx_bench := Button.new()
+	gfx_bench.text = "重新检测画质"
+	gfx_bench.add_theme_font_size_override("font_size", 20)
+	gfx_bench.clip_text = true
+	UiAssets.style_card_button(gfx_bench)
+	gfx_bench.pressed.connect(_on_gfx_rebench)
+	settings_page.add_child(gfx_bench)
 	_album_pages = { "flowers": flowers_page, "items": items_page, "settings": settings_page }
 	for pid in _album_pages:
 		var pg := _album_pages[pid] as Control

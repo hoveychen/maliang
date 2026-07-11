@@ -33,6 +33,7 @@ func _tick() -> void:
 		_check("benchmark 模式挂上 Benchmark 节点", bench != null, true)
 		if bench != null:
 			bench.finished.connect(_on_finished)
+			bench.enter_world_when_done = false  # 别把测试脚本切走场景
 		_check("不连后端（无 Api 节点）", scene.get_node_or_null("Api") == null, true)
 		var npcs: Array = scene.get("npcs")
 		var bench_chars := 0
