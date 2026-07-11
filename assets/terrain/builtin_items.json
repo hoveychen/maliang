@@ -408,5 +408,173 @@
     "themes": [
       "scifi"
     ]
+  },
+  {
+    "id": "toy_bear",
+    "worldId": null,
+    "name": "玩具熊",
+    "renderRef": "furniture:bear",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_bed_single",
+    "worldId": null,
+    "name": "单人床",
+    "renderRef": "furniture:bedSingle",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_bed_bunk",
+    "worldId": null,
+    "name": "双层床",
+    "renderRef": "furniture:bedBunk",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_bookcase",
+    "worldId": null,
+    "name": "书架",
+    "renderRef": "furniture:bookcaseOpen",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_sofa",
+    "worldId": null,
+    "name": "沙发",
+    "renderRef": "furniture:loungeSofa",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_chair",
+    "worldId": null,
+    "name": "圆背椅",
+    "renderRef": "furniture:chairRounded",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_table",
+    "worldId": null,
+    "name": "桌子",
+    "renderRef": "furniture:table",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_coffee_table",
+    "worldId": null,
+    "name": "茶几",
+    "renderRef": "furniture:tableCoffee",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_lamp",
+    "worldId": null,
+    "name": "落地灯",
+    "renderRef": "furniture:lampRoundFloor",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_plant",
+    "worldId": null,
+    "name": "盆栽",
+    "renderRef": "furniture:pottedPlant",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_tv",
+    "worldId": null,
+    "name": "电视机",
+    "renderRef": "furniture:televisionModern",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_box",
+    "worldId": null,
+    "name": "纸箱",
+    "renderRef": "furniture:cardboardBoxOpen",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
   }
 ]
