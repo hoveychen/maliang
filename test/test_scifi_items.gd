@@ -1,8 +1,8 @@
 extends SceneTree
 ## 未来机器人主题 item 接入冒烟（world-themes P2）。
 ## 锁死三方一致：server BUILTIN_ITEMS 的 scifi renderRef（对拍进 builtin_items.json）
-## ↔ 客户端 ChunkManager.SCIFI_NODES preload 表 ↔ glb 资产可实例化。
-## 任一方漂移（改了 id/renderRef/漏 preload/glb 路径错）都在这里炸——这是「新主题接入管线」的守门测试。
+## ↔ 客户端 PackRegistry（assets/packs/scifi/pack.json 数据驱动，world-themes P3）↔ glb 资产可实例化。
+## 任一方漂移（改了 id/renderRef/漏 pack 声明/glb 路径错）都在这里炸——这是「新主题接入管线」的守门测试。
 ## 运行: godot --headless --path . --script res://test/test_scifi_items.gd
 
 const BUILTIN_JSON := "res://assets/terrain/builtin_items.json"
@@ -19,7 +19,7 @@ func _init() -> void:
 	var defs: Variant = JSON.parse_string(f.get_as_text())
 	fails += _check("builtin_items.json 是数组", 1 if typeof(defs) == TYPE_ARRAY else 0, 1)
 
-	# 2) 收集所有 scifi renderRef 的 key（冒号后段），逐个校验落在 SCIFI_NODES 且场景可实例化
+	# 2) 收集所有 scifi renderRef 的 key（冒号后段），逐个校验在 PackRegistry 注册且场景可实例化
 	var scifi_keys := {}
 	for d in defs:
 		if typeof(d) != TYPE_DICTIONARY:
@@ -33,25 +33,25 @@ func _init() -> void:
 		var themes: Variant = (d as Dictionary).get("themes", [])
 		var has_scifi := typeof(themes) == TYPE_ARRAY and (themes as Array).has("scifi")
 		fails += _check("item %s themes 含 scifi" % (d as Dictionary).get("id", "?"), 1 if has_scifi else 0, 1)
-		# 客户端 preload 表必须有这个 key
-		if not ChunkManager.SCIFI_NODES.has(key):
-			printerr("  FAIL renderRef scifi:%s 在 SCIFI_NODES 缺 preload" % key)
+		# 客户端 PackRegistry 必须注册这个 key（scifi 全为 node 类）
+		if not PackRegistry.has(key):
+			printerr("  FAIL renderRef scifi:%s 未在 PackRegistry 注册" % key)
 			fails += 1
 			continue
-		var nb: Dictionary = ChunkManager.SCIFI_NODES[key]
-		var scene: Variant = nb.get("scene")
+		fails += _check("scifi:%s 分类为 node" % key, 1 if PackRegistry.category(key) == "node" else 0, 1)
+		fails += _check("scifi:%s scale>0" % key, 1 if PackRegistry.scale(key) > 0.0 else 0, 1)
+		var scene: Variant = PackRegistry.load_resource(key)
 		fails += _check("scifi:%s 是 PackedScene" % key, 1 if scene is PackedScene else 0, 1)
-		fails += _check("scifi:%s scale>0" % key, 1 if float(nb.get("scale", 0.0)) > 0.0 else 0, 1)
 		if scene is PackedScene:
 			var inst: Node = (scene as PackedScene).instantiate()
 			fails += _check("scifi:%s 可实例化为 Node3D" % key, 1 if inst is Node3D else 0, 1)
 			if inst:
 				inst.free()
 
-	# 3) 期望恰 12 个 scifi item，且 SCIFI_NODES 无孤儿（每个 preload 都被某 item 引用）
+	# 3) 期望恰 12 个 scifi item，且 scifi pack 无孤儿（每个 pack 声明都被某 item 引用）
 	fails += _check("scifi item 数量", scifi_keys.size(), 12)
-	for k in ChunkManager.SCIFI_NODES:
-		fails += _check("SCIFI_NODES[%s] 被 item 引用（无孤儿 preload）" % k, 1 if scifi_keys.has(k) else 0, 1)
+	for k in PackRegistry.keys_in_pack("scifi"):
+		fails += _check("scifi pack[%s] 被 item 引用（无孤儿声明）" % k, 1 if scifi_keys.has(k) else 0, 1)
 
 	if fails == 0:
 		print("scifi_items tests PASS")

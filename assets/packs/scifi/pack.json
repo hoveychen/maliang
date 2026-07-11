@@ -1,0 +1,18 @@
+{
+  "_comment": "未来机器人主题资产包（world-themes P2 打样，P3 从 SCIFI_NODES 常量表迁出）。全 node 类（独立节点建筑/角色，带 scale）。全 CC0：Quaternius 机器人 + Kenney Space Kit，来源见 assets/scifi/SOURCES.txt。scale 为首版目测值，真机手感调参留 P5。",
+  "entries": {
+    "robot_animated":  { "category": "node", "path": "res://assets/scifi/robots/robot_animated.glb",  "scale": 2.4 },
+    "robot_enemy":     { "category": "node", "path": "res://assets/scifi/robots/robot_enemy.glb",     "scale": 2.4 },
+    "robot_flying":    { "category": "node", "path": "res://assets/scifi/robots/robot_flying.glb",    "scale": 2.0 },
+    "robot_legs_gun":  { "category": "node", "path": "res://assets/scifi/robots/robot_legs_gun.glb",  "scale": 2.4 },
+    "robot_flying_gun":{ "category": "node", "path": "res://assets/scifi/robots/robot_flying_gun.glb", "scale": 2.0 },
+    "robot_large":     { "category": "node", "path": "res://assets/scifi/robots/robot_large.glb",     "scale": 3.0 },
+    "mech":            { "category": "node", "path": "res://assets/scifi/robots/mech.glb",            "scale": 3.0 },
+
+    "hangar_smallA":          { "category": "node", "path": "res://assets/scifi/props/hangar_smallA.glb",          "scale": 3.5 },
+    "machine_generatorLarge": { "category": "node", "path": "res://assets/scifi/props/machine_generatorLarge.glb", "scale": 3.0 },
+    "satelliteDish_large":    { "category": "node", "path": "res://assets/scifi/props/satelliteDish_large.glb",    "scale": 3.0 },
+    "barrel":                 { "category": "node", "path": "res://assets/scifi/props/barrel.glb",                 "scale": 1.8 },
+    "rock_crystals":          { "category": "node", "path": "res://assets/scifi/props/rock_crystals.glb",          "scale": 2.0 }
+  }
+}
