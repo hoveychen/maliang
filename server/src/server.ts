@@ -14,6 +14,15 @@ import { startBackup, restoreBackup, type BackupExport } from './backup.ts';
 
 /** 上传备份包的体量兜底。正常包只有几十 MB，这个数只是防止有人拿它当上传洞。 */
 const MAX_RESTORE_UPLOAD = 2 * 1024 * 1024 * 1024;
+
+/**
+ * If-None-Match 是否命中某个 ETag。按 RFC 9110：可以是逗号分隔的多个 tag，
+ * 也可能带弱校验前缀 W/（代理/浏览器都会这么发），逐个剥掉再比。
+ */
+function etagMatches(header: string | string[] | undefined, etag: string): boolean {
+  if (typeof header !== 'string') return false;
+  return header.split(',').some((t) => t.trim().replace(/^W\//, '') === etag);
+}
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
 import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
@@ -517,10 +526,20 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { spec: validated.spec };
   });
 
-  // 取生成的 sprite 资源
+  // 取生成的 sprite 资源。
+  //
+  // 内容寻址 = URL 里的 hash 就是内容的 SHA-256 摘要，同一个 URL 的字节永远不可能变——
+  // 内容变了 hash 就变了，URL 也跟着变。所以这里可以放心地 immutable + 一年 max-age，
+  // 不存在缓存陈旧的风险。ETag 直接用 hash（它本来就是摘要），命中就回 304 连字节都不用传。
+  //
+  // Godot 客户端因为自己有 user://asset_cache（同样按 hash 存、永不失效）本来就不重复拉，
+  // 这组头是给管理台、浏览器、以及将来任何 CDN / 反代用的。
   app.get<{ Params: { hash: string } }>('/assets/:hash', async (req, reply) => {
     const asset = store.getAsset(req.params.hash);
     if (!asset) return reply.code(404).send({ error: 'asset not found' });
+    const etag = `"${req.params.hash}"`;
+    reply.header('cache-control', 'public, max-age=31536000, immutable').header('etag', etag);
+    if (etagMatches(req.headers['if-none-match'], etag)) return reply.code(304).send();
     return reply.header('content-type', asset.mime).send(Buffer.from(asset.bytes));
   });
 
