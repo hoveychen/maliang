@@ -3594,49 +3594,74 @@ func _filter_boot_characters(all: Array) -> Array:
 			chars.append(cd)
 	return chars
 
+## 在线引导 = 拉取半段 + 应用半段顺序执行（现状路径，行为与拆分前一致）。
+## intro 模式（P3+）把两段拆开：fetch 在建造演出期后台跑，apply 在转正点演出化执行。
 func _bootstrap() -> void:
+	var fetched := await _bootstrap_fetch()
+	await _bootstrap_apply(fetched)
+
+## 拉取半段：get_world + 实体定义就位 + 角色素材并发预取。**只落缓存/内存与数据，不动场景任何节点**
+## （ItemCatalog.set_defs 是纯数据、_prefetch_characters 只写 asset 缓存）——故 intro 可后台跑这段而
+## 世界仍是离线占位形态。返回 { world, chars, prefetched }；离线（get_world 空）返回 {}。
+## 真正的场景变更（重铺地形/清占位/降生村民/搬玩家/接 WS）在 _bootstrap_apply。
+func _bootstrap_fetch() -> Dictionary:
 	_bootstrapping = true
 	_player_restore_pending = true
 	_boot_status = "连接精灵世界…"
-	_apply_player_sprite() # 档案形象替换占位（并行拉取，不阻塞世界引导）
+	_apply_player_sprite() # 玩家自己的档案形象替换占位（并行拉取，不阻塞）——是占位的自我替换，非服务端状态
 	# 加载固定的 default 世界（含预生成村民），不再每次新建
 	var world: Dictionary = await api.get_world("default")
 	_boot_stage = 1 # 网络已定音（成功或离线），loading 进度推进到中段
-	if not world.is_empty():
-		online = true
-		world_id = String(world.get("id", "default"))
-		ItemCatalog.set_defs(world.get("items", [])) # 实体定义先就位（矩阵 palette 的解引用依据）
-		await _load_server_terrain(world.get("scenes", []))
-		backend.url = (api.base as String).replace("http", "ws") + "/ws"
-		backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入
-		backend.connect_to_server()
-		for n in npcs:
-			OccupancyMap.char_unregister(String(n.get("id", "")))
-			(n["node"] as Node).queue_free() # 清掉离线占位
-		npcs.clear()
-		var chars: Array = _filter_boot_characters(world.get("characters", []))
-		# 先并发预取所有角色素材（anim 优先，跳静态大图）：冷启动从「逐个立绘串行下载」的长尾
-		# 降到「最慢一个并发」，杜绝首次进世界接近 25s 揭幕硬超时、村民后补的观感。
-		var total := chars.size()
-		_boot_status = "唤醒村民 0/%d" % total
-		var prefetched := await _prefetch_characters(chars)
-		# 素材已就位，顺序降生（命中内存缓存瞬时）；逐个推进 _boot_sub，loading 仙子据此持续前行。
-		for i in range(total):
-			_boot_status = "唤醒村民 %d/%d" % [i + 1, total]
-			await _spawn_server_character(chars[i] as Dictionary, Vector2.INF, prefetched)
-			_boot_sub = float(i + 1) / float(total) if total > 0 else 1.0
-		_boot_status = "布置世界…"
-		# 摆着的造物在场景矩阵物品层里（随地形一并就位），背包由 world_state 下发
-		# 玩家搬到小神仙旁边降生，相机跟着玩家过去
-		var fairy := _find_fairy()
-		if not fairy.is_empty():
-			focus_logical = fairy["logical"]
-			if not player.is_empty():
-				var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
-				player["logical"] = spot
-				OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
-	else:
+	if world.is_empty():
+		return {}
+	ItemCatalog.set_defs(world.get("items", [])) # 实体定义先就位（矩阵 palette 的解引用依据，纯数据）
+	var chars: Array = _filter_boot_characters(world.get("characters", []))
+	# 先并发预取所有角色素材（anim 优先，跳静态大图）：冷启动从「逐个立绘串行下载」的长尾
+	# 降到「最慢一个并发」，杜绝首次进世界接近 25s 揭幕硬超时、村民后补的观感。素材只落缓存。
+	_boot_status = "唤醒村民 0/%d" % chars.size()
+	var prefetched := await _prefetch_characters(chars)
+	return { "world": world, "chars": chars, "prefetched": prefetched }
+
+## 应用半段（转正点执行）：把 fetch 好的服务端世界落地——重铺地形、清离线占位、降生村民、搬玩家、接 WS。
+## **场景变更全在这里**。fetched 为空 = 离线，保留占位世界。
+func _bootstrap_apply(fetched: Dictionary) -> void:
+	if fetched.is_empty():
 		_boot_status = "离线模式"
+		_finish_bootstrap()
+		return
+	var world: Dictionary = fetched.get("world", {})
+	online = true
+	world_id = String(world.get("id", "default"))
+	await _load_server_terrain(world.get("scenes", []))
+	backend.url = (api.base as String).replace("http", "ws") + "/ws"
+	backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入
+	backend.connect_to_server()
+	for n in npcs:
+		OccupancyMap.char_unregister(String(n.get("id", "")))
+		(n["node"] as Node).queue_free() # 清掉离线占位
+	npcs.clear()
+	var chars: Array = fetched.get("chars", [])
+	var prefetched: Dictionary = fetched.get("prefetched", {})
+	# 素材已就位，顺序降生（命中内存缓存瞬时）；逐个推进 _boot_sub，loading 仙子据此持续前行。
+	var total := chars.size()
+	for i in range(total):
+		_boot_status = "唤醒村民 %d/%d" % [i + 1, total]
+		await _spawn_server_character(chars[i] as Dictionary, Vector2.INF, prefetched)
+		_boot_sub = float(i + 1) / float(total) if total > 0 else 1.0
+	_boot_status = "布置世界…"
+	# 摆着的造物在场景矩阵物品层里（随地形一并就位），背包由 world_state 下发
+	# 玩家搬到小神仙旁边降生，相机跟着玩家过去
+	var fairy := _find_fairy()
+	if not fairy.is_empty():
+		focus_logical = fairy["logical"]
+		if not player.is_empty():
+			var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
+			player["logical"] = spot
+			OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	_finish_bootstrap()
+
+## 引导收尾：里程碑置终、清 _bootstrapping（world_ready 守望据此揭幕）。fetch/apply 两条出口共用。
+func _finish_bootstrap() -> void:
 	_boot_stage = 2 # 角色/props 就位、玩家已落到最终位——引导侧全部完成
 	_boot_sub = 1.0
 	_boot_status = "就绪"

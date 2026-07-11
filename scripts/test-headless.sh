@@ -122,6 +122,7 @@ run_test test_visual_dialog_stage_blocked --fixed-fps 10 --quit-after 30
 run_test test_visual_dialog_anim   --fixed-fps 10 --quit-after 40
 run_test test_npc_idle_anim        --fixed-fps 10 --quit-after 80
 run_test test_villager_assets      --fixed-fps 10 --quit-after 40
+run_test test_bootstrap_split      --fixed-fps 10 --quit-after 60
 run_test test_world_notice         --fixed-fps 10 --quit-after 40
 run_test test_visual_greeting      --fixed-fps 10 --quit-after 60
 run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
