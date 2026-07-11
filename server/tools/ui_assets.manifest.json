@@ -170,6 +170,12 @@
       "prompt": "a cute app icon of a little red reward flower with a golden smiley center resting on a small stamp collection booklet"
     },
     {
+      "id": "app_home",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute cozy little cottage house with a warm red triangular roof, a round wooden door and a glowing yellow window, a small heart floating above the chimney, welcoming and toy-like"
+    },
+    {
       "id": "reward_flower",
       "kind": "sticker",
       "targetSize": 256,
