@@ -81,19 +81,24 @@ func _run(ga: GameAudio) -> void:
 	ga._advance(GameAudio.SFX_GAP + 0.01)
 	_fails += _check("冷却过后可再播", ga.play_sfx("click"), true)
 
-	# 保留能力：喂多条 step 时按 section 轮换并交叉淡化（生产只用单条，这里用同一文件×2 覆盖机制）
-	# 用 0.05s 小步长模拟真实帧推进；一次塞大 delta 会在同帧内完成整个淡化
+	# 多条 step 时**按各曲整首时长**播完再交叉淡化（不再是旧的固定 SECTION_SECS 切段）。
+	# 生产喂 3 首不同曲；这里用同一文件×2 覆盖轮换机制。用 0.05s 小步长模拟真实帧推进。
 	var two: Array = [GameAudio.BGM_STEPS[0], GameAudio.BGM_STEPS[0]]
 	ga.start_bgm(two)
 	_fails += _check("start_bgm 不同步起播(线程加载中)", ga.step_index, -1)
 	_wait_bgm(ga)
 	_fails += _check("线程加载完起播在第 0 段", ga.step_index, 0)
+	var seg0 := ga._step_secs(0)  # 现在段长=整首时长（远大于 SECTION_SECS 下限）
+	# 到旧的固定 19.2s 不该换段了——证明契约已改成整首播完
 	_sim(ga, GameAudio.SECTION_SECS + 0.1)
-	_fails += _check("section 到点换段", ga.step_index, 1)
+	_fails += _check("固定 19.2s 不再换段", ga.step_index, 0)
+	# 播满整首后才交叉淡化到下一首
+	_sim(ga, seg0 - GameAudio.SECTION_SECS + 0.1)
+	_fails += _check("整首播完换段", ga.step_index, 1)
 	_fails += _check("交叉淡化进行中", ga._fade_left > 0.0, true)
 	_sim(ga, GameAudio.CROSSFADE_SECS + 0.1)
 	_fails += _check("淡化结束", ga._fade_left, 0.0)
-	_sim(ga, GameAudio.SECTION_SECS)
+	_sim(ga, ga._step_secs(1) + 0.1)
 	_fails += _check("轮换回第 0 段", ga.step_index, 0)
 
 	# duck：目标音量应收敛到 MUSIC_DB + DUCK_DB

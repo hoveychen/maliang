@@ -1,16 +1,25 @@
-Children's Game Music 2 - Adventure (background loop)
+Background music — 3 warm acoustic tracks in rotation
 
-Author:  heartade
-Source:  https://opengameart.org/content/childrens-game-music-2-adventure
-License: CC0 (Creative Commons Zero, Public Domain)
-         http://creativecommons.org/publicdomain/zero/1.0/
+Author:  Kevin MacLeod (incompetech.com)
+License: Creative Commons Attribution 4.0 (CC BY 4.0)
+         https://creativecommons.org/licenses/by/4.0/
 
-File bgm_main.wav is the "Adventure" track from the "Children's Game Music"
-series (source children_soundtrack_2.wav, 44.1kHz float stereo), resampled to
-32kHz stereo 16-bit PCM with leading/trailing silence trimmed to ~68.5s for a
-tight seamless loop.
+Required attribution (keep visible in the game's credits / about screen):
+  "Music by Kevin MacLeod (incompetech.com), licensed under CC BY 4.0"
 
-Previously this folder shipped bgm_step1/2/3.wav ("Music Loop Variations" by
-"obscure music", also CC0, https://opengameart.org/content/music-loop-variations).
-Those three 9.6s intensity layers were replaced by this single continuous track:
-cycling the short layers every ~19s sounded choppy and never settled.
+Tracks (source MP3 from incompetech.com/music/royalty-free/,
+resampled to 32kHz stereo 16-bit PCM WAV with leading/trailing silence trimmed):
+
+  bgm_carefree.wav       <- "Carefree"            (~204s)  ukulele + whistle, sunny acoustic
+  bgm_cheery_monday.wav  <- "Cheery Monday"       (~78s)   bright playful
+  bgm_happy_boy.wav      <- "Happy Boy End Theme" (~52s)   warm closing theme
+
+game_audio.gd plays these three in rotation: each track plays through in full,
+then crossfades (CROSSFADE_SECS) to the next — one full cycle is ~5m34s before
+any track repeats. bgm_carefree.wav is BGM_STEPS[0] and also beds the main menu.
+
+Previously this folder shipped bgm_main.wav ("Children's Game Music 2 - Adventure"
+by heartade, CC0, opengameart.org) — a single ~68.5s loop. It was replaced because
+a 68s loop felt too repetitive and too electronic in tone. Its predecessor
+bgm_step1/2/3.wav ("Music Loop Variations" by "obscure music", CC0) were 9.6s
+intensity layers cycled every ~19s, which sounded choppy and never settled.
