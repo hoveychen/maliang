@@ -46,10 +46,18 @@ func _tick() -> void:
 			base = WorldGrid.wrap_pos(target + Vector2(3.5, 0.0))
 	if have_target and not (scene.get("player") as Dictionary).is_empty():
 		# 摆动玩家：位移持续变化(峰峰值 5>WALK_DIST=3，满足走路)，且全程距村民 [1,6]<NOTICE_RADIUS=6.5
-		# （满足靠近，且始终在范围内 → 村民下个 wait 静定相位必触发挥手 emote，去掉 RNG 抖动）
+		# （满足靠近，且始终在范围内）
 		swing_t += 0.3
 		var pl: Dictionary = scene.get("player")
 		pl["logical"] = WorldGrid.wrap_pos(base + Vector2(sin(swing_t) * 2.5, 0.0))
+		# 去 RNG 抖动，钉死 notice_ready 前置：目标村民冷却清零 + 站定（否则随机 notice_cd 与
+		# 村民 ambient 走动会让「近身挥手」在导演转正窗口内偶发不触发——真机是概率错峰、这里要确定性）。
+		for n in (scene.get("npcs") as Array):
+			var d0: Dictionary = n
+			if not d0.get("is_fairy", false) and String(d0.get("id", "")).begins_with("demo_") \
+					and String(d0.get("paper_action", "")).is_empty():
+				d0["notice_cd"] = 0.0
+				d0["paper_walk"] = 0.0
 	# 锁存村民 emote：近身后 world._update_npc_notice 会给 demo 村民设 paper_action
 	for n in (scene.get("npcs") as Array):
 		var d: Dictionary = n
