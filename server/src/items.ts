@@ -44,10 +44,29 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   builtin('paper_note', '纸条', 'sdf_res:paper_note', 1, true),
   builtin('crayon', '蜡笔', 'sdf_res:crayon', 1, true),
   builtin('village_sign', '村口路牌', 'sdf_res:village_sign', 1, true),
+  // 贴纸系列（挂 tile 边缘的薄片，docs/sticker-items-design.md）：不占位不阻挡，
+  // 小红花商店购买进背包，允许拾回（贴错能揭下来）。
+  sticker('sticker_sun', '太阳贴纸'),
+  sticker('sticker_flower', '花朵贴纸'),
+  sticker('sticker_star', '星星贴纸'),
+  sticker('sticker_rainbow', '彩虹贴纸'),
+  sticker('sticker_heart', '爱心贴纸'),
+  sticker('sticker_butterfly', '蝴蝶贴纸'),
+  sticker('sticker_moon', '月亮贴纸'),
+  sticker('sticker_cloud', '云朵贴纸'),
+  sticker('sticker_strawberry', '草莓贴纸'),
+  sticker('sticker_smile', '笑脸贴纸'),
+  sticker('sticker_flag', '小旗贴纸'),
+  sticker('sticker_mushroom', '蘑菇贴纸'),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
   return { id, worldId: null, name, renderRef, footprintW: span, footprintH: span, blocking, pathOk: false, wander: 0 };
+}
+
+/** 贴纸：mount:'edge' 薄片，footprint/blocking/wander 对边缘物无意义（恒 1×1/false/0）。 */
+function sticker(id: string, name: string): ItemDef {
+  return { ...builtin(id, name, `sticker:${id.replace(/^sticker_/, '')}`, 1, false), pathOk: true, mount: 'edge' };
 }
 
 /**
@@ -118,6 +137,9 @@ export function buildStaticOccupancy(t: Terrain, resolve: ItemResolver): Uint8Ar
     const ax = i % t.gridW;
     const ay = Math.floor(i / t.gridW);
 
+    // 边缘物（贴纸）不许挂 tile 正上方——mount 错位是数据损坏
+    if (def.mount === 'edge') throw new TerrainFormatError(`edge 物品 ${def.id} at (${ax},${ay}) 挂在 itemRef`);
+
     // 非 blocking（草丛类）：纯点缀，只禁水面，不占位
     if (!def.blocking) {
       if (t.types[i] === T_WATER) throw new TerrainFormatError(`item ${def.id} at (${ax},${ay}) 落在水面`);
@@ -144,14 +166,19 @@ export function buildStaticOccupancy(t: Terrain, resolve: ItemResolver): Uint8Ar
 
 /**
  * 矩阵的物品语义校验（入库/编辑前守门）：palette 可解析、footprint 不压水/
- * 不压路（除非 pathOk）/不跨台阶/互不重叠。edge 平面一期恒 0，非零即拒
- * （数据位已留，渲染二期才放开）。
+ * 不压路（除非 pathOk）/不跨台阶/互不重叠。edge 平面（贴纸等薄片）只做引用
+ * 合法性校验：可解析且 mount==='edge'，不参与占用（sticker-items 设计 §1.1）。
  */
 export function validateTerrainItems(t: Terrain, resolve: ItemResolver = resolveBuiltin): void {
   for (let e = 0; e < 4; e++) {
     const plane = t.edges[e]!;
     for (let i = 0; i < plane.length; i++) {
-      if (plane[i] !== 0) throw new TerrainFormatError(`edge 平面一期必须全 0（edge[${e}][${i}]=${plane[i]}）`);
+      const ref = plane[i]!;
+      if (ref === 0) continue;
+      const id = t.palette[ref - 1];
+      const def = id !== undefined ? resolve(id) : undefined;
+      if (!def) throw new TerrainFormatError(`edge[${e}][${i}] 引用 ${ref} 无法解析`);
+      if (def.mount !== 'edge') throw new TerrainFormatError(`tile 物品 ${def.id} 挂在 edge[${e}][${i}]`);
     }
   }
   buildStaticOccupancy(t, resolve);

@@ -132,10 +132,15 @@ test('拒收：草丛（非 blocking）也不能长在水里', () => {
   assert.throws(() => validateTerrainItems(t), /水面/);
 });
 
-test('拒收：edge 平面一期必须全 0', () => {
+test('edge 平面：tile 物品挂边 → 拒；贴纸（mount edge）→ 放行（sticker-items 起渲染二期已开）', () => {
   const t = terrainWithItems();
-  t.edges[1][at(3, 3)] = 1;
-  assert.throws(() => validateTerrainItems(t), /edge 平面一期/);
+  t.edges[1][at(3, 3)] = 1; // palette[0] 是 tile 物品 → mount 错位
+  assert.throws(() => validateTerrainItems(t), /挂在 edge/);
+
+  const ok = terrainWithItems();
+  ok.palette.push('sticker_sun');
+  ok.edges[1][at(3, 3)] = ok.palette.length;
+  assert.doesNotThrow(() => validateTerrainItems(ok));
 });
 
 test('合法矩阵通过校验', () => {

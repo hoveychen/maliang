@@ -76,7 +76,7 @@ import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
-import { BUILTIN_ITEMS, creationItemDef, validateTerrainItems } from './items.ts';
+import { BUILTIN_ITEMS, creationItemDef, getBuiltinItem, validateTerrainItems } from './items.ts';
 import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrain_edit.ts';
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
@@ -1570,6 +1570,20 @@ function tileItemIdAt(store: WorldStore, worldId: string, sceneId: string, x: nu
   }
 }
 
+/** 某 tile 某条边当前挂的贴纸实体 id（同上语义，side 越界也回 ''）。 */
+function tileEdgeItemIdAt(store: WorldStore, worldId: string, sceneId: string, x: number, y: number, side: number): string {
+  const rec = store.getSceneTerrain(worldId, sceneId);
+  if (!rec || !Number.isInteger(side) || side < 0 || side > 3) return '';
+  try {
+    const t = decodeTerrain(rec.bytes);
+    if (x < 0 || x >= t.gridW || y < 0 || y >= t.gridH) return '';
+    const ref = t.edges[side]![y * t.gridW + x]!;
+    return ref > 0 ? t.palette[ref - 1]! : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function handleWsMessage(
   socket: { send: (data: string) => void },
   raw: string,
@@ -1599,8 +1613,9 @@ export async function handleWsMessage(
     kind?: string;
     targetName?: string;
     locationName?: string;
-    itemId?: string; // item_place：要摆出的物品实体 id（背包持有）
+    itemId?: string; // item_place：要摆出的物品实体 id（背包持有）；sticker_buy：要买的贴纸 id
     yawDeg?: number; // item_place：摆放朝向（度）
+    edgeSide?: number; // item_place/pickup：0..3=N/E/S/W，带上 = 操作 tile 边缘（贴纸）
     tileX?: number;
     tileY?: number;
     // positions_report：客户端批量上报 tile（chars 只含本轮变化过的角色，player 可缺省）
@@ -2027,24 +2042,32 @@ export async function handleWsMessage(
 
   // 摆放：背包扣一份 → 目标 tile 挂实体引用（唯一写入口 editSceneTerrain：校验 →
   // version+1 → terrain_patch 广播，发起者也靠广播落地渲染）。失败回 error 不动账。
+  // 带 edgeSide（0..3=N/E/S/W）= 贴纸挂 tile 边缘（sticker-items 设计 §2.2），不带 = 摆 tile 正上方。
   if (msg.type === 'item_place') {
     const worldId = msg.worldId ?? '';
     const itemId = msg.itemId ?? '';
     const sceneId = session.currentScene || DEFAULT_SCENE;
     const x = Math.trunc(Number(msg.tileX ?? -1));
     const y = Math.trunc(Number(msg.tileY ?? -1));
+    const edgeSide = msg.edgeSide === undefined ? null : Math.trunc(Number(msg.edgeSide));
     if ((store.getBag(worldId, session.playerId)[itemId] ?? 0) < 1) {
       socket.send(JSON.stringify({ type: 'error', error: 'item not in bag' }));
       return;
     }
-    // tile 编辑对已有引用是覆写语义（admin 用）；摆放不许顶掉别人——目标 tile 必须为空。
-    // footprint 级冲突（压进民居占地等）由 editSceneTerrain 整图复检兜住。
-    if (tileItemIdAt(store, worldId, sceneId, x, y) !== '') {
-      socket.send(JSON.stringify({ type: 'error', error: 'tile occupied' }));
+    // tile 编辑对已有引用是覆写语义（admin 用）；摆放不许顶掉别人——目标 tile/边必须为空。
+    // footprint 级冲突（压进民居占地等）与 mount 错位由 editSceneTerrain 整图复检兜住。
+    const occupied = edgeSide === null
+      ? tileItemIdAt(store, worldId, sceneId, x, y) !== ''
+      : tileEdgeItemIdAt(store, worldId, sceneId, x, y, edgeSide) !== '';
+    if (occupied) {
+      socket.send(JSON.stringify({ type: 'error', error: edgeSide === null ? 'tile occupied' : 'edge occupied' }));
       return;
     }
     try {
-      editSceneTerrain(store, hub, worldId, sceneId, [{ x, y, item: { id: itemId, yawDeg: Number(msg.yawDeg ?? 0) } }]);
+      const edit = edgeSide === null
+        ? { x, y, item: { id: itemId, yawDeg: Number(msg.yawDeg ?? 0) } }
+        : { x, y, edge: { side: edgeSide, id: itemId } };
+      editSceneTerrain(store, hub, worldId, sceneId, [edit]);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'error', error: err instanceof Error ? err.message : String(err) }));
       return;
@@ -2055,30 +2078,61 @@ export async function handleWsMessage(
   }
 
   // 拾起：tile 上的引用必须是语音造物（实体 worldId 非空）——内置树/石/建筑拒拾。
+  // 例外：边缘贴纸（mount:'edge'）虽是内置也允许拾回——孩子贴错要能揭下来（老板拍板 2026-07-12）。
   // 清引用（terrain_patch 广播）→ 背包加一份 → bag_update。失败回 error 不动账。
   if (msg.type === 'item_pickup') {
     const worldId = msg.worldId ?? '';
     const sceneId = session.currentScene || DEFAULT_SCENE;
     const x = Math.trunc(Number(msg.tileX ?? -1));
     const y = Math.trunc(Number(msg.tileY ?? -1));
-    const itemId = tileItemIdAt(store, worldId, sceneId, x, y);
+    const edgeSide = msg.edgeSide === undefined ? null : Math.trunc(Number(msg.edgeSide));
+    const itemId = edgeSide === null
+      ? tileItemIdAt(store, worldId, sceneId, x, y)
+      : tileEdgeItemIdAt(store, worldId, sceneId, x, y, edgeSide);
     const def = itemId ? store.getItemDef(worldId, itemId) : undefined;
     if (!def) {
-      socket.send(JSON.stringify({ type: 'error', error: 'no item on tile' }));
+      socket.send(JSON.stringify({ type: 'error', error: edgeSide === null ? 'no item on tile' : 'no item on edge' }));
       return;
     }
-    if (def.worldId === null) {
+    if (def.worldId === null && def.mount !== 'edge') {
       socket.send(JSON.stringify({ type: 'error', error: 'builtin item not pickable' }));
       return;
     }
     try {
-      editSceneTerrain(store, hub, worldId, sceneId, [{ x, y, item: null }]);
+      const edit = edgeSide === null ? { x, y, item: null } : { x, y, edge: { side: edgeSide, id: null } };
+      editSceneTerrain(store, hub, worldId, sceneId, [edit]);
     } catch (err) {
       socket.send(JSON.stringify({ type: 'error', error: err instanceof Error ? err.message : String(err) }));
       return;
     }
     store.bagAdd(worldId, session.playerId, itemId);
     socket.send(JSON.stringify({ type: 'bag_update', worldId, bag: store.getBag(worldId, session.playerId) }));
+    return;
+  }
+
+  // 贴纸小铺：小红花买贴纸进背包（sticker-items 设计 §2.3，单价 1 朵）。
+  // 只卖内置贴纸（mount:'edge'）；余额不足回 sticker_denied（同 gen/prop_denied 心智）。
+  if (msg.type === 'sticker_buy') {
+    const worldId = msg.worldId ?? '';
+    const itemId = msg.itemId ?? '';
+    const def = getBuiltinItem(itemId);
+    if (!def || def.mount !== 'edge') {
+      socket.send(JSON.stringify({ type: 'error', error: 'not a sticker' }));
+      return;
+    }
+    if (!store.spendFlower(worldId, session.playerId)) {
+      socket.send(JSON.stringify({
+        type: 'sticker_denied', worldId, reason: 'no_flowers',
+        wallet: store.getWallet(worldId, session.playerId),
+      }));
+      return;
+    }
+    store.bagAdd(worldId, session.playerId, itemId);
+    socket.send(JSON.stringify({
+      type: 'sticker_bought', worldId, itemId,
+      bag: store.getBag(worldId, session.playerId),
+      wallet: store.getWallet(worldId, session.playerId),
+    }));
     return;
   }
 

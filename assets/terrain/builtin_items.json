@@ -20,5 +20,17 @@
   { "id": "pinwheel", "worldId": null, "name": "纸风车", "renderRef": "sdf_res:pinwheel", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
   { "id": "paper_note", "worldId": null, "name": "纸条", "renderRef": "sdf_res:paper_note", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
   { "id": "crayon", "worldId": null, "name": "蜡笔", "renderRef": "sdf_res:crayon", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "village_sign", "worldId": null, "name": "村口路牌", "renderRef": "sdf_res:village_sign", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 }
+  { "id": "village_sign", "worldId": null, "name": "村口路牌", "renderRef": "sdf_res:village_sign", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
+  { "id": "sticker_sun", "worldId": null, "name": "太阳贴纸", "renderRef": "sticker:sun", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_flower", "worldId": null, "name": "花朵贴纸", "renderRef": "sticker:flower", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_star", "worldId": null, "name": "星星贴纸", "renderRef": "sticker:star", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_rainbow", "worldId": null, "name": "彩虹贴纸", "renderRef": "sticker:rainbow", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_heart", "worldId": null, "name": "爱心贴纸", "renderRef": "sticker:heart", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_butterfly", "worldId": null, "name": "蝴蝶贴纸", "renderRef": "sticker:butterfly", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_moon", "worldId": null, "name": "月亮贴纸", "renderRef": "sticker:moon", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_cloud", "worldId": null, "name": "云朵贴纸", "renderRef": "sticker:cloud", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_strawberry", "worldId": null, "name": "草莓贴纸", "renderRef": "sticker:strawberry", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_smile", "worldId": null, "name": "笑脸贴纸", "renderRef": "sticker:smile", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_flag", "worldId": null, "name": "小旗贴纸", "renderRef": "sticker:flag", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "sticker_mushroom", "worldId": null, "name": "蘑菇贴纸", "renderRef": "sticker:mushroom", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" }
 ]
