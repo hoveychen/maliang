@@ -66,6 +66,7 @@ UNIT_TESTS=(
   test_matrix_skin
   test_terrain_patch
   test_terrain_rebuild
+  test_sticker_edges
   test_forest_scene
   test_forest_reach
   test_enter_scene_client

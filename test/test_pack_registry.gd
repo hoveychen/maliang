@@ -43,8 +43,11 @@ func _init() -> void:
 			fails += 1
 			continue
 		var cat := PackRegistry.category(key)
-		fails += _check("%s 分类合法(baked/scatter/node)" % rref,
-			1 if cat in ["baked", "scatter", "node"] else 0, 1)
+		fails += _check("%s 分类合法(baked/scatter/node/sticker)" % rref,
+			1 if cat in ["baked", "scatter", "node", "sticker"] else 0, 1)
+		if cat == "sticker": # 贴纸=贴图资源（sticker-items），Texture2D 而非 mesh/场景
+			fails += _check("%s 贴图可 load" % rref, 1 if PackRegistry.load_resource(key) is Texture2D else 0, 1)
+			continue
 		var res: Variant = PackRegistry.load_resource(key)
 		fails += _check("%s 资源可 load" % rref, 1 if res is Resource else 0, 1)
 		if cat == "node":

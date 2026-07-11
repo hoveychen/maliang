@@ -63,6 +63,7 @@ var _home_btn: Button               ## "回家"按钮（测试锚点）
 # —— 物品页 ——
 var _items_grid: GridContainer      ## 背包网格（动态重建）
 var _items_empty: Label             ## 空态提示
+var _shop_grid: GridContainer       ## 贴纸小铺货架（在线才铺货）
 
 # —— 设置页 ——
 var _reroll_btn: Button             ## "重新捏角色"按钮（测试锚点）
@@ -650,7 +651,53 @@ func _build_items_page() -> Control:
 	UiAssets.style_card_label(_items_empty, 34)
 	page.add_child(_items_grid)
 	page.add_child(_items_empty)
+	# 贴纸小铺（docs/sticker-items-design.md §2.3）：物品页内嵌货架，1 朵小红花一张。
+	var shop_title := Label.new()
+	shop_title.text = "🌸 贴纸小铺 · 一朵小红花换一张"
+	shop_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	shop_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiAssets.style_card_label(shop_title, 30)
+	page.add_child(shop_title)
+	_shop_grid = GridContainer.new()
+	_shop_grid.columns = 6
+	_shop_grid.add_theme_constant_override("h_separation", 26)
+	_shop_grid.add_theme_constant_override("v_separation", 24)
+	_shop_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	page.add_child(_shop_grid)
 	return page
+
+## 重建贴纸小铺货架（离线清空——买卖要服务端点头）。贴图直接用世界渲染同款。
+func _refresh_sticker_shop() -> void:
+	if _shop_grid == null:
+		return
+	for c in _shop_grid.get_children():
+		c.queue_free()
+	if _w == null or not _w.online:
+		return
+	for item_id in ItemCatalog.sticker_ids():
+		var def := ItemCatalog.get_def(item_id)
+		var key := String(def.get("renderRef", "")).get_slice(":", 1)
+		var tex := PackRegistry.load_resource(key) as Texture2D # stickers pack（category "sticker"）
+		if tex == null:
+			continue
+		var cell := VBoxContainer.new()
+		cell.alignment = BoxContainer.ALIGNMENT_CENTER
+		cell.custom_minimum_size = Vector2(104.0, 0.0)
+		var btn := TextureButton.new()
+		btn.texture_normal = tex
+		btn.ignore_texture_size = true
+		btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+		btn.custom_minimum_size = Vector2(84.0, 84.0)
+		btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		btn.pressed.connect(func() -> void: _w.backend.send_sticker_buy(_w.world_id, String(item_id)))
+		var name_label := Label.new()
+		name_label.text = String(def.get("name", "贴纸"))
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_label.custom_minimum_size = Vector2(104.0, 0.0)
+		UiAssets.style_card_label(name_label, 24)
+		cell.add_child(btn)
+		cell.add_child(name_label)
+		_shop_grid.add_child(cell)
 
 ## 重建背包网格（礼盒贴纸+物件名+份数）。数据源是服务端权威 bag 计数，
 ## 名字/spec 从 ItemCatalog 实体定义取。物件不多，全量重建最简单。
@@ -671,7 +718,22 @@ func refresh_items() -> void:
 		var cell := VBoxContainer.new()
 		cell.alignment = BoxContainer.ALIGNMENT_CENTER
 		cell.custom_minimum_size = Vector2(104.0, 0.0)
-		var glyph := UiAssets.icon_button("ic_gift", 92.0) # 点一下摆到玩家身旁
+		# 贴纸显示本尊贴图（一眼认出买了啥），其余物件保留礼盒图标
+		var skey := String(def.get("renderRef", "")).get_slice(":", 1)
+		var stex: Texture2D = null
+		if String(def.get("renderRef", "")).begins_with("sticker:"):
+			stex = PackRegistry.load_resource(skey) as Texture2D
+		var glyph: BaseButton
+		if stex != null:
+			var tb := TextureButton.new()
+			tb.texture_normal = stex
+			tb.ignore_texture_size = true
+			tb.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+			tb.custom_minimum_size = Vector2(92.0, 92.0)
+			tb.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+			glyph = tb
+		else:
+			glyph = UiAssets.icon_button("ic_gift", 92.0) # 点一下摆到玩家身旁
 		glyph.pressed.connect(func() -> void: _w._place_bag_item(String(item_id)))
 		var name_label := Label.new()
 		var display := String(def.get("name", "小玩意"))
@@ -683,6 +745,7 @@ func refresh_items() -> void:
 		cell.add_child(glyph)
 		cell.add_child(name_label)
 		_items_grid.add_child(cell)
+	_refresh_sticker_shop()
 
 ## ── 设置 app ────────────────────────────────────────────────────────────────
 

@@ -26,6 +26,8 @@ export interface TileEditInput {
   d?: number;
   /** 挂物品（实体 id + 朝向角）/ null 移除。多 tile 物品写锚点。 */
   item?: { id: string; yawDeg?: number } | null;
+  /** 边缘挂载（贴纸类薄片，side=0..3 对应 N/E/S/W）：id=null 清除该边。 */
+  edge?: { side: number; id: string | null };
 }
 
 /** 广播给客户端的已应用编辑（item 已翻成 palette 索引）。 */
@@ -36,6 +38,8 @@ export interface AppliedEdit {
   h?: number;
   d?: number;
   item?: [number, number] | null;
+  /** [side, ref]，ref=0 表示该边已清空（与 u8 平面语义一致）。 */
+  edge?: [number, number];
 }
 
 export class TerrainEditError extends Error {
@@ -108,6 +112,27 @@ export function applyTileEdits(
         terrain.itemRef[i] = ref;
         terrain.itemArg[i] = arg;
         out.item = [ref, arg];
+      }
+    }
+    if (e.edge !== undefined) {
+      const { side, id } = e.edge;
+      if (!Number.isInteger(side) || side < 0 || side > 3) throw new TerrainEditError(`edge side ${side} 非法`);
+      if (id === null) {
+        terrain.edges[side]![i] = 0;
+        out.edge = [side, 0];
+      } else {
+        const def = resolve(id);
+        if (!def) throw new TerrainEditError(`物品实体 ${JSON.stringify(id)} 不存在`);
+        if (def.mount !== 'edge') throw new TerrainEditError(`物品 ${id} 不能挂边缘（mount=${def.mount ?? 'tile'}）`);
+        let ref = terrain.palette.indexOf(id) + 1;
+        if (ref === 0) {
+          if (terrain.palette.length >= MAX_PALETTE) throw new TerrainEditError(`palette 满（${MAX_PALETTE}）`);
+          terrain.palette.push(id);
+          ref = terrain.palette.length;
+          paletteAppend.push({ index: ref, itemId: id });
+        }
+        terrain.edges[side]![i] = ref;
+        out.edge = [side, ref];
       }
     }
     applied.push(out);

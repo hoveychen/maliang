@@ -211,6 +211,12 @@ static func apply_patch(patch: Dictionary) -> Dictionary:
 			var a := item as Array
 			if a.size() != 2 or int(a[0]) < 1 or int(a[0]) > pal_size or int(a[1]) < 0 or int(a[1]) > 255:
 				return { "ok": false, "tiles": [], "error": "item 引用非法" }
+		if d.has("edge"): # [side, ref]，ref=0 表示清空该边（与服务端 AppliedEdit 对齐）
+			if typeof(d["edge"]) != TYPE_ARRAY:
+				return { "ok": false, "tiles": [], "error": "edge 非法" }
+			var eg := d["edge"] as Array
+			if eg.size() != 2 or int(eg[0]) < 0 or int(eg[0]) > 3 or int(eg[1]) < 0 or int(eg[1]) > pal_size:
+				return { "ok": false, "tiles": [], "error": "edge 引用非法" }
 
 	# ── 应用 ───────────────────────────────────────────────────────────────
 	for p in pal_add:
@@ -232,6 +238,9 @@ static func apply_patch(patch: Dictionary) -> Dictionary:
 		elif item == null: # 显式 null = 移除物品
 			_item_ref[i] = 0
 			_item_arg[i] = 0
+		if d.has("edge"):
+			var eg := d["edge"] as Array
+			_edges[int(eg[0])][i] = int(eg[1])
 		tiles.append(Vector2i(int(d["x"]), int(d["y"])))
 	return { "ok": true, "tiles": tiles, "error": "" }
 
@@ -269,7 +278,7 @@ static func tile_item_arg(t: Vector2i) -> int:
 static func tile_item_yaw_deg(t: Vector2i) -> float:
 	return float(tile_item_arg(t)) * 360.0 / 256.0
 
-## tile 某面边缘挂的物品实体 id（EDGE_N/E/S/W）；一期数据位恒空。
+## tile 某面边缘挂的物品实体 id（EDGE_N/E/S/W）；空边返回 ""。
 static func edge_item_id(t: Vector2i, side: int) -> String:
 	_ensure_built()
 	var ref := _edges[side][_idx(t)]

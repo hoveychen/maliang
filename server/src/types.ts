@@ -172,6 +172,7 @@ export interface ItemDef {
    *   'scifi:<name>'   科幻主题 gltf 场景（Quaternius/Kenney CC0，客户端 SCIFI_NODES 表）
    *   'sdf_res:<name>' 打包内 SDF spec（assets/sdf_props/<name>.json）
    *   'sdf_inline'     spec 字段内联（语音造物）
+   *   'sticker:<name>' 贴纸图（assets/stickers/<name>.webp，边缘竖片，docs/sticker-items-design.md）
    */
   renderRef: string;
   /** sdf_inline 时的 SDF spec（结构见 sdf_prop.ts）。 */
@@ -191,6 +192,11 @@ export interface ItemDef {
    * 缺省 = 无标签（草/路/水时代的内置布景不带）。
    */
   themes?: string[];
+  /**
+   * 挂载面（docs/sticker-items-design.md §1.1）：缺省 'tile'（矩阵 itemRef，存量语义）；
+   * 'edge' 只能挂 tile 四条边缘平面（贴纸类薄片），不进占用位图。
+   */
+  mount?: 'tile' | 'edge';
 }
 
 /** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */

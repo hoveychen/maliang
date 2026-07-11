@@ -47,6 +47,16 @@ static func get_def(id: String) -> Dictionary:
 static func has_def(id: String) -> bool:
 	return _defs.has(id)
 
+## 内置贴纸实体 id 清单（mount=='edge'）：贴纸小铺货架数据源（phone_ui）。
+static func sticker_ids() -> Array:
+	ensure_builtin()
+	var out := []
+	for id in _defs:
+		if String((_defs[id] as Dictionary).get("mount", "tile")) == "edge":
+			out.append(String(id))
+	out.sort()
+	return out
+
 ## footprint 尺寸（含朝向就近象限旋转；与服务端 rotatedFootprint 一致）。未知实体按 1×1。
 static func footprint(id: String, arg: int) -> Vector2i:
 	var def := get_def(id)
