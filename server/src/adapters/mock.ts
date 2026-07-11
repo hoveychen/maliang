@@ -46,6 +46,10 @@ const CREATION_ASK: Record<CreationCategory, string> = {
   motion: '（造角色不问会不会动）', // 占位：motion 是造物专属类别
 };
 
+// 引导式创造里小朋友反悔的说法（真实实现由 LLM 判语义；mock 用关键词模拟同一个 cancelled 信号）。
+const CANCEL_WORDS = /(取消|算了|不要了|不想要了|不造了|不变了|不做了|不玩了|不想造|别造了)/;
+const CANCEL_LINE = '好呀，那我们不造啦，你想玩点别的也行呀！';
+
 const ANIMALS = ['兔', '猫', '狗', '熊', '龙', '鸟', '鱼', '象', '鹿', '羊'];
 
 function pickName(intent: string): string {
@@ -203,6 +207,8 @@ export function createMockAdapters(): ServiceAdapters {
         return { kind: 'chat', replyText: `（mock 回应）你说的是「${transcript}」对吗？`, emotion: 'happy' };
       },
       async guideCreation(state: CreationState, childInput: string): Promise<GuideCreationResult> {
+        // 小朋友反悔（真实 LLM 自己判语义，mock 用关键词模拟出同一个 cancelled 信号，保证确定性）
+        if (CANCEL_WORDS.test(childInput)) return { replyText: CANCEL_LINE, done: false, cancelled: true };
         // mock：从输入里按图标 label 认属性；name 类别问过后自由文本当名字。凑够 kind+(color|trait) 或超轮即造。
         const attrs = { ...state.attrs, traits: [...state.attrs.traits] };
         const updated: { kind?: string; color?: string; size?: string; traits?: string[]; personality?: string; name?: string } = {};
@@ -236,6 +242,7 @@ export function createMockAdapters(): ServiceAdapters {
         return { replyText: CREATION_ASK[next], done: false, question: CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
       },
       async guideProp(state: CreationState, childInput: string): Promise<GuideCreationResult> {
+        if (CANCEL_WORDS.test(childInput)) return { replyText: CANCEL_LINE, done: false, cancelled: true };
         // 造物 mock：从输入按图标 label 认属性（kind/color/size/motion），凑够 kind + 一项 或超轮即造。
         const attrs = { ...state.attrs, traits: [...state.attrs.traits] };
         const updated: Partial<CreationAttrs> = {};

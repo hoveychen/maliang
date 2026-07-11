@@ -410,10 +410,11 @@ export interface CreationOption {
   iconAsset: string;
 }
 
-/** guideCreation 一轮的产物：要么继续追问（question+options），要么攒够去造（done+description）。 */
+/** guideCreation 一轮的产物：要么继续追问（question+options），要么攒够去造（done+description），要么小朋友反悔（cancelled）。 */
 export interface GuideCreationResult {
   replyText: string;                 // 仙子这轮说的话（TTS 念出，含问题与选项口播）
   done: boolean;
+  cancelled?: boolean;               // 小朋友说不造了（「算了/不要了/不想造了」）：清会话、收占位符，绝不开造
   description?: string;              // done：汇总属性给 designCharacter 的中文描述
   question?: string;                // done=false：追问的问题
   category?: CreationCategory;      // done=false：本轮问的类别
