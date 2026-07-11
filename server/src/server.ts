@@ -8,6 +8,7 @@ import type { ServiceAdapters, ASRStream } from './adapters/types.ts';
 import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
+import { startBackup, type BackupExport } from './backup.ts';
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
 import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
@@ -589,6 +590,31 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   });
   // 资源化只读 API（/debug/api/*）：React 多页面后台分资源拉取（见 debug_api.ts）。
   registerDebugApi(app, store, debugAuthed);
+
+  // ── 全量数据备份 / 恢复 ──
+  // 数据只有持久卷一个落点，卷没了就全没了；这两个端点是唯一的兜底。
+  //
+  // 门禁刻意比 debugAuthed 更严：debugAuthed 在**未配** MALIANG_ADMIN_TOKEN 时一律放行
+  //（"开发环境开放"），但导出 = 全量数据出境、导入 = 全量数据被覆盖。真要是哪天生产漏配了
+  // token，那条规则等于把删库按钮挂在公网上。所以没 token 就直接关掉这两个端点。
+  const backupAuthed = (req: { headers: Record<string, unknown>; query: unknown }): boolean =>
+    Boolean(debugToken) && debugAuthed(req);
+
+  app.get('/admin/backup', async (req, reply) => {
+    if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    let out: BackupExport;
+    try {
+      out = startBackup(store);
+    } catch (e) {
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+    // manifest 走响应头：管理台不用解包就能显示"这一包里有多少玩家/角色/资产"。
+    return reply
+      .header('content-type', 'application/gzip')
+      .header('content-disposition', `attachment; filename="${out.filename}"`)
+      .header('x-backup-manifest', JSON.stringify(out.manifest))
+      .send(out.stream);
+  });
   // /debug 页面：优先托管 admin/dist（React 多页面管理台，Docker 多阶段构建产出）。
   // HTML/JS 是公开壳子不含数据（数据全在带门禁的 /debug/api/*），页面本身不设 token 门——
   // 打开后 SPA 里粘 token 即可用（也兼容 ?token= 透传）。未构建（本地测试）回退旧版内嵌单页。
