@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # maliang Mac 一键试玩。
-# 用法：scripts/play-mac.sh [--local] [--build]
-#   (默认)   导出(缺失时)并启动 app，连线上 maliang-api.muveeai.com。
+# 用法：scripts/play-mac.sh [--local] [--cache]
+#   (默认)   每次重新导出并启动 app（打包路线），连线上 maliang-api.muveeai.com。
+#            导出会自动注入端侧 ASR 模型并 ad-hoc 签名（否则扩展加载不出/无模型）；
+#            SIGN_IDENTITY 可覆盖为 Developer ID。分发级（公证）包走 package-mac-app.sh。
+#   --cache  复用已有 build/maliang.app、跳过导出（改动不会生效，只图快开旧包）。
 #   --local  改连本机后端：起 Node 后端在 :8090，用 MALIANG_API_BASE 让 app 指向它。
 #            （宿主 8080 常被 Docker 等占用，故本地固定用 8090。）
-#   --build  强制重新导出 app（否则仅在 build/maliang.app 缺失时导出）。
-# 导出会自动注入端侧 ASR 模型并 ad-hoc 签名（否则扩展加载不出/无模型）；SIGN_IDENTITY
-# 可覆盖为 Developer ID。分发级（公证）包走 scripts/package-mac-app.sh。
 # 说明：客户端启动时从 api.base 推导后端地址（world.gd），api.gd 支持 MALIANG_API_BASE
 #       环境变量覆盖，故本地/远程切换无需改任何代码。
 # 前置：Godot 导出模板已装；--local 时 server/.env 已配密钥。
@@ -16,13 +16,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/build/maliang.app"
 PORT=8090
 LOCAL=0
-BUILD=0
+CACHE=0
 for a in "$@"; do
   case "$a" in
     --local)  LOCAL=1;;
     --remote) LOCAL=0;;
-    --build)  BUILD=1;;
-    *) echo "未知参数：${a}（支持 --local / --build）"; exit 1;;
+    --cache)  CACHE=1;;
+    --build)  ;;  # 兼容旧习惯：现在默认就重导，--build 为空操作
+    *) echo "未知参数：${a}（支持 --local / --cache）"; exit 1;;
   esac
 done
 
@@ -32,8 +33,11 @@ GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 [ -x "$GODOT" ] || GODOT="$(command -v godot || true)"
 [ -n "$GODOT" ] || { echo "找不到 Godot，可用 GODOT=/path/to/Godot 指定"; exit 1; }
 
-# 1. 需要时导出 app（缺失或 --build）
-if [ ! -d "$APP" ] || [ "$BUILD" = 1 ]; then
+# 1. 默认每次重新导出（打包路线）；--cache 且已有包时复用、跳过导出。
+if [ "$CACHE" = 1 ] && [ -d "$APP" ]; then
+  echo "复用已有包 $APP（--cache，源码改动不会生效）。"
+else
+  [ "$CACHE" = 1 ] && echo "指定了 --cache 但 $APP 不存在，仍需导出一次。"
   echo "导出 macOS app（$("$GODOT" --version)）..."
   rm -rf "$APP"
   "$GODOT" --headless --path "$ROOT" --export-debug macOS "$APP"
