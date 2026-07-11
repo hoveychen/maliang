@@ -23,9 +23,9 @@ const CULL_MARGIN := BendMat.CULL_MARGIN
 ## 斜阳投影不在物体正下方（会被树冠盖住看不见），而是沿光照射方向拖到背光侧、并被拉成
 ## 椭圆——方向唯一取自 BlobShadow.sun_ground_dir（场景那盏光），与场景明暗同一个太阳。
 const SHADOW_STRENGTH := 0.40    ## 加深到能看清（旧 0.22 又淡又被树冠盖，实测等于没有）
-const SHADOW_RADIUS_FACTOR := 0.6  ## 短半轴 = 树冠水平半尺寸 × 此系数（垂直光方向那半径）
-const SHADOW_ELONGATION := 1.6   ## 椭圆长/短轴比：沿光方向拉长，模拟斜阳投影
-const SHADOW_OFFSET_FACTOR := 0.9  ## 影心沿光方向偏移 = 短半径 × 此（拖出树冠外才看得见）
+const SHADOW_RADIUS_FACTOR := 0.6  ## 树/灌木短半轴 = 树冠水平半尺寸 × 此（垂直光方向）
+const SHADOW_COT := 0.70         ## cot(太阳仰角 55°)：影子沿地面伸出长度 = 物体高 × 此
+                                 ## ——偏移/拉长由高度定(不是半径),高树/房影拖远才看得见
 const SHADOW_LIFT := 0.2         ## 抬离地面（同 BlobShadow，给深度测试留余量）
 
 ## KayKit CC0 资产（见 assets/kaykit/*/License）。Hexagon 建筑是微缩比例，需放大。
@@ -328,7 +328,8 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 			var inst := _spawn_on_tile(deco, wrapped, lm["scene"], anchor, lm["scale"], lm["yaw"],
 				int(lm.get("reserve", 0)), int(lm.get("search", 0)), bool(lm.get("path_ok", false)))
 			if inst != null:
-				building_shadows.append([inst.position, _visual_short_r(inst, lm["scale"])])
+				var ext := _visual_extent(inst, lm["scale"])
+				building_shadows.append([inst.position, ext.x, ext.y])
 		_flush_building_shadows(deco, building_shadows)
 
 		# SDF 可动物件：与地标同权重的手工锚点，先于散布占地。
@@ -741,17 +742,19 @@ func _flush_batches(parent: Node3D, batches: Dictionary) -> void:
 		parent.add_child(mmi)
 		mmi.add_to_group("perf_scatter")  # PerfSweep 分解扫频用（debug 诊断）
 
-## 单个贴片影的实例变换（树/灌木/建筑共用）：以物体落点 pos + 短半径 short_r，按场景
-## 太阳方向做「影心偏移到背光侧 + 椭圆(长轴沿光方向拉长)」。方向唯一取 sun_ground_dir，
-## 与场景明暗同一个太阳。纯函数、CPU 侧可单测。
-func _shadow_xform(pos: Vector3, short_r: float) -> Transform3D:
+## 单个贴片影的实例变换（树/灌木/建筑共用）：按斜阳几何投影——影子沿光方向从物体脚伸出
+## reach = 物体高 × cot(仰角)，椭圆长轴覆盖 [脚, 脚+reach]、短轴 = 水平半径，影心挪到中点。
+## 方向唯一取 sun_ground_dir（场景那盏光）；矮物影短、高树/房影拖得远，物理一致、看得见。
+## 必须 rot * scale（local 轴缩放后再旋转）：Basis.scaled 是 diag*R（世界轴缩放），椭圆
+## 长轴不跟 yaw 转、方向错，get_scale 也分解不出长短轴。纯函数、CPU 侧可单测。
+func _shadow_xform(pos: Vector3, short_r: float, height: float) -> Transform3D:
 	var sun := BlobShadow.sun_ground_dir
 	var yaw := atan2(sun.x, sun.z)  # 使 local +Z 对齐光方向 → 长轴沿光方向
-	var long_r := short_r * SHADOW_ELONGATION
-	# 必须 rot * scale（local 轴缩放后再旋转）：Basis.scaled 是 diag*R（世界轴缩放），
-	# 椭圆长轴会不跟着 yaw 转、方向错，get_scale 也分解不出长短轴。
+	var reach := height * SHADOW_COT        # 影子沿地面伸出的长度（由高度定，不是半径）
+	var long_r := (reach + short_r) * 0.5   # 长半轴：覆盖脚 pos 到影端 pos+reach
+	var offset := long_r - short_r          # 影心从脚沿光方向挪到椭圆中心
 	var b := Basis(Vector3.UP, yaw) * Basis.from_scale(Vector3(short_r * 2.0, 1.0, long_r * 2.0))
-	var center := pos + sun * (short_r * SHADOW_OFFSET_FACTOR) + Vector3(0.0, SHADOW_LIFT, 0.0)
+	var center := pos + sun * offset + Vector3(0.0, SHADOW_LIFT, 0.0)
 	return Transform3D(b, center)
 
 ## 散布树/灌木影斑变换（CPU 侧、可单测——headless 下 MultiMesh 的 transform 走
@@ -764,8 +767,10 @@ func _shadow_xforms(batches: Dictionary) -> Array[Transform3D]:
 			continue  # 石/草太矮太碎，不铺影
 		var aabb: AABB = _scatter_kind(key)["mesh"].get_aabb()
 		var base_r := maxf(aabb.size.x, aabb.size.z) * 0.5 * SHADOW_RADIUS_FACTOR
+		var base_h := aabb.size.y
 		for t: Transform3D in batches[key]:
-			xforms.append(_shadow_xform(t.origin, base_r * t.basis.get_scale().x))
+			var s := t.basis.get_scale().x
+			xforms.append(_shadow_xform(t.origin, base_r * s, base_h * s))
 	return xforms
 
 ## 散布树/灌木脚下贴片阴影：把落点收成一层合并 MultiMesh 暗斑（一次 draw call、
@@ -788,19 +793,22 @@ func _flush_shadows(parent: Node3D, batches: Dictionary) -> void:
 	parent.add_child(mmi)
 	mmi.add_to_group("perf_scatter")  # 与散布同组，PerfSweep 一并可切
 
-## 建筑水平影半径：遍历 inst 的 MeshInstance3D 取最大 mesh 水平 AABB × 实例缩放 × 影系数
-## （近似，忽略部件相对偏移；影子不需精确）。没 mesh 兜底 2m。
-func _visual_short_r(inst: Node3D, scale_f: float) -> float:
+## 建筑影用的水平半径 + 高度：遍历 inst 的 MeshInstance3D 取最大 mesh 水平/竖直 AABB ×
+## 实例缩放（近似，忽略部件相对偏移；影子不需精确）。短轴用实际半径（不缩 factor，房子
+## 影要盖住占地）。返回 Vector2(short_r, height)。没 mesh 兜底 (1, 3)。
+func _visual_extent(inst: Node3D, scale_f: float) -> Vector2:
 	var span := 0.0
+	var hgt := 0.0
 	for mi: MeshInstance3D in inst.find_children("*", "MeshInstance3D", true, false):
 		if mi.mesh != null:
 			var a := mi.mesh.get_aabb()
 			span = maxf(span, maxf(a.size.x, a.size.z))
+			hgt = maxf(hgt, a.size.y)
 	if span <= 0.0:
-		span = 2.0
-	return span * 0.5 * scale_f * SHADOW_RADIUS_FACTOR
+		return Vector2(1.0, 3.0) * scale_f
+	return Vector2(span * 0.5, hgt) * scale_f
 
-## 地标建筑脚下同款斜阳椭圆贴片影：入参 [[落点, 短半径], ...]，一层合并 MultiMesh
+## 地标建筑脚下同款斜阳椭圆贴片影：入参 [[落点, 短半径, 高度], ...]，一层合并 MultiMesh
 ## （一次 draw call、不投实时阴影），方向/椭圆走 _shadow_xform（与树影同一个太阳）。
 func _flush_building_shadows(parent: Node3D, centers: Array) -> void:
 	if centers.is_empty():
@@ -810,7 +818,7 @@ func _flush_building_shadows(parent: Node3D, centers: Array) -> void:
 	mm.mesh = BlobShadow.multimesh_mesh(SHADOW_STRENGTH)
 	mm.instance_count = centers.size()
 	for i in range(centers.size()):
-		mm.set_instance_transform(i, _shadow_xform(centers[i][0], centers[i][1]))
+		mm.set_instance_transform(i, _shadow_xform(centers[i][0], centers[i][1], centers[i][2]))
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "BuildingShadows"
 	mmi.multimesh = mm
