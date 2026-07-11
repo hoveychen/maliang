@@ -65,6 +65,8 @@ export interface Wallet {
   stampProgress: number;
   /** 累计盖过的章数（只增，集邮簿/成就展示用）。 */
   stampsTotal: number;
+  /** 收到的爱心数（玩家互动送❤，只增不减、不动小红花——纯情感计数，集邮册展示用）。 */
+  hearts: number;
 }
 
 /** 集邮盖章款式目录：完成委托时随机挑一款（纯演出，不影响经济）。id 稳定入存档，客户端映射到 AIGC 盖章图（P5）。 */

@@ -13,7 +13,7 @@ test('admin flowers: token 门禁 + 设值/缺省/夹紧/保留盖章进度', as
   // 先花光初始花并盖 1 章，制造 flowers=0、stampProgress=1、stampsTotal=1 的存量态
   assert.equal(store.spendFlower('w1', ANON_PLAYER, INITIAL_FLOWERS), true);
   store.addStamp('w1', ANON_PLAYER);
-  assert.deepEqual(store.getWallet('w1', ANON_PLAYER), { flowers: 0, stampProgress: 1, stampsTotal: 1 });
+  assert.deepEqual(store.getWallet('w1', ANON_PLAYER), { flowers: 0, stampProgress: 1, stampsTotal: 1, hearts: 0 });
 
   const app = await buildServer({ adapters: createMockAdapters(), store });
   t.after(() => app.close());
@@ -38,6 +38,7 @@ test('admin flowers: token 门禁 + 设值/缺省/夹紧/保留盖章进度', as
       flowers: INITIAL_FLOWERS,
       stampProgress: 1,
       stampsTotal: 1,
+      hearts: 0,
     });
 
     // 显式值 → 设为该值

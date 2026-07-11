@@ -21,7 +21,7 @@ const TASK: ActiveTask = {
 test('新档冷启动：预置初始小红花、零盖章进度', () => {
   const store = new WorldStore();
   store.createWorld('w1');
-  assert.deepEqual(store.getWallet('w1', ANON_PLAYER), { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0 });
+  assert.deepEqual(store.getWallet('w1', ANON_PLAYER), { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0, hearts: 0 });
 });
 
 test('盖章：纯累加，每满 3 章换 1 花，stampsTotal 只增', () => {
@@ -29,13 +29,13 @@ test('盖章：纯累加，每满 3 章换 1 花，stampsTotal 只增', () => {
   store.createWorld('w1');
   let r = store.addStamp('w1', ANON_PLAYER);
   assert.equal(r.flowerGained, false);
-  assert.deepEqual(r.wallet, { flowers: INITIAL_FLOWERS, stampProgress: 1, stampsTotal: 1 });
+  assert.deepEqual(r.wallet, { flowers: INITIAL_FLOWERS, stampProgress: 1, stampsTotal: 1, hearts: 0 });
   r = store.addStamp('w1', ANON_PLAYER);
   assert.equal(r.flowerGained, false);
   assert.equal(r.wallet.stampProgress, 2);
   r = store.addStamp('w1', ANON_PLAYER); // 第 3 章 → 升 1 花，进度归零
   assert.equal(r.flowerGained, true);
-  assert.deepEqual(r.wallet, { flowers: INITIAL_FLOWERS + 1, stampProgress: 0, stampsTotal: 3 });
+  assert.deepEqual(r.wallet, { flowers: INITIAL_FLOWERS + 1, stampProgress: 0, stampsTotal: 3, hearts: 0 });
 });
 
 test('满 9 溢出：停在待兑换组不清零、不再多攒；花掉低于 9 立即补升', () => {
@@ -101,7 +101,7 @@ test('持久化：钱包与委托落盘并回读', () => {
   store.spendFlower('w1', ANON_PLAYER);
   store.setActiveTask('w1', ANON_PLAYER, TASK);
   const reloaded = new WorldStore(dir);
-  assert.deepEqual(reloaded.getWallet('w1', ANON_PLAYER), { flowers: INITIAL_FLOWERS - 1, stampProgress: 1, stampsTotal: 1 });
+  assert.deepEqual(reloaded.getWallet('w1', ANON_PLAYER), { flowers: INITIAL_FLOWERS - 1, stampProgress: 1, stampsTotal: 1, hearts: 0 });
   assert.equal(reloaded.getActiveTask('w1', ANON_PLAYER)!.type, 'deliver');
 });
 
@@ -113,7 +113,7 @@ test('方案 A 迁移：旧贴纸背包 worlds.json → 清空换初始小红花
   );
   const store = new WorldStore(dir);
   // 旧贴纸清空，置初始花
-  assert.deepEqual(store.getWallet('old', ANON_PLAYER), { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0 });
+  assert.deepEqual(store.getWallet('old', ANON_PLAYER), { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0, hearts: 0 });
   // 迁移后动一动账，新实例读回可见（旧 worlds.json 已改名 .migrated）
   store.spendFlower('old', ANON_PLAYER, INITIAL_FLOWERS);
   assert.equal(new WorldStore(dir).getWallet('old', ANON_PLAYER).flowers, 0);

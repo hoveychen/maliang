@@ -120,11 +120,11 @@ test('completeTaskOnEvent：三类事件匹配盖章，错事件/错参数不动
 
 test('praiseLine：升花报喜 / 未升花报进度 / 满仓夸奖（纯中文不含 emoji）', () => {
   const task: ActiveTask = { id: 't', type: 'deliver', npcId: 'g', npcName: '小绿', targetName: '小蓝', stampStyle: 'star' };
-  const gained = praiseLine(task, { flowerGained: true, wallet: { flowers: 1, stampProgress: 0, stampsTotal: 3 } });
+  const gained = praiseLine(task, { flowerGained: true, wallet: { flowers: 1, stampProgress: 0, stampsTotal: 3, hearts: 0 } });
   assert.ok(gained.includes('小红花'), '升花应报喜');
-  const progress = praiseLine(task, { flowerGained: false, wallet: { flowers: 0, stampProgress: 1, stampsTotal: 1 } });
+  const progress = praiseLine(task, { flowerGained: false, wallet: { flowers: 0, stampProgress: 1, stampsTotal: 1, hearts: 0 } });
   assert.ok(progress.includes('2'), '未升花应说还差 2 个');
-  const full = praiseLine(task, { flowerGained: false, wallet: { flowers: 9, stampProgress: 3, stampsTotal: 30 } });
+  const full = praiseLine(task, { flowerGained: false, wallet: { flowers: 9, stampProgress: 3, stampsTotal: 30, hearts: 0 } });
   assert.ok(full.includes('满'), '满仓应夸满');
   for (const line of [gained, progress, full]) {
     assert.ok(!/[\u{1F300}-\u{1FAFF}⭐]/u.test(line), 'TTS 台词不应含 emoji');
@@ -142,7 +142,7 @@ test('WS world_info/task_event：world_state 同步钱包，完成盖章 → tas
   // world_info → world_state 同步钱包
   await handleWsMessage(socket, JSON.stringify({ type: 'world_info', worldId: 'w1', locations: ['池塘'] }), ...rest);
   const ws = sent.find((m) => m['type'] === 'world_state')!;
-  assert.deepEqual(ws['wallet'], { flowers: INITIAL_FLOWERS, stampProgress: 2, stampsTotal: 2 });
+  assert.deepEqual(ws['wallet'], { flowers: INITIAL_FLOWERS, stampProgress: 2, stampsTotal: 2, hearts: 0 });
 
   // task_event：deliver 完成 → task_complete 带盖章款式/升花/最新钱包
   store.setActiveTask('w1', ANON_PLAYER, {
@@ -153,7 +153,7 @@ test('WS world_info/task_event：world_state 同步钱包，完成盖章 → tas
   const tc = sent.find((m) => m['type'] === 'task_complete')!;
   assert.equal(tc['stampStyle'], 'medal');
   assert.equal(tc['flowerGained'], true, '第 3 章升花');
-  assert.deepEqual(tc['wallet'], { flowers: INITIAL_FLOWERS + 1, stampProgress: 0, stampsTotal: 3 });
+  assert.deepEqual(tc['wallet'], { flowers: INITIAL_FLOWERS + 1, stampProgress: 0, stampsTotal: 3, hearts: 0 });
   assert.equal(store.getActiveTask('w1', ANON_PLAYER), null);
   const praise = sent.filter((m) => m['type'] === 'praise_tts');
   assert.equal(praise.length, 1, '完成应推一条表扬语音');

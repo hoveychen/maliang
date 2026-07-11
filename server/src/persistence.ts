@@ -13,7 +13,7 @@ import { sanitizeLevels, type DeviceSample, type Levels } from './device_profile
 
 /** 初始钱包（冷启动/旧档迁移）：预置初始小红花，零盖章进度。 */
 function freshWallet(): Wallet {
-  return { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0 };
+  return { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0, hearts: 0 };
 }
 
 /**
@@ -27,7 +27,8 @@ function coerceWallet(raw: unknown): { wallet: Wallet; migrated: boolean } {
     const flowers = Math.max(0, Math.min(MAX_FLOWERS, Math.floor(r.flowers)));
     const stampProgress = Math.max(0, Math.min(STAMPS_PER_FLOWER, Math.floor(Number(r.stampProgress) || 0)));
     const stampsTotal = Math.max(0, Math.floor(Number(r.stampsTotal) || 0));
-    return { wallet: { flowers, stampProgress, stampsTotal }, migrated: false };
+    const hearts = Math.max(0, Math.floor(Number((r as { hearts?: unknown }).hearts) || 0));
+    return { wallet: { flowers, stampProgress, stampsTotal, hearts }, migrated: false };
   }
   return { wallet: freshWallet(), migrated: true };
 }
@@ -852,7 +853,7 @@ export class WorldStore {
    * 世界不存在返回一个空钱包（不写库）。
    */
   getWallet(worldId: string, playerId: string): Wallet {
-    if (!this.#worldExists(worldId)) return { flowers: 0, stampProgress: 0, stampsTotal: 0 };
+    if (!this.#worldExists(worldId)) return { flowers: 0, stampProgress: 0, stampsTotal: 0, hearts: 0 };
     const row = this.#db
       .prepare('SELECT data FROM wallets WHERE world_id = ? AND player_id = ?')
       .get(worldId, this.#walletKey(playerId)) as { data: string } | undefined;
@@ -875,13 +876,22 @@ export class WorldStore {
    * 返回是否因此升了花 + 结算后的钱包。世界不存在则 flowerGained=false。
    */
   addStamp(worldId: string, playerId: string): { flowerGained: boolean; wallet: Wallet } {
-    if (!this.#worldExists(worldId)) return { flowerGained: false, wallet: { flowers: 0, stampProgress: 0, stampsTotal: 0 } };
+    if (!this.#worldExists(worldId)) return { flowerGained: false, wallet: { flowers: 0, stampProgress: 0, stampsTotal: 0, hearts: 0 } };
     const w = this.getWallet(worldId, playerId);
     w.stampsTotal += 1;
     w.stampProgress += 1;
     const flowerGained = settleWallet(w);
     this.#setWallet(worldId, playerId, w);
     return { flowerGained, wallet: w };
+  }
+
+  /** 收 1 颗爱心（玩家互动送❤）：只增不减、不动小红花。返回结算后的钱包；世界不存在返回空账。 */
+  addHeart(worldId: string, playerId: string): Wallet {
+    if (!this.#worldExists(worldId)) return { flowers: 0, stampProgress: 0, stampsTotal: 0, hearts: 0 };
+    const w = this.getWallet(worldId, playerId);
+    w.hearts += 1;
+    this.#setWallet(worldId, playerId, w);
+    return w;
   }
 
   /** 花 n 朵小红花（造物/造角色）。够扣则扣、腾出格子后立即补升满 9 溢出的待兑换组，返回 true；不够返回 false 且不动账。 */

@@ -13,7 +13,11 @@ const STICKER_ICONS := {
 }
 
 ## 情绪 → 图标（world.gd _show_emotion；缺省音符）。
-const EMOTION_ICONS := { "happy": "em_happy", "think": "em_think", "wave": "em_wave", "sad": "em_sad" }
+## jump/spin/nod/heart 是玩家互动表情盘补的动作贴纸（与 em_* 同一 manifest 管线画风）。
+const EMOTION_ICONS := {
+	"happy": "em_happy", "think": "em_think", "wave": "em_wave", "sad": "em_sad",
+	"jump": "em_jump", "spin": "em_spin", "nod": "em_nod", "heart": "em_heart",
+}
 
 static func tex(name: String) -> Texture2D:
 	var path := "%s/%s.png" % [DIR, name]

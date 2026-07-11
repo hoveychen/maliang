@@ -86,7 +86,7 @@ import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts'
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
-import { backfillVoices, FAIRY_VOICE } from './voice_catalog.ts';
+import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, type StageStartOpts } from './stage_session.ts';
 import { buildDebut, DebutError } from './stage_debut.ts';
@@ -1488,10 +1488,15 @@ export interface SpawnCtx {
   connKey?: string;
 }
 
+/** 玩家 emote 动作白名单：客户端 behavior_executor 的动作集 + heart（送爱心，见设计 P2）。 */
+const EMOTE_ACTIONS = new Set(['wave', 'jump', 'spin', 'nod', 'heart']);
+
 export interface ActorPresence {
   playerId: string;
   name: string;
   spriteAsset: string;
+  /** 玩家音色（playerId 稳定哈希，见 voiceForPlayer）：对端播放其 player_speech/招呼语用。 */
+  voiceId: string;
   tile?: TilePos;
 }
 
@@ -1501,6 +1506,7 @@ function presenceOf(store: WorldStore, worldId: string, sceneId: string, playerI
     playerId,
     name: p?.name ?? '',
     spriteAsset: p?.spriteAsset ?? '',
+    voiceId: voiceForPlayer(playerId, p?.gender),
     tile: store.getPlayerTile(worldId, sceneId, playerId),
   };
 }
@@ -1615,6 +1621,10 @@ export async function handleWsMessage(
     error?: string;
     subId?: string; // near/tap/timer：触发的订阅 id
     payload?: Record<string, unknown>; // 规则事件负载（注回脚本回调）
+    // 玩家互动（player_emote / player_speech，见 docs/player-interaction-design.md）
+    targetPlayerId?: string;
+    action?: string; // player_emote：动作名（EMOTE_ACTIONS 白名单）
+    lang?: string; // player_speech：文本语言（跨语言翻译钩子，缺省 zh）
     // 玩家身份：每条消息可带 playerId（设备端稳定 UUID）；world_info 另带 profile 供首见建档。
     playerId?: string;
     profile?: {
@@ -1695,6 +1705,8 @@ export async function handleWsMessage(
     socket.send(JSON.stringify({
       type: 'world_state',
       wallet: store.getWallet(worldId, session.playerId),
+      // 自己的稳定音色（playerId 哈希）：客户端喊话复述用——复述音=对端听到的音，孩子两端听感一致
+      voiceId: session.playerId ? voiceForPlayer(session.playerId, store.getPlayer(session.playerId)?.gender) : '',
       bag: store.getBag(worldId, session.playerId),
       activeTask: store.getActiveTask(worldId, session.playerId),
       // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
@@ -2151,6 +2163,54 @@ export async function handleWsMessage(
     if (entries.length > 0 && applied === 0) {
       socket.send(JSON.stringify({ type: 'error', error: 'no character position applied' }));
     }
+    return;
+  }
+
+  // 玩家互动（见 docs/player-interaction-design.md）：emote=打招呼动作，speech=ASR 文本中继对话。
+  // 服务端无状态：校验后按【同世界同场景】定向转发，不落库。speech 是「喊话」模型——
+  // 同场景旁观者也收到（现实里说话旁边人也听得见）；lang 字段是将来跨语言翻译的钩子。
+  if (msg.type === 'player_emote') {
+    if (!hub || !session.playerId) return; // 无多人基座/无身份：没有可送达的对象
+    const action = String(msg.action ?? '');
+    if (!EMOTE_ACTIONS.has(action)) {
+      socket.send(JSON.stringify({ type: 'error', error: `unknown emote action: ${action}` }));
+      return;
+    }
+    const worldId = msg.worldId ?? '';
+    const target = typeof msg.targetPlayerId === 'string' ? msg.targetPlayerId : '';
+    hub.broadcastScene(worldId, session.currentScene, {
+      type: 'player_emote',
+      sceneId: session.currentScene,
+      fromPlayerId: session.playerId,
+      targetPlayerId: target,
+      action,
+    }, connKey);
+    // 送❤入账：收方爱心 +1（只增不减、不动小红花）。离线/跨场景也入账——孩子的心意不丢；
+    // 收方在线则单播最新钱包（hearts_update），集邮册立即点亮。
+    if (action === 'heart' && target && target !== session.playerId) {
+      const w = store.addHeart(worldId, target);
+      for (const m of hub.membersIn(worldId)) {
+        if (m.playerId === target) m.send({ type: 'hearts_update', wallet: w });
+      }
+    }
+    return;
+  }
+
+  if (msg.type === 'player_speech') {
+    if (!hub || !session.playerId) return;
+    // 长度封顶：ASR 单句不会超过这个数，超长=异常客户端，截断而不是拒绝（孩子的话不该整句丢掉）。
+    const text = String(msg.text ?? '').trim().slice(0, 200);
+    if (!text) return; // 空句（ASR 没识别出内容）没有转发价值
+    hub.broadcastScene(msg.worldId ?? '', session.currentScene, {
+      type: 'player_speech',
+      sceneId: session.currentScene,
+      fromPlayerId: session.playerId,
+      targetPlayerId: typeof msg.targetPlayerId === 'string' ? msg.targetPlayerId : '',
+      text,
+      lang: typeof msg.lang === 'string' && msg.lang ? msg.lang : 'zh',
+      // 音色由服务端盖章（而非收端查 presence）：收端在 actor_join 之前收到喊话也能出对的声。
+      voiceId: voiceForPlayer(session.playerId, store.getPlayer(session.playerId)?.gender),
+    }, connKey);
     return;
   }
 
