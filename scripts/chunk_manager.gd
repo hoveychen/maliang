@@ -127,6 +127,25 @@ func set_terrain_low_detail(on: bool) -> void:
 		_ground_mat.set_shader_parameter("low_detail", on)
 	if _water_mat != null:
 		_water_mat.set_shader_parameter("low_detail", on)
+
+## 画质开关记忆态：chunk 是 3×3 流送、越界重铺会重建 deco 子节点，新建的贴片影 /
+## SDF 物件必须沿用当前开关态，否则重铺一次就打回默认。setter 同时切现有节点。
+var _ground_shadows := true  ## 地面斜阳椭圆贴片影（散布 + 建筑）
+var _props_shown := true     ## 会动的 SDF 物件
+
+## 画质：地面贴片影开/关。切现有 ScatterShadows/BuildingShadows + 记住供 chunk 重铺沿用。
+## （不能按 perf_scatter 组切——那组混了散布植被本体，会连树一起隐藏，只能按节点 name。）
+func set_ground_shadows(on: bool) -> void:
+	_ground_shadows = on
+	for n in get_tree().get_nodes_in_group("perf_scatter"):
+		if n is MultiMeshInstance3D and (n.name == "ScatterShadows" or n.name == "BuildingShadows"):
+			n.visible = on
+
+## 画质：会动的 SDF 物件显/隐。切现有 perf_props + 记住供 chunk 重铺沿用。
+func set_props_shown(on: bool) -> void:
+	_props_shown = on
+	for n in get_tree().get_nodes_in_group("perf_props"):
+		n.visible = on
 ## 语音生成的动态 SDF 物件（运行时登记，区块重刷幸存）：
 ## { "spec_data": Dictionary, "tile": Vector2i(全局), "yaw": float, "wander": float }
 var _dynamic_props: Array = []
@@ -790,6 +809,7 @@ func _flush_shadows(parent: Node3D, batches: Dictionary) -> void:
 	mmi.multimesh = mm
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mmi.extra_cull_margin = CULL_MARGIN
+	mmi.visible = _ground_shadows  # 沿用画质开关态（chunk 重铺不打回默认）
 	parent.add_child(mmi)
 	mmi.add_to_group("perf_scatter")  # 与散布同组，PerfSweep 一并可切
 
@@ -824,6 +844,7 @@ func _flush_building_shadows(parent: Node3D, centers: Array) -> void:
 	mmi.multimesh = mm
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mmi.extra_cull_margin = CULL_MARGIN
+	mmi.visible = _ground_shadows  # 沿用画质开关态（chunk 重铺不打回默认）
 	parent.add_child(mmi)
 	mmi.add_to_group("perf_scatter")
 
@@ -963,6 +984,7 @@ func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, an
 			_claim(wrapped, origin, span, span)
 			prop.position = _tile_local(ti, wrapped)
 			prop.rotation_degrees = Vector3(0.0, float(entry.get("yaw", 0.0)), 0.0)
+			prop.visible = _props_shown  # 沿用画质开关态（chunk 重铺不打回默认）
 			parent.add_child(prop)
 			prop.enable_wander(float(entry.get("wander", 0.0)), hash(str(entry.get("spec", prop.name))) + hash(ti))
 			if entry.has("id"): # 动态物件（语音造物）：记节点引用供拾起拖拽（SDF_PROPS 常量表不可写）

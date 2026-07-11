@@ -48,6 +48,7 @@ UNIT_TESTS=(
   test_sdf_static_baker
   test_paper_idle
   test_player_profile
+  test_graphics_settings
   test_backend_player_id
   test_stage_agent
   test_screenplay_replay
@@ -123,6 +124,7 @@ run_test test_visual_props         --fixed-fps 10 --quit-after 120
 run_test test_casting_placeholder  --fixed-fps 10 --quit-after 120
 run_test test_prop_creation_cards  --fixed-fps 10 --quit-after 90
 run_test test_visual_settings      --fixed-fps 10 --quit-after 80
+run_test test_graphics_toggles     --fixed-fps 10 --quit-after 40
 run_test test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
 run_test test_visual_scene_switch   --fixed-fps 10 --quit-after 60
 run_test test_visual_portal         --fixed-fps 10 --quit-after 90

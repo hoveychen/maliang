@@ -84,6 +84,8 @@ var _target_pitch := GOD_PITCH_DEG
 var _target_dist := GOD_DIST
 var _cur_focus_y := 0.0             ## 相机焦点高度 = focus 所在 tile 的台阶高度（缓动，防上台阶时画面跳变）
 var _env: Environment               ## 世界环境（深度雾起止随 _cur_focus_y 补偿，山顶视角不整体变浓雾）
+var _sun: DirectionalLight3D        ## 太阳灯（画质「角色实时阴影」开关切 shadow_enabled；_setup_environment 存下）
+var _gfx_buttons := {}              ## 画质开关按钮 {key: Button}（设置页；toggled → 应用 + 存档）
 var _locked: PaperCharacter = null ## lock 跟随的角色（null=god 自由模式）
 var _stage_player_logical := Vector2.ZERO ## 对话玩家站位（小跳落点）
 var _hop_from := Vector2.ZERO      ## 小跳起点 logical
@@ -373,8 +375,11 @@ func _ready() -> void:
 	# canvas 仍原生分辨率），随后 AdaptiveQuality 按实测帧时自动升/降档并持久化
 	if OS.has_feature("mobile"):
 		get_viewport().scaling_3d_scale = 0.7
-		if not FileAccess.file_exists("user://perf_sweep"):  # 扫频诊断时不许换档搅数据
+		# 用户在画质设置里显式存过档就不自动定档（用户接管，免自适应覆盖其 override）
+		if not FileAccess.file_exists("user://perf_sweep") and not GraphicsSettings.has_saved():
 			add_child(AdaptiveQuality.make(self, chunk_manager))
+	# 画质档启动恢复：在自适应/默认之后应用用户 override（节点已就绪：_sun/chunk_manager/_gfx_buttons）
+	_apply_saved_graphics()
 	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
 	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
 		Engine.max_fps = 0  # 扫频要真实帧时，解除 menu 设的移动端限帧
@@ -405,6 +410,7 @@ func _setup_audio() -> void:
 func _setup_environment() -> void:
 	var light := DirectionalLight3D.new()
 	light.name = "Sun"
+	_sun = light
 	light.rotation_degrees = Vector3(-55.0, -40.0, 0.0)
 	light.light_color = Color(1.0, 0.96, 0.86) # 暖阳（Pokopia 式午后柔光）
 	light.light_energy = 1.25
@@ -417,10 +423,9 @@ func _setup_environment() -> void:
 	# 靠 BlobShadow 脚下暗斑承担锚定感。CHARACTER_SHADOWS 实验：只给会动的角色投实时
 	# 阴影（地面/建筑/散布/水全设不投，shadow pass 只重画几张角色 billboard），把开销
 	# 压到最小、看真机是否划算；开则角色脚下暗斑让位真实投影。
-	light.shadow_enabled = CHARACTER_SHADOWS
-	if CHARACTER_SHADOWS:
-		light.directional_shadow_max_distance = 45.0  # 只近处投影，远处 chunk 不进 shadow pass
-		BlobShadow.suppress_actor_blob = true
+	light.shadow_enabled = CHARACTER_SHADOWS       # 默认档；画质设置启动恢复会 override（见 _apply_graphics_key）
+	light.directional_shadow_max_distance = 45.0   # 总设：运行时开阴影即生效（只近处进 shadow pass）
+	BlobShadow.suppress_actor_blob = CHARACTER_SHADOWS
 	add_child(light)
 
 	var we := WorldEnvironment.new()
@@ -445,6 +450,45 @@ func _setup_environment() -> void:
 	we.environment = env
 	add_child(we)
 	_env = env
+
+## 幂等应用单个画质开关（设置页 toggle 与启动恢复共用）。self 就是 world，直接够到
+## 太阳灯 / chunk_manager / 环境。键定义见 GraphicsSettings。
+func _apply_graphics_key(key: String, on: bool) -> void:
+	match key:
+		"actor_shadows":  # 角色实时定向阴影 ↔ 脚下暗斑
+			if _sun != null:
+				_sun.shadow_enabled = on
+			BlobShadow.suppress_actor_blob = on
+			for c in get_tree().get_nodes_in_group("paper_chars"):
+				if c.has_method("refresh_ground_shadow"):
+					c.refresh_ground_shadow()  # 已在场角色立即挂/摘 blob
+		"ground_shadows":  # 地面斜阳椭圆贴片影（树/灌木/建筑）
+			chunk_manager.set_ground_shadows(on)
+		"hi_res":  # 3D 原生分辨率 vs 0.7 降采样（与 AdaptiveQuality 同一旋钮）
+			get_viewport().scaling_3d_scale = 1.0 if on else 0.7
+		"fog":  # 深度雾
+			if _env != null:
+				_env.fog_enabled = on
+		"outline":  # SDF 物件描边 pass
+			SdfProp.set_outline_enabled(on, get_tree())
+		"prop_anim":  # 会动的 SDF 物件显/隐
+			chunk_manager.set_props_shown(on)
+
+## 读画质档并逐项应用（启动恢复用；只在用户显式存过时 override 自适应定档）。
+func _apply_saved_graphics() -> void:
+	if not GraphicsSettings.has_saved():
+		return
+	var g := GraphicsSettings.load_all()
+	for key in GraphicsSettings.KEYS:
+		_apply_graphics_key(key, bool(g[key]))
+
+## 设置页画质开关切换：即时应用到场景 + 把当前全部按钮态存进 profile（重启恢复）。
+func _on_graphics_toggled(on: bool, key: String) -> void:
+	_apply_graphics_key(key, on)
+	var settings := {}
+	for k: String in _gfx_buttons:
+		settings[k] = (_gfx_buttons[k] as Button).button_pressed
+	GraphicsSettings.save_all(settings)
 
 ## 白天动态天空：渐变 + 卡通云漂移 + 太阳光晕（shaders/sky_day.gdshader）。
 ## ambient 走纯色源不依赖天空 radiance，radiance 取最小档 + 仅材质变更时重烘
@@ -711,6 +755,7 @@ func _setup_fairy_offline() -> void:
 	node.setup(tex, Color.WHITE, "小神仙")
 	node.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
 	BlobShadow.detach(node) # 悬浮飞行不落地，脚下暗斑穿帮
+	node.wants_ground_shadow = false  # 切「角色实时阴影」刷新时别给悬浮角色挂脚下 blob
 	var spawn := WorldGrid.wrap_pos(player["logical"] + Vector2(3.0, 2.0))
 	npcs.append({ "node": node, "logical": spawn, "id": "fairy_local", "is_fairy": true, "hover": FAIRY_HOVER })
 	fairy_voice = FairyVoice.new()
@@ -1180,6 +1225,29 @@ func _setup_hud() -> void:
 	_avatar_preview.add_child(avatar_row)
 	_avatar_preview.visible = false
 	settings_page.add_child(_avatar_preview)
+	# —— 画质分区：GraphicsSettings 的 6 个开关，toggle 即时应用 + 存 profile（重启恢复）——
+	# 内容区自带竖向滚动（scroll），多加几行不撑破手机壳。
+	var gfx_title := Label.new()
+	gfx_title.text = "画质"
+	gfx_title.add_theme_font_size_override("font_size", 26)
+	gfx_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	settings_page.add_child(gfx_title)
+	var gfx_labels := {
+		"actor_shadows": "角色阴影", "ground_shadows": "地面阴影", "hi_res": "高清画质",
+		"fog": "远景雾", "outline": "描边", "prop_anim": "会动物件",
+	}
+	var gfx_now := GraphicsSettings.load_all()
+	_gfx_buttons = {}
+	for key: String in GraphicsSettings.KEYS:
+		var b := Button.new()
+		b.text = String(gfx_labels[key])
+		b.toggle_mode = true  # 按下=开（style_card_button 给 pressed 态上暖黄底）
+		b.button_pressed = bool(gfx_now[key])
+		b.add_theme_font_size_override("font_size", 24)
+		UiAssets.style_card_button(b)
+		b.toggled.connect(_on_graphics_toggled.bind(key))
+		settings_page.add_child(b)
+		_gfx_buttons[key] = b
 	_album_pages = { "flowers": flowers_page, "items": items_page, "settings": settings_page }
 	for pid in _album_pages:
 		var pg := _album_pages[pid] as Control
@@ -3468,6 +3536,7 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 	var is_fairy := bool(c.get("isFairy", false))
 	if is_fairy:
 		BlobShadow.detach(npc) # 悬浮飞行不落地，脚下暗斑穿帮
+		npc.wants_ground_shadow = false  # 切「角色实时阴影」刷新时别给悬浮角色挂脚下 blob
 		if use_anim: # 已是动画图集：直接以动画降生（play_idle 覆盖 setup 的静态尺寸，同帧无闪）
 			npc.play_idle(tex, anim_meta, FAIRY_HEIGHT, 0.0)
 		else:
