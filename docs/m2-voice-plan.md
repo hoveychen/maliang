@@ -1,5 +1,10 @@
 # M2 语音闭环 — 设计与计划
 
+> ⚙️ **已过时（历史规划快照，保留作演进记录）**：本文档写于选型讯飞时期。讯飞 ASR/TTS **已全部退役**，
+> 当前架构：ASR 走 `local`（sherpa-onnx Zipformer，服务端 + Android/macOS 端侧化）、TTS 走 MiniMax
+> （失败回落本地 Kokoro）、客户端优先 edge-tts 直连。讲飞相关的适配器与 secret 已删除/解绑。
+> 现行设计见 [`macos-asr-feasibility.md`](macos-asr-feasibility.md)。下文的讲飞细节仅供历史参考。
+
 > 目标：让小朋友能**对着角色说话**，角色用语音+动作回应。把交互模式从"点击"升级到"语音"。
 > 前置：M0 渲染 ✅、M1 后端骨架 ✅、真实造角色闭环 ✅。
 
