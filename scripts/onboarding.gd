@@ -105,8 +105,9 @@ func _ready() -> void:
 ## 端侧 ASR（与 world.gd 同路由策略：插件就绪走本地，否则整段 PCM 上传）。
 func _setup_local_asr() -> void:
 	if not Engine.has_singleton("MaliangAsr"):
-		# Android 上没有单例 = 导出漏带 ASR 的 AAR（坏包），硬报错拒进游戏；桌面/编辑器合法走服务端。
-		if AsrGuard.is_fatal(_os_name, false):
+		# Android/导出 macOS 没有单例 = 导出漏带端侧 ASR（坏包），硬报错拒进游戏；
+		# editor/headless 从源码跑无模型随包，合法走服务端识别（is_template 为假不致命）。
+		if AsrGuard.is_fatal(_os_name, false, OS.has_feature("template")):
 			AsrGuard.block(get_tree(), AsrGuard.MSG_MISSING)
 		return
 	_asr_local = Engine.get_singleton("MaliangAsr")
@@ -114,8 +115,8 @@ func _setup_local_asr() -> void:
 	_asr_local.connect("asr_ready", _on_local_ready)
 	_asr_local.connect("asr_error", func(msg: String) -> void:
 		_local_session = false
-		# Android：端侧 ASR 硬依赖，失败即报错，绝不静默回落。
-		if AsrGuard.is_fatal(_os_name, false):
+		# Android/导出 macOS：端侧 ASR 硬依赖，失败即报错，绝不静默回落。
+		if AsrGuard.is_fatal(_os_name, false, OS.has_feature("template")):
 			AsrGuard.block(get_tree(), AsrGuard.MSG_INIT_FAILED % msg)
 			return
 		_asr_local = null)
@@ -333,8 +334,8 @@ func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
 func _intro_open_mic() -> void:
 	if _vad != null or _intro_submitting:
 		return
-	# 端侧模型还在异步加载：不开麦。Android 上绝不把 PCM 回落上传服务端。
-	if AsrGuard.must_wait_for_ready(_os_name, _asr_is_ready()):
+	# 端侧模型还在异步加载：不开麦。Android/导出 macOS 上绝不把 PCM 回落上传服务端。
+	if AsrGuard.must_wait_for_ready(_os_name, _asr_is_ready(), OS.has_feature("template")):
 		_intro_status.texture = UiAssets.tex("ic_wait")
 		return
 	mic.start()

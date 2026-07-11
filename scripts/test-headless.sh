@@ -124,6 +124,36 @@ run_test test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
 run_test test_visual_scene_switch   --fixed-fps 10 --quit-after 60
 run_test test_visual_portal         --fixed-fps 10 --quit-after 90
 
+# ── macOS 端侧 ASR 端到端真识别（GDExtension 在 headless 也加载）──────────────
+# 喂真中文 wav 给 sherpa 识别器，断言识别文本含「研究」。framework 与模型都是 gitignored，
+# 干净 checkout / 非 macOS 没有 → 显式 SKIP（不静默丢、不误报失败）。
+run_macos_asr_test() {
+  local name="macos_asr_recognize"
+  if [ "$(uname)" != "Darwin" ]; then
+    echo "== $name SKIP（非 macOS）=="; return
+  fi
+  local fw="$ROOT/addons/maliang_asr_native/bin/libmaliang_asr.macos.editor.framework"
+  if [ ! -d "$fw" ]; then
+    echo "== $name SKIP（GDExtension 未构建：$fw 不存在）=="; return
+  fi
+  local model_dir="$ROOT/server/models/sherpa-onnx-streaming-zipformer-multi-zh-hans-2023-12-12"
+  if [ ! -f "$model_dir/tokens.txt" ]; then
+    echo "== $name SKIP（缺模型：$model_dir/tokens.txt 不存在）=="; return
+  fi
+  echo "== $name =="
+  local out; out="$(mktemp)"
+  MALIANG_ASR_MODEL_DIR="$model_dir" MALIANG_ASR_CHECK_OUT="$out" \
+    "$GODOT" --headless --path "$ROOT" --script "res://test/${name}.gd" >/dev/null 2>&1
+  local code=$?
+  local result; result="$(cat "$out" 2>/dev/null)"; rm -f "$out"
+  echo "  $result"
+  if [ "$code" -ne 0 ]; then
+    echo "-- $name FAILED (exit=$code)"
+    fails=$((fails + 1))
+  fi
+}
+run_macos_asr_test
+
 echo
 if [ "$fails" -eq 0 ]; then
   echo "全部通过 ✔"

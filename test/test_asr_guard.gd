@@ -17,6 +17,21 @@ func _init() -> void:
 	fails += _check("asr_required(Android)", AsrGuard.asr_required("Android"), true)
 	fails += _check("asr_required(macOS)", AsrGuard.asr_required("macOS"), false)
 
+	# ── macOS：仅导出构建(is_template)才 required——editor/headless 不受门禁约束 ──
+	# 否则整套 headless 回测会因 worktree/源码没随包模型被 block。真识别路径见 macos_asr_recognize.gd。
+	fails += _check("asr_required(macOS, 非导出)", AsrGuard.asr_required("macOS", false), false)
+	fails += _check("asr_required(macOS, 导出)", AsrGuard.asr_required("macOS", true), true)
+	fails += _check("asr_required(Android, 导出)", AsrGuard.asr_required("Android", true), true)
+	fails += _check("asr_required(Android, 非导出)", AsrGuard.asr_required("Android", false), true)
+	# 导出 macOS 缺单例/模型 → 致命(坏包硬报错)；非导出缺失 → 不致命(合法走服务端)
+	fails += _check("导出 macOS + 无单例 → 致命", AsrGuard.is_fatal("macOS", false, true), true)
+	fails += _check("导出 macOS + 可用 → 不致命", AsrGuard.is_fatal("macOS", true, true), false)
+	fails += _check("非导出 macOS + 无单例 → 不致命", AsrGuard.is_fatal("macOS", false, false), false)
+	# 导出 macOS 未就绪必须等；非导出 macOS 从不等(服务端合法)
+	fails += _check("导出 macOS + 未就绪 → 必须等", AsrGuard.must_wait_for_ready("macOS", false, true), true)
+	fails += _check("导出 macOS + 已就绪 → 不等", AsrGuard.must_wait_for_ready("macOS", true, true), false)
+	fails += _check("非导出 macOS + 未就绪 → 不等", AsrGuard.must_wait_for_ready("macOS", false, false), false)
+
 	# ── utterance 阶段：Android 未就绪必须等待，绝不回落服务端上传 PCM ──
 	# （加载失败走 asr_error 硬报错；这里的未就绪只可能是 initialize() 异步没跑完）
 	fails += _check("Android + 未就绪 → 必须等", AsrGuard.must_wait_for_ready("Android", false), true)
