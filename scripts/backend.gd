@@ -42,6 +42,12 @@ signal actors_snapshot(data: Dictionary)
 signal actor_join(data: Dictionary)
 ## 别人造出了新伙伴：{ sceneId, character }。本端据此就地降生（否则要重进场景才看得到）。
 signal character_spawned(data: Dictionary)
+## 别的小朋友的表情动作：{ sceneId, fromPlayerId, targetPlayerId, action }（wave/jump/spin/nod/heart）。
+signal player_emote(data: Dictionary)
+## 别的小朋友的喊话（ASR 文本中继，见 docs/player-interaction-design.md）：
+## { sceneId, fromPlayerId, targetPlayerId, text, lang, voiceId }。voiceId 服务端按发送者盖章，
+## 本端据此 TTS 出声 + 头顶气泡；targetPlayerId==自己 ⇒ 对我说的（自动回礼判定用）。
+signal player_speech(data: Dictionary)
 ## 换场景（模型 B，走 portal）：收到目标场景的地形 + 角色 + items 实体 + pois + 该场景玩家最后位置。
 ## data = { worldId, sceneId, scene:Dictionary|null, characters:Array, items:Array, playerPos:Dictionary|null }
 ## （摆着的造物在场景矩阵物品层里，不再单发 props）
@@ -99,6 +105,16 @@ func send_voice_transcript(world_id: String, character_id: String, transcript: S
 ## 回 character_response(+tts_chunk) 与普通回复同路。招呼失败服务端静默跳过，不打断进对话。
 func send_greeting(world_id: String, character_id: String) -> void:
 	_send({ "type": "voice_greeting", "worldId": world_id, "characterId": character_id })
+
+## 玩家互动：对着别的小朋友做表情动作（喊话态表情盘，见 docs/player-interaction-design.md）。
+## 服务端白名单校验后按同世界同场景定向转发（player_emote 下行），发送者不回环。
+func send_player_emote(world_id: String, target_player_id: String, action: String) -> void:
+	_send({ "type": "player_emote", "worldId": world_id, "targetPlayerId": target_player_id, "action": action })
+
+## 玩家喊话（ASR 文本中继）：本端 ASR 出的文本发给同场景的人，对端用发送者音色 TTS 出声。
+## lang 是跨语言翻译钩子（本期恒 zh，服务端透传）。
+func send_player_speech(world_id: String, target_player_id: String, text: String, lang := "zh") -> void:
+	_send({ "type": "player_speech", "worldId": world_id, "targetPlayerId": target_player_id, "text": text, "lang": lang })
 
 func send_create_character(world_id: String, intent_text: String) -> void:
 	_send({ "type": "create_character_request", "worldId": world_id, "intentText": intent_text, "byFairy": true })
@@ -288,5 +304,9 @@ func _dispatch(data: Dictionary) -> void:
 			actor_join.emit(data)
 		"character_spawned":
 			character_spawned.emit(data)
+		"player_emote":
+			player_emote.emit(data)
+		"player_speech":
+			player_speech.emit(data)
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))

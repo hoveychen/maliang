@@ -56,6 +56,7 @@ UNIT_TESTS=(
   test_remote_actor_buffer
   test_positions_report
   test_presence
+  test_player_talk
   test_terrain_export
   test_terrain_load
   test_terrain_v2

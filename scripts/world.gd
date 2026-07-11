@@ -2113,6 +2113,11 @@ var _replicated_bufs: Dictionary = {}
 ## 位置流只在人动起来时才发，只靠它的话静止的玩家在本端根本不存在；presence 让进场即可见，
 ## 并提供 spriteAsset —— 远端玩家据此渲染真实立绘，而不是一个泛蓝的占位小生物。
 var _presence: Dictionary = {}
+## 玩家喊话态（player-interaction P2，见 docs/player-interaction-design.md）：正在面对的远端玩家 id。
+## 「喊话」模型无会话锁——对方端无感知、不被钉住；对方走远/离场/换场景时本端自动退出。
+## 只存 id 不存条目引用：副本可能被 stale 回收后经 positions_relay 重建（新字典），按 id 现查才不拿旧物。
+var _talk_pid := ""
+const TALK_LEAVE_DIST := 7.0 ## 对方走出此距离（logical 米）即自动退出喊话态
 
 static func _is_local_only_id(id: String) -> bool:
 	for prefix in _LOCAL_ONLY_IDS:
@@ -2324,6 +2329,8 @@ func _on_world_host_changed(is_host: bool) -> void:
 func _on_actor_leave(player_id: String) -> void:
 	if player_id.is_empty():
 		return
+	if player_id == _talk_pid:
+		_exit_player_talk() # 正面对的小朋友退出了游戏：立即解锁，别对着空气
 	_presence.erase(player_id)
 	var ra: Dictionary = _remote_actors.get(player_id, {})
 	if ra.is_empty():
@@ -2335,6 +2342,7 @@ func _on_actor_leave(player_id: String) -> void:
 
 ## 清掉所有远端副本与在场名单（换场景时调用：旧场景的人不在新场景里）。
 func _clear_remote_actors() -> void:
+	_exit_player_talk() # 面对的人随旧场景清掉，喊话态一并退
 	for id in _remote_actors.keys():
 		var node: Variant = (_remote_actors[id] as Dictionary).get("node", null)
 		if node != null and is_instance_valid(node):
@@ -2374,6 +2382,14 @@ func _step_remote_actors(_delta: float) -> void:
 			_remote_actors.erase(id)
 			continue
 		ra["logical"] = buf2.sample(render_ms, ra["logical"])
+	# 喊话态维持判定：对方副本没了（掉线回收）或走远了 → 自动退出，不把孩子钉在空位前
+	if not _talk_pid.is_empty():
+		var tra: Dictionary = _remote_actors.get(_talk_pid, {})
+		if tra.is_empty():
+			_exit_player_talk()
+		elif not player.is_empty() \
+				and WorldGrid.shortest_delta(player["logical"], tra["logical"]).length() > TALK_LEAVE_DIST:
+			_exit_player_talk()
 
 func _step_executors(delta: float) -> void:
 	for ex in _executors:
@@ -2788,6 +2804,11 @@ func _tap_pick(screen_pos: Vector2) -> void:
 	if hit != null:
 		_approach_npc(hit)
 		return
+	# 点别的小朋友：跑过去进喊话态（表情盘/喊话在 P3/P5 叠加）
+	var rhit := _pick_remote_actor(screen_pos)
+	if not rhit.is_empty():
+		_approach_remote(rhit)
+		return
 	# 点自己 = 跟身边的小仙子说话（她是「我」的引导精灵，语音路由到精灵角色）
 	if _pick_player(screen_pos):
 		var fairy := _find_fairy()
@@ -2797,6 +2818,7 @@ func _tap_pick(screen_pos: Vector2) -> void:
 	# 点空地：退出交互（恢复被叫停的 NPC），玩家走过去
 	if selected != null:
 		_exit_interaction()
+	_exit_player_talk()
 	_clear_approach()
 	var ground := _pick_ground(screen_pos)
 	if ground != Vector2.INF and not player.is_empty():
@@ -2823,12 +2845,14 @@ func _cancel_player_move() -> void:
 func _try_begin_hold_follow(screen_pos: Vector2) -> void:
 	if _hold_follow or player.is_empty():
 		return
-	if _pick_npc(screen_pos) != null or _pick_player(screen_pos):
+	if _pick_npc(screen_pos) != null or _pick_player(screen_pos) \
+			or not _pick_remote_actor(screen_pos).is_empty():
 		return
 	if _pick_ground(screen_pos) == Vector2.INF:
 		return
 	if selected != null:
 		_exit_interaction()
+	_exit_player_talk()
 	_clear_approach()
 	_hold_follow = true
 	_hold_pos = screen_pos
@@ -2949,6 +2973,24 @@ func _pick_npc(screen_pos: Vector2) -> PaperCharacter:
 			best = node
 	return best
 
+## 远端玩家副本的屏幕空间拾取（与 _pick_npc 同一套 unproject 判定）。返回副本条目，未命中 {}。
+func _pick_remote_actor(screen_pos: Vector2) -> Dictionary:
+	var best: Dictionary = {}
+	var best_d := PICK_RADIUS_PX
+	for id in _remote_actors:
+		var ra: Dictionary = _remote_actors[id]
+		var node: PaperCharacter = ra["node"]
+		if not is_instance_valid(node):
+			continue
+		var wp := node.global_position + Vector3(0.0, 1.6, 0.0)
+		if camera.is_position_behind(wp):
+			continue
+		var dd := screen_pos.distance_to(camera.unproject_position(wp))
+		if dd < best_d:
+			best_d = dd
+			best = ra
+	return best
+
 ## 观演态点击 → 按下事件的屏幕坐标；非按下（拖拽/松手/键盘）返回 INF。
 ## 触屏一次点击会同时来 ScreenTouch + 仿真 MouseButton，两者都返回坐标，去重交 StageAgent（TAP_DEBOUNCE_MS）。
 func _stage_tap_pos(event: InputEvent) -> Vector2:
@@ -2978,10 +3020,22 @@ func _approach_npc(npc: PaperCharacter) -> void:
 		return
 	if selected != null:
 		_exit_interaction()
+	_exit_player_talk()
 	_clear_approach()
 	_halt_npc(d)
 	_approach = d
 	_move_player_to(d["logical"], APPROACH_ARRIVE)
+
+## 点别的小朋友：跑到他旁边进喊话态。不 halt——对方是真人玩家，钉不住也不该钉。
+func _approach_remote(entry: Dictionary) -> void:
+	if String(entry.get("id", "")) == _talk_pid:
+		return # 已在跟他喊话
+	if selected != null:
+		_exit_interaction()
+	_exit_player_talk()
+	_clear_approach()
+	_approach = entry # is_remote 条目：_check_approach 到位后分流进喊话态
+	_move_player_to(entry["logical"], APPROACH_ARRIVE)
 
 ## 叫停一个 NPC 的所有行为（闲逛/服务端指令），退出交互时恢复。
 ## 正在跟随的记下目标（resume_follow），恢复时继续跟而不是回去闲逛。
@@ -3030,7 +3084,10 @@ func _check_approach() -> void:
 		return
 	var dist: float = WorldGrid.shortest_delta(player["logical"], d["logical"]).length()
 	if dist <= APPROACH_ARRIVE + 0.6:
-		_enter_interaction(d["node"])
+		if d.get("is_remote", false):
+			_enter_player_talk(d)
+		else:
+			_enter_interaction(d["node"])
 	else:
 		_resume_stopped_npc()
 
@@ -3065,6 +3122,43 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	_unmute_t = 0.0
 	_reset_empty_streak() # 新一场对话不继承上一场的空识别退避
 	_greet_on_enter(d) # 对方先开口打招呼（播放期间 _step_voice 自动闭麦，说完再放开）
+
+## 进「玩家喊话」态：站桩构图面对对方副本。对方端无感知（无会话锁）——他继续玩他的；
+## 走远/离场/换场景由 _step_remote_actors 的维持判定自动退出。P3 在此态叠表情盘，P5 叠开放麦喊话。
+func _enter_player_talk(entry: Dictionary) -> void:
+	_talk_pid = String(entry.get("id", ""))
+	if _talk_pid.is_empty():
+		return
+	game_audio.play_sfx("enter")
+	if not player.is_empty():
+		var target := _pick_stage_target(entry["logical"], player["logical"])
+		var fdx := WorldGrid.shortest_delta(entry["logical"], target).x
+		player["paper_face"] = 0.0 if fdx <= 0.0 else PI
+		if WorldGrid.shortest_delta(target, player["logical"]).length() > 0.05:
+			_cancel_player_move()
+			_hop_from = player["logical"]
+			_stage_player_logical = target
+			player["_hop"] = true
+			_hop_t = 0.0
+	# lock：对话构图相机对着两人（_find_npc_dict 兼容远端副本条目）
+	_locked = entry["node"]
+	_target_pitch = LOCK_PITCH_DEG
+	banner.text = "跟%s打个招呼吧！" % (entry["node"] as PaperCharacter).char_name
+	banner.visible = true
+
+## 退出喊话态：解锁相机回自由视角。幂等——不在喊话态时调用是 no-op（各退出路径可放心乱叫）。
+func _exit_player_talk() -> void:
+	if _talk_pid.is_empty():
+		return
+	_talk_pid = ""
+	game_audio.play_sfx("exit")
+	if not player.is_empty():
+		player.erase("_hop") # 中途退出清掉未完成的小跳（保留当前位置，不瞬移回落点）
+	_hop_t = -1.0
+	_locked = null
+	_target_pitch = GOD_PITCH_DEG
+	_target_dist = GOD_DIST
+	banner.visible = false
 
 ## 进对话对方先打招呼：小仙子走预制语音（离线可用、零延迟），普通 NPC 走服务端招呼
 ## （按角色风格选词、用其 voiceId 流式 TTS，回 character_response 走 _on_character_response 播放）。
@@ -4011,7 +4105,8 @@ func _prop_wander(spec: Dictionary) -> float:
 func _begin_prop_press(screen_pos: Vector2) -> void:
 	_prop_press_tile = NO_PRESS_TILE
 	_prop_press_t = 0.0
-	if _pick_npc(screen_pos) != null or _pick_player(screen_pos):
+	if _pick_npc(screen_pos) != null or _pick_player(screen_pos) \
+			or not _pick_remote_actor(screen_pos).is_empty():
 		return
 	var ground := _pick_ground(screen_pos)
 	if ground == Vector2.INF:
@@ -5912,6 +6007,10 @@ func _find_npc_dict(npc: PaperCharacter) -> Dictionary:
 	for n in npcs:
 		if n["node"] == npc:
 			return n
+	# 玩家喊话态：_locked 可能是远端玩家副本（对话构图取 logical/身高同一套逻辑）
+	for id in _remote_actors:
+		if (_remote_actors[id] as Dictionary).get("node") == npc:
+			return _remote_actors[id]
 	return {}
 
 func _find_npc_by_id(id: String) -> PaperCharacter:
