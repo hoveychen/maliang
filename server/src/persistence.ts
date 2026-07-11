@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { creationItemDef, getBuiltinItem } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
@@ -165,10 +165,22 @@ export class WorldStore {
       this.#migrateLegacyChatHistory();
       this.#migrateLegacyPlayerPositions();
       this.#migrateLegacyEntityScenes();
+      this.#migrateVisitsDevice();
       this.#loadAssets();
       this.#loadSpriteAnims();
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
       this.#migratePropsToItems(); // 依赖场景矩阵已就位（placed 物件要写进矩阵）
+    }
+  }
+
+  /**
+   * 旧库的 visits 表没有 device 列（生产已有 62 条会话记录），补上。
+   * 幂等：列已存在就跳过（新库 initSchema 已带 device，走这条会跳过）。
+   */
+  #migrateVisitsDevice(): void {
+    const cols = this.#db.prepare('PRAGMA table_info(visits)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'device')) {
+      this.#db.exec('ALTER TABLE visits ADD COLUMN device TEXT');
     }
   }
 
@@ -281,7 +293,9 @@ export class WorldStore {
         world_id TEXT NOT NULL,
         player_id TEXT NOT NULL,
         started_at INTEGER NOT NULL,
-        ended_at INTEGER
+        ended_at INTEGER,
+        -- 会话建立时的设备快照 JSON（DeviceSnapshot）。旧行为 NULL，见 #migrateVisitsDevice。
+        device TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_visits_world_player ON visits(world_id, player_id);
       CREATE TABLE IF NOT EXISTS chat_turns (
@@ -1211,11 +1225,14 @@ export class WorldStore {
 
   // ── 会话 Visit（进世界→离开为一段，作会话结束批量抽记忆的边界；见 types.Visit）──────
 
-  /** 开一段会话，返回 visitId（ended_at 置空=进行中）。startedAt 由调用方传（server 用 Date.now）。 */
-  startVisit(worldId: string, playerId: string, startedAt: number): number {
+  /**
+   * 开一段会话，返回 visitId（ended_at 置空=进行中）。startedAt 由调用方传（server 用 Date.now）。
+   * device 为本次连接的设备快照（activity 记录）；无则 null。
+   */
+  startVisit(worldId: string, playerId: string, startedAt: number, device?: DeviceSnapshot | null): number {
     const info = this.#db
-      .prepare('INSERT INTO visits (world_id, player_id, started_at, ended_at) VALUES (?, ?, ?, NULL)')
-      .run(worldId, playerId, startedAt);
+      .prepare('INSERT INTO visits (world_id, player_id, started_at, ended_at, device) VALUES (?, ?, ?, NULL, ?)')
+      .run(worldId, playerId, startedAt, device ? JSON.stringify(device) : null);
     return Number(info.lastInsertRowid);
   }
 
@@ -1228,18 +1245,44 @@ export class WorldStore {
   listVisits(worldId?: string): Visit[] {
     const rows = (
       worldId === undefined
-        ? this.#db.prepare('SELECT id, world_id, player_id, started_at, ended_at FROM visits ORDER BY started_at DESC').all()
+        ? this.#db.prepare('SELECT id, world_id, player_id, started_at, ended_at, device FROM visits ORDER BY started_at DESC').all()
         : this.#db
-            .prepare('SELECT id, world_id, player_id, started_at, ended_at FROM visits WHERE world_id = ? ORDER BY started_at DESC')
+            .prepare('SELECT id, world_id, player_id, started_at, ended_at, device FROM visits WHERE world_id = ? ORDER BY started_at DESC')
             .all(worldId)
-    ) as { id: number; world_id: string; player_id: string; started_at: number; ended_at: number | null }[];
+    ) as { id: number; world_id: string; player_id: string; started_at: number; ended_at: number | null; device: string | null }[];
     return rows.map((r) => ({
       id: r.id,
       worldId: r.world_id,
       playerId: r.player_id,
       startedAt: r.started_at,
       endedAt: r.ended_at,
+      device: r.device ? (JSON.parse(r.device) as DeviceSnapshot) : null,
     }));
+  }
+
+  /**
+   * activity 记录：会话 + 设备快照，倒序分页。给管理台看"谁、用什么设备、何时来、玩多久"。
+   * 只读，直连查询。带 limit/offset（管理台翻页）。
+   */
+  listActivity(limit = 100, offset = 0): Visit[] {
+    const rows = this.#db
+      .prepare('SELECT id, world_id, player_id, started_at, ended_at, device FROM visits ORDER BY started_at DESC LIMIT ? OFFSET ?')
+      .all(Math.max(1, Math.min(500, limit)), Math.max(0, offset)) as {
+      id: number; world_id: string; player_id: string; started_at: number; ended_at: number | null; device: string | null;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      worldId: r.world_id,
+      playerId: r.player_id,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      device: r.device ? (JSON.parse(r.device) as DeviceSnapshot) : null,
+    }));
+  }
+
+  /** activity 总条数（分页用）。 */
+  countVisits(): number {
+    return this.#count('visits');
   }
 
   // ── 只读观测（P6 调试后台；不改状态，直连查询）────────────────────────────
