@@ -54,48 +54,14 @@ var _shown_at := 0
 var _world: Node = null
 var _revealing := false    ## 已开始揭开（防重复 spawn/reveal）
 var _frames := 0           ## 已过帧数（首帧只画遮罩，第二帧起才同步加载世界）
-var _gfx_resolved := false ## 画质档已决议（查过 backend / 无需查）：世界要等它才能起
 
 func _ready() -> void:
 	_shown_at = Time.get_ticks_msec()
 	_build_overlay()
-	_resolve_graphics()  # 没定过画质档的新机器：先查 backend 有没有同 GPU 的众包结果
-	# 隔一帧再同步加载：先让遮罩画出来，避免加载 main.tscn 的那一帧还是黑屏
-
-## 画质档决议（只在没定过档时做一次；定过档就直接进世界，不为此等网络）：
-##   backend 有同 GPU 的众包档 → 拿来即用（source=backend），这台机器不用当小白鼠
-##   没有（真·新 GPU）        → 置 Benchmark.pending，进世界后跑一次定档（见 Benchmark）
-## 查不通（离线/超时）也置 pending：宁可本机测一次，也不要让孩子一直玩在保守起步档上。
-## 注意：这是 best-effort 的一次网络往返，超时由 Api.REQUEST_TIMEOUT_SEC 兜底。
-func _resolve_graphics() -> void:
-	if GraphicsSettings.has_saved() or not OS.has_feature("mobile"):
-		_gfx_resolved = true  # 定过档 / 桌面天然满配：无需决议，别为此等一次网络
-		return
-	var gpu := DeviceProfile.gpu()
-	if gpu.is_empty():
-		# 拿不到 GPU 名就没有分桶的 key（众包按 GPU 分桶）：跳过查询，本机自己测一次
-		print("GFX 取不到 GPU 名：跳过众包，本机跑一次 benchmark 定档")
-		Benchmark.pending = true
-		_gfx_resolved = true
-		return
-	var api := Api.new()
-	api.name = "BootApi"
-	add_child(api)
-	var res := await api.get_json("/device-profile?gpu=%s&benchVersion=%d" % [
-		gpu.uri_encode(), DeviceProfile.BENCH_VERSION])
-	api.queue_free()
-	var levels: Variant = res.get("levels")
-	if bool(res.get("found", false)) and typeof(levels) == TYPE_DICTIONARY:
-		GraphicsSettings.save_all(levels, "backend", {
-			"gpu": DeviceProfile.gpu(), "bench_version": DeviceProfile.BENCH_VERSION,
-			"samples": int(res.get("samples", 0)),
-		})
-		print("GFX 命中同 GPU 众包档（%d 台样本）：%s" % [int(res.get("samples", 0)), JSON.stringify(levels)])
-		_gfx_resolved = true
-		return
-	print("GFX 未命中（GPU=%s）：进世界跑一次 benchmark 定档" % DeviceProfile.gpu())
-	Benchmark.pending = true
-	_gfx_resolved = true
+	# 隔一帧再同步加载：先让遮罩画出来，避免加载 main.tscn 的那一帧还是黑屏。
+	# 注意：这里不做任何画质决议 / 网络查询。曾经在此 await 查 backend 众包档并 gate 住
+	# _spawn_world，结果网络一慢世界就永远不 spawn、加载页永远不关（真机实测卡死）。
+	# 画质定档改由 menu 后的独立「建造小世界」前置阶段处理（见 world-building-intro plan）。
 
 func _build_overlay() -> void:
 	var layer := CanvasLayer.new()
@@ -230,11 +196,10 @@ func _process(delta: float) -> void:
 
 	if _revealing:
 		return
-	# 首帧只画遮罩，第二帧起再同步加载（遮罩已上屏，加载卡帧也不黑）。
-	# 但必须等画质档决议落定——world._ready 要读 Benchmark.pending 决定跑不跑定档，
-	# 世界抢在决议之前起来的话，这一票就永远丢了（见 _resolve_graphics）。
+	# 首帧只画遮罩，第二帧起再同步加载（遮罩已上屏，加载卡帧也不黑）。零阻塞：不再等任何
+	# 网络决议——加载页唯一的职责就是把世界加载出来。
 	_frames += 1
-	if _frames >= 2 and _gfx_resolved:
+	if _frames >= 2:
 		_spawn_world()
 
 ## 推进显示进度：真进度领先就快速追上（里程碑落地→仙子前冲）；真进度停滞则慢爬向
