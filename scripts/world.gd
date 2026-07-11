@@ -2130,6 +2130,7 @@ var _talk_view: Control            ## 喊话态底部表情盘容器（进态显
 ## 这样「A 挥手→B 自动回礼→A 又自动回礼→…」的乒乓在第二拍就断掉。
 var _emote_cd_until: Dictionary = {}
 var _emote_press_cd := 0.0         ## 表情盘按键节流（动作播完前不重发）
+var _my_voice_id := ""             ## 自己的稳定音色（world_state 下发）：喊话复述用，与对端听到的同声
 const EMOTE_PANEL_ACTIONS := ["wave", "jump", "spin", "nod", "heart"] ## 表情盘五格（❤=送爱心）
 const EMOTE_CD_MS := 8000
 
@@ -3173,6 +3174,11 @@ func _enter_player_talk(entry: Dictionary) -> void:
 	banner.visible = true
 	if _talk_view != null:
 		_talk_view.visible = true # 底部表情盘亮起：点一格双端一起演
+	# 开放麦（喊话）：与近身对话同一套 VAD 断句；端侧 ASR 未就绪时 _step_voice 门禁不实际开录
+	_mic.start()
+	_vad = VoiceVad.new()
+	_unmute_t = 0.0
+	_reset_empty_streak()
 
 ## 退出喊话态：解锁相机回自由视角。幂等——不在喊话态时调用是 no-op（各退出路径可放心乱叫）。
 func _exit_player_talk() -> void:
@@ -3180,6 +3186,10 @@ func _exit_player_talk() -> void:
 		return
 	_talk_pid = ""
 	game_audio.play_sfx("exit")
+	if _recording:
+		_utterance_cancel() # 说到一半退出：静默丢弃，不留半开会话
+	_mic.stop()
+	_vad = null
 	if _talk_view != null:
 		_talk_view.visible = false
 	if not player.is_empty():
@@ -3256,6 +3266,31 @@ func _on_player_emote(data: Dictionary) -> void:
 		game_audio.play_sfx("reveal")
 	if emote_should_autoreply(data, backend.player_id, int(_emote_cd_until.get(from, 0)), Time.get_ticks_msec()):
 		_send_emote(from, "wave")
+
+## 喊话文本落地（端侧 ASR final，玩家对话路由）：本端用自己的音色复述一遍——孩子听到
+## 自己被识别成了什么；复述窗口 ≈ 对端收听窗口（同文本同音色时长近似），节奏天然对齐。
+## 同时上行 player_speech 让服务端场景定向转发。lang 恒 zh（跨语言翻译钩子在服务端）。
+func _handle_talk_transcript(t: String) -> void:
+	heard_label.text = "我说：%s" % t # 家长可读字幕；幼儿靠复述音
+	heard_label.visible = true
+	if online and backend != null:
+		backend.send_player_speech(world_id, _talk_pid, t)
+	_speak_line(t, _my_voice_id) # pending/播放期间 FSM 自动闭麦，说完自动恢复聆听
+
+## 收到别的小朋友的喊话：他的副本头顶亮个说话泡 + 用他的音色（服务端盖章）把话念出来。
+## 「喊话」模型：不用进任何状态就能听见（现实里有人跟你说话你也不用先按接听）。
+func _on_player_speech(data: Dictionary) -> void:
+	var text := String(data.get("text", ""))
+	if text.is_empty():
+		return
+	var from := String(data.get("fromPlayerId", ""))
+	var ra: Dictionary = _remote_actors.get(from, {})
+	if not ra.is_empty():
+		_pop_notice_bubble(ra, "happy") # 说话泡：头顶亮表情（内容靠 TTS 念，幼儿不识字）
+	var disp := String((_presence.get(from, {}) as Dictionary).get("name", ""))
+	banner.text = ("%s：%s" % [disp, text]) if not disp.is_empty() else text
+	banner.visible = true
+	_speak_line(text, String(data.get("voiceId", ""))) # 播放期间 FSM 闭麦（半双工防自听）
 
 ## 进对话对方先打招呼：小仙子走预制语音（离线可用、零延迟），普通 NPC 走服务端招呼
 ## （按角色风格选词、用其 voiceId 流式 TTS，回 character_response 走 _on_character_response 播放）。
@@ -3347,6 +3382,7 @@ func _setup_backend() -> void:
 	backend.character_spawned.connect(_on_character_spawned) # 别人造的新伙伴：就地降生
 	backend.player_emote.connect(_on_player_emote)       # 别的小朋友的表情动作：副本演起来+自动回礼
 	backend.hearts_update.connect(func(d: Dictionary) -> void: _apply_wallet(d.get("wallet"))) # 收到爱心：钱包同步,集邮册点亮
+	backend.player_speech.connect(_on_player_speech)     # 别的小朋友的喊话：TTS 念出来+说话泡
 	backend.scene_entered.connect(_on_scene_entered) # 走 portal 换场景：卸旧场景、载新场景
 	backend.terrain_patch.connect(_on_terrain_patch) # 地形矩阵增量更新（tile 编辑广播）
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），
@@ -4364,6 +4400,9 @@ func _on_local_asr_final(text: String) -> void:
 		_begin_empty_cooldown()
 		return
 	_reset_empty_streak()
+	if not _talk_pid.is_empty() and selected == null:
+		_handle_talk_transcript(t) # 玩家喊话：文本中继给对方，不走 NPC 对话
+		return
 	_vt_send = Time.get_ticks_msec() # 发转写 → 到 character_response 即纯 LLM 耗时
 	backend.send_voice_transcript(world_id, _selected_id(), t)
 
@@ -4383,7 +4422,7 @@ func _on_local_asr_error(msg: String) -> void:
 ## 字段与旧 _step_voice 的闭麦表达式逐字对应，行为等价由 test_interaction_fsm 的 64 组合护栏保证。
 func _fsm_inputs() -> InteractionFsm.Inputs:
 	return InteractionFsm.Inputs.new({
-		"in_interaction": selected != null,
+		"in_interaction": selected != null or not _talk_pid.is_empty(), # 玩家喊话态同样开麦（ASR 门禁另见 _step_voice）
 		"approaching": not _approach.is_empty(),
 		"thinking": thinking_label != null and thinking_label.visible,
 		"tts_busy": (_tts_player != null and _tts_player.playing) or _tts_pending,
@@ -4410,6 +4449,10 @@ func _step_voice(delta: float) -> void:
 	# （加载失败会走 asr_error 硬报错，不会长期卡在这里）。桌面无单例，此处恒为 false。
 	# 排在 FSM 闭麦判定之前：未就绪时无论交互态如何都不许开麦。
 	if AsrGuard.must_wait_for_ready(_os_name, _asr_is_ready(), OS.has_feature("template")):
+		_vad.reset()
+		return
+	# 玩家喊话只走端侧 ASR（文本中继，无服务端语音会话可回落）：无本地模型不开麦，表情盘仍可用。
+	if not _talk_pid.is_empty() and not _asr_is_ready():
 		_vad.reset()
 		return
 	if not InteractionFsm.mic_open(InteractionFsm.derive(x)):
@@ -4474,7 +4517,7 @@ func _feed_voice_pcm(pcm: PackedByteArray) -> void:
 
 ## 开口：开一个识别会话（路由定格），VAD 给的预录头块先送（首音节不丢）。
 func _utterance_begin(head: PackedByteArray) -> void:
-	if selected == null or _recording:
+	if (selected == null and _talk_pid.is_empty()) or _recording:
 		return
 	_recording = true
 	# 语音耗时：开口即新一轮，清零各段戳
@@ -4491,6 +4534,11 @@ func _utterance_begin(head: PackedByteArray) -> void:
 	_local_asr_session = _asr_local != null and _asr_local.isReady()
 	if _local_asr_session:
 		_asr_local.startSession()
+	elif not _talk_pid.is_empty():
+		# 喊话只走端侧 ASR（_step_voice 已门禁；此处是就绪状态翻转的时序兜底）：不开服务端会话
+		_recording = false
+		_pending_pcm = PackedByteArray()
+		return
 	else:
 		backend.send_voice_start(world_id, _selected_id())
 	_flush_pending_chunk()
@@ -4501,7 +4549,9 @@ func _utterance_commit() -> void:
 		return
 	_recording = false
 	game_audio.play_sfx("mic_off")
-	thinking_label.visible = true
+	# 喊话没有服务端回复要等：不亮「思考中」、不开解卡定时器（端侧 ASR final 秒回）
+	if _talk_pid.is_empty():
+		thinking_label.visible = true
 	banner.visible = false
 	_flush_pending_chunk()
 	if _in_creation:
@@ -4515,7 +4565,8 @@ func _utterance_commit() -> void:
 	_vt_local = _local_asr_session
 	if not _local_asr_session:
 		_vt_send = _vt_speak_end
-	_think_timer.start(THINK_TIMEOUT)  # 兜底：响应没回来也会自动解卡
+	if _talk_pid.is_empty():
+		_think_timer.start(THINK_TIMEOUT)  # 兜底：响应没回来也会自动解卡
 
 ## 太短的误触/中途退出：静默丢弃本段，双 ASR 路径都不产生任何回复。麦克风保持聆听。
 func _utterance_cancel() -> void:
@@ -5700,6 +5751,7 @@ func _send_world_info() -> void:
 
 ## world_info 的回包：同步钱包/背包与进行中委托（断线重连/重启后补状态）。
 func _on_world_state(data: Dictionary) -> void:
+	_my_voice_id = String(data.get("voiceId", _my_voice_id)) # 自己的稳定音色：喊话复述用
 	_apply_wallet(data.get("wallet"))
 	_apply_bag(data.get("bag"))
 	_set_active_task(data.get("activeTask"))

@@ -1617,6 +1617,8 @@ export async function handleWsMessage(
     socket.send(JSON.stringify({
       type: 'world_state',
       wallet: store.getWallet(worldId, session.playerId),
+      // 自己的稳定音色（playerId 哈希）：客户端喊话复述用——复述音=对端听到的音，孩子两端听感一致
+      voiceId: session.playerId ? voiceForPlayer(session.playerId, store.getPlayer(session.playerId)?.gender) : '',
       bag: store.getBag(worldId, session.playerId),
       activeTask: store.getActiveTask(worldId, session.playerId),
       // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
