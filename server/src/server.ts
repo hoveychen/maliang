@@ -23,6 +23,51 @@ function etagMatches(header: string | string[] | undefined, etag: string): boole
   if (typeof header !== 'string') return false;
   return header.split(',').some((t) => t.trim().replace(/^W\//, '') === etag);
 }
+
+/**
+ * 取客户端真实 IP。muvee 是反代，socket 远端地址是反代自己的 IP，真实客户端 IP 在
+ * x-forwarded-for（可能是 "client, proxy1, proxy2" 链，取最左即最初的客户端）。
+ * 没有该头（本地直连/测试）就退回 fastify 的 req.ip。
+ */
+export function clientIp(req: { headers: Record<string, unknown>; ip?: string }): string | undefined {
+  const xff = req.headers['x-forwarded-for'];
+  const raw = Array.isArray(xff) ? xff[0] : xff;
+  if (typeof raw === 'string' && raw.trim()) return raw.split(',')[0]!.trim().slice(0, 64);
+  return req.ip && req.ip.length ? req.ip.slice(0, 64) : undefined;
+}
+
+/** 合成设备快照：连接层（IP/UA）+ 客户端上报（机型/系统等）。全空则返回 null（旧客户端不带）。 */
+export function buildDeviceSnapshot(
+  session: { connIp?: string; connUa?: string },
+  reported: DeviceReport | undefined,
+): DeviceSnapshot | null {
+  const s = (v: unknown, n: number): string | undefined => {
+    if (typeof v !== 'string') return undefined;
+    const t = v.trim();
+    return t ? t.slice(0, n) : undefined;
+  };
+  const snap: DeviceSnapshot = {
+    ip: s(session.connIp, 64),
+    ua: s(session.connUa, 512),
+    model: s(reported?.model, 128),
+    os: s(reported?.os, 64),
+    osVersion: s(reported?.osVersion, 64),
+    screen: s(reported?.screen, 32),
+    godot: s(reported?.godot, 64),
+    app: s(reported?.app, 64),
+  };
+  return Object.values(snap).some((v) => v !== undefined) ? snap : null;
+}
+
+/** 客户端在 world_info.profile.device 里上报的设备块（都可选、都当不可信输入夹紧）。 */
+interface DeviceReport {
+  model?: string;
+  os?: string;
+  osVersion?: string;
+  screen?: string;
+  godot?: string;
+  app?: string;
+}
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
 import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
@@ -36,7 +81,7 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type ChatTurn, type CreationGoal, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
@@ -838,6 +883,10 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const session = newVoiceSession(); // 边录边传：本连接的语音分片缓冲
     // 能力协商：客户端自带 TTS（edge-tts）时连接 URL 带 ?clientTts=1，本连接全程跳过服务端合成。
     session.clientTts = (req.query as { clientTts?: string } | undefined)?.clientTts === '1';
+    // 连接层设备信息（activity 快照的服务端半段）：muvee 是反代，真实 IP 在 x-forwarded-for。
+    session.connIp = clientIp(req);
+    const ua = req.headers['user-agent'];
+    if (typeof ua === 'string' && ua) session.connUa = ua.slice(0, 512);
     socket.on('message', (raw: Buffer) => {
       void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session, hub, stages);
     });
@@ -946,6 +995,9 @@ export interface VoiceSession {
   creation: CreationState | null;
   /** 客户端自带 TTS（edge-tts 直连微软）：WS 连接 URL 带 ?clientTts=1 时置位，服务端全程跳过合成只发文本+voiceId。 */
   clientTts: boolean;
+  /** 连接层设备信息（activity 快照的服务端半段）：握手时从 req 取，world_info 建 Visit 时并入。 */
+  connIp?: string;
+  connUa?: string;
   /**
    * 玩家当前所在场景（模型 B）。world_info 进世界时置初值，enter_scene 走 portal 时更新。
    * getLocations/委托候选/角色物件下发都按它过滤（消化「委托指向别场景」的边界）。
@@ -967,9 +1019,10 @@ export function startSessionVisit(
   adapters: ServiceAdapters,
   store: WorldStore,
   now: number,
+  device?: DeviceSnapshot | null,
 ): void {
   if (session.visit) void endSessionVisit(session, adapters, store, now); // 收尾旧的（同步排空 pending，抽取后台跑）
-  session.visit = { id: store.startVisit(worldId, playerId, now), worldId, playerId, pending: new Map(), history: new Map(), summary: new Map(), compacting: new Set() };
+  session.visit = { id: store.startVisit(worldId, playerId, now, device), worldId, playerId, pending: new Map(), history: new Map(), summary: new Map(), compacting: new Set() };
 }
 
 /** 记一轮对话进当前 Visit 的增量；单角色超阈值即中途 flush 兜底（后台跑，不阻塞回复路径）。 */
@@ -1571,6 +1624,7 @@ export async function handleWsMessage(
       color?: string;
       spriteAsset?: string;
       createdAt?: string;
+      device?: DeviceReport; // 设备信息上报（机型/系统等）；服务端另并入 IP/UA
     };
   };
   try {
@@ -1622,7 +1676,9 @@ export async function handleWsMessage(
     // 记下进世界的初始场景（缺省 village）；后续 enter_scene 走 portal 时更新。
     session.currentScene = (msg.sceneId ?? DEFAULT_SCENE) || DEFAULT_SCENE;
     // 进世界 = 一段会话（Visit）开始：作会话结束批量抽记忆的边界。
-    startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now());
+    // 顺带落一份设备快照（activity 记录）：连接层 IP/UA + 客户端上报的机型/系统。
+    const device = buildDeviceSnapshot(session, msg.profile?.device);
+    startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now(), device);
     // 多人基座：登记进 world 分组；首位进入者为 host（NPC 模拟所有权），换世界时旧世界可能换 host。
     if (hub) {
       const joined = hub.join(worldId, {

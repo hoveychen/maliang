@@ -45,6 +45,16 @@ func _init() -> void:
 	fails += _check("upload_dict spriteAsset 驼峰", up.get("spriteAsset", ""), "h9")
 	fails += _check("upload_dict nickname", up.get("nickname", ""), "多多")
 	fails += _check("upload_dict 无下划线键", up.has("sprite_asset"), false)
+
+	# device_dict：activity 记录用的设备块，键名对齐 server DeviceReport；机型/系统非空、分辨率成串
+	fails += _check("upload_dict 带 device 块", up.has("device"), true)
+	var dev: Dictionary = up.get("device", {})
+	fails += _check("device 有 os", String(dev.get("os", "")).is_empty(), false)
+	fails += _check("device 有 model 键", dev.has("model"), true)
+	fails += _check("device screen 成 WxH 串", String(dev.get("screen", "")).contains("x"), true)
+	fails += _check("device godot 版本非空", String(dev.get("godot", "")).is_empty(), false)
+	# device 块不含任何可定位/隐私字段（IP 由服务端从连接层取，客户端绝不上报）
+	fails += _check("device 不含 ip", dev.has("ip"), false)
 	PlayerProfile.clear()
 
 	if fails == 0:

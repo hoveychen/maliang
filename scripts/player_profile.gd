@@ -81,4 +81,18 @@ static func upload_dict() -> Dictionary:
 		"color": String(p.get("color", "")),
 		"spriteAsset": String(p.get("sprite_asset", "")),
 		"createdAt": String(p.get("created_at", "")),
+		"device": device_dict(), # activity 记录：机型/系统/分辨率（IP/UA 服务端另补）
+	}
+
+## 设备信息块（world_info.profile.device）：给后台 activity 记录看"用什么设备来玩的"。
+## 只报能稳定拿到的静态信息，不含任何可定位/隐私字段（IP 由服务端从连接层取）。
+static func device_dict() -> Dictionary:
+	var scr := DisplayServer.window_get_size()
+	var v := Engine.get_version_info()
+	return {
+		"model": OS.get_model_name(),   # 真机型号（桌面多为 "GenericDevice"）
+		"os": OS.get_name(),            # Android / macOS / Windows / Linux
+		"osVersion": OS.get_version(),  # 系统版本串
+		"screen": "%dx%d" % [scr.x, scr.y],
+		"godot": "%d.%d.%d" % [v.get("major", 0), v.get("minor", 0), v.get("patch", 0)],
 	}

@@ -350,12 +350,29 @@ export interface Player {
  * 身份 = (worldId, playerId, startedAt)，绑世界+玩家而非 socket（兼容未来重连）。
  * endedAt=null 表示进行中（掉线未收尾也可能停留 null，靠 socket.close 兜底置时）。
  */
+/**
+ * 一段会话建立时的设备快照（activity 记录）。前半段服务端被动拿（连接层），
+ * 后半段客户端在 world_info.profile.device 里主动上报。字段全可选：旧客户端/直连不带。
+ */
+export interface DeviceSnapshot {
+  ip?: string; // 客户端 IP：反代过来的走 x-forwarded-for 第一段，否则 socket 远端地址
+  ua?: string; // User-Agent（Android WebView/HTTP 客户端会带系统与型号片段）
+  model?: string; // 机型（Godot OS.get_model_name）
+  os?: string; // 系统名（OS.get_name：Android/macOS/Windows/Linux）
+  osVersion?: string; // 系统版本（OS.get_version）
+  screen?: string; // 屏幕分辨率，如 "2000x1200"
+  godot?: string; // 引擎版本（Engine.get_version_info 拼串）
+  app?: string; // 客户端应用版本（构建号 / 版本串）
+}
+
 export interface Visit {
   id: number;
   worldId: string;
   playerId: string;
   startedAt: number;
   endedAt: number | null;
+  /** 会话建立时的设备快照；旧行/未上报为 null。 */
+  device?: DeviceSnapshot | null;
 }
 
 /** 记忆分类型（对齐 extractMemory 抽取口径：名字/喜好/约定/发生的事/关系；

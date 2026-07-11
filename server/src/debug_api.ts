@@ -82,6 +82,31 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
     };
   });
 
+  // activity 记录：会话 + 设备快照，倒序分页。回答"谁、用什么设备、何时来、玩多久"。
+  app.get<{ Querystring: { limit?: string; offset?: string } }>('/debug/api/activity', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 100));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const rows = store.listActivity(limit, offset);
+    // 派生玩家昵称（活动行只存 playerId，列表直接可读省一次前端 join）
+    const players = new Map(store.listPlayers().map((p) => [p.id, p.nickname || p.name || '']));
+    return {
+      total: store.countVisits(),
+      limit,
+      offset,
+      activity: rows.map((v) => ({
+        id: v.id,
+        worldId: v.worldId,
+        playerId: v.playerId,
+        playerName: players.get(v.playerId) ?? '',
+        startedAt: v.startedAt,
+        endedAt: v.endedAt,
+        durationMs: v.endedAt !== null ? v.endedAt - v.startedAt : null,
+        device: v.device ?? null,
+      })),
+    };
+  });
+
   // 玩家列表（带派生的会话统计，列表页直接可用）
   app.get('/debug/api/players', async (req, reply) => {
     if (!guard(req, reply)) return reply;
