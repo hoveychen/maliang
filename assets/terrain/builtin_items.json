@@ -1836,5 +1836,89 @@
     "themes": [
       "ancient_china"
     ]
+  },
+  {
+    "id": "dino_trex",
+    "worldId": null,
+    "name": "霸王龙",
+    "renderRef": "dino:trex",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_raptor",
+    "worldId": null,
+    "name": "迅猛龙",
+    "renderRef": "dino:raptor",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_triceratops",
+    "worldId": null,
+    "name": "三角龙",
+    "renderRef": "dino:triceratops",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_parasaur",
+    "worldId": null,
+    "name": "鸭嘴龙",
+    "renderRef": "dino:parasaur",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_stego",
+    "worldId": null,
+    "name": "剑龙",
+    "renderRef": "dino:stego",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_apato",
+    "worldId": null,
+    "name": "腕龙",
+    "renderRef": "dino:apato",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
   }
 ]

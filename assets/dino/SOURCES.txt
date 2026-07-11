@@ -1,0 +1,17 @@
+侏罗纪时代主题资产（world-themes 补遗第 12 主题）。全 CC0，作者 Quaternius。
+
+Quaternius Animated Dinosaur Bundle — CC0 1.0（公共领域，署名非强制）
+  https://poly.pizza/bundle/Animated-Dinosaur-Bundle-SmoLdBLO2K
+  （亦见 https://quaternius.itch.io/animated-lowpoly-dinosaurs）
+  经 poly.pizza 直链 static.poly.pizza/<uuid>.glb 匿名下载（无需登录）。
+
+选用全部 6 件恐龙（node 类，带动画的 glb，作静态节点摆放）。物种按 AABB 形状匹配
+（页面物种名 JS 渲染取不到，按体型比例判定：最长=腕龙/最高=霸王龙/最小=迅猛龙/最宽=三角龙）：
+  dino_a.glb 霸王龙 T-Rex          uuid 6aa1f3ff-b9b3-4bb5-9d85-b2ffa514f0cc（最高 H18.6）
+  dino_b.glb 迅猛龙 Velociraptor   uuid 47b9d0bd-cddb-49be-b072-12201def24a9（最小）
+  dino_c.glb 三角龙 Triceratops    uuid 34eed102-48f0-43dd-bc6f-ef7a6dfddfbb（最宽 W7.95）
+  dino_d.glb 鸭嘴龙 Parasaurolophus uuid c1f0c4cb-c84f-415c-8323-d8cb871a2126
+  dino_e.glb 剑龙   Stegosaurus    uuid 6f8f4ac6-f9e8-488d-97a8-220b9b2fd02a
+  dino_f.glb 腕龙   Apatosaurus    uuid 7b873860-f23f-4266-b341-5c5e6770cfa0（最长 D49.7）
+
+地面：可搭配 P1 tile 地基（草地/沙地）；无恐龙专属地形。
