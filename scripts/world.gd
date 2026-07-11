@@ -1030,6 +1030,9 @@ func _setup_hud() -> void:
 	# 一进创造就显它、退出普通对话构图（见 _enter_creation_view）；点卡即答复小仙子。
 	_build_creation_view(layer)
 
+	# 玩家喊话态的底部表情盘（player-interaction P3）：进喊话态亮起，点一格双端一起演。
+	_build_talk_view(layer)
+
 	# 收听 HUD：近身对话期间浮在横幅上方——AIGC 生成的奶油圆角边框贴图（hud_listen，
 	# 麦克风+音波+星饰烤进边框），一排珊瑚色声波柱嵌在边框空心内板、随音量跳动，
 	# 给不识字的小朋友一个又大又清楚的「现在在听你说话」提示。
@@ -2073,6 +2076,8 @@ func _process(delta: float) -> void:
 	tp = _prof_lap(tp, "tap/wave")
 	_update_think_bubble(delta)
 	_update_emotion_bubble(delta)
+	if _emote_press_cd > 0.0:
+		_emote_press_cd -= delta # 表情盘节流：动作播完才能再按
 	_update_npc_chats(delta)
 	_update_speak_anim(delta)
 	tp = _prof_lap(tp, "bubbles")
@@ -2118,6 +2123,20 @@ var _presence: Dictionary = {}
 ## 只存 id 不存条目引用：副本可能被 stale 回收后经 positions_relay 重建（新字典），按 id 现查才不拿旧物。
 var _talk_pid := ""
 const TALK_LEAVE_DIST := 7.0 ## 对方走出此距离（logical 米）即自动退出喊话态
+# ── 喊话态表情盘（P3）──
+var _talk_view: Control            ## 喊话态底部表情盘容器（进态显示，退态隐藏）
+## peer playerId → 自动回礼冷却截止（ticks_msec）。发出任何 emote（手动/回礼）都记冷却，
+## 这样「A 挥手→B 自动回礼→A 又自动回礼→…」的乒乓在第二拍就断掉。
+var _emote_cd_until: Dictionary = {}
+var _emote_press_cd := 0.0         ## 表情盘按键节流（动作播完前不重发）
+const EMOTE_PANEL_ACTIONS := ["wave", "jump", "spin", "nod"] ## 表情盘四格（P4 加 heart）
+const EMOTE_CD_MS := 8000
+
+## 自动回礼判定（纯函数，headless 可测）：对我做的动作 + 不在冷却期才回。
+static func emote_should_autoreply(data: Dictionary, my_pid: String, cd_until_ms: int, now_ms: int) -> bool:
+	if my_pid.is_empty() or String(data.get("targetPlayerId", "")) != my_pid:
+		return false
+	return now_ms >= cd_until_ms
 
 static func _is_local_only_id(id: String) -> bool:
 	for prefix in _LOCAL_ONLY_IDS:
@@ -2335,18 +2354,23 @@ func _on_actor_leave(player_id: String) -> void:
 	var ra: Dictionary = _remote_actors.get(player_id, {})
 	if ra.is_empty():
 		return
-	var node: Node = ra.get("node")
-	if is_instance_valid(node):
-		node.queue_free()
+	_free_remote_actor(ra)
 	_remote_actors.erase(player_id)
+
+## 释放一个远端副本的挂件（立绘节点 + 头顶表情泡）。erase 前调用，别留孤儿 Sprite3D。
+func _free_remote_actor(ra: Dictionary) -> void:
+	var node: Variant = ra.get("node", null)
+	if node != null and is_instance_valid(node):
+		(node as Node).queue_free()
+	var bub: Variant = ra.get("notice_bubble", null)
+	if bub != null and is_instance_valid(bub):
+		(bub as Node).queue_free()
 
 ## 清掉所有远端副本与在场名单（换场景时调用：旧场景的人不在新场景里）。
 func _clear_remote_actors() -> void:
 	_exit_player_talk() # 面对的人随旧场景清掉，喊话态一并退
 	for id in _remote_actors.keys():
-		var node: Variant = (_remote_actors[id] as Dictionary).get("node", null)
-		if node != null and is_instance_valid(node):
-			(node as Node).queue_free()
+		_free_remote_actor(_remote_actors[id])
 	_remote_actors.clear()
 	_replicated_bufs.clear()
 	_presence.clear()
@@ -2376,12 +2400,11 @@ func _step_remote_actors(_delta: float) -> void:
 		var ra: Dictionary = _remote_actors[id]
 		var buf2: RemoteActorBuffer = ra["buf"]
 		if buf2.is_stale(now_local):
-			var node: Node = ra.get("node")
-			if is_instance_valid(node):
-				node.queue_free()
+			_free_remote_actor(ra)
 			_remote_actors.erase(id)
 			continue
 		ra["logical"] = buf2.sample(render_ms, ra["logical"])
+		_animate_notice_bubble(ra, _delta) # emote 表情泡跟头顶（与村民打招呼泡同一套演出）
 	# 喊话态维持判定：对方副本没了（掉线回收）或走远了 → 自动退出，不把孩子钉在空位前
 	if not _talk_pid.is_empty():
 		var tra: Dictionary = _remote_actors.get(_talk_pid, {})
@@ -2572,14 +2595,16 @@ func _update_npc_notice(delta: float) -> void:
 		_pop_notice_bubble(n)
 		n["notice_cd"] = randf_range(NOTICE_CD_MIN, NOTICE_CD_MAX)
 
-## 在村民头顶弹一个小表情气泡（per-NPC 懒建 Sprite3D，不复用 selected 单例的 emotion_bubble）。
-func _pop_notice_bubble(n: Dictionary) -> void:
+## 在角色头顶弹一个小表情气泡（per-角色懒建 Sprite3D，不复用 selected 单例的 emotion_bubble）。
+## emotion 显式给定用那张（玩家 emote 互动）；空串保持旧行为随机友好表情（村民主动打招呼）。
+func _pop_notice_bubble(n: Dictionary, emotion := "") -> void:
 	var bub := n.get("notice_bubble") as Sprite3D
 	if bub == null or not is_instance_valid(bub):
 		bub = UiAssets.bubble_sprite("em_happy", NOTICE_BUBBLE_H)
 		add_child(bub)
 		n["notice_bubble"] = bub
-	bub.texture = UiAssets.emotion_tex(NOTICE_EMOTES[randi() % NOTICE_EMOTES.size()])
+	var pick := emotion if not emotion.is_empty() else String(NOTICE_EMOTES[randi() % NOTICE_EMOTES.size()])
+	bub.texture = UiAssets.emotion_tex(pick)
 	bub.visible = true
 	bub.modulate = Color.WHITE
 	bub.scale = Vector3.ONE * 0.4
@@ -3145,6 +3170,8 @@ func _enter_player_talk(entry: Dictionary) -> void:
 	_target_pitch = LOCK_PITCH_DEG
 	banner.text = "跟%s打个招呼吧！" % (entry["node"] as PaperCharacter).char_name
 	banner.visible = true
+	if _talk_view != null:
+		_talk_view.visible = true # 底部表情盘亮起：点一格双端一起演
 
 ## 退出喊话态：解锁相机回自由视角。幂等——不在喊话态时调用是 no-op（各退出路径可放心乱叫）。
 func _exit_player_talk() -> void:
@@ -3152,6 +3179,8 @@ func _exit_player_talk() -> void:
 		return
 	_talk_pid = ""
 	game_audio.play_sfx("exit")
+	if _talk_view != null:
+		_talk_view.visible = false
 	if not player.is_empty():
 		player.erase("_hop") # 中途退出清掉未完成的小跳（保留当前位置，不瞬移回落点）
 	_hop_t = -1.0
@@ -3159,6 +3188,66 @@ func _exit_player_talk() -> void:
 	_target_pitch = GOD_PITCH_DEG
 	_target_dist = GOD_DIST
 	banner.visible = false
+
+## 喊话态底部表情盘：一排大图标卡（挥手/跳跳/转圈/点头），点一下双端一起演。
+## 摆底部横排而不是居中 2×2——对话构图的两个小人在画面中央，卡不能挡脸。
+func _build_talk_view(host: CanvasLayer) -> void:
+	_talk_view = Control.new()
+	_talk_view.name = "TalkView"
+	_talk_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_talk_view.mouse_filter = Control.MOUSE_FILTER_IGNORE # 只有卡吃点击，不挡世界
+	_talk_view.visible = false
+	host.add_child(_talk_view)
+	var row := HBoxContainer.new()
+	row.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	row.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	row.offset_top = -190.0
+	row.offset_bottom = -34.0
+	row.add_theme_constant_override("separation", 26)
+	_talk_view.add_child(row)
+	for action in EMOTE_PANEL_ACTIONS:
+		var card := Button.new()
+		card.custom_minimum_size = Vector2(156.0, 156.0) # 3 岁友好大点击区
+		UiAssets.style_card_button(card, 24.0) # 奶油圆角卡片，与造角色选项卡同调
+		card.icon = UiAssets.emotion_tex(action)
+		card.expand_icon = true
+		card.pressed.connect(_on_talk_emote_card.bind(String(action)))
+		row.add_child(card)
+
+## 点了表情盘某格：本端立即演 + 发给服务端转发（对端在我的副本上演同款）。
+func _on_talk_emote_card(action: String) -> void:
+	if _talk_pid.is_empty() or _emote_press_cd > 0.0:
+		return
+	_emote_press_cd = float(BehaviorExecutor.ACTION_DUR.get(action, 1.2))
+	game_audio.play_sfx("bell")
+	_send_emote(_talk_pid, action)
+
+## 发出一个 emote（手动点卡/自动回礼共用）：自己的角色演起来 + 上行 + 记冷却。
+func _send_emote(target_pid: String, action: String) -> void:
+	if not player.is_empty():
+		_play_emote_on(player, action)
+	_emote_cd_until[target_pid] = Time.get_ticks_msec() + EMOTE_CD_MS
+	if online and backend != null:
+		backend.send_player_emote(world_id, target_pid, action)
+
+## 在某个角色条目（本地玩家/远端副本）上演 emote：纸片动作 + 头顶表情泡。
+func _play_emote_on(entry: Dictionary, action: String) -> void:
+	if not BehaviorExecutor.ACTION_DUR.has(action):
+		return # 未知动作（如 P4 前收到 heart）：静默忽略，别演成错的
+	entry["paper_action"] = action
+	entry["paper_action_t"] = 0.0
+	_pop_notice_bubble(entry, action)
+
+## 收到别的小朋友的 emote：他的副本演起来；对我做的且冷却期外 → 自动回一个挥手
+## （孩子不操作也有来有往；发出方自己也记了冷却，乒乓在第二拍断掉）。
+func _on_player_emote(data: Dictionary) -> void:
+	var from := String(data.get("fromPlayerId", ""))
+	var action := String(data.get("action", ""))
+	var ra: Dictionary = _remote_actors.get(from, {})
+	if not ra.is_empty():
+		_play_emote_on(ra, action)
+	if emote_should_autoreply(data, backend.player_id, int(_emote_cd_until.get(from, 0)), Time.get_ticks_msec()):
+		_send_emote(from, "wave")
 
 ## 进对话对方先打招呼：小仙子走预制语音（离线可用、零延迟），普通 NPC 走服务端招呼
 ## （按角色风格选词、用其 voiceId 流式 TTS，回 character_response 走 _on_character_response 播放）。
@@ -3248,6 +3337,7 @@ func _setup_backend() -> void:
 	backend.actors_snapshot.connect(_on_actors_snapshot) # 在场名单：静止的小朋友也立起来
 	backend.actor_join.connect(_on_actor_join)           # 玩家进场：带真实立绘立副本
 	backend.character_spawned.connect(_on_character_spawned) # 别人造的新伙伴：就地降生
+	backend.player_emote.connect(_on_player_emote)       # 别的小朋友的表情动作：副本演起来+自动回礼
 	backend.scene_entered.connect(_on_scene_entered) # 走 portal 换场景：卸旧场景、载新场景
 	backend.terrain_patch.connect(_on_terrain_patch) # 地形矩阵增量更新（tile 编辑广播）
 	# 「思考中」兜底超时：即使 voice_failed/character_response 都没回来（响应丢失/TLS/网络），

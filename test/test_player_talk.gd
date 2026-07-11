@@ -67,6 +67,17 @@ func _init() -> void:
 	b._dispatch({ "type": "player_hug", "x": 1 })
 	fails += _check("未知消息不误发 emote", emotes.size(), 1)
 
+	# ── 自动回礼判定（World.emote_should_autoreply 纯函数）────────────────
+	var w: GDScript = load("res://scripts/world.gd")
+	var at_me := { "fromPlayerId": "pb", "targetPlayerId": "pa", "action": "wave" }
+	fails += _check("对我做的+无冷却 → 回礼", w.emote_should_autoreply(at_me, "pa", 0, 1000), true)
+	fails += _check("冷却期内 → 不回", w.emote_should_autoreply(at_me, "pa", 9000, 1000), false)
+	fails += _check("冷却刚过期 → 回", w.emote_should_autoreply(at_me, "pa", 1000, 1000), true)
+	var at_other := { "fromPlayerId": "pb", "targetPlayerId": "pc", "action": "wave" }
+	fails += _check("对别人做的 → 不回（旁观）", w.emote_should_autoreply(at_other, "pa", 0, 1000), false)
+	fails += _check("无身份 → 不回", w.emote_should_autoreply(at_me, "", 0, 1000), false)
+	fails += _check("无 target（广播型）→ 不回", w.emote_should_autoreply({ "fromPlayerId": "pb" }, "pa", 0, 1000), false)
+
 	b.free()
 	print("player_talk: %d 处失败" % fails)
 	quit(fails)
