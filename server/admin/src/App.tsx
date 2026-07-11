@@ -6,11 +6,13 @@ import { PlayerDetailPage } from './pages/PlayerDetail.tsx';
 import { WorldsPage } from './pages/Worlds.tsx';
 import { WorldDetailPage } from './pages/WorldDetail.tsx';
 import { CharacterDetailPage } from './pages/CharacterDetail.tsx';
+import { DataPage } from './pages/Data.tsx';
 
 const NAV = [
   { to: '/', zh: '总览', en: 'overview', end: true },
   { to: '/players', zh: '玩家', en: 'players', end: false },
   { to: '/worlds', zh: '世界', en: 'worlds', end: false },
+  { to: '/data', zh: '数据', en: 'backup', end: false },
 ];
 
 export function App() {
@@ -46,6 +48,7 @@ export function App() {
             <Route path="/worlds" element={<WorldsPage />} />
             <Route path="/worlds/:id" element={<WorldDetailPage />} />
             <Route path="/worlds/:id/characters/:cid" element={<CharacterDetailPage />} />
+            <Route path="/data" element={<DataPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
