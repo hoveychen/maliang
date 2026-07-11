@@ -1,8 +1,8 @@
 extends SceneTree
 ## 临时视觉验证（不进回测，服务人眼 QA）：基础交互演出截帧。
-## 编排（--fixed-fps 8）：1s 小蓝开始跟随玩家 → 玩家绕广场走一圈（跟随拖尾）→
-## 6s 小蓝连做四个动作（挥手/跳/转圈/点头）→ 12s 小绿去找小黄聊天（面对+轮流气泡）→
-## 19s 点名传话：对小绿点名小蓝跳——小绿跑腿到小蓝旁交接，小蓝点头应答后跳 → 25s 结束。
+## 编排（--fixed-fps 8）：1s 舞舞兔开始跟随玩家 → 玩家绕广场走一圈（跟随拖尾）→
+## 6s 舞舞兔连做四个动作（挥手/跳/转圈/点头）→ 12s 灵狐小围巾去找花环小鹿聊天（面对+轮流气泡）→
+## 19s 点名传话：对灵狐小围巾点名舞舞兔跳——灵狐小围巾跑腿到舞舞兔旁交接，舞舞兔点头应答后跳 → 25s 结束。
 ## 环境变量：PITCH/DIST 调相机（如 PITCH=30 DIST=16 近景）。
 ## 运行: godot --write-movie <目录>/f.png --fixed-fps 8 --quit-after 200 \
 ##       --script res://test/test_visual_interactions_shot.gd
@@ -37,9 +37,9 @@ func _tick() -> void:
 		_teleport(player, Vector2i(37, 37))
 		for n in (scene.get("npcs") as Array):
 			match (n["node"] as PaperCharacter).char_name:
-				"小蓝": blue = n
-				"小绿": green = n
-				"小黄": yellow = n
+				"舞舞兔": blue = n
+				"灵狐小围巾": green = n
+				"花环小鹿": yellow = n
 		_teleport(blue, Vector2i(40, 37))
 		_teleport(green, Vector2i(34, 36))
 		_teleport(yellow, Vector2i(34, 40))
@@ -61,9 +61,9 @@ func _tick() -> void:
 				{ "type": "do_action", "params": { "action": "nod" } },
 			], "loop": false })
 		96:
-			_inject(green, { "commands": [{ "type": "chat_with", "params": { "character_name": "小黄" } }], "loop": false })
+			_inject(green, { "commands": [{ "type": "chat_with", "params": { "character_name": "花环小鹿" } }], "loop": false })
 		152:
-			# 点名传话：玩家正与小绿对话，点名小蓝跳——小绿跑腿交接，小蓝点头应答后跳
+			# 点名传话：玩家正与灵狐小围巾对话，点名舞舞兔跳——灵狐小围巾跑腿交接，舞舞兔点头应答后跳
 			scene.set("selected", green["node"])
 			_inject(blue, { "commands": [{ "type": "do_action", "params": { "action": "jump" } }], "loop": false })
 	# 玩家走一段折线（8m/s@8fps，走东/南开阔路面别让房子挡镜头），跟随者拖尾；动作/聊天阶段站住看戏

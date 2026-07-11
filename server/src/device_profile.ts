@@ -11,8 +11,10 @@
  * 旧样本按不同 version 隔离，自然作废。
  */
 
-/** benchmark 口径版本：渲染管线/负载场景/旋钮集合变了就 +1，旧样本自动隔离作废。 */
-export const BENCH_VERSION = 1;
+/** benchmark 口径版本：渲染管线/负载场景/旋钮集合变了就 +1，旧样本自动隔离作废。
+ *  必须与 scripts/device_profile.gd 的 BENCH_VERSION 一致。
+ *  v2（P5）：压测负载换 seed 村民图集 + 采样期冻结世界，渲染成本口径变了 → 旧 v1 样本作废。 */
+export const BENCH_VERSION = 2;
 
 export type Levels = Record<string, number>;
 

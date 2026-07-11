@@ -60,6 +60,17 @@ static func save_play_budget(used_sec: float, cooldown_until: float, last_active
 	p["play_budget"] = { "used_sec": used_sec, "cooldown_until": cooldown_until, "last_active": last_active }
 	save_profile(p)
 
+## 「建造小世界」前置演出是否已看过（首次进世界的教学段据此只演一次）。
+## 存本机档案；缺失/离线（无档案）视为未看过 → 首启进 intro。见 world._need_intro。
+static func intro_seen() -> bool:
+	return bool(load_profile().get("intro_seen", false))
+
+## 标记 intro 已看过（转正后调用）。档案不存在则新建只含此标志的档案（离线首启也能记住）。
+static func mark_intro_seen() -> void:
+	var p := load_profile()
+	p["intro_seen"] = true
+	save_profile(p)
+
 ## 确保档案里有稳定玩家 id：设备端「开始新游戏」时生成的 UUID（面向未来 MMO / QR 换机迁移）。
 ## 首次调用生成并写盘；已有则原样返回。无鉴权——这个 UUID 就是玩家唯一身份。
 static func ensure_player_id() -> String:

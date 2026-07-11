@@ -35,6 +35,11 @@ func feed(delta: float) -> void:
 func is_done() -> bool:
 	return _t > _warmup + _window
 
+## 是否还在 warmup 段（这段帧被丢弃、不计 p95）。embedded benchmark 据此把「世界成形」的动静
+## 安排在采样窗【间隙】（warmup）里，让计入统计的 window 段保持静止（可复现帧）。纯读取，不改采样。
+func is_warming() -> bool:
+	return _t <= _warmup
+
 ## p95 帧时（毫秒）；还没有样本时返回 0。
 func p95_ms() -> float:
 	if _ms.is_empty():

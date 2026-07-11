@@ -26,7 +26,7 @@ func _initialize() -> void:
 func _task(type: String, over := {}) -> Dictionary:
 	var t := {
 		"id": "t_%s" % type, "type": type, "npcId": String(green.get("id", "")),
-		"npcName": "小绿", "stampStyle": "star",
+		"npcName": "灵狐小围巾", "stampStyle": "star",
 	}
 	t.merge(over, true)
 	return t
@@ -39,8 +39,8 @@ func _tick() -> void:
 		root.size = Vector2i(1280, 720)
 		for n in (scene.get("npcs") as Array):
 			match (n["node"] as PaperCharacter).char_name:
-				"小蓝": blue = n
-				"小绿": green = n
+				"舞舞兔": blue = n
+				"灵狐小围巾": green = n
 		(scene.get("backend") as Backend).sent.connect(func(m: Dictionary) -> void: sent.append(m))
 		scene.set("online", true) # 离线世界里启用任务判定钩子（send 由 sent 信号观测）
 		return
@@ -48,7 +48,7 @@ func _tick() -> void:
 		3:
 			# world_state 同步：钱包+进行中委托 → chip 可见、小红花计数亮起
 			scene.call("_on_world_state", { "wallet": { "flowers": 2, "stampProgress": 1, "stampsTotal": 4 },
-				"activeTask": _task("deliver", { "targetName": "小蓝", "message": "hi" }) })
+				"activeTask": _task("deliver", { "targetName": "舞舞兔", "message": "hi" }) })
 			var chip := scene.get("task_chip") as HBoxContainer
 			_check("task chip visible", chip.visible, true)
 			var chip_text := ""
@@ -58,7 +58,7 @@ func _tick() -> void:
 					chip_text += (c as Label).text
 				elif c is TextureRect:
 					chip_icons += 1
-			_check("task chip shows goal", chip_text.contains("小蓝"), true)
+			_check("task chip shows goal", chip_text.contains("舞舞兔"), true)
 			_check("task chip shows target+stamp icons", chip_icons >= 2, true)
 			_check("wallet flowers synced", scene.call("_red_flower_count"), 2)
 			scene.call("_toggle_album")
@@ -81,8 +81,8 @@ func _tick() -> void:
 			_check("quest giver celebrates (jump)", String(green.get("paper_action", "")), "jump")
 			_check("fairy cheers on reward", fv.is_playing(), true)
 		12:
-			# bring 判定：目标与委托人相邻（直接把小蓝挪到小绿旁）
-			scene.call("_set_active_task", _task("bring", { "targetName": "小蓝" }))
+			# bring 判定：目标与委托人相邻（直接把舞舞兔挪到灵狐小围巾旁）
+			scene.call("_set_active_task", _task("bring", { "targetName": "舞舞兔" }))
 			blue["logical"] = WorldGrid.wrap_pos((green["logical"] as Vector2) + Vector2(2.0, 0.0))
 			OccupancyMap.char_register(String(blue.get("id", "")), blue["logical"], 2)
 		25:

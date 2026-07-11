@@ -241,6 +241,8 @@ var _executors: Array = []        ## 活跃的 BehaviorExecutor
 var _stage: StageAgent            ## 舞台协议大脑（剧本系统，见 stage_agent.gd）；_setup_backend 接线
 var _hud: HudFactory              ## 舞台 HUD 工厂（计分/倒计时/toast，见 hud_factory.gd）；_setup_hud 建
 var _stage_active := false        ## 观演/游戏态：期间吞玩家输入，StageAgent 全权调度演出
+var _bench_freeze := false         ## intro benchmark 全程：锁玩家输入 + 仙子注魔定格（相机/主角不动）
+var _bench_still := false           ## intro benchmark 采样窗(window)内：冻结村民动态；warmup 间隙放行让世界"成形"
 var _stage_drives: Array = []     ## 进行中的完成型舞台命令 { ex:BehaviorExecutor, done:Callable }
 var _stage_holds: Array = []      ## 设置型持续驱动的执行器（follow/flee）：收场统一 cancel（永不自完成）
 var _stage_speaks: Array = []     ## 进行中的舞台念白 { done:Callable, deadline:float, started:bool }
@@ -363,8 +365,16 @@ func _ready() -> void:
 	api.name = "Api"
 	add_child(api)
 	_setup_audio()
-	_bootstrap() # 在线引导（best-effort，离线则保留占位 NPC）
-	_watch_world_ready() # 首屏铺完+引导结束→发 world_ready（loading.gd 据此淡出）
+	# 分流：intro 由上游（menu/onboarding）按 IntroDirector.should_run（无画质档 / 未看过建造演出）
+	# 置 pending——与 Benchmark.pending 同款显式开关，避免每个 headless 测试都误入 intro。见分流矩阵。
+	if IntroDirector.pending:
+		IntroDirector.pending = false # 消费掉：一次就够
+		_intro_active = true
+		_intro = IntroDirector.make(self)
+		add_child(_intro) # 编排器 _ready 里早揭幕 + 后台 fetch + 建造演出 + 转正 apply + 标记 intro 已看过
+	else:
+		_bootstrap() # 在线引导（best-effort，离线则保留占位 NPC）
+		_watch_world_ready() # 首屏铺完+引导结束→发 world_ready（loading.gd 据此淡出）
 
 func _setup_audio() -> void:
 	# 麦克风采集抽到 MicRecorder（与 onboarding 共用）；TTS 播放器保留在本场景
@@ -663,19 +673,28 @@ func _step_hop(delta: float) -> void:
 		_hop_t = -1.0
 		OccupancyMap.char_register(PLAYER_ID, _stage_player_logical, PLAYER_SPAN)
 
+## 离线/intro 的 demo 村民：用打包的 seed 村民图集（VillagerAssets）以 idle 动画降生，
+## 不再是染色 critter 静态占位。id 用 demo_<slug>（demo_ 前缀 → _LOCAL_ONLY_IDS 本地专属、
+## 绝不上报）；转正（在线 bootstrap）时清掉、换成服务端村民（同款 seed 则视觉无缝，见设计 D2）。
 func _setup_npcs() -> void:
-	var defs := [
-		{ "logical": Vector2(10.0, -10.0), "color": Color(0.62, 0.80, 1.0), "name": "小蓝" },
-		{ "logical": Vector2(-11.0, -9.0), "color": Color(0.70, 1.0, 0.62), "name": "小绿" },
-		{ "logical": Vector2(1.0, -18.0), "color": Color(1.0, 0.82, 0.5), "name": "小黄" },
-	]
-	for d in defs:
+	var positions := [Vector2(10.0, -10.0), Vector2(-11.0, -9.0), Vector2(1.0, -18.0)]
+	var seed: Array = VillagerAssets.SEED
+	for i in range(positions.size()):
+		var v: Dictionary = seed[i % seed.size()]
 		var npc := PaperCharacter.new()
 		add_child(npc)
-		npc.setup(critter_tex, d["color"], d["name"])
-		var lg := WorldGrid.wrap_pos(d["logical"])
-		npcs.append({ "node": npc, "logical": lg, "id": "demo_%s" % d["name"] })
-		OccupancyMap.char_register("demo_%s" % d["name"], lg, 2)
+		# 先用 critter 占位跑通 setup（内部归一尺寸 + 挂脚下暗斑），再切村民图集动画。
+		# 图集加载失败（理论上不会）则保留占位，不崩。
+		npc.setup(critter_tex, Color.WHITE, String(v["name"]))
+		var atlas := load(String(v["atlas"])) as Texture2D
+		if atlas != null:
+			# 相位按序错开，避免三只同帧起跳的机械感（31帧/8fps ≈ 3.9s 循环），与 _spawn_server_character 一致
+			var phase := float(i) / float(positions.size()) * 3.9
+			npc.play_idle(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
+		var lg := WorldGrid.wrap_pos(positions[i])
+		var did := "demo_%s" % String(v["slug"])
+		npcs.append({ "node": npc, "logical": lg, "id": did })
+		OccupancyMap.char_register(did, lg, 2)
 		_start_ambient_wander(npcs[npcs.size() - 1])
 
 ## 让角色自主活动：循环「等一会 → 就近 wander」。
@@ -784,6 +803,8 @@ func _setup_fairy_offline() -> void:
 ## 小仙子随从每帧驱动：悬浮漂移跟在玩家旁（玩家跑动时拖尾追赶，静止时缓慢环绕），
 ## 轻微上下浮动。永远由这里驱动，不吃行为脚本（见 _run_behavior）。
 func _update_fairy(delta: float) -> void:
+	if _bench_freeze:
+		return # benchmark 采样期：仙子凝神注魔定格（不飘、不聊、不追随），保持负载恒定
 	var fairy := _find_fairy()
 	if fairy.is_empty() or player.is_empty():
 		return
@@ -1433,6 +1454,7 @@ func _process(delta: float) -> void:
 	_update_fairy(delta)
 	tp = _prof_lap(tp, "fairy")
 	_step_voice(delta)
+	_step_intro_listen(delta) # intro 教学「开口说话」步的本地 VAD 监听（非 intro 期为空转）
 	_step_edge_tts(delta)
 	_step_pending_leave(delta) # 「说完再走」：回应播完才动身+关对话（缺陷 ④）
 	tp = _prof_lap(tp, "voice")
@@ -1857,6 +1879,8 @@ func _step_remote_actors(_delta: float) -> void:
 			_exit_player_talk()
 
 func _step_executors(delta: float) -> void:
+	if _bench_still:
+		return # benchmark 采样窗(window)内：村民停走定格保持负载恒定；warmup 间隙放行让世界"成形"有动静
 	for ex in _executors:
 		ex.step(delta)
 	# 单趟分拣（旧版两次 filter 每帧各分配一个数组+Callable，无人完成时纯浪费）
@@ -2148,6 +2172,10 @@ func _update_hud() -> void:
 	]
 
 func _unhandled_input(event: InputEvent) -> void:
+	# benchmark 采样期：吞掉一切玩家输入（点击移动/手势/缩放），玩家不动→相机不动→可复现帧。
+	# 注：将来若把「家长长按跳过 intro」接到输入，须让它绕过这道门（否则采样期跳不了）。
+	if _bench_freeze:
+		return
 	# 观演/游戏态：StageAgent 全权调度演出，吞掉一切玩家输入（点击移动/进对话/手势/缩放）。
 	# 唯一例外——「点角色」这类游戏规则（躲猫猫抓人/点选）仍要探测：命中被 watch 的演员即上行 tap 事件。
 	# 玩家想退场（"不玩了"）走别的通道（提词/横幅按钮），不从这里放行。
@@ -3254,49 +3282,148 @@ func _filter_boot_characters(all: Array) -> Array:
 			chars.append(cd)
 	return chars
 
+## 在线引导 = 拉取半段 + 应用半段顺序执行（现状路径，行为与拆分前一致）。
+## intro 模式（P3+）把两段拆开：fetch 在建造演出期后台跑，apply 在转正点演出化执行。
 func _bootstrap() -> void:
+	var fetched := await _bootstrap_fetch()
+	await _bootstrap_apply(fetched)
+
+## 拉取半段：get_world + 实体定义就位 + 角色素材并发预取。**只落缓存/内存与数据，不动场景任何节点**
+## （ItemCatalog.set_defs 是纯数据、_prefetch_characters 只写 asset 缓存）——故 intro 可后台跑这段而
+## 世界仍是离线占位形态。返回 { world, chars, prefetched }；离线（get_world 空）返回 {}。
+## 真正的场景变更（重铺地形/清占位/降生村民/搬玩家/接 WS）在 _bootstrap_apply。
+func _bootstrap_fetch() -> Dictionary:
 	_bootstrapping = true
 	_player_restore_pending = true
 	_boot_status = "连接精灵世界…"
-	_apply_player_sprite() # 档案形象替换占位（并行拉取，不阻塞世界引导）
+	_apply_player_sprite() # 玩家自己的档案形象替换占位（并行拉取，不阻塞）——是占位的自我替换，非服务端状态
 	# 加载固定的 default 世界（含预生成村民），不再每次新建
 	var world: Dictionary = await api.get_world("default")
 	_boot_stage = 1 # 网络已定音（成功或离线），loading 进度推进到中段
-	if not world.is_empty():
-		online = true
-		world_id = String(world.get("id", "default"))
-		ItemCatalog.set_defs(world.get("items", [])) # 实体定义先就位（矩阵 palette 的解引用依据）
-		await _load_server_terrain(world.get("scenes", []))
-		backend.url = (api.base as String).replace("http", "ws") + "/ws"
-		backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入
-		backend.connect_to_server()
-		for n in npcs:
-			OccupancyMap.char_unregister(String(n.get("id", "")))
-			(n["node"] as Node).queue_free() # 清掉离线占位
-		npcs.clear()
-		var chars: Array = _filter_boot_characters(world.get("characters", []))
-		# 先并发预取所有角色素材（anim 优先，跳静态大图）：冷启动从「逐个立绘串行下载」的长尾
-		# 降到「最慢一个并发」，杜绝首次进世界接近 25s 揭幕硬超时、村民后补的观感。
-		var total := chars.size()
-		_boot_status = "唤醒村民 0/%d" % total
-		var prefetched := await _prefetch_characters(chars)
-		# 素材已就位，顺序降生（命中内存缓存瞬时）；逐个推进 _boot_sub，loading 仙子据此持续前行。
-		for i in range(total):
-			_boot_status = "唤醒村民 %d/%d" % [i + 1, total]
-			await _spawn_server_character(chars[i] as Dictionary, Vector2.INF, prefetched)
-			_boot_sub = float(i + 1) / float(total) if total > 0 else 1.0
-		_boot_status = "布置世界…"
-		# 摆着的造物在场景矩阵物品层里（随地形一并就位），背包由 world_state 下发
-		# 玩家搬到小神仙旁边降生，相机跟着玩家过去
-		var fairy := _find_fairy()
-		if not fairy.is_empty():
-			focus_logical = fairy["logical"]
-			if not player.is_empty():
-				var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
-				player["logical"] = spot
-				OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
-	else:
+	if world.is_empty():
+		return {}
+	ItemCatalog.set_defs(world.get("items", [])) # 实体定义先就位（矩阵 palette 的解引用依据，纯数据）
+	var chars: Array = _filter_boot_characters(world.get("characters", []))
+	# 先并发预取所有角色素材（anim 优先，跳静态大图）：冷启动从「逐个立绘串行下载」的长尾
+	# 降到「最慢一个并发」，杜绝首次进世界接近 25s 揭幕硬超时、村民后补的观感。素材只落缓存。
+	_boot_status = "唤醒村民 0/%d" % chars.size()
+	var prefetched := await _prefetch_characters(chars)
+	return { "world": world, "chars": chars, "prefetched": prefetched }
+
+## 应用半段（转正点执行）：把 fetch 好的服务端世界落地——重铺地形、清离线占位、降生村民、搬玩家、接 WS。
+## **场景变更全在这里**。fetched 为空 = 离线，保留占位世界。
+func _bootstrap_apply(fetched: Dictionary) -> void:
+	if fetched.is_empty():
 		_boot_status = "离线模式"
+		_finish_bootstrap()
+		return
+	var world: Dictionary = fetched.get("world", {})
+	online = true
+	world_id = String(world.get("id", "default"))
+	await _load_server_terrain(world.get("scenes", []))
+	backend.url = (api.base as String).replace("http", "ws") + "/ws"
+	backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入
+	backend.connect_to_server()
+	for n in npcs:
+		OccupancyMap.char_unregister(String(n.get("id", "")))
+		(n["node"] as Node).queue_free() # 清掉离线占位
+	npcs.clear()
+	var chars: Array = fetched.get("chars", [])
+	var prefetched: Dictionary = fetched.get("prefetched", {})
+	# 素材已就位，顺序降生（命中内存缓存瞬时）；逐个推进 _boot_sub，loading 仙子据此持续前行。
+	var total := chars.size()
+	for i in range(total):
+		_boot_status = "唤醒村民 %d/%d" % [i + 1, total]
+		await _spawn_server_character(chars[i] as Dictionary, Vector2.INF, prefetched)
+		_boot_sub = float(i + 1) / float(total) if total > 0 else 1.0
+	_boot_status = "布置世界…"
+	# 摆着的造物在场景矩阵物品层里（随地形一并就位），背包由 world_state 下发
+	# 玩家搬到小神仙旁边降生，相机跟着玩家过去
+	var fairy := _find_fairy()
+	if not fairy.is_empty():
+		focus_logical = fairy["logical"]
+		if not player.is_empty():
+			var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
+			player["logical"] = spot
+			OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	_finish_bootstrap()
+
+## intro 编排器（intro 模式下驱动 fetch/apply 与建造演出；现状路径为 null）。
+var _intro: IntroDirector = null
+var _intro_active := false
+
+## 当前是否处于「建造小世界」intro 前置阶段（loading/其它模块可据此调整揭幕节奏）。
+func intro_active() -> bool:
+	return _intro_active
+
+## intro 内嵌 benchmark 全程冻结（Benchmark embedded 模式 _ready/finish 开关，见设计 D5）：锁玩家
+## 移动输入（相机/主角不动）+ 仙子注魔定格（含闭嘴，语音让位注魔旁白）。整段 benchmark 都开着，
+## 保证不管在采样窗内还是间隙，玩家/相机/仙子都不动——这是可复现帧的地基。
+func set_bench_freeze(on: bool) -> void:
+	_bench_freeze = on
+	if not on:
+		_bench_still = false # 收尾一并解除采样窗静止，避免残留
+
+## 采样窗(window)内冻结村民动态（Benchmark._process 按 FrameSampler.is_warming 逐帧开关）：计入 p95 的
+## window 段静止 → 负载恒定；warmup 间隙(帧被丢弃)放行村民微动，让世界在采样窗【间隙】"有动静地成形"
+## （设计 D5：采样窗内静止、采样窗之间播建造动静）。仙子的定格/输入锁由 _bench_freeze 全程管，不受此开关。
+func set_bench_still(on: bool) -> void:
+	_bench_still = on
+
+# ── intro 教学「开口说话」步（P4）───────────────────────────────────────────
+# 只用本地 VAD 检测「孩子开口」这个手势——不建 ASR 会话、不上传任何 PCM、不理解内容
+# （见设计 D4）。与近身对话的 _step_voice/_vad 完全独立：intro 期 selected 为 null、_vad 为 null，
+# _step_voice 早返回，不会双开麦。
+var _intro_listening := false
+var _intro_heard := false
+var _intro_listen_vad: VoiceVad = null
+var _intro_listen_grace := 0.0
+
+## 教学「开口说话」步是否被 ASR 门禁挡下（端侧应有却未就绪 → 跳过本步，绝不上传 PCM）。
+## 桌面/headless（非导出）恒 false，可正常走本地 VAD 检测开口。
+func intro_asr_blocked() -> bool:
+	return AsrGuard.must_wait_for_ready(_os_name, _asr_is_ready(), OS.has_feature("template"))
+
+## 开始教学监听。调用前须先 intro_asr_blocked() 判门禁。检测到开口即置 _intro_heard。
+func intro_listen_begin() -> void:
+	if _intro_listening:
+		return
+	_intro_heard = false
+	_intro_listening = true
+	_intro_listen_vad = VoiceVad.new()
+	_intro_listen_grace = UNMUTE_GRACE # 刚播完的旁白余响不算开口
+	_mic.start()
+
+func intro_listen_end() -> void:
+	if not _intro_listening:
+		return
+	_intro_listening = false
+	_intro_listen_vad = null
+	_mic.stop()
+
+func intro_heard_speech() -> bool:
+	return _intro_heard
+
+## 每帧推进教学监听：排空麦 PCM 喂本地 VAD，检测到「开口(start)」即算完成。
+func _step_intro_listen(delta: float) -> void:
+	if not _intro_listening or _intro_listen_vad == null:
+		return
+	var pcm := _mic.drain_pcm16k()
+	if _intro_listen_grace > 0.0:
+		_intro_listen_grace -= delta
+		return
+	intro_feed_pcm(pcm)
+
+## VAD 喂入（headless 测试注入合成 PCM 走同一判定，见 test_intro_tutorial）。
+func intro_feed_pcm(pcm: PackedByteArray) -> void:
+	if _intro_listen_vad == null:
+		return
+	for ev in _intro_listen_vad.feed(pcm):
+		if String(ev["type"]) == "start":
+			_intro_heard = true
+
+## 引导收尾：里程碑置终、清 _bootstrapping（world_ready 守望据此揭幕）。fetch/apply 两条出口共用。
+func _finish_bootstrap() -> void:
 	_boot_stage = 2 # 角色/props 就位、玩家已落到最终位——引导侧全部完成
 	_boot_sub = 1.0
 	_boot_status = "就绪"
