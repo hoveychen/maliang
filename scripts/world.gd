@@ -2005,6 +2005,7 @@ func _process(delta: float) -> void:
 	_update_fairy(delta)
 	tp = _prof_lap(tp, "fairy")
 	_step_voice(delta)
+	_step_intro_listen(delta) # intro 教学「开口说话」步的本地 VAD 监听（非 intro 期为空转）
 	_step_edge_tts(delta)
 	_step_pending_leave(delta) # 「说完再走」：回应播完才动身+关对话（缺陷 ④）
 	tp = _prof_lap(tp, "voice")
@@ -3675,6 +3676,58 @@ var _intro_active := false
 ## 当前是否处于「建造小世界」intro 前置阶段（loading/其它模块可据此调整揭幕节奏）。
 func intro_active() -> bool:
 	return _intro_active
+
+# ── intro 教学「开口说话」步（P4）───────────────────────────────────────────
+# 只用本地 VAD 检测「孩子开口」这个手势——不建 ASR 会话、不上传任何 PCM、不理解内容
+# （见设计 D4）。与近身对话的 _step_voice/_vad 完全独立：intro 期 selected 为 null、_vad 为 null，
+# _step_voice 早返回，不会双开麦。
+var _intro_listening := false
+var _intro_heard := false
+var _intro_listen_vad: VoiceVad = null
+var _intro_listen_grace := 0.0
+
+## 教学「开口说话」步是否被 ASR 门禁挡下（端侧应有却未就绪 → 跳过本步，绝不上传 PCM）。
+## 桌面/headless（非导出）恒 false，可正常走本地 VAD 检测开口。
+func intro_asr_blocked() -> bool:
+	return AsrGuard.must_wait_for_ready(_os_name, _asr_is_ready(), OS.has_feature("template"))
+
+## 开始教学监听。调用前须先 intro_asr_blocked() 判门禁。检测到开口即置 _intro_heard。
+func intro_listen_begin() -> void:
+	if _intro_listening:
+		return
+	_intro_heard = false
+	_intro_listening = true
+	_intro_listen_vad = VoiceVad.new()
+	_intro_listen_grace = UNMUTE_GRACE # 刚播完的旁白余响不算开口
+	_mic.start()
+
+func intro_listen_end() -> void:
+	if not _intro_listening:
+		return
+	_intro_listening = false
+	_intro_listen_vad = null
+	_mic.stop()
+
+func intro_heard_speech() -> bool:
+	return _intro_heard
+
+## 每帧推进教学监听：排空麦 PCM 喂本地 VAD，检测到「开口(start)」即算完成。
+func _step_intro_listen(delta: float) -> void:
+	if not _intro_listening or _intro_listen_vad == null:
+		return
+	var pcm := _mic.drain_pcm16k()
+	if _intro_listen_grace > 0.0:
+		_intro_listen_grace -= delta
+		return
+	intro_feed_pcm(pcm)
+
+## VAD 喂入（headless 测试注入合成 PCM 走同一判定，见 test_intro_tutorial）。
+func intro_feed_pcm(pcm: PackedByteArray) -> void:
+	if _intro_listen_vad == null:
+		return
+	for ev in _intro_listen_vad.feed(pcm):
+		if String(ev["type"]) == "start":
+			_intro_heard = true
 
 ## 引导收尾：里程碑置终、清 _bootstrapping（world_ready 守望据此揭幕）。fetch/apply 两条出口共用。
 func _finish_bootstrap() -> void:

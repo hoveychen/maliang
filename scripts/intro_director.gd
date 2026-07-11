@@ -1,21 +1,22 @@
 class_name IntroDirector
 extends Node
-## 「建造小世界」前置演出编排器（P3 骨架）。挂在 world 上（类比 Benchmark.make(world)），
-## 在 world intro 模式下驱动：早揭幕 → 后台预取(fetch) → 建造演出 → benchmark 段 → 转正(apply)。
+## 「建造小世界」前置演出编排器（P3 骨架 → P4 旁白+教学）。挂在 world 上（类比 Benchmark.make(world)），
+## 在 world intro 模式下驱动：早揭幕 → 后台预取(fetch) → 建造演出(旁白+教学) → benchmark 段 → 转正(apply)。
 ##
 ## 载体 = world 的 intro 模式（不新增场景，见设计 D1）：world 照常 _ready（打包地形+seed 村民占位+
 ## 本地仙子＝虚拟场景），本编排器只管演出节奏与「拉取/应用」两半段的时序。
 ##
-## 分段职责边界（本文件是骨架，占位段留给后续 P 落地）：
+## 分段职责边界：
 ##   - 早揭幕：首屏铺几帧后 emit world_ready，让 loading 过场淡出、露出建造演出（复用现有 reveal）。
 ##   - fetch：world._bootstrap_fetch 后台跑（只落缓存/数据，不动场景）——见 world.gd P3 地基。
-##   - 建造演出（P4 旁白+教学 / P5 建造动画）：此处目前是占位等待，可被家长长按 skip() 跳过。
+##   - 建造演出（P4）：IntroNarrator 顺序播预制旁白（开场/建造/伙伴/转正）；无档案(未看过引导)时
+##       穿插教学段（走路→靠近村民→开口说话，见 _run_tutorial / 设计 D4）。可被家长长按 skip() 跳过。
 ##   - benchmark 段（P5）：无画质档时跑贪心定档；骨架先采纳当前保守默认档为已定档（source=intro-default），
 ##       使 has_saved() 转真、下次启动不再因缺画质档重进 intro。真 benchmark 由 P5 替换。
 ##   - 转正：等 fetch（超时兜底）→ world._bootstrap_apply 演出化落地服务端世界 → 标记 intro 已看过。
 ##
-## 兜底：离线（fetch 空）→ apply 保留虚拟世界；弱网（fetch 超时未完）→ 先离线转正，不阻塞（骨架取此
-## 保守策略，服务端角色后补弹入的精细化留后续）；长按 skip → 立即跳到转正。
+## 兜底：离线（fetch 空）→ apply 保留虚拟世界；弱网（fetch 超时未完）→ 先离线转正，不阻塞（服务端
+## 角色后补弹入的精细化留后续）；长按 skip → 停旁白/收麦、立即跳到转正。
 
 signal finished
 
@@ -29,11 +30,17 @@ static func should_run() -> bool:
 	return not GraphicsSettings.has_saved() or not PlayerProfile.intro_seen()
 
 const REVEAL_FRAMES := 3          ## 首屏铺几帧后早揭幕（loading 淡出露出建造演出）
-const BUILD_SHOW_SEC := 2.0       ## 建造演出占位时长（P4/P5 用真旁白+动画时长替换）
+const NARRATE_TAIL := 0.4         ## 每条旁白播完后的停顿（秒），衔接不抢拍
 const FETCH_TIMEOUT_SEC := 20.0   ## 转正前等 fetch 的上限（弱网兜底：到点先离线转正）
 const POLL_SEC := 0.1
+const WALK_DIST := 3.0            ## 教学「走路」达标位移（逻辑单位）
+const APPROACH_RADIUS := 6.0      ## 教学「靠近村民」达标半径（< world.NOTICE_RADIUS=6.5，保证村民会挥手 emote）
+const STEP_TIMEOUT_SEC := 25.0    ## 单个教学步等孩子操作的上限（到点静默推进，不卡住演出）
+const LISTEN_TIMEOUT_SEC := 15.0  ## 教学「开口说话」步等开口的上限
 
 var _world: Node3D
+var _narrator: IntroNarrator
+var _tutorial := false            ## 是否演教学段（无档案/未看过引导；run 开始时定，早于 mark_intro_seen）
 var _fetched: Dictionary = {}
 var _fetch_done := false
 var _skipped := false
@@ -51,11 +58,20 @@ func _ready() -> void:
 ## 家长长按跳过：置位后各占位段提前结束、直奔转正（fetch 继续后台跑，benchmark 未完则不定档留待下次）。
 func skip() -> void:
 	_skipped = true
+	if _narrator != null:
+		_narrator.stop()
+	if is_instance_valid(_world):
+		_world.call("intro_listen_end") # 教学监听中被跳过：立即收麦（幂等）
 
 func is_done() -> bool:
 	return _done
 
 func _run() -> void:
+	_tutorial = not PlayerProfile.intro_seen() # 首次(未看过引导)才演教学；返回用户(仅补画质档)跳过
+	_narrator = IntroNarrator.new()
+	_narrator.name = "IntroNarrator"
+	add_child(_narrator)
+
 	# ① 早揭幕：等首屏铺几帧（避免揭幕即黑屏），emit world_ready → loading 过场淡出、露出世界。
 	for _i in range(REVEAL_FRAMES):
 		await get_tree().process_frame
@@ -65,8 +81,8 @@ func _run() -> void:
 	# ② 后台预取（建造演出期间跑）：只落缓存/数据，不动场景。
 	_fetch_bg()
 
-	# ③ 建造演出（占位；P4 接旁白+教学、P5 接建造动画）。可被 skip 打断。
-	await _sleep(BUILD_SHOW_SEC)
+	# ③ 建造演出：旁白 + （首次）教学。可被 skip 打断。
+	await _show_intro()
 
 	# ④ benchmark 段（占位；P5 接贪心定档）。骨架：无画质档时采纳当前保守默认为已定档。
 	if not GraphicsSettings.has_saved():
@@ -84,6 +100,108 @@ func _run() -> void:
 	PlayerProfile.mark_intro_seen()
 	_done = true
 	finished.emit()
+
+## 建造演出脚本（设计 §5）。开场→建造→伙伴用预制旁白铺节奏；首次玩家穿插教学段；末尾转正旁白。
+## 注魔段(intro_magic_1)留给 P5 真 benchmark 段播放，此处不抢。
+func _show_intro() -> void:
+	await _narrate("intro_open_1")
+	await _narrate("intro_build_1")
+	await _narrate("intro_build_2")
+	await _narrate("intro_partner_1")
+	if _tutorial:
+		await _run_tutorial()
+	await _narrate("intro_ready_1")
+
+## 教学段（仅无档案/首次，见设计 D4）：走路 → 靠近村民（村民只 emote 不开口）→ 开口说话。
+## 每步都有超时兜底，孩子不操作也会静默推进，不卡演出。
+func _run_tutorial() -> void:
+	await _tutorial_walk()
+	await _tutorial_approach()
+	await _tutorial_speak()
+
+## 走路：旁白引导点地走 → 检测玩家位移达标 → 夸奖。点击移动在 intro 期正常可用（intro 不 gate 输入）。
+func _tutorial_walk() -> void:
+	if _skipped:
+		return
+	await _narrate("intro_walk_ask")
+	var start := _player_logical()
+	var moved := await _wait_until(func() -> bool:
+		return WorldGrid.shortest_delta(start, _player_logical()).length() >= WALK_DIST, STEP_TIMEOUT_SEC)
+	if moved:
+		await _narrate("intro_walk_ok")
+
+## 靠近村民：旁白引导走近 → 玩家进 APPROACH_RADIUS，world._update_npc_notice 自动令村民挥手 emote
+## （不开口说话，守「预制音色=运行期音色」契约）→ 夸奖。
+func _tutorial_approach() -> void:
+	if _skipped:
+		return
+	await _narrate("intro_near_ask")
+	var near := await _wait_until(func() -> bool:
+		return _nearest_villager_dist() <= APPROACH_RADIUS, STEP_TIMEOUT_SEC)
+	if near:
+		await _narrate("intro_near_ok")
+
+## 开口说话：教「话筒亮了就能说」这个手势。本地 VAD 检测到开口即算完成，不理解内容、不上传 PCM。
+## 端侧 ASR 未就绪(旧 Android 首次加载)→ 跳过本步（只教走路/靠近），绝不为教学开服务端上传口子。
+func _tutorial_speak() -> void:
+	if _skipped:
+		return
+	if bool(_world.call("intro_asr_blocked")):
+		return
+	await _narrate("intro_talk_ask")
+	_world.call("intro_listen_begin")
+	var heard := await _wait_until(func() -> bool:
+		return bool(_world.call("intro_heard_speech")), LISTEN_TIMEOUT_SEC)
+	_world.call("intro_listen_end")
+	if heard:
+		await _narrate("intro_talk_ok")
+
+## 播一条旁白并 await 其时长（+尾停）。skip 后立即返回不再播。播放期间压低 BGM。
+func _narrate(id: String) -> void:
+	if _skipped or _narrator == null:
+		return
+	var dur := _narrator.play(id)
+	_duck(true)
+	await _sleep(dur + NARRATE_TAIL)
+	_duck(false)
+
+## 压低/恢复 BGM（旁白期间让仙子的声音清楚）。game_audio 未就绪则静默跳过。
+func _duck(on: bool) -> void:
+	if not is_instance_valid(_world):
+		return
+	var ga: Variant = _world.get("game_audio")
+	if ga != null and (ga as Node).has_method("set_ducked"):
+		ga.call("set_ducked", on)
+
+## 轮询等某条件成立或到超时；skip 时立即返回 false。成立返回 true。
+func _wait_until(pred: Callable, timeout: float) -> bool:
+	var waited := 0.0
+	while waited < timeout and not _skipped:
+		if bool(pred.call()):
+			return true
+		await get_tree().create_timer(POLL_SEC).timeout
+		waited += POLL_SEC
+	return false
+
+## 玩家当前逻辑坐标（未就位则原点）。
+func _player_logical() -> Vector2:
+	var p: Variant = _world.get("player")
+	if typeof(p) == TYPE_DICTIONARY and not (p as Dictionary).is_empty():
+		return (p as Dictionary).get("logical", Vector2.ZERO)
+	return Vector2.ZERO
+
+## 最近的 demo 占位村民到玩家的距离（无则 INF）。
+func _nearest_villager_dist() -> float:
+	var pl := _player_logical()
+	var best := INF
+	for n in (_world.get("npcs") as Array):
+		var d: Dictionary = n
+		if d.get("is_fairy", false) or not String(d.get("id", "")).begins_with("demo_"):
+			continue
+		var dist := WorldGrid.shortest_delta(pl, d.get("logical", Vector2.ZERO)).length()
+		if dist < best:
+			best = dist
+	return best
 
 ## 后台 fetch（fire-and-forget，跑到首个 await 即返回）：完成后存结果、置 _fetch_done。
 func _fetch_bg() -> void:
