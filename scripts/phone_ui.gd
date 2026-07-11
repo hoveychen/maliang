@@ -58,6 +58,7 @@ var _items_grid: GridContainer      ## 背包网格（动态重建）
 var _items_empty: Label             ## 空态提示
 
 # —— 设置页 ——
+var _reroll_btn: Button             ## "重新捏角色"按钮（测试锚点）
 var _reroll_confirm: HBoxContainer  ## "重新捏角色" ✓/✗ 确认行（防小手误触）
 var _avatar_btn: Button             ## "换形象"按钮（生成中禁用防连点）
 var _avatar_preview: VBoxContainer  ## 换形象预览区（新形象图 + ✓/✗）
@@ -162,17 +163,20 @@ func _build_spread(vp: SubViewport) -> void:
 		vp.add_child(bg)
 	var pad := MarginContainer.new()
 	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
-	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		pad.add_theme_constant_override(side, 28)
+	# 边距贴合跨页底图的蜡笔边框（960×1008 里边框离边 ~6-8%），内容都画在框内
+	pad.add_theme_constant_override("margin_left", 64)
+	pad.add_theme_constant_override("margin_right", 64)
+	pad.add_theme_constant_override("margin_top", 44)
+	pad.add_theme_constant_override("margin_bottom", 64)
 	vp.add_child(pad)
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 14)
+	vbox.add_theme_constant_override("separation", 10)
 	pad.add_child(vbox)
 	var app_bar := HBoxContainer.new()
 	app_bar.add_theme_constant_override("separation", 8)
 	var back_btn := Button.new()
 	back_btn.text = "返回"
-	back_btn.add_theme_font_size_override("font_size", 24)
+	back_btn.add_theme_font_size_override("font_size", 28)
 	UiAssets.style_card_button(back_btn)
 	back_btn.pressed.connect(func() -> void:
 		if _w.game_audio != null:
@@ -180,12 +184,12 @@ func _build_spread(vp: SubViewport) -> void:
 		close_app())
 	app_bar.add_child(back_btn)
 	_phone_app_title = Label.new()
-	UiAssets.style_card_label(_phone_app_title, 30)
+	UiAssets.style_card_label(_phone_app_title, 40)
 	_phone_app_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_phone_app_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	app_bar.add_child(_phone_app_title)
 	var app_bar_spacer := Control.new() # 标题视觉居中（右侧留与返回键等宽的空）
-	app_bar_spacer.custom_minimum_size = Vector2(72.0, 0.0)
+	app_bar_spacer.custom_minimum_size = Vector2(110.0, 0.0)
 	app_bar.add_child(app_bar_spacer)
 	vbox.add_child(app_bar)
 	# 页面宿主套竖向滚动：内容多的 app（设置）滚动，不撑破跨页。
@@ -291,9 +295,10 @@ func _build_phone_pages() -> void:
 	var pages := int(ceil(float(maxi(n, 1)) / float(PHONE_PAGE_SLOTS)))
 	var idx := 0
 	for _p in pages:
-		var page := HBoxContainer.new() # 页宽=分页容器宽（tick 同步），网格居中
+		var page := HBoxContainer.new() # 页宽=分页容器宽（tick 同步），网格水平+垂直居中
 		page.alignment = BoxContainer.ALIGNMENT_CENTER
 		var g := GridContainer.new()
+		g.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		g.columns = PHONE_GRID_COLS
 		g.add_theme_constant_override("h_separation", 22)
 		g.add_theme_constant_override("v_separation", 22)
@@ -345,7 +350,7 @@ func _make_pencil_clock() -> Control:
 		var r := TextureRect.new()
 		r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		r.custom_minimum_size = Vector2(16.0 if i == 2 else 26.0, 40.0)
+		r.custom_minimum_size = Vector2(20.0 if i == 2 else 34.0, 52.0)
 		if i == 2:
 			r.texture = UiAssets.tex("phone3d_digit_colon")
 		else:
@@ -464,42 +469,64 @@ func refresh_banner() -> void:
 		for bar in _phone_signal.get_children():
 			(bar as ColorRect).color = col
 
+## ── 跨页双页布局 ────────────────────────────────────────────────────────────
+
+## 摊开的双页：左右两个竖排页容器，中缝（装订线）两侧各留半页边距。
+## 返回 { "row": 整行, "left": 左页, "right": 右页 }。
+func _make_spread_pages() -> Dictionary:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 96) # 跨过中缝装订线
+	var left := VBoxContainer.new()
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	left.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_child(left)
+	var right := VBoxContainer.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_child(right)
+	return { "row": row, "left": left, "right": right }
+
 ## ── 小红花/集邮 app ─────────────────────────────────────────────────────────
 
-## 3×3 花格(按 flowers 点亮) + 一排盖章进度点(按 stampProgress) + 累计盖章数。
+## 集邮册跨页：左页 3×3 小红花大格(按 flowers 点亮)；右页盖章进度(满 3 章换 1 朵)+累计。
 func _build_flowers_page() -> Control:
-	var page := VBoxContainer.new()
-	page.alignment = BoxContainer.ALIGNMENT_CENTER
-	page.add_theme_constant_override("separation", 20)
+	var pages := _make_spread_pages()
+	var left := pages["left"] as VBoxContainer
 	var grid := GridContainer.new()
 	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 16)
-	grid.add_theme_constant_override("v_separation", 16)
+	grid.add_theme_constant_override("h_separation", 28)
+	grid.add_theme_constant_override("v_separation", 28)
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_flower_cells.clear()
 	for _i in MAX_FLOWERS:
-		var cell := UiAssets.icon_rect("reward_flower", 88.0)
+		var cell := UiAssets.icon_rect("reward_flower", 100.0)
 		grid.add_child(cell)
 		_flower_cells.append(cell)
-	page.add_child(grid)
+	left.add_child(grid)
+	var right := pages["right"] as VBoxContainer
+	right.add_theme_constant_override("separation", 48)
 	var stamp_row := HBoxContainer.new()
 	stamp_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	stamp_row.add_theme_constant_override("separation", 14)
+	stamp_row.add_theme_constant_override("separation", 26)
 	_stamp_dots.clear()
 	for _i in STAMPS_PER_FLOWER:
-		var dot := UiAssets.icon_rect("stamp_star", 52.0)
+		var dot := UiAssets.icon_rect("stamp_star", 84.0)
 		stamp_row.add_child(dot)
 		_stamp_dots.append(dot)
-	page.add_child(stamp_row)
+	right.add_child(stamp_row)
 	var total_row := HBoxContainer.new()
 	total_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	total_row.add_theme_constant_override("separation", 6)
-	total_row.add_child(UiAssets.icon_rect("stamp_star", 32.0))
+	total_row.add_theme_constant_override("separation", 12)
+	total_row.add_child(UiAssets.icon_rect("stamp_star", 46.0))
 	_stamps_total_label = Label.new()
-	UiAssets.style_card_label(_stamps_total_label, 26)
+	UiAssets.style_card_label(_stamps_total_label, 42)
 	total_row.add_child(_stamps_total_label)
-	page.add_child(total_row)
-	return page
+	right.add_child(total_row)
+	return pages["row"]
 
 ## 刷新小红花/集邮 + 物品页（钱包/背包数据变化、开手机、开 app 时都会调）。
 func refresh_album() -> void:
@@ -515,20 +542,23 @@ func refresh_album() -> void:
 
 ## ── 物品 app ────────────────────────────────────────────────────────────────
 
+## 物品货架跨页：一张 6 列大格货架摊在双页上（跨中缝像真手账），份数手写角标风。
 func _build_items_page() -> Control:
 	var page := VBoxContainer.new()
+	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page.alignment = BoxContainer.ALIGNMENT_CENTER
 	_items_grid = GridContainer.new()
-	_items_grid.columns = 4
-	_items_grid.add_theme_constant_override("h_separation", 16)
-	_items_grid.add_theme_constant_override("v_separation", 16)
+	_items_grid.columns = 6
+	_items_grid.add_theme_constant_override("h_separation", 26)
+	_items_grid.add_theme_constant_override("v_separation", 30)
 	_items_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_items_empty = Label.new()
 	_items_empty.text = "还没有收起来的物品"
 	_items_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_items_empty.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	_items_empty.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	UiAssets.style_card_label(_items_empty, 28)
+	UiAssets.style_card_label(_items_empty, 34)
 	page.add_child(_items_grid)
 	page.add_child(_items_empty)
 	return page
@@ -551,34 +581,36 @@ func refresh_items() -> void:
 		var count := int(_w.bag[item_id])
 		var cell := VBoxContainer.new()
 		cell.alignment = BoxContainer.ALIGNMENT_CENTER
-		cell.custom_minimum_size = Vector2(88.0, 0.0)
-		var glyph := UiAssets.icon_button("ic_gift", 72.0) # 点一下摆到玩家身旁
+		cell.custom_minimum_size = Vector2(104.0, 0.0)
+		var glyph := UiAssets.icon_button("ic_gift", 92.0) # 点一下摆到玩家身旁
 		glyph.pressed.connect(func() -> void: _w._place_bag_item(String(item_id)))
 		var name_label := Label.new()
 		var display := String(def.get("name", "小玩意"))
 		name_label.text = display if count <= 1 else "%s×%d" % [display, count]
 		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		name_label.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-		name_label.custom_minimum_size = Vector2(88.0, 0.0)
-		UiAssets.style_card_label(name_label, 22)
+		name_label.custom_minimum_size = Vector2(104.0, 0.0)
+		UiAssets.style_card_label(name_label, 26)
 		cell.add_child(glyph)
 		cell.add_child(name_label)
 		_items_grid.add_child(cell)
 
 ## ── 设置 app ────────────────────────────────────────────────────────────────
 
+## 设置跨页：左页「我的形象」（重捏/换形象+预览），右页「画质」旋钮组。
 func _build_settings_page() -> Control:
-	var settings_page := VBoxContainer.new()
-	settings_page.alignment = BoxContainer.ALIGNMENT_CENTER
-	settings_page.add_theme_constant_override("separation", 16)
+	var pages := _make_spread_pages()
+	var settings_page := pages["left"] as VBoxContainer
+	settings_page.add_theme_constant_override("separation", 18)
 	# 重新捏角色（回童话书重新自我介绍；onboarding 合并保存档案，贴纸/物品不丢）
 	var reroll := Button.new()
 	reroll.text = "重新捏角色"
 	reroll.icon = UiAssets.tex("ic_retry")
-	reroll.add_theme_constant_override("icon_max_width", 36)
-	reroll.add_theme_font_size_override("font_size", 26)
+	reroll.add_theme_constant_override("icon_max_width", 40)
+	reroll.add_theme_font_size_override("font_size", 32)
 	UiAssets.style_card_button(reroll)
 	reroll.pressed.connect(_on_reroll_pressed)
+	_reroll_btn = reroll
 	settings_page.add_child(reroll)
 	_reroll_confirm = HBoxContainer.new()
 	_reroll_confirm.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -596,8 +628,8 @@ func _build_settings_page() -> Control:
 	_avatar_btn = Button.new()
 	_avatar_btn.text = "换形象"
 	_avatar_btn.icon = UiAssets.tex("ic_wand")
-	_avatar_btn.add_theme_constant_override("icon_max_width", 36)
-	_avatar_btn.add_theme_font_size_override("font_size", 26)
+	_avatar_btn.add_theme_constant_override("icon_max_width", 40)
+	_avatar_btn.add_theme_font_size_override("font_size", 32)
 	UiAssets.style_card_button(_avatar_btn)
 	_avatar_btn.pressed.connect(_on_avatar_regen_pressed)
 	settings_page.add_child(_avatar_btn)
@@ -622,13 +654,15 @@ func _build_settings_page() -> Control:
 	_avatar_preview.add_child(avatar_row)
 	_avatar_preview.visible = false
 	settings_page.add_child(_avatar_preview)
-	# —— 画质分区：GraphicsSettings 的 9 个旋钮，每个一张卡片。点档位按钮升一档、
+	# —— 右页画质分区：GraphicsSettings 的 9 个旋钮，每个一张卡片。点档位按钮升一档、
 	# 到顶回最省，即时应用 + 存 profile（source=user，应用逻辑在 world）。——
+	var gfx_page := pages["right"] as VBoxContainer
+	gfx_page.add_theme_constant_override("separation", 8)
 	var gfx_title := Label.new()
 	gfx_title.text = "画质"
-	gfx_title.add_theme_font_size_override("font_size", 26)
+	UiAssets.style_card_label(gfx_title, 30) # 白纸底上用暖棕字（默认白色看不清）
 	gfx_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	settings_page.add_child(gfx_title)
+	gfx_page.add_child(gfx_title)
 	_gfx_buttons = {}
 	for key: String in GraphicsSettings.KEYS:
 		var pad := MarginContainer.new()  # 别让说明文字贴到页缘
@@ -640,7 +674,7 @@ func _build_settings_page() -> Control:
 		row.add_theme_constant_override("separation", 8)
 		var name_lbl := Label.new()
 		name_lbl.text = String(GraphicsSettings.LABELS[key])
-		name_lbl.add_theme_font_size_override("font_size", 22)
+		UiAssets.style_card_label(name_lbl, 22)
 		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(name_lbl)
 		var b := Button.new()
@@ -654,12 +688,12 @@ func _build_settings_page() -> Control:
 		card.add_child(row)
 		var sub := Label.new()  # 「关掉后会看到什么」——家长照着这行就能自己权衡
 		sub.text = String(GraphicsSettings.SUBTITLES[key])
-		sub.add_theme_font_size_override("font_size", 18)
+		UiAssets.style_card_label(sub, 18)
 		sub.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-		sub.modulate = Color(1.0, 1.0, 1.0, 0.8)
+		sub.modulate = Color(1.0, 1.0, 1.0, 0.75)
 		card.add_child(sub)
 		pad.add_child(card)
-		settings_page.add_child(pad)
+		gfx_page.add_child(pad)
 		_gfx_buttons[key] = b
 		refresh_gfx_button(key)
 	# 「恢复自动」：清掉用户 override，把定档权交回 benchmark / 后端下发
@@ -669,7 +703,7 @@ func _build_settings_page() -> Control:
 	gfx_auto.clip_text = true
 	UiAssets.style_card_button(gfx_auto)
 	gfx_auto.pressed.connect(func() -> void: _w._on_gfx_restore_auto())
-	settings_page.add_child(gfx_auto)
+	gfx_page.add_child(gfx_auto)
 	# 「重新检测」：换了系统/发烫/手感变了 → 重跑一次 benchmark 定档
 	var gfx_bench := Button.new()
 	gfx_bench.text = "重新检测画质"
@@ -677,8 +711,8 @@ func _build_settings_page() -> Control:
 	gfx_bench.clip_text = true
 	UiAssets.style_card_button(gfx_bench)
 	gfx_bench.pressed.connect(func() -> void: _w._on_gfx_rebench())
-	settings_page.add_child(gfx_bench)
-	return settings_page
+	gfx_page.add_child(gfx_bench)
+	return pages["row"]
 
 ## 档位按钮文案（「开」/「高清」/「粗略」…）+ 按下态跟随当前档（档数据在 world._gfx_levels）。
 func refresh_gfx_button(key: String) -> void:

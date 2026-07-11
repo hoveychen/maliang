@@ -18,8 +18,7 @@ func _pui() -> PhoneUi:
 	return scene.get("phone_ui") as PhoneUi
 
 func _reroll_button() -> Button:
-	var page := (_pui().get("_album_pages") as Dictionary)["settings"] as Control
-	return page.get_child(0) as Button
+	return _pui().get("_reroll_btn") as Button
 
 func _confirm_row() -> HBoxContainer:
 	return _pui().get("_reroll_confirm") as HBoxContainer
