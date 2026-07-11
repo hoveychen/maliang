@@ -207,7 +207,6 @@ const PHONE_NDC := Vector2(0.52, 0.0)        ## 正面态中心 NDC
 const PHONE_SPREAD_FILL := 0.80     ## 跨页态机身高占屏比
 const PHONE_SPREAD_NDC := Vector2(0.28, 0.0) ## 跨页态中心 NDC
 var _phone_fit_vp := Vector2.ZERO   ## 上次贴合时的视口尺寸（窗口 resize 触发重贴合）
-var _phone_dock_t := 0.0            ## 停靠态低频刷屏计时（30s 一帧，时钟走字）
 ## 手机近身相机：开手机时按玩家立绘高度反算距离，让玩家（自适应身高）占屏高约 70%，
 ## 并把焦点右移，使玩家落在屏幕偏左、右侧留给手机（PHONE_PLAYER_NDC_X 方向若反了取负）。
 const PHONE_CAM_FILL := 0.70        ## 玩家立绘占屏高约 70%（按 _char_top 反算距离，自适应身高）
@@ -1059,6 +1058,7 @@ func _setup_hud() -> void:
 		paper_phone.set_face_texture(PaperPhone.FACE_BACK, shell_back)
 	phone_ui = PhoneUi.new(self)
 	phone_ui.build(paper_phone.front_viewport(), paper_phone.spread_viewport())
+	phone_ui.set_screen_off(true) # 停靠常驻=熄屏黑屏，点亮才见主屏
 	phone_ui.app_opened.connect(func(_id: String) -> void:
 		if game_audio != null:
 			game_audio.play_sfx("page") # 翻面纸声（点选 select 已在 PhoneUi 响过）
@@ -1173,19 +1173,17 @@ func _fit_phone_dock() -> void:
 	var ndc := Vector2(c.x / vp.x * 2.0 - 1.0, 1.0 - c.y / vp.y * 2.0)
 	paper_phone.fit_dock(camera, r.size.y / vp.y, ndc)
 
-## 每帧驱动手机：resize/首帧重贴合；停靠态 30s 低频刷一帧屏（时钟走字）；
+## 每帧驱动手机：resize/首帧重贴合；停靠态熄屏零开销（黑屏无时钟，不用低频刷）；
 ## 使用态跑 banner 秒刷 + 图标分页贴合。
 func _step_phone_ui(delta: float) -> void:
 	if paper_phone == null:
 		return
 	if get_viewport().get_visible_rect().size != _phone_fit_vp or not paper_phone.visible:
+		var was_hidden := not paper_phone.visible
 		_fit_phone(paper_phone.state == PaperPhone.State.SPREAD) # 首帧按钮布局就绪前 visible=false，逐帧兜底
+		if was_hidden and paper_phone.visible:
+			paper_phone.refresh_dock_screen() # 首次现身渲一帧熄屏黑底（视口从未渲过是垃圾纹理）
 	if paper_phone.state == PaperPhone.State.DOCKED:
-		_phone_dock_t -= delta
-		if _phone_dock_t <= 0.0:
-			_phone_dock_t = 30.0
-			phone_ui.refresh_banner()
-			paper_phone.refresh_dock_screen()
 		return
 	phone_ui.tick(delta)
 
@@ -5340,6 +5338,7 @@ func _toggle_album() -> void:
 func _open_phone() -> void:
 	PaperCharacter.set_xray_enabled(false, get_tree())
 	_fit_phone(false)
+	phone_ui.set_screen_off(false) # 点亮
 	phone_ui.close_app() # 每次打开手机都回到主屏
 	phone_ui.refresh_album()
 	phone_ui.refresh_banner()
@@ -5353,6 +5352,8 @@ func _close_phone() -> void:
 	if paper_phone == null or paper_phone.state == PaperPhone.State.DOCKED:
 		return
 	paper_phone.dock()
+	phone_ui.set_screen_off(true) # 放回=熄屏；渲一帧黑底后视口彻底停更
+	paper_phone.refresh_dock_screen()
 	if _phone_scrim != null:
 		_phone_scrim.visible = false
 	_exit_phone_cam()

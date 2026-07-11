@@ -25,6 +25,7 @@ const PANEL_T := 0.032            ## 卡纸厚度（厚切边=硬卡纸手工感
 const FACE_EPS := 0.002           ## 贴面浮出板面的间隙（防 z-fighting）
 const FLIP_DUR := 0.45            ## 翻转+展开动画时长
 const MOVE_DUR := 0.40            ## 停靠位↔持机位搬移动画时长
+const DOCK_ROT := Vector3(0.10, -0.44, 0.05) ## 停靠侧摆角(rad):侧身~25°+微俯仰,一眼立体手机
 
 ## 贴面 id（射线拾取返回、set_face_texture 寻址）
 const FACE_FRONT := "front"        ## A 外面：手机正面壳
@@ -52,6 +53,7 @@ var _hand_scale := 1.0
 var _dock_pos := Vector3.ZERO      ## 停靠位（fit_dock 算出；首次贴合前手机隐藏防闪原点）
 var _dock_scale := 0.2
 var _dock_fitted := false          ## 停靠位是否已按真实布局贴合过（首帧 Control 布局后才有）
+var _base_rot := DOCK_ROT          ## 基础姿态角（停靠=DOCK_ROT 侧摆、持机=0；微摆叠加其上；初始即停靠）
 var _sway_t := 0.0                 ## 持机微摆相位
 
 # 在 _init 建几何而非 _ready：headless 测试在 SceneTree._initialize 阶段节点尚未进树、
@@ -67,8 +69,7 @@ func _process(delta: float) -> void:
 	if not visible:
 		return
 	_sway_t += delta
-	rotation.z = sin(_sway_t * 1.4) * 0.012
-	rotation.x = sin(_sway_t * 0.9 + 1.7) * 0.008
+	rotation = _base_rot + Vector3(sin(_sway_t * 0.9 + 1.7) * 0.008, 0.0, sin(_sway_t * 1.4) * 0.012)
 
 ## ── 几何 ────────────────────────────────────────────────────────────────────
 
@@ -104,8 +105,8 @@ func _make_slab() -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.name = "Slab"
 	mi.mesh = box
-	# 纸芯亮白：Paper Mario 式"剪出来的白边"——侧面比贴图面更白更亮，一眼是纸
-	mi.material_override = _paper_mat(Color(1.0, 1.0, 0.985))
+	# 侧面=手机边框：钛灰哑光（老板点名要像 iPhone；纸感由正背面卡纸+切边厚度承担）
+	mi.material_override = _paper_mat(Color(0.84, 0.82, 0.79)) # 钛灰侧框（iPhone 边框感，仍是哑光卡纸）
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi
 
@@ -272,10 +273,11 @@ func show_front(animate := true) -> void:
 		_apply_pose(180.0, 0.0)
 		position = _hand_pos
 		scale = Vector3.ONE * _hand_scale
+		_base_rot = Vector3.ZERO
 		return
 	if from_dock:
 		_apply_pose(180.0, 0.0)
-		_animate_move(_hand_pos, _hand_scale, false)
+		_animate_move(_hand_pos, _hand_scale, Vector3.ZERO, false)
 	else:
 		_animate_flip(180.0, 0.0)
 
@@ -286,6 +288,7 @@ func show_spread(animate := true) -> void:
 	if not animate:
 		position = _hand_pos
 		scale = Vector3.ONE * _hand_scale
+		_base_rot = Vector3.ZERO
 		_apply_pose(0.0, 180.0)
 		return
 	_animate_flip(0.0, 180.0)
@@ -300,8 +303,9 @@ func dock(animate := true) -> void:
 		_apply_pose(180.0, 0.0)
 		position = _dock_pos
 		scale = Vector3.ONE * _dock_scale
+		_base_rot = DOCK_ROT
 		return
-	_animate_move(_dock_pos, _dock_scale, was_spread)
+	_animate_move(_dock_pos, _dock_scale, DOCK_ROT, was_spread)
 
 func _set_state(s: int) -> void:
 	state = s
@@ -333,12 +337,14 @@ func _animate_flip(fold_to: float, yaw_to: float) -> void:
 
 ## 停靠位↔持机位搬移：位移+缩放并行 tween（带一点回弹的"拿起/放回"手感）；
 ## fold_back=true 时（从跨页收）合拢+翻回正面与搬移并行。
-func _animate_move(to_pos: Vector3, to_scale: float, fold_back: bool) -> void:
+func _animate_move(to_pos: Vector3, to_scale: float, to_rot: Vector3, fold_back: bool) -> void:
 	_kill_tween()
 	_tween = create_tween().set_parallel(true)
 	_tween.tween_property(self, "position", to_pos, MOVE_DUR) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_tween.tween_property(self, "scale", Vector3.ONE * to_scale, MOVE_DUR) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_tween.tween_property(self, "_base_rot", to_rot, MOVE_DUR) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	if fold_back:
 		var fold_from := _fold_deg

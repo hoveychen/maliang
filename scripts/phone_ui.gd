@@ -42,6 +42,7 @@ var _phone_page := 0                ## 当前页
 var _phone_page_w := 0.0            ## 单页宽
 var _phone_pager_dragging := false  ## 拖拽中（松手贴合最近页）
 var _phone_ui_t := 0.0              ## banner 刷新节流计时
+var _screen_cover: ColorRect        ## 熄屏遮罩（停靠黑屏/点亮隐藏）
 
 # —— 跨页 app 视图 ——
 var _phone_app_title: Label         ## 打开的 app 标题
@@ -165,6 +166,12 @@ func _build_front(vp: SubViewport) -> void:
 	_phone_dots.add_theme_constant_override("separation", 8)
 	vbox.add_child(_phone_dots)
 	_rebuild_phone_dots()
+	# 熄屏遮罩：停靠=黑屏（真手机没点亮就是黑的），点亮时隐藏；盖住含灵动岛在内的一切
+	_screen_cover = ColorRect.new()
+	_screen_cover.color = Color(0.08, 0.08, 0.10)
+	_screen_cover.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_screen_cover.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vp.add_child(_screen_cover)
 
 ## 跨页 app 视图：返回条（返回键+标题）+ 竖向滚动的页面宿主（flowers/items/settings）。
 func _build_spread(vp: SubViewport) -> void:
@@ -389,6 +396,11 @@ func _on_phone_pager_input(e: InputEvent) -> void:
 			var last := maxi(0, _phone_pages_box.get_child_count() - 1)
 			_phone_page = clampi(int(round(_phone_pager.scroll_horizontal / _phone_page_w)), 0, last)
 			_highlight_phone_dot()
+
+## 熄屏/点亮（world 在停靠/掏出时切）。
+func set_screen_off(off: bool) -> void:
+	if _screen_cover != null:
+		_screen_cover.visible = off
 
 ## ── 每帧驱动（world 在手机打开时调）────────────────────────────────────────
 

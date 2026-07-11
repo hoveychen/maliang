@@ -54,8 +54,11 @@ func _run(scene: Node) -> void:
 	_check(cols_ok, "每页网格 columns=3 (3x3)")
 	_check(icon_total == 3, "图标总数 = 已实装 app 数 3（flowers/items/settings）")
 
+	var cover: ColorRect = pui.get("_screen_cover")
+	_check(cover != null and cover.visible, "停靠常驻=熄屏黑屏")
 	scene._toggle_album()
 	_check(phone.state == PaperPhone.State.FRONT, "打开后正面态(FRONT)")
+	_check(not cover.visible, "打开=点亮（熄屏遮罩隐藏）")
 	_check(phone.visible, "打开后可见")
 	_check(String(pui.get("_phone_open_app")) == "", "打开后停在主屏")
 	_check((scene.get("_phone_scrim") as Control).visible, "打开后遮罩可见")
@@ -127,7 +130,10 @@ func _run(scene: Node) -> void:
 	# 收起：状态复位 + 两块视口停更新 + 遮罩隐藏
 	scene._close_phone()
 	_check(phone.state == PaperPhone.State.DOCKED, "收起回停靠态(DOCKED)")
+	_check((pui.get("_screen_cover") as ColorRect).visible, "收起=熄屏")
+	_check((phone.get("_base_rot") as Vector3).is_equal_approx(PaperPhone.DOCK_ROT) or phone.get("_tween") != null,
+		"停靠侧摆角已入姿态（动画目标=DOCK_ROT）")
 	_check(not (scene.get("_phone_scrim") as Control).visible, "收起后遮罩隐藏")
-	_check(phone.front_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED \
+	_check(phone.front_viewport().render_target_update_mode == SubViewport.UPDATE_ONCE \
 			and phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED,
-		"收起后两视口停更新")
+		"收起后跨页停更、正面渲一帧熄屏黑底后自动停（UPDATE_ONCE）")
