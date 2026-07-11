@@ -67,6 +67,7 @@ UNIT_TESTS=(
   test_terrain_patch
   test_terrain_rebuild
   test_forest_scene
+  test_forest_reach
   test_enter_scene_client
   test_portal
   test_poi_serve

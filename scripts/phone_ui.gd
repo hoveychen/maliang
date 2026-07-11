@@ -17,11 +17,12 @@ const HAND_FONT := "res://assets/fonts/patrick_hand/PatrickHand-Regular.ttf" ## 
 
 ## 屏幕上的 app：[id, 短名, 图标资产]。图标资产缺失回退现有图标占位。
 const PHONE_APPS := [
+	["home", "回家", "app_home"],
 	["flowers", "小红花", "app_flowers"],
 	["items", "物品", "app_items"],
 	["settings", "设置", "app_settings"],
 ]
-const PHONE_APP_FALLBACK := { "flowers": "reward_flower", "items": "ic_gift", "settings": "ic_gear" }
+const PHONE_APP_FALLBACK := { "home": "ic_pin", "flowers": "reward_flower", "items": "ic_gift", "settings": "ic_gear" }
 ## 小红花经济常量（与 server/src/types.ts 对齐）。
 const MAX_FLOWERS := 9              ## 小红花上限（3×3 格）
 const STAMPS_PER_FLOWER := 3        ## 每满 3 章换 1 朵花
@@ -55,6 +56,9 @@ var _flower_cells: Array = []       ## 3×3 花格（按 flowers 点亮）
 var _stamp_dots: Array = []         ## 盖章进度点（按 stampProgress 点亮）
 var _stamps_total_label: Label      ## 累计盖章数
 var _hearts_label: Label            ## 收到的爱心计数（玩家互动送❤，只增不减）
+
+# —— 回家页 ——
+var _home_btn: Button               ## "回家"按钮（测试锚点）
 
 # —— 物品页 ——
 var _items_grid: GridContainer      ## 背包网格（动态重建）
@@ -252,6 +256,7 @@ func _build_spread(vp: SubViewport) -> void:
 	host.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.add_child(host)
 	_album_pages = {
+		"home": _build_home_page(),
 		"flowers": _build_flowers_page(),
 		"items": _build_items_page(),
 		"settings": _build_settings_page(),
@@ -521,6 +526,47 @@ func _make_spread_pages() -> Dictionary:
 	right.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_child(right)
 	return { "row": row, "left": left, "right": right }
+
+## ── 回家 app ────────────────────────────────────────────────────────────────
+
+## 「回家」app：迷路/卡在别的场景（如穿传送门进森林被树围死）时的逃生舱。跨页正中一个大
+## 「回家」按钮，点了收起手机 + 把玩家送回初始世界原点（world._go_home）。用确认页而非点
+## 图标直接传送，防小手误触把自己传走。图标缺 app_home 素材时回退定位钉 ic_pin。
+func _build_home_page() -> Control:
+	var page := VBoxContainer.new()
+	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	page.alignment = BoxContainer.ALIGNMENT_CENTER
+	page.add_theme_constant_override("separation", 28)
+	var icon_name := "app_home" if ResourceLoader.exists("res://assets/ui/app_home.png") else "ic_pin"
+	var icon := UiAssets.icon_rect(icon_name, 160.0)
+	icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	page.add_child(icon)
+	var hint := Label.new()
+	hint.text = "迷路了吗？\n点一下回到家！"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	UiAssets.style_card_label(hint, 34)
+	page.add_child(hint)
+	var go := Button.new()
+	go.text = "回家"
+	go.icon = UiAssets.tex(icon_name)
+	go.add_theme_constant_override("icon_max_width", 48)
+	go.add_theme_font_size_override("font_size", 44)
+	go.custom_minimum_size = Vector2(280.0, 100.0)
+	go.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	UiAssets.style_card_button(go)
+	go.pressed.connect(_on_home_pressed)
+	_home_btn = go
+	page.add_child(go)
+	return page
+
+## 点「回家」：确认音效 → world 收起手机并把玩家传回初始世界原点（在线跨场景走过场遮罩，
+## 已在家/离线就地挪回原点空位解卡）。
+func _on_home_pressed() -> void:
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("confirm")
+	_w._go_home()
 
 ## ── 小红花/集邮 app ─────────────────────────────────────────────────────────
 

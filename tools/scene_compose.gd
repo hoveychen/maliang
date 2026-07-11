@@ -273,14 +273,16 @@ static func _deco_kind_forest(gt: Vector2i) -> int:
 		if roll < 5:
 			return DECO_ROCK
 		return DECO_TUFT if roll < 18 else DECO_NONE
-	# 林地草（平坦林床）：郁闭林冠——密树 + 灌木下层 + 草丛
-	if roll < 50:
+	# 林地草（平坦林床）：疏林可穿行——树 + 灌木下层 + 草丛。
+	# 挡路密度（树+灌+石）必须低于连通阈值(~40%)，否则密林把空地围成孤岛、玩家落地即卡死
+	# （test_forest_reach 实测：66% 挡路时从落点只能到 123/2058 tile）。开阔度靠草丛/空地撑。
+	if roll < 28:
 		return DECO_TREE
-	if roll < 62:
+	if roll < 34:
 		return DECO_BUSH
-	if roll < 66:
+	if roll < 37:
 		return DECO_ROCK
-	return DECO_TUFT if roll < 86 else DECO_NONE
+	return DECO_TUFT if roll < 64 else DECO_NONE
 
 ## 8 邻里有水（环面 wrap 由 TerrainMap._idx 兜底）。
 static func _near_water(gt: Vector2i) -> bool:

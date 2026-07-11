@@ -52,7 +52,7 @@ func _run(scene: Node) -> void:
 						cols_ok = false
 					icon_total += g.get_child_count()
 	_check(cols_ok, "每页网格 columns=3 (3x3)")
-	_check(icon_total == 3, "图标总数 = 已实装 app 数 3（flowers/items/settings）")
+	_check(icon_total == 4, "图标总数 = 已实装 app 数 4（home/flowers/items/settings）")
 
 	var cover: Control = pui.get("_screen_cover")
 	_check(cover != null and cover.visible, "停靠常驻=熄屏黑屏")
@@ -67,7 +67,7 @@ func _run(scene: Node) -> void:
 
 	# 打开各 app：翻转到跨页、只显示该页
 	var pages: Dictionary = pui.get("_album_pages")
-	for id in ["flowers", "items", "settings"]:
+	for id in ["home", "flowers", "items", "settings"]:
 		scene._open_app(id)
 		_check(String(pui.get("_phone_open_app")) == id, "打开 app: %s" % id)
 		_check(phone.state == PaperPhone.State.SPREAD, "%s：翻转到跨页态" % id)
@@ -137,3 +137,19 @@ func _run(scene: Node) -> void:
 	_check(phone.front_viewport().render_target_update_mode == SubViewport.UPDATE_ONCE \
 			and phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED,
 		"收起后跨页停更、正面渲一帧熄屏黑底后自动停（UPDATE_ONCE）")
+
+	# 回家 app：跨页有「回家」按钮；离线且已在 village 时点回家 → 就地把玩家挪回原点附近空位解卡。
+	_check(pui.get("_home_btn") != null and pui.get("_home_btn") is Button, "回家页有「回家」按钮(_home_btn)")
+	var far := WorldGrid.from_tile_center(Vector2i(50, 50))
+	(scene.get("player") as Dictionary)["logical"] = far
+	scene._go_home()
+	var home_pos: Vector2 = (scene.get("player") as Dictionary)["logical"]
+	var d_home := WorldGrid.shortest_delta(home_pos, WorldGrid.from_tile_center(Vector2i.ZERO)).length()
+	_check(d_home <= 20.0, "离线回家：玩家从(50,50)挪回原点附近（环面距原点 %.1f ≤ 20 单位）" % d_home)
+	_check(WorldGrid.shortest_delta(scene.get("focus_logical"), home_pos).length() < 0.01, "回家后相机聚焦跟到玩家")
+
+	# 过场 loading 遮罩：_setup_hud 建好、初始隐藏；步进一帧仙子动画不崩
+	var overlay: Control = scene.get("_transition_overlay")
+	_check(overlay != null and not overlay.visible, "过场 loading 遮罩存在且初始隐藏")
+	scene._step_transition_fairy(0.1)
+	_check(true, "_step_transition_fairy 运行不崩")
