@@ -77,8 +77,19 @@ func _init() -> void:
 	mesh = q
 	material_override = _mat
 
+## 脚下伪影半径（setup/play_idle 记录，refresh_ground_shadow 复用）；wants_ground_shadow
+## 落地角色为真、悬浮角色（仙子/飞行）由 world 置假——切「角色实时阴影」时据此挂/摘 blob。
+var _blob_radius := 0.6
+var wants_ground_shadow := true
+
 func _enter_tree() -> void:
-	add_to_group("paper_chars")  # set_xray_enabled 换档批量寻址用
+	add_to_group("paper_chars")  # set_xray_enabled / refresh_ground_shadow 换档批量寻址用
+
+## 画质切「角色实时阴影」后刷新脚下 blob：attach 内部按 BlobShadow.suppress_actor_blob
+## 自动挂/摘（suppress 时会 detach 旧的且不建新）。悬浮角色跳过（脚下暗斑穿帮）。
+func refresh_ground_shadow() -> void:
+	if wants_ground_shadow:
+		BlobShadow.attach(self, _blob_radius)
 
 func setup(tex: Texture2D, color: Color, cname: String) -> void:
 	char_name = cname
@@ -90,7 +101,8 @@ func setup(tex: Texture2D, color: Color, cname: String) -> void:
 	offset = Vector2(0.0, h / 2.0)
 	texture = tex
 	# 脚下伪影（替代实时阴影，见 BlobShadow 注释）；换贴图重设尺寸时同步重挂
-	BlobShadow.attach(self, clampf(float(tex.get_width()) * pixel_size * 0.38, 0.4, 1.4))
+	_blob_radius = clampf(float(tex.get_width()) * pixel_size * 0.38, 0.4, 1.4)
+	BlobShadow.attach(self, _blob_radius)
 
 ## 演出参数量化步长（米）：4mm 对 45mm 的慢呼吸卷曲肉眼不可辨，
 ## 却把待机时的 uniform 上传从每帧降到 ~1/5——旧版每角色每帧 4 次 set_shader_parameter。
@@ -130,7 +142,8 @@ func play_idle(atlas: Texture2D, meta: Dictionary, world_height: float, phase :=
 	pixel_size = world_height / ch  # setter 会触发 _refresh_geometry（此时 _sheet 已置）
 	offset = Vector2(0.0, ch / 2.0)
 	texture = atlas
-	BlobShadow.attach(self, clampf(cw * pixel_size * 0.38, 0.4, 1.4))
+	_blob_radius = clampf(cw * pixel_size * 0.38, 0.4, 1.4)
+	BlobShadow.attach(self, _blob_radius)
 
 ## 可见世界高度（米）：动画图集按单格 cellH 算，静态整图按贴图高算。
 ## 头顶挂饰定位/相机构图都按这个——整张图集高度是 rows×cellH，会把动画角色算高 rows 倍。

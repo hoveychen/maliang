@@ -10,6 +10,7 @@ func _initialize() -> void:
 	_test_flush_shadows()
 	_test_empty_when_no_trees()
 	_test_building_shadows()
+	_test_shadow_visibility_memory()
 	if fails == 0:
 		print("scatter_shadows tests PASS")
 	else:
@@ -98,6 +99,29 @@ func _test_building_shadows() -> void:
 	b.free()
 	parent.free()
 	cm.free()
+
+## 画质记忆态：_ground_shadows=false 时 flush 建的影节点必须 invisible（chunk 重铺沿用
+## 开关态，不打回默认）；默认 true 时 visible。
+func _test_shadow_visibility_memory() -> void:
+	var cm := ChunkManager.new()
+	cm._ground_shadows = false
+	var parent := Node3D.new()
+	cm._flush_shadows(parent, {"tree0": [_xf(Vector3(1, 0, 1), 1.0)]})
+	var mmi := parent.get_node_or_null("ScatterShadows")
+	_check("关态：散布影建出来但 invisible", mmi != null and not mmi.visible, true)
+	cm._flush_building_shadows(parent, [[Vector3(2, 0, 2), 2.0, 3.0]])
+	var b := parent.get_node_or_null("BuildingShadows")
+	_check("关态：建筑影建出来但 invisible", b != null and not b.visible, true)
+	parent.free()
+	cm.free()
+
+	var cm2 := ChunkManager.new()  # 默认 _ground_shadows=true
+	var p2 := Node3D.new()
+	cm2._flush_shadows(p2, {"tree0": [_xf(Vector3(1, 0, 1), 1.0)]})
+	var m2 := p2.get_node_or_null("ScatterShadows")
+	_check("默认开态：散布影 visible", m2 != null and m2.visible, true)
+	p2.free()
+	cm2.free()
 
 func _test_empty_when_no_trees() -> void:
 	var cm := ChunkManager.new()
