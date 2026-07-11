@@ -165,9 +165,9 @@ test('消费门槛：造物扣 1 花、0 花拦截 prop_denied、造失败退还
   const sent: Record<string, unknown>[] = [];
   const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
 
-  // 有花：造物成功，扣 1 花，prop_created 带最新钱包
+  // 有花：造物成功，扣 1 花，item_created 带最新钱包
   await createPropAsync(socket, 'w1', ANON_PLAYER, '一棵小树', createMockAdapters(), store);
-  const created = sent.find((m) => m['type'] === 'prop_created')!;
+  const created = sent.find((m) => m['type'] === 'item_created')!;
   assert.ok(created, '应造出物件');
   assert.equal((created['wallet'] as { flowers: number }).flowers, INITIAL_FLOWERS - 1, '造物扣 1 花');
   assert.equal(store.getWallet('w1', ANON_PLAYER).flowers, INITIAL_FLOWERS - 1);

@@ -32,7 +32,7 @@ function seed(): WorldStore {
   const s = new WorldStore();
   s.createWorld('w1');
   s.upsertScene({
-    worldId: 'w1', sceneId: 'forest', name: '森林', terrainAsset: 'hash-forest', gridTiles: REQUIRED_GRID,
+    worldId: 'w1', sceneId: 'forest', name: '森林', terrainAsset: 'hash-forest', gridTiles: REQUIRED_GRID, terrainVersion: 1,
     pois: [{ tile: [2, 2], radius: 5, trigger: 't', name: '树屋', aliases: [] }],
     portals: [{ tile: [0, 0], radius: 3, toScene: DEFAULT_SCENE, toTile: [37, 37] }],
   });

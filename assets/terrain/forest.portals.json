@@ -1,0 +1,14 @@
+[
+  {
+    "radius": 3.0,
+    "tile": [
+      20,
+      18
+    ],
+    "toScene": "village",
+    "toTile": [
+      18,
+      52
+    ]
+  }
+]

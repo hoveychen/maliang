@@ -31,10 +31,10 @@ func _xf(pos: Vector3, scale_f: float) -> Transform3D:
 func _test_shadow_xforms() -> void:
 	var cm := ChunkManager.new()
 	var batches := {
-		"tree0": [_xf(Vector3(1, 0, 1), 1.0), _xf(Vector3(3, 0, 2), 1.2)],
-		"bush": [_xf(Vector3(5, 0, 5), 1.0)],
-		"rock0": [_xf(Vector3(2, 0, 2), 1.0)],  # 石头太碎，应跳过
-		"tuft0": [_xf(Vector3(4, 0, 4), 1.0)],  # 草丛太矮，应跳过
+		"tree_puff_a": [_xf(Vector3(1, 0, 1), 1.0), _xf(Vector3(3, 0, 2), 1.2)],
+		"bush_puff": [_xf(Vector3(5, 0, 5), 1.0)],
+		"rock_0": [_xf(Vector3(2, 0, 2), 1.0)],  # 石头太碎，应跳过
+		"tuft_0": [_xf(Vector3(4, 0, 4), 1.0)],  # 草丛太矮，应跳过
 	}
 	# 固定太阳方向（不依赖 world 启动），断言才确定：太阳偏左近侧、影朝右远拖
 	BlobShadow.sun_ground_dir = Vector3(0.643, 0.0, -0.766)
@@ -59,10 +59,10 @@ func _test_flush_shadows() -> void:
 	var cm := ChunkManager.new()
 	var parent := Node3D.new()
 	var batches := {
-		"tree0": [_xf(Vector3(1, 0, 1), 1.0), _xf(Vector3(3, 0, 2), 1.2)],
-		"bush": [_xf(Vector3(5, 0, 5), 1.0)],
-		"rock0": [_xf(Vector3(2, 0, 2), 1.0)],
-		"tuft0": [_xf(Vector3(4, 0, 4), 1.0)],
+		"tree_puff_a": [_xf(Vector3(1, 0, 1), 1.0), _xf(Vector3(3, 0, 2), 1.2)],
+		"bush_puff": [_xf(Vector3(5, 0, 5), 1.0)],
+		"rock_0": [_xf(Vector3(2, 0, 2), 1.0)],
+		"tuft_0": [_xf(Vector3(4, 0, 4), 1.0)],
 	}
 	cm._flush_shadows(parent, batches)
 	var mmi := parent.get_node_or_null("ScatterShadows")
@@ -106,7 +106,7 @@ func _test_shadow_visibility_memory() -> void:
 	var cm := ChunkManager.new()
 	cm._ground_shadows = false
 	var parent := Node3D.new()
-	cm._flush_shadows(parent, {"tree0": [_xf(Vector3(1, 0, 1), 1.0)]})
+	cm._flush_shadows(parent, {"tree_puff_a": [_xf(Vector3(1, 0, 1), 1.0)]})
 	var mmi := parent.get_node_or_null("ScatterShadows")
 	_check("关态：散布影建出来但 invisible", mmi != null and not mmi.visible, true)
 	cm._flush_building_shadows(parent, [[Vector3(2, 0, 2), 2.0, 3.0]])
@@ -117,7 +117,7 @@ func _test_shadow_visibility_memory() -> void:
 
 	var cm2 := ChunkManager.new()  # 默认 _ground_shadows=true
 	var p2 := Node3D.new()
-	cm2._flush_shadows(p2, {"tree0": [_xf(Vector3(1, 0, 1), 1.0)]})
+	cm2._flush_shadows(p2, {"tree_puff_a": [_xf(Vector3(1, 0, 1), 1.0)]})
 	var m2 := p2.get_node_or_null("ScatterShadows")
 	_check("默认开态：散布影 visible", m2 != null and m2.visible, true)
 	p2.free()
@@ -127,8 +127,8 @@ func _test_empty_when_no_trees() -> void:
 	var cm := ChunkManager.new()
 	var parent := Node3D.new()
 	cm._flush_shadows(parent, {
-		"rock0": [_xf(Vector3.ZERO, 1.0)],
-		"tuft0": [_xf(Vector3.ZERO, 1.0)],
+		"rock_0": [_xf(Vector3.ZERO, 1.0)],
+		"tuft_0": [_xf(Vector3.ZERO, 1.0)],
 	})
 	_check("无树/灌木时不建影节点", parent.get_node_or_null("ScatterShadows"), null)
 	parent.free()

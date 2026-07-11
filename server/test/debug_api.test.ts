@@ -4,7 +4,8 @@ import { buildServer } from '../src/server.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { ANON_PLAYER } from '../src/types.ts';
-import type { Character, WorldProp } from '../src/types.ts';
+import type { Character, ItemDef } from '../src/types.ts';
+import { emptyTerrain, encodeTerrain, REQUIRED_GRID } from '../src/terrain.ts';
 
 function makeCharacter(id: string, worldId: string, name: string, isFairy = false): Character {
   return {
@@ -16,7 +17,7 @@ function makeCharacter(id: string, worldId: string, name: string, isFairy = fals
   };
 }
 
-/** 造两个世界：w1 有角色/记忆/对话/物品/会话/背包，w2 空。玩家 p1。 */
+/** 造两个世界：w1 有角色/记忆/对话/造物实体/背包/会话，w2 空。玩家 p1。 */
 function seed(store: WorldStore): void {
   store.createWorld('w1');
   store.createWorld('w2');
@@ -26,19 +27,19 @@ function seed(store: WorldStore): void {
   store.addMemory('c1', { text: '小朋友叫朵朵', kind: 'identity', aboutPlayer: 'p1', ts: 0 });
   store.addChatTurn('c1', 'p1', 'child', '你好', 0);
   store.addChatTurn('c1', 'p1', 'npc', '你好朵朵', 0);
-  const prop: WorldProp = {
-    id: 'prop1',
-    spec: { name: '小花', parts: [] } as unknown as WorldProp['spec'],
-    tile: [3, 4],
-    state: 'placed',
+  const item: ItemDef = {
+    id: 'item1', worldId: 'w1', name: '小花', renderRef: 'sdf_inline',
+    spec: { name: '小花', parts: [] } as unknown as ItemDef['spec'],
+    footprintW: 1, footprintH: 1, blocking: true, pathOk: true, wander: 0,
   };
-  store.addProp('w1', prop);
+  store.upsertItem(item);
+  store.bagAdd('w1', ANON_PLAYER, 'item1');
   store.addStamp('w1', ANON_PLAYER); // 盖 1 章：stampProgress=1（初始 3 花不变）
   store.setLocations('w1', ['小池塘']);
   // 场景（模型 B）：debug 详情要能透出场景 + POI + 传送门的结构化数据
   store.upsertScene({
     worldId: 'w1', sceneId: 'village', name: '村庄',
-    terrainAsset: 'terrain-hash-abc', gridTiles: 75,
+    terrainAsset: 'terrain-hash-abc', gridTiles: 75, terrainVersion: 1,
     pois: [{ tile: [3, 4], radius: 2, trigger: 'pond', name: '小池塘', aliases: ['池塘', '水塘'] }],
     portals: [{ tile: [10, 10], radius: 1, toScene: 'forest', toTile: [1, 1] }],
   });
@@ -63,7 +64,7 @@ test('GET /debug/api/overview：各资源计数 + 最近会话', async () => {
     assert.equal(s.players, 1);
     assert.equal(s.worlds, 2);
     assert.equal(s.characters, 2);
-    assert.equal(s.props, 1);
+    assert.equal(s.items, 1);
     assert.equal(s.visits.total, 2);
     assert.equal(s.visits.active, 1);
     assert.equal(s.recentVisits.length, 2);
@@ -102,7 +103,7 @@ test('GET /debug/api/players 与 /debug/api/players/:id：列表带会话统计�
   }
 });
 
-test('GET /debug/api/worlds 与 /debug/api/worlds/:id：列表计数摘要，详情带角色/物品/会话', async () => {
+test('GET /debug/api/worlds 与 /debug/api/worlds/:id：列表计数摘要，详情带角色/造物/背包/会话', async () => {
   const app = await makeApp();
   try {
     const list = await app.inject({ method: 'GET', url: '/debug/api/worlds' });
@@ -112,7 +113,7 @@ test('GET /debug/api/worlds 与 /debug/api/worlds/:id：列表计数摘要，详
     const w1 = ws.find((w: { id: string }) => w.id === 'w1');
     assert.equal(w1.characterCount, 2);
     assert.equal(w1.fairyCount, 1);
-    assert.equal(w1.propCount, 1);
+    assert.equal(w1.itemCount, 1);
     assert.equal(w1.visitCount, 2);
     assert.equal(w1.activeVisitCount, 1);
     // 钱包按玩家分：这里只有匿名玩家（addStamp 走 ANON_PLAYER）盖过章
@@ -131,7 +132,8 @@ test('GET /debug/api/worlds 与 /debug/api/worlds/:id：列表计数摘要，详
     assert.equal(c1.memoryCount, 1);
     assert.equal(c1.chatTurnCount, 2);
     assert.equal(c1.sceneId, 'village', '角色摘要带场景（存量缺省归 village），供后台地图按场景归位');
-    assert.equal(d.props.length, 1);
+    assert.equal(d.items.length, 1);
+    assert.deepEqual(d.bags, [{ playerId: ANON_PLAYER, itemId: 'item1', count: 1 }], '背包计数透出');
     assert.equal(d.visits.length, 2);
     // 场景 + POI + 传送门的结构化数据都要透出（此前 debug 只给拍平的 locations 名字）
     assert.equal(d.scenes.length, 1);
@@ -225,5 +227,45 @@ test('/debug/api/*：配置 MALIANG_ADMIN_TOKEN 后无 token 拒绝、带 token 
     await app.close();
     if (prev === undefined) delete process.env.MALIANG_ADMIN_TOKEN;
     else process.env.MALIANG_ADMIN_TOKEN = prev;
+  }
+});
+
+test('GET /debug/api/worlds/:id/scenes/:sid/terrain-grid：解码矩阵 + palette 实体', async () => {
+  const store = new WorldStore();
+  seed(store);
+  const t = emptyTerrain();
+  t.palette = ['tree_puff_a'];
+  t.itemRef[10 * REQUIRED_GRID + 10] = 1;
+  t.types[0] = 2; t.depths[0] = 1; t.heights[5] = 3;
+  store.setSceneTerrain('w1', 'village', encodeTerrain(t), 4);
+  process.env.MALIANG_ADMIN_TOKEN = 'sesame'; // 门禁 token 在 buildServer 时捕获，必须先设
+  const app = await buildServer({ adapters: createMockAdapters(), store });
+  try {
+    const denied = await app.inject({ method: 'GET', url: '/debug/api/worlds/w1/scenes/village/terrain-grid' });
+    assert.equal(denied.statusCode, 403, 'admin token 门禁');
+
+    const res = await app.inject({
+      method: 'GET', url: '/debug/api/worlds/w1/scenes/village/terrain-grid',
+      headers: { 'x-admin-token': 'sesame' },
+    });
+    assert.equal(res.statusCode, 200);
+    const g = res.json() as { version: number; gridW: number; types: number[]; heights: number[]; depths: number[]; itemRef: number[]; palette: string[]; items: { id: string; name: string }[] };
+    assert.equal(g.version, 4);
+    assert.equal(g.gridW, REQUIRED_GRID);
+    assert.equal(g.types[0], 2);
+    assert.equal(g.depths[0], 1);
+    assert.equal(g.heights[5], 3);
+    assert.equal(g.itemRef[10 * REQUIRED_GRID + 10], 1);
+    assert.deepEqual(g.palette, ['tree_puff_a']);
+    assert.equal(g.items[0]!.name, '蓬蓬树·甲', 'palette 实体定义已解引用');
+
+    const missing = await app.inject({
+      method: 'GET', url: '/debug/api/worlds/w1/scenes/ghost/terrain-grid',
+      headers: { 'x-admin-token': 'sesame' },
+    });
+    assert.equal(missing.statusCode, 404);
+  } finally {
+    delete process.env.MALIANG_ADMIN_TOKEN;
+    await app.close();
   }
 });

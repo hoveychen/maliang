@@ -1,0 +1,44 @@
+[
+  {
+    "aliases": [
+      "深潭",
+      "小河",
+      "河边"
+    ],
+    "name": "小河深潭",
+    "radius": 5.0,
+    "tile": [
+      41,
+      33
+    ],
+    "trigger": "poi_forest_pond"
+  },
+  {
+    "aliases": [
+      "空地",
+      "草地",
+      "林中空地"
+    ],
+    "name": "林间空地",
+    "radius": 5.0,
+    "tile": [
+      20,
+      18
+    ],
+    "trigger": "poi_forest_clearing"
+  },
+  {
+    "aliases": [
+      "山丘",
+      "高地",
+      "土坡"
+    ],
+    "name": "小山丘",
+    "radius": 5.0,
+    "tile": [
+      55,
+      30
+    ],
+    "trigger": "poi_forest_knoll"
+  }
+]

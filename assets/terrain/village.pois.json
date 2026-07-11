@@ -1,0 +1,57 @@
+[
+  {
+    "aliases": [
+      "湖",
+      "水边",
+      "河边"
+    ],
+    "name": "池塘",
+    "radius": 20.0,
+    "tile": [
+      24,
+      24
+    ],
+    "trigger": "poi_pond"
+  },
+  {
+    "aliases": [
+      "山",
+      "高山",
+      "山顶"
+    ],
+    "name": "大山",
+    "radius": 22.0,
+    "tile": [
+      31,
+      7
+    ],
+    "trigger": "poi_mountain"
+  },
+  {
+    "aliases": [
+      "大风车",
+      "风车山"
+    ],
+    "name": "风车",
+    "radius": 20.0,
+    "tile": [
+      59,
+      54
+    ],
+    "trigger": "poi_windmill"
+  },
+  {
+    "aliases": [
+      "水潭",
+      "树林",
+      "小树林"
+    ],
+    "name": "小水潭",
+    "radius": 18.0,
+    "tile": [
+      13,
+      50
+    ],
+    "trigger": "poi_marsh"
+  }
+]

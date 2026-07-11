@@ -1,7 +1,7 @@
 extends SceneTree
 ## 换场景 world 层集成断言（scene-portal P4）：_on_scene_entered 卸旧场景、载新场景。
 ## 离线 demo 世界（村庄占位角色 + 一个语音物件），喂一条合成的 scene_entered（目标 forest，
-## scene=null 免地形网络拉取）→ 断言：旧角色/语音物件清空、新角色降生、world_props 清空、
+## scene=null 免地形网络拉取）→ 断言：旧角色/动态物件清空、新角色降生、
 ## 运行期 _scene_id 切到 forest、玩家按 playerPos 落位、出站 world_info 带新 sceneId。
 ## 出站消息经 Backend.sent 捕获（与 test_visual_props 同路）。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 10 \
@@ -47,8 +47,7 @@ func _tick() -> void:
 					old_ids.append(String(n.get("id", "")))
 			dp_tile = _free_tile_near(Vector2i(40, 20))
 			cm.add_dynamic_prop(SPEC, dp_tile, 0.0, 0.0, "dp1")
-			_check("语音物件已落位", cm.dynamic_prop_at(dp_tile), "dp1")
-			(scene.get("world_props") as Dictionary)["dp1"] = { "spec": SPEC, "state": "placed", "tile": [dp_tile.x, dp_tile.y] }
+			_check("动态物件已落位", cm.dynamic_prop_at(dp_tile), "dp1")
 			target_tile = _free_tile_near(Vector2i(18, 58))
 		12:
 			# 换场景：目标 forest，两个新角色，scene=null（不拉地形，避开网络），玩家落到 target_tile
@@ -62,7 +61,7 @@ func _tick() -> void:
 					{ "id": "seedFairy", "name": "小仙女", "isFairy": true, "appearance": {},
 						"position": { "tileX": 10, "tileY": 10 } },
 				],
-				"props": [],
+				"items": [],
 				"playerPos": { "tileX": target_tile.x, "tileY": target_tile.y },
 			})
 		16:
@@ -79,8 +78,7 @@ func _tick() -> void:
 				if ids.has(oid):
 					old_gone = false
 			_check("旧场景角色全部卸载", old_gone, true)
-			_check("旧语音物件已清（换场景不带入新场景）", cm.dynamic_prop_at(dp_tile), "")
-			_check("world_props 已清空", (scene.get("world_props") as Dictionary).is_empty(), true)
+			_check("旧动态物件已清（换场景不带入新场景）", cm.dynamic_prop_at(dp_tile), "")
 			# 玩家按 playerPos 落位（就近找空位，目标本身空则原位）
 			var ptile: Vector2i = WorldGrid.to_tile((scene.get("player") as Dictionary)["logical"])
 			_check("玩家落到 playerPos 附近", _tile_dist(ptile, target_tile) <= 3, true)

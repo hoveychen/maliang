@@ -1,17 +1,14 @@
 extends SceneTree
-## 把客户端 TerrainMap 确定性生成的地形导出成 .mltr 二进制，供 POST /admin/scenes 入库。
+## 把村庄场景导出成 .mltr v2 二进制（地貌 + 物品层 + palette），供 POST /admin/scenes 入库。
 ##
 ## 用法：
 ##   godot --headless --path . --script res://tools/export_terrain.gd -- --out village.mltr
 ##
-## 导出的字节与 TerrainMap 内存里的三个数组逐字节相同——这是「地形搬到服务端」那一步的
-## 验收标准：上线当天玩家看到的地图与今天完全一致，纯粹换了数据来源。
-##
-## 格式见 server/src/terrain.ts（两边必须同步改）：
-##   magic "MLTR" 4B | version u8 | gridW u8 | gridH u8 | tileSize f32(LE) | types | heights | depths
+## 地貌三平面与 TerrainMap._paint() 逐字节相同（上线地图与本地一致）；物品层由
+## tools/scene_compose.gd 组装（地标/SDF 物件常量表 + 分区散布规则的唯一权威）。
+## 格式见 server/src/terrain.ts（两边必须同步改）。
 
-const MAGIC := "MLTR"
-const VERSION := 1
+const COMPOSE := preload("res://tools/scene_compose.gd")
 const HEADER_BYTES := 11
 
 func _init() -> void:
@@ -75,29 +72,29 @@ static func build_portal_json() -> Array:
 		{ "tile": [18, 52], "radius": 3.0, "toScene": "forest", "toTile": [20, 18] },
 	]
 
-## 构建 .mltr 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。
+## 构建 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。
+## 前置副作用：把 TerrainMap 复位成本地村庄地貌（组装规则要读它判水/高度）。
 static func build_terrain_bytes() -> PackedByteArray:
 	var n := WorldGrid.GRID_TILES
 	var count := n * n
-	var buf := PackedByteArray()
-	buf.resize(HEADER_BYTES + 3 * count)
-
-	for i in range(4):
-		buf[i] = MAGIC.unicode_at(i)
-	buf[4] = VERSION
-	buf[5] = n
-	buf[6] = n
-	buf.encode_float(7, WorldGrid.TILE_SIZE) # 小端，与 DataView.setFloat32(.., true) 一致
-
+	# 组装规则读 TerrainMap，先确保是干净的村庄 _paint()（同进程可能残留别的场景）
+	TerrainMap.reset()
+	var types := PackedByteArray()
+	types.resize(count)
+	var heights := PackedByteArray()
+	heights.resize(count)
+	var depths := PackedByteArray()
+	depths.resize(count)
 	# 行主序（y 外层、x 内层），与服务端 _idx = y*W + x 一致
 	for y in range(n):
 		for x in range(n):
 			var t := Vector2i(x, y)
 			var i := y * n + x
-			buf[HEADER_BYTES + i] = TerrainMap.tile_type(t)
-			buf[HEADER_BYTES + count + i] = TerrainMap.tile_height(t)
-			buf[HEADER_BYTES + 2 * count + i] = TerrainMap.tile_depth(t)
-	return buf
+			types[i] = TerrainMap.tile_type(t)
+			heights[i] = TerrainMap.tile_height(t)
+			depths[i] = TerrainMap.tile_depth(t)
+	var composed: Dictionary = COMPOSE.compose("village")
+	return COMPOSE.build_v2_bytes(types, heights, depths, composed)
 
 static func _arg(name: String, fallback: String) -> String:
 	var args := OS.get_cmdline_user_args()

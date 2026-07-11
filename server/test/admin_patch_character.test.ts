@@ -23,7 +23,7 @@ test('admin PATCH 角色：修 sceneId/position/spriteAsset + 逐项校验 + tok
   try {
     store.createWorld('w1');
     store.upsertScene({
-      worldId: 'w1', sceneId: 'forest', name: '森林', terrainAsset: 'h', gridTiles: REQUIRED_GRID,
+      worldId: 'w1', sceneId: 'forest', name: '森林', terrainAsset: 'h', gridTiles: REQUIRED_GRID, terrainVersion: 1,
       pois: [], portals: [],
     });
     store.addCharacter(char('w1', 'c1', 'village'));

@@ -49,7 +49,7 @@ test('造物扣的是该玩家的花，不动别人的', async () => {
 
   assert.equal(store.getWallet('w1', 'A').flowers, INITIAL_FLOWERS - 1, 'A 的花被扣了一朵');
   assert.equal(store.getWallet('w1', 'B').flowers, INITIAL_FLOWERS, 'B 一分未动');
-  assert.ok(sent.some((m) => m.type === 'prop_created'), '造物成功');
+  assert.ok(sent.some((m) => m.type === 'item_created'), '造物成功');
 });
 
 test('造角色扣的是该玩家的花', async () => {

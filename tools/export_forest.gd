@@ -1,14 +1,13 @@
 extends SceneTree
-## 程序化生成第二张地图「森林」并导出 .mltr（+ POI json），供 POST /admin/scenes 入库。
-## 森林地形本身：林地草铺底 + 一条蜿蜒小河（浅水，一处深潭）+ 几处高地空地（knoll，可缓坡走上去）。
-## 树木不进地形（tile 只有草/路/水）——森林郁闭林冠由客户端 chunk_manager._deco_kind_forest 在
-## scene_id=forest 时铺满树表达；河岸苇、高地留白也都在那里。地形字节只负责草/水/高度骨架。
+## 程序化生成第二张地图「森林」并导出 .mltr v2（+ POI json），供 POST /admin/scenes 入库。
+## 森林地形：林地草铺底 + 一条蜿蜒小河（浅水，一处深潭）+ 几处高地空地（knoll，可缓坡走上去）。
+## v2 起郁闭林冠/河岸苇/高地留白直接组装进物品层（tools/scene_compose.gd 的
+## _deco_kind_forest），一份矩阵即完整场景——客户端不再有运行时散布规则。
 ##
 ## 用法：godot --headless --path . --script res://tools/export_forest.gd -- --out forest.mltr
 ## 格式见 server/src/terrain.ts / tools/export_terrain.gd（三处必须同步）。
 
-const MAGIC := "MLTR"
-const VERSION := 1
+const COMPOSE := preload("res://tools/scene_compose.gd")
 const HEADER_BYTES := 11
 const T_GRASS := 0
 const T_WATER := 2
@@ -98,20 +97,24 @@ static func build_terrain_bytes() -> PackedByteArray:
 			heights[i] = 0
 	_ellipse_depth(depths, types, n, 41.5, 33.5, 2.4, 2.0, 2)
 
-	# ── 组装（行主序，与服务端 _idx = y*W + x 一致）──
-	var buf := PackedByteArray()
-	buf.resize(HEADER_BYTES + 3 * count)
+	# ── 组装物品层：散布规则读 TerrainMap，先把森林地貌灌进去（v1 载荷最省事）──
+	var v1 := PackedByteArray()
+	v1.resize(HEADER_BYTES)
 	for i in range(4):
-		buf[i] = MAGIC.unicode_at(i)
-	buf[4] = VERSION
-	buf[5] = n
-	buf[6] = n
-	buf.encode_float(7, WorldGrid.TILE_SIZE)
-	for i in range(count):
-		buf[HEADER_BYTES + i] = types[i]
-		buf[HEADER_BYTES + count + i] = heights[i]
-		buf[HEADER_BYTES + 2 * count + i] = depths[i]
-	return buf
+		v1[i] = TerrainMap.MLTR_MAGIC.unicode_at(i)
+	v1[4] = TerrainMap.MLTR_VERSION_1
+	v1[5] = n
+	v1[6] = n
+	v1.encode_float(7, WorldGrid.TILE_SIZE)
+	v1.append_array(types)
+	v1.append_array(heights)
+	v1.append_array(depths)
+	TerrainMap.reset()
+	var r: Dictionary = TerrainMap.load_from_bytes(v1)
+	assert(r["ok"], "森林地貌自产自销必须可载入: %s" % r.get("error", ""))
+	var composed: Dictionary = COMPOSE.compose("forest")
+	TerrainMap.reset() # 不给同进程后续使用者留森林地形
+	return COMPOSE.build_v2_bytes(types, heights, depths, composed)
 
 static func _idx(n: int, x: int, z: int) -> int:
 	return posmod(z, n) * n + posmod(x, n)

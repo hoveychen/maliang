@@ -2,8 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import { creationItemDef, getBuiltinItem } from './items.ts';
+import { applyTileEdits } from './terrain_edit.ts';
+import { decodeTerrain, encodeTerrain } from './terrain.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 
@@ -55,7 +58,7 @@ export interface SpriteAnimRecord {
   meta?: SpriteSheetMeta;
 }
 
-/** scenes 表的一行原样（列名 snake_case）。 */
+/** scenes 表的一行（列名 snake_case；terrain blob 单独走 getSceneTerrain，不在此）。 */
 interface SceneRow {
   world_id: string;
   scene_id: string;
@@ -64,16 +67,18 @@ interface SceneRow {
   grid_tiles: number;
   pois: string;
   portals: string;
+  terrain_version: number;
 }
+
+/** getScene/listScenes 的列清单：刻意不含 terrain blob（50KB，别随场景元数据白拉）。 */
+const SCENE_COLS = 'world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, terrain_version';
 
 export interface World {
   id: string;
   characters: Map<string, Character>;
-  /** 语音生成的 SDF 物件（id → WorldProp，tile 为落位回报）。 */
-  props: Map<string, WorldProp>;
 }
-// 注：钱包与进行中委托已不属于「世界」——它们按 (worldId, playerId) 分，
-// 见 getWallet/getActiveTask。世界只剩角色与物件这类真正全局的东西。
+// 注：钱包/委托/背包按 (worldId, playerId) 分（getWallet/getActiveTask/getBag）；
+// 语音造物是 items 实体行 + 地形矩阵 tile 引用（万物皆物品），不再挂在世界对象上。
 
 /**
  * 世界状态 + 生成的 sprite 资源存储。
@@ -83,7 +88,9 @@ export interface World {
  * 存储布局：
  *   worlds(id, inventory, active_task)       ← inventory/active_task 两列已废弃，见 wallets/player_tasks
  *   characters(id PK, world_id, data JSON)   ← Character 整对象存一行
- *   props(id PK, world_id, data JSON)
+ *   props(id PK, world_id, data JSON)            ← 已退役：启动时迁到 items+矩阵/背包（#migratePropsToItems）
+ *   items(id PK, world_id, data JSON)            ← 语音造物实体行（万物皆物品）
+ *   bag(world_id, player_id, item_id, count)     ← 每玩家的物品背包计数
  *   wallets(world_id, player_id, data JSON)      ← 每玩家一份小红花钱包
  *   player_tasks(world_id, player_id, data JSON) ← 每玩家一个进行中委托（无委托则无行）
  * saveCharacter 从「全量重写 worlds.json」变为「UPDATE 一行」，根治 chatHistory 膨胀拖慢落盘。
@@ -111,6 +118,8 @@ export class WorldStore {
       this.#migrateLegacyEntityScenes();
       this.#loadAssets();
       this.#loadSpriteAnims();
+      this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
+      this.#migratePropsToItems(); // 依赖场景矩阵已就位（placed 物件要写进矩阵）
     }
   }
 
@@ -190,7 +199,28 @@ export class WorldStore {
         tile_y    INTEGER NOT NULL,
         PRIMARY KEY (world_id, scene_id, player_id)
       );
-      -- 场景 = 世界里的一片区域（一张地图）。地形二进制存 assets 库，这里只记 hash。
+      -- 物品实体（万物皆物品，docs/scene-item-refactor-design.md §2.1）：
+      -- 只存语音造物（world 归属）；内置定义是代码常量（items.ts BUILTIN_ITEMS），不落库。
+      -- 地形矩阵 palette / 背包引用的都是本表（或内置）的 id。
+      CREATE TABLE IF NOT EXISTS items (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_items_world ON items(world_id);
+      -- 背包：玩家持有的物品实体计数（与钱包同构，按 (world, player) 分）。
+      -- 实例身份已消解为（tile + 实体引用），背包只记「哪种物品有几份」。
+      CREATE TABLE IF NOT EXISTS bag (
+        world_id  TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        item_id   TEXT NOT NULL,
+        count     INTEGER NOT NULL,
+        PRIMARY KEY (world_id, player_id, item_id)
+      );
+      -- 场景 = 世界里的一片区域（一张地图）。
+      -- 地形矩阵 v2 起直接存 terrain 列（频繁 tile 编辑与内容寻址天然冲突），
+      -- terrain_version 单调递增供客户端缓存/patch 对齐；terrain_asset 是
+      -- 内容寻址时代的 hash，过渡期保留（老客户端仍按它拉 /assets）。
       CREATE TABLE IF NOT EXISTS scenes (
         world_id      TEXT NOT NULL,
         scene_id      TEXT NOT NULL,
@@ -199,9 +229,22 @@ export class WorldStore {
         grid_tiles    INTEGER NOT NULL,
         pois          TEXT NOT NULL DEFAULT '[]',
         portals       TEXT NOT NULL DEFAULT '[]',
+        terrain       BLOB,
+        terrain_version INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (world_id, scene_id)
       );
     `);
+    // 存量库的 scenes 表补新列（SQLite 无 IF NOT EXISTS 列语法，重复 ALTER 会抛，吞掉即可）
+    for (const ddl of [
+      'ALTER TABLE scenes ADD COLUMN terrain BLOB',
+      "ALTER TABLE scenes ADD COLUMN terrain_version INTEGER NOT NULL DEFAULT 0",
+    ]) {
+      try {
+        this.#db.exec(ddl);
+      } catch {
+        /* 列已存在 */
+      }
+    }
   }
 
   /** 引导式造角色：某选项 id 已生成图标的资产 hash（未生成返回空串）。 */
@@ -304,7 +347,7 @@ export class WorldStore {
     this.#db
       .prepare('INSERT OR IGNORE INTO worlds (id, inventory, active_task) VALUES (?, ?, ?)')
       .run(id, '{}', null);
-    return { id, characters: new Map(), props: new Map() };
+    return { id, characters: new Map() };
   }
 
   getWorld(id: string): World | undefined {
@@ -314,9 +357,7 @@ export class WorldStore {
     if (!row) return undefined;
     const characters = new Map<string, Character>();
     for (const c of this.listCharacters(id)) characters.set(c.id, c);
-    const props = new Map<string, WorldProp>();
-    for (const p of this.listProps(id)) props.set(p.id, p);
-    return { id: row.id, characters, props };
+    return { id: row.id, characters };
   }
 
   #worldExists(id: string): boolean {
@@ -338,75 +379,129 @@ export class WorldStore {
       .run(character.id, character.worldId, JSON.stringify(character));
   }
 
-  /** 语音生成的 SDF 物件：新增（tile 待客户端落位回报）。 */
-  addProp(worldId: string, prop: WorldProp): void {
-    if (!this.#worldExists(worldId)) throw new Error(`world not found: ${worldId}`);
-    this.#saveProp(worldId, prop);
-  }
+  // ── 物品实体（items 表，只存语音造物；内置定义见 items.ts）─────────────
 
-  #getProp(worldId: string, propId: string): WorldProp | undefined {
-    const row = this.#db.prepare('SELECT data FROM props WHERE id = ? AND world_id = ?').get(propId, worldId) as
-      | { data: string }
-      | undefined;
-    return row ? (JSON.parse(row.data) as WorldProp) : undefined;
-  }
-
-  #saveProp(worldId: string, prop: WorldProp): void {
+  /** 新增/更新物品实体（语音造物）。内置 id 由 upsert 侧拒绝，防止覆盖代码常量。 */
+  upsertItem(def: ItemDef): void {
+    if (def.worldId === null) throw new Error(`builtin item 不入库: ${def.id}`);
+    if (getBuiltinItem(def.id)) throw new Error(`item id 与内置冲突: ${def.id}`);
+    if (!this.#worldExists(def.worldId)) throw new Error(`world not found: ${def.worldId}`);
     this.#db
       .prepare(
-        'INSERT INTO props (id, world_id, data) VALUES (?, ?, ?) ' +
+        'INSERT INTO items (id, world_id, data) VALUES (?, ?, ?) ' +
           'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
       )
-      .run(prop.id, worldId, JSON.stringify(prop));
+      .run(def.id, def.worldId, JSON.stringify(def));
   }
 
-  /** 客户端落位回报：记下物件的 tile，重载世界时按此恢复。 */
-  setPropTile(worldId: string, propId: string, tile: [number, number]): boolean {
-    const prop = this.#getProp(worldId, propId);
-    if (!prop) return false;
-    prop.tile = tile;
-    this.#saveProp(worldId, prop);
+  /** 物品实体定义：先查内置常量，再查该 world 的造物行。 */
+  getItemDef(worldId: string, id: string): ItemDef | undefined {
+    const b = getBuiltinItem(id);
+    if (b) return b;
+    const row = this.#db.prepare('SELECT data FROM items WHERE id = ? AND world_id = ?').get(id, worldId) as
+      | { data: string }
+      | undefined;
+    return row ? (JSON.parse(row.data) as ItemDef) : undefined;
+  }
+
+  /** 该 world 的造物实体（不含内置）。 */
+  listWorldItems(worldId: string): ItemDef[] {
+    const rows = this.#db.prepare('SELECT data FROM items WHERE world_id = ? ORDER BY id').all(worldId) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as ItemDef);
+  }
+
+  /** 地形矩阵校验用的实体解析器（内置 + 该 world 造物）。 */
+  itemResolver(worldId: string): (id: string) => ItemDef | undefined {
+    return (id) => this.getItemDef(worldId, id);
+  }
+
+  // ── 背包（bag 表：玩家持有的物品实体计数，与钱包同款 (world, player) 维度）──────
+  //
+  // 摆放 = tile 编辑挂引用 + bagTake；拾起 = tile 编辑清引用 + bagAdd（见 server.ts
+  // item_place/item_pickup）。匿名兜底与钱包一致：playerId 为空落 ANON_PLAYER 键。
+
+  /** 背包加 n 份某物品（造物落成/拾起）。 */
+  bagAdd(worldId: string, playerId: string, itemId: string, n = 1): void {
+    if (!this.#worldExists(worldId)) throw new Error(`world not found: ${worldId}`);
+    this.#db
+      .prepare(
+        'INSERT INTO bag (world_id, player_id, item_id, count) VALUES (?, ?, ?, ?) ' +
+          'ON CONFLICT(world_id, player_id, item_id) DO UPDATE SET count = count + excluded.count',
+      )
+      .run(worldId, this.#walletKey(playerId), itemId, n);
+  }
+
+  /** 背包扣 n 份某物品（摆放）。不足 → false 不动账；扣到 0 删行。 */
+  bagTake(worldId: string, playerId: string, itemId: string, n = 1): boolean {
+    const key = this.#walletKey(playerId);
+    const r = this.#db
+      .prepare('UPDATE bag SET count = count - ? WHERE world_id = ? AND player_id = ? AND item_id = ? AND count >= ?')
+      .run(n, worldId, key, itemId, n);
+    if (r.changes === 0) return false;
+    this.#db.prepare('DELETE FROM bag WHERE world_id = ? AND player_id = ? AND item_id = ? AND count <= 0').run(worldId, key, itemId);
     return true;
   }
 
-  /** 收纳：已摆物件收进收集册物品页（tile 清空）。不存在或已在背包 → false 不动账。 */
-  storeProp(worldId: string, propId: string): boolean {
-    const prop = this.#getProp(worldId, propId);
-    if (!prop || prop.state !== 'placed') return false;
-    prop.state = 'bagged';
-    prop.tile = null;
-    this.#saveProp(worldId, prop);
-    return true;
+  /** 某玩家的背包（item id → 份数）。 */
+  getBag(worldId: string, playerId: string): Record<string, number> {
+    const rows = this.#db
+      .prepare('SELECT item_id, count FROM bag WHERE world_id = ? AND player_id = ? ORDER BY item_id')
+      .all(worldId, this.#walletKey(playerId)) as { item_id: string; count: number }[];
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.item_id] = r.count;
+    return out;
   }
 
-  /** 摆出：背包物件放回世界指定 tile（客户端已过占地校验）。不存在或不在背包 → false。 */
-  takeProp(worldId: string, propId: string, tile: [number, number]): boolean {
-    const prop = this.#getProp(worldId, propId);
-    if (!prop || prop.state !== 'bagged') return false;
-    prop.state = 'placed';
-    prop.tile = tile;
-    this.#saveProp(worldId, prop);
-    return true;
-  }
-
-  /** 挪位：已摆物件换 tile（长按拖拽后回报）。不存在或在背包 → false。 */
-  movePropTile(worldId: string, propId: string, tile: [number, number]): boolean {
-    const prop = this.#getProp(worldId, propId);
-    if (!prop || prop.state !== 'placed') return false;
-    prop.tile = tile;
-    this.#saveProp(worldId, prop);
-    return true;
+  /** 某世界所有玩家的背包行（debug 后台用）。 */
+  listBags(worldId: string): { playerId: string; itemId: string; count: number }[] {
+    const rows = this.#db
+      .prepare('SELECT player_id, item_id, count FROM bag WHERE world_id = ? ORDER BY player_id, item_id')
+      .all(worldId) as { player_id: string; item_id: string; count: number }[];
+    return rows.map((r) => ({ playerId: r.player_id, itemId: r.item_id, count: r.count }));
   }
 
   /**
-   * 世界里的物件。传 sceneId 则只返回该场景的物件（缺 sceneId 的存量物件按 DEFAULT_SCENE 归入）；
-   * 不传 = 全世界所有场景（保持既有调用点行为不变）。
+   * 存量迁移：props 表（旧 WorldProp 实例）→ items 实体行 + 矩阵 tile 引用/背包计数。
+   * placed 且落位合法 → 写进所在场景矩阵（version+1）；场景无矩阵、tile 越界、占地冲突、
+   * bagged、无主 → 收进匿名背包（ANON_PLAYER，与旧「全世界共用」行为一致）。
+   * 迁移后删 props 行 → 幂等（第二次开库无行可迁）。必须与语义切换同版上线：
+   * 旧协议（prop_place/store/take/move）已删，存量物件只能以新形态存在。
    */
-  listProps(worldId: string, sceneId?: string): WorldProp[] {
-    const rows = this.#db.prepare('SELECT data FROM props WHERE world_id = ?').all(worldId) as { data: string }[];
-    const all = rows.map((r) => JSON.parse(r.data) as WorldProp);
-    if (sceneId === undefined) return all;
-    return all.filter((p) => (p.sceneId ?? DEFAULT_SCENE) === sceneId);
+  #migratePropsToItems(): void {
+    const rows = this.#db.prepare('SELECT id, world_id, data FROM props').all() as
+      { id: string; world_id: string; data: string }[];
+    if (rows.length === 0) return;
+    for (const r of rows) {
+      try {
+        const prop = JSON.parse(r.data) as WorldProp;
+        const def = creationItemDef(r.world_id, prop.id, prop.spec);
+        this.upsertItem(def);
+        let inMatrix = false;
+        if (prop.state === 'placed' && Array.isArray(prop.tile)) {
+          const sceneId = prop.sceneId ?? DEFAULT_SCENE;
+          const rec = this.getSceneTerrain(r.world_id, sceneId);
+          if (rec) {
+            try {
+              const terrain = decodeTerrain(rec.bytes);
+              const [x, y] = prop.tile;
+              // tile 编辑对已有引用是覆写语义——目标 tile 已有物品时不许顶掉，收背包
+              if (x < 0 || x >= terrain.gridW || y < 0 || y >= terrain.gridH || terrain.itemRef[y * terrain.gridW + x] !== 0) {
+                throw new Error('tile occupied/out of range');
+              }
+              applyTileEdits(terrain, [{ x, y, item: { id: def.id } }], this.itemResolver(r.world_id));
+              this.setSceneTerrain(r.world_id, sceneId, encodeTerrain(terrain), rec.version + 1);
+              inMatrix = true;
+            } catch {
+              /* 越界/tile 被占/占地冲突/压水：收进背包，物件绝不凭空消失 */
+            }
+          }
+        }
+        if (!inMatrix) this.bagAdd(r.world_id, ANON_PLAYER, def.id);
+      } catch (err) {
+        console.warn(`props 迁移跳过坏行 ${r.id}：${String(err)}`);
+      }
+    }
+    this.#db.exec('DELETE FROM props');
   }
 
   /**
@@ -462,19 +557,58 @@ export class WorldStore {
       gridTiles: r.grid_tiles,
       pois: JSON.parse(r.pois) as ScenePoi[],
       portals: JSON.parse(r.portals) as ScenePortal[],
+      terrainVersion: r.terrain_version,
     };
   }
 
   getScene(worldId: string, sceneId: string): Scene | undefined {
-    const row = this.#db.prepare('SELECT * FROM scenes WHERE world_id = ? AND scene_id = ?').get(worldId, sceneId) as
+    const row = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? AND scene_id = ?`).get(worldId, sceneId) as
       | SceneRow
       | undefined;
     return row ? this.#rowToScene(row) : undefined;
   }
 
   listScenes(worldId: string): Scene[] {
-    const rows = this.#db.prepare('SELECT * FROM scenes WHERE world_id = ? ORDER BY scene_id').all(worldId) as unknown as SceneRow[];
+    const rows = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? ORDER BY scene_id`).all(worldId) as unknown as SceneRow[];
     return rows.map((r) => this.#rowToScene(r));
+  }
+
+  /**
+   * 存量场景迁移：terrain blob 为空但 terrain_asset 指向内容寻址库 → 把字节搬进
+   * scenes.terrain（重编码为 v2，v1 存量物品层补零），version 置 1。
+   * 幂等（blob 非空即跳过）；资产缺失/字节坏则跳过该场景（本就不可用）。
+   */
+  #migrateSceneTerrainBlobs(): void {
+    const rows = this.#db
+      .prepare("SELECT world_id, scene_id, terrain_asset FROM scenes WHERE terrain IS NULL AND terrain_asset != ''")
+      .all() as { world_id: string; scene_id: string; terrain_asset: string }[];
+    for (const r of rows) {
+      const blob = this.getAsset(r.terrain_asset);
+      if (!blob) continue;
+      try {
+        const bytes = encodeTerrain(decodeTerrain(blob.bytes));
+        this.setSceneTerrain(r.world_id, r.scene_id, bytes, 1);
+      } catch {
+        /* 坏字节：跳过，别让一个坏场景拦启动 */
+      }
+    }
+  }
+
+  /** 场景地形矩阵（v2 blob）与版本。场景未入库/无地形 → undefined。 */
+  getSceneTerrain(worldId: string, sceneId: string): { bytes: Uint8Array; version: number } | undefined {
+    const row = this.#db
+      .prepare('SELECT terrain, terrain_version FROM scenes WHERE world_id = ? AND scene_id = ?')
+      .get(worldId, sceneId) as { terrain: Uint8Array | null; terrain_version: number } | undefined;
+    if (!row || row.terrain === null) return undefined;
+    return { bytes: new Uint8Array(row.terrain), version: row.terrain_version };
+  }
+
+  /** 写入场景地形矩阵与版本（唯一写入口是 terrain_edit.ts / /admin/scenes）。 */
+  setSceneTerrain(worldId: string, sceneId: string, bytes: Uint8Array, version: number): void {
+    const r = this.#db
+      .prepare('UPDATE scenes SET terrain = ?, terrain_version = ? WHERE world_id = ? AND scene_id = ?')
+      .run(bytes, version, worldId, sceneId);
+    if (r.changes === 0) throw new Error(`scene not found: ${worldId}/${sceneId}`);
   }
 
   // ── 奖赏系统：小红花钱包 + 进行中委托（均按 (worldId, playerId) 维度）────────────────

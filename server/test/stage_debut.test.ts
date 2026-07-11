@@ -39,13 +39,13 @@ function seedTwoScenes(): WorldStore {
   const store = new WorldStore();
   store.createWorld('w1');
   store.upsertScene({
-    worldId: 'w1', sceneId: 'forest', name: '森林', terrainAsset: 'h-forest', gridTiles: 75,
+    worldId: 'w1', sceneId: 'forest', name: '森林', terrainAsset: 'h-forest', gridTiles: 75, terrainVersion: 1,
     pois: [{ tile: [2, 2], radius: 5, trigger: 't', name: '小河深潭', aliases: [] },
            { tile: [4, 4], radius: 5, trigger: 't', name: '林间空地', aliases: [] }],
     portals: [],
   });
   store.upsertScene({
-    worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h-village', gridTiles: 75,
+    worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h-village', gridTiles: 75, terrainVersion: 1,
     pois: [{ tile: [6, 6], radius: 5, trigger: 't', name: '池塘', aliases: [] },
            { tile: [8, 8], radius: 5, trigger: 't', name: '大山', aliases: [] }],
     portals: [],

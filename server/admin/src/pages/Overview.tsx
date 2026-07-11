@@ -20,7 +20,7 @@ export function OverviewPage() {
               { label: '玩家', num: data.players },
               { label: '世界', num: data.worlds },
               { label: '角色', num: data.characters },
-              { label: '物品', num: data.props },
+              { label: '造物', num: data.items },
               {
                 label: '会话（进行中/总）',
                 num: (

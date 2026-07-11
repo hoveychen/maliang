@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import {
-  encodeTerrain, decodeTerrain, TerrainFormatError,
-  HEADER_BYTES, REQUIRED_GRID, DEFAULT_TILE_SIZE, TERRAIN_VERSION,
+  encodeTerrain, decodeTerrain, emptyTerrain, TerrainFormatError,
+  HEADER_BYTES, PLANES_V2, REQUIRED_GRID, DEFAULT_TILE_SIZE,
+  TERRAIN_VERSION, TERRAIN_VERSION_1,
   T_GRASS, T_PATH, T_WATER, type Terrain,
 } from '../src/terrain.ts';
 
@@ -13,10 +14,7 @@ const N = REQUIRED_GRID * REQUIRED_GRID;
 
 /** 造一份合法地形：默认全草地，指定几格水（带水深）与路。 */
 function terrain(mut?: (t: Terrain) => void): Terrain {
-  const t: Terrain = {
-    gridW: REQUIRED_GRID, gridH: REQUIRED_GRID, tileSize: DEFAULT_TILE_SIZE,
-    types: new Uint8Array(N), heights: new Uint8Array(N), depths: new Uint8Array(N),
-  };
+  const t = emptyTerrain();
   t.types[0] = T_WATER; t.depths[0] = 2;   // 深水
   t.types[1] = T_PATH;
   t.heights[2] = 8;                         // 实测主峰最高 8 级
@@ -24,30 +22,70 @@ function terrain(mut?: (t: Terrain) => void): Terrain {
   return t;
 }
 
-test('round-trip：编码再解码，三个平面逐字节一致', () => {
-  const t = terrain();
+/** 手工拼一份 v1 载荷（旧导出工具/存量库的格式）。 */
+function v1Bytes(mut?: (t: Terrain) => void): Uint8Array {
+  const t = terrain(mut);
+  const out = new Uint8Array(HEADER_BYTES + 3 * N);
+  const view = new DataView(out.buffer);
+  for (let i = 0; i < 4; i++) out[i] = 'MLTR'.charCodeAt(i);
+  out[4] = TERRAIN_VERSION_1;
+  out[5] = REQUIRED_GRID;
+  out[6] = REQUIRED_GRID;
+  view.setFloat32(7, DEFAULT_TILE_SIZE, true);
+  out.set(t.types, HEADER_BYTES);
+  out.set(t.heights, HEADER_BYTES + N);
+  out.set(t.depths, HEADER_BYTES + 2 * N);
+  return out;
+}
+
+test('v2 round-trip：九平面 + palette 逐字节一致', () => {
+  const t = terrain((x) => {
+    x.palette = ['tree_puff_a', 'house_0', '小明的花'];
+    x.itemRef[100] = 1; x.itemArg[100] = 57;   // yaw ≈80°
+    x.itemRef[200] = 3; x.itemArg[200] = 128;  // yaw 180°
+  });
   const back = decodeTerrain(encodeTerrain(t));
 
   assert.equal(back.gridW, REQUIRED_GRID);
-  assert.equal(back.gridH, REQUIRED_GRID);
   assert.equal(back.tileSize, DEFAULT_TILE_SIZE);
   assert.deepEqual(back.types, t.types);
   assert.deepEqual(back.heights, t.heights);
   assert.deepEqual(back.depths, t.depths);
+  assert.deepEqual(back.itemRef, t.itemRef);
+  assert.deepEqual(back.itemArg, t.itemArg);
+  for (let e = 0; e < 4; e++) assert.deepEqual(back.edges[e], t.edges[e]);
+  assert.deepEqual(back.palette, ['tree_puff_a', 'house_0', '小明的花']);
 });
 
-test('体积就是 11 + 3×gridW×gridH', () => {
-  const buf = encodeTerrain(terrain());
-  assert.equal(buf.length, HEADER_BYTES + 3 * N);
-  assert.equal(buf.length, 16886, '75×75 → 16886 B');
+test('v2 体积：11 + 9×N + palette 尾段', () => {
+  const empty = encodeTerrain(terrain());
+  assert.equal(empty.length, HEADER_BYTES + PLANES_V2 * N + 1, '空 palette 只有 count 一个字节');
+
+  const withPalette = encodeTerrain(terrain((x) => { x.palette = ['ab', 'cde']; }));
+  assert.equal(withPalette.length, HEADER_BYTES + PLANES_V2 * N + 1 + (1 + 2) + (1 + 3));
 });
 
-test('头部字段：magic / version 落在约定位置', () => {
+test('头部字段：magic / version=2 落在约定位置', () => {
   const buf = encodeTerrain(terrain());
   assert.equal(String.fromCharCode(buf[0]!, buf[1]!, buf[2]!, buf[3]!), 'MLTR');
   assert.equal(buf[4], TERRAIN_VERSION);
   assert.equal(buf[5], REQUIRED_GRID);
   assert.equal(buf[6], REQUIRED_GRID);
+});
+
+test('v1 兼容：三平面读回，item/edge 平面补零、palette 为空', () => {
+  const back = decodeTerrain(v1Bytes());
+  assert.equal(back.types[0], T_WATER);
+  assert.equal(back.depths[0], 2);
+  assert.equal(back.heights[2], 8);
+  assert.equal(back.itemRef.length, N);
+  assert.ok(back.itemRef.every((v) => v === 0));
+  assert.ok(back.edges.every((p) => p.every((v) => v === 0)));
+  assert.deepEqual(back.palette, []);
+});
+
+test('v1 兼容：长度对不上 v1 声明照样拒收', () => {
+  assert.throws(() => decodeTerrain(v1Bytes().slice(0, HEADER_BYTES + 3 * N - 1)), /length/);
 });
 
 test('拒收：magic 不对', () => {
@@ -68,13 +106,38 @@ test('拒收：网格尺寸不是 75×75（第一版锁死）', () => {
   assert.throws(() => decodeTerrain(buf), /只接受 75x75/);
 });
 
-test('拒收：长度对不上头部声明（截断/多余尾巴）', () => {
+test('拒收：长度对不上（截断/palette 后多余尾巴）', () => {
   const buf = encodeTerrain(terrain());
-  assert.throws(() => decodeTerrain(buf.slice(0, buf.length - 1)), /length/);
+  assert.throws(() => decodeTerrain(buf.slice(0, buf.length - 1)), /length|truncated/);
 
   const longer = new Uint8Array(buf.length + 1);
   longer.set(buf);
-  assert.throws(() => decodeTerrain(longer), /length/);
+  assert.throws(() => decodeTerrain(longer), /多余尾巴/);
+});
+
+test('拒收：itemRef 索引越出 palette', () => {
+  const buf = encodeTerrain(terrain((x) => { x.palette = ['tree_puff_a']; }));
+  buf[HEADER_BYTES + 3 * N + 7] = 2; // palette 只有 1 项，itemRef 却写 2
+  assert.throws(() => decodeTerrain(buf), /itemRef\[7\] = 2/);
+});
+
+test('拒收：edge 索引越出 palette', () => {
+  const buf = encodeTerrain(terrain());
+  buf[HEADER_BYTES + 5 * N + 9] = 1; // edgeN 平面，空 palette
+  assert.throws(() => decodeTerrain(buf), /edgeN\[9\] = 1/);
+});
+
+test('拒收：palette 截断 / 空项 / 重复项', () => {
+  const good = encodeTerrain(terrain((x) => { x.palette = ['ab', 'ab2']; }));
+  assert.throws(() => decodeTerrain(good.slice(0, good.length - 2)), /truncated|length/);
+
+  const emptyEntry = encodeTerrain(terrain((x) => { x.palette = ['ab']; }));
+  emptyEntry[HEADER_BYTES + PLANES_V2 * N + 1] = 0; // len=0
+  assert.throws(() => decodeTerrain(emptyEntry), /empty|truncated|length|多余/);
+
+  const t = terrain();
+  t.palette = ['same', 'same'];
+  assert.throws(() => decodeTerrain(encodeTerrain(t)), /duplicate/);
 });
 
 test('拒收：非法 tile 类型', () => {
@@ -94,10 +157,18 @@ test('拒收：太短的载荷（连头都不够）', () => {
   assert.throws(() => decodeTerrain(new Uint8Array(5)), /too short/);
 });
 
-test('编码期自检：平面长度与 grid 不符直接抛', () => {
+test('编码期自检：平面长度与 grid 不符 / palette 超上限直接抛', () => {
   const t = terrain();
   t.types = new Uint8Array(N - 1);
   assert.throws(() => encodeTerrain(t), /types length/);
+
+  const t2 = terrain();
+  t2.itemRef = new Uint8Array(N + 1);
+  assert.throws(() => encodeTerrain(t2), /itemRef length/);
+
+  const t3 = terrain();
+  t3.palette = Array.from({ length: 256 }, (_, i) => `it${i}`);
+  assert.throws(() => encodeTerrain(t3), /palette 256/);
 });
 
 test('水格可以有水深，草/路格水深为 0 —— 合法数据不该被误杀', () => {
@@ -115,7 +186,7 @@ import { DEFAULT_SCENE, type Scene } from '../src/types.ts';
 function scene(over: Partial<Scene> = {}): Scene {
   return {
     worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄',
-    terrainAsset: 'abc123', gridTiles: REQUIRED_GRID,
+    terrainAsset: 'abc123', gridTiles: REQUIRED_GRID, terrainVersion: 1,
     pois: [{ tile: [24, 24], radius: 20, trigger: 'poi_pond', name: '池塘', aliases: ['湖', '水边'] }],
     portals: [],
     ...over,

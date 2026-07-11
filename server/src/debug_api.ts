@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WorldStore } from './persistence.ts';
 import type { Character } from './types.ts';
 import { DEFAULT_SCENE } from './types.ts';
+import { decodeTerrain } from './terrain.ts';
 
 type AuthedFn = (req: { headers: Record<string, unknown>; query: unknown }) => boolean;
 
@@ -46,7 +47,7 @@ function worldSummary(store: WorldStore, w: { id: string }) {
     sceneCount: store.listScenes(w.id).length,
     characterCount: characters.length,
     fairyCount: characters.filter((c) => c.isFairy).length,
-    propCount: store.listProps(w.id).length,
+    itemCount: store.listWorldItems(w.id).length,
     visitCount: visits.length,
     activeVisitCount: visits.filter((v) => v.endedAt === null).length,
   };
@@ -64,17 +65,17 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
     if (!guard(req, reply)) return reply;
     const worlds = store.listWorlds();
     let characters = 0;
-    let props = 0;
+    let items = 0;
     for (const w of worlds) {
       characters += store.listCharacters(w.id).length;
-      props += store.listProps(w.id).length;
+      items += store.listWorldItems(w.id).length;
     }
     const visits = store.listVisits();
     return {
       players: store.listPlayers().length,
       worlds: worlds.length,
       characters,
-      props,
+      items,
       visits: { total: visits.length, active: visits.filter((v) => v.endedAt === null).length },
       creationIcons: Object.keys(store.listCreationIcons()).length,
       recentVisits: [...visits].sort((a, b) => b.startedAt - a.startedAt).slice(0, 20),
@@ -133,7 +134,7 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
     return { worlds: store.listWorlds().map((w) => worldSummary(store, w)) };
   });
 
-  // 世界详情：钱包/委托/地点 + 角色摘要 + 物品 + 会话（事件页 = 会话 + 委托）
+  // 世界详情：钱包/委托/地点 + 角色摘要 + 造物实体/背包 + 会话（事件页 = 会话 + 委托）
   app.get<{ Params: { id: string } }>('/debug/api/worlds/:id', async (req, reply) => {
     if (!guard(req, reply)) return reply;
     const world = store.getWorld(req.params.id);
@@ -143,8 +144,32 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
       // 场景 = 世界里的每片区域（模型 B）：地形 hash/网格 + POI + 传送门，全结构透出给后台
       scenes: store.listScenes(world.id),
       characters: store.listCharacters(world.id).map((c) => characterSummary(store, c)),
-      props: store.listProps(world.id),
+      // 造物实体行（摆着的引用在场景矩阵里，见 terrain-grid 端点）+ 各玩家背包计数
+      items: store.listWorldItems(world.id),
+      bags: store.listBags(world.id),
       visits: store.listVisits(world.id),
+    };
+  });
+
+  // 场景地形矩阵（解码成 JSON 供后台矩阵图渲染：地貌三平面 + 物品层 + palette 实体定义）。
+  // 服务端解码复用唯一编解码器（terrain.ts），后台不抄第二份格式实现。
+  app.get<{ Params: { id: string; sid: string } }>('/debug/api/worlds/:id/scenes/:sid/terrain-grid', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    const rec = store.getSceneTerrain(req.params.id, req.params.sid);
+    if (!rec) return reply.code(404).send({ error: 'scene terrain not found' });
+    const t = decodeTerrain(rec.bytes);
+    const resolve = store.itemResolver(req.params.id);
+    return {
+      version: rec.version,
+      gridW: t.gridW,
+      gridH: t.gridH,
+      types: Array.from(t.types),
+      heights: Array.from(t.heights),
+      depths: Array.from(t.depths),
+      itemRef: Array.from(t.itemRef),
+      itemArg: Array.from(t.itemArg),
+      palette: t.palette,
+      items: t.palette.map((id) => resolve(id) ?? null),
     };
   });
 

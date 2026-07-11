@@ -1,26 +1,38 @@
 /**
  * 地形二进制格式（.mltr）编解码。
  *
- * 地形是环面世界的 tile 数据：每格三个字节——类型（草/路/水）、高度（0..N 级台阶）、
- * 水深（湖床下挖级数，只对水 tile 非零）。客户端 TerrainMap 的内存布局就是三个等长
- * 字节数组，本格式即其直接序列化。
+ * 地形是环面世界的 tile 数据。v2 起一份矩阵即一个场景的完整静态描述
+ * （设计见 docs/scene-item-refactor-design.md）：地貌三平面 + 物品引用平面 +
+ * 边缘挂载平面（一期恒 0，数据位）+ palette 尾段（u8 索引 → 物品实体 id）。
+ * 物品实体（内置布置物与语音造物同表）见 items.ts。
  *
  * 布局（小端）：
  *   magic    "MLTR"      4 B
- *   version  u8          1 B
+ *   version  u8          1 B    v1=3 平面无 palette；v2=9 平面 + palette
  *   gridW    u8          1 B
  *   gridH    u8          1 B
  *   tileSize f32         4 B
- *   types    u8[W*H]
- *   heights  u8[W*H]
- *   depths   u8[W*H]
+ *   types    u8[W*H]            0 草 / 1 路 / 2 水
+ *   heights  u8[W*H]            0..N 级台阶
+ *   depths   u8[W*H]            水深（湖床下挖级数，只对水 tile 非零）
+ *   -- 以下 v2 新增 --
+ *   itemRef  u8[W*H]            0=无物品 / 1..count=palette 索引（多 tile 物品只写锚点）
+ *   itemArg  u8[W*H]            朝向：全字节 256 档（arg×360/256 度）
+ *   edgeN/E/S/W u8[W*H] ×4      边缘挂载 palette 索引，一期恒 0
+ *   palette  count u8 + count × (len u8 + item_id UTF-8)
  *
- * 75×75 → 11 + 3×5625 = 16886 B（gzip 后实测 495 B）。
+ * 75×75 v1 → 11 + 3×5625 = 16886 B（gzip 后实测 495 B）；
+ * v2 → 11 + 9×5625 + palette ≈ 50.7 KB（item 平面低熵，gzip 预计 <3 KB）。
  */
 
 export const TERRAIN_MAGIC = 'MLTR';
-export const TERRAIN_VERSION = 1;
+export const TERRAIN_VERSION_1 = 1;
+export const TERRAIN_VERSION = 2;
 export const HEADER_BYTES = 11;
+/** v2 的平面数（v1 是前 3 张）。 */
+export const PLANES_V2 = 9;
+/** palette 容量上限：itemRef 是 u8，0 留给「无物品」。 */
+export const MAX_PALETTE = 255;
 
 /**
  * 第一版所有场景一律 75×75。
@@ -35,6 +47,12 @@ export const T_GRASS = 0;
 export const T_PATH = 1;
 export const T_WATER = 2;
 
+/** 边缘平面顺序（itemRef 后的 4 张），与客户端 TerrainMap.EDGE_* 一一对应。 */
+export const EDGE_N = 0;
+export const EDGE_E = 1;
+export const EDGE_S = 2;
+export const EDGE_W = 3;
+
 export interface Terrain {
   gridW: number;
   gridH: number;
@@ -42,6 +60,14 @@ export interface Terrain {
   types: Uint8Array;
   heights: Uint8Array;
   depths: Uint8Array;
+  /** 物品引用平面：0=无 / 1..N=palette 索引（多 tile 物品只写锚点 tile）。 */
+  itemRef: Uint8Array;
+  /** 物品参数平面：朝向全字节 256 档（argYawDeg/yawToArg）。 */
+  itemArg: Uint8Array;
+  /** 边缘挂载平面 N/E/S/W（一期恒 0，数据位）。 */
+  edges: [Uint8Array, Uint8Array, Uint8Array, Uint8Array];
+  /** palette：u8 索引-1 → 物品实体 id（items.ts / items 表）。 */
+  palette: string[];
 }
 
 export class TerrainFormatError extends Error {
@@ -51,21 +77,62 @@ export class TerrainFormatError extends Error {
   }
 }
 
-/** 三个数组必须等长且等于 gridW*gridH，否则解码出来的地图会整体错位。 */
-function assertPlanes(t: Terrain): void {
-  const n = t.gridW * t.gridH;
-  if (t.types.length !== n) throw new TerrainFormatError(`types length ${t.types.length} != ${n}`);
-  if (t.heights.length !== n) throw new TerrainFormatError(`heights length ${t.heights.length} != ${n}`);
-  if (t.depths.length !== n) throw new TerrainFormatError(`depths length ${t.depths.length} != ${n}`);
+/** 空地形（全草地、无物品）：测试与迁移的起点。 */
+export function emptyTerrain(): Terrain {
+  const n = REQUIRED_GRID * REQUIRED_GRID;
+  return {
+    gridW: REQUIRED_GRID, gridH: REQUIRED_GRID, tileSize: DEFAULT_TILE_SIZE,
+    types: new Uint8Array(n), heights: new Uint8Array(n), depths: new Uint8Array(n),
+    itemRef: new Uint8Array(n), itemArg: new Uint8Array(n),
+    edges: [new Uint8Array(n), new Uint8Array(n), new Uint8Array(n), new Uint8Array(n)],
+    palette: [],
+  };
 }
 
+/** itemArg 朝向：全字节 256 档（≈1.4°/档），保住地标/SDF 物件的手调角度。 */
+export function argYawDeg(arg: number): number {
+  return (arg & 0xff) * (360 / 256);
+}
+
+/** 朝向角 → itemArg 字节（就近取档，任意角度归一到 [0,360)）。 */
+export function yawToArg(deg: number): number {
+  const norm = ((deg % 360) + 360) % 360;
+  return Math.round(norm / (360 / 256)) % 256;
+}
+
+function planes(t: Terrain): Uint8Array[] {
+  return [t.types, t.heights, t.depths, t.itemRef, t.itemArg, ...t.edges];
+}
+
+const PLANE_NAMES = ['types', 'heights', 'depths', 'itemRef', 'itemArg', 'edgeN', 'edgeE', 'edgeS', 'edgeW'];
+
+/** 九个平面必须等长且等于 gridW*gridH，否则解码出来的地图会整体错位。 */
+function assertPlanes(t: Terrain): void {
+  const n = t.gridW * t.gridH;
+  planes(t).forEach((p, i) => {
+    if (p.length !== n) throw new TerrainFormatError(`${PLANE_NAMES[i]} length ${p.length} != ${n}`);
+  });
+}
+
+const utf8Enc = new TextEncoder();
+const utf8Dec = new TextDecoder('utf-8', { fatal: true });
+
+/** 编码恒为 v2（v1 只在解码侧兼容旧库存量/旧导出工具）。 */
 export function encodeTerrain(t: Terrain): Uint8Array {
   assertPlanes(t);
   if (t.gridW > 255 || t.gridH > 255 || t.gridW < 1 || t.gridH < 1) {
     throw new TerrainFormatError(`grid ${t.gridW}x${t.gridH} out of u8 range`);
   }
+  if (t.palette.length > MAX_PALETTE) throw new TerrainFormatError(`palette ${t.palette.length} > ${MAX_PALETTE}`);
+  const ids = t.palette.map((id) => {
+    const b = utf8Enc.encode(id);
+    if (b.length < 1 || b.length > 255) throw new TerrainFormatError(`palette id ${JSON.stringify(id)} length ${b.length}`);
+    return b;
+  });
+
   const n = t.gridW * t.gridH;
-  const out = new Uint8Array(HEADER_BYTES + 3 * n);
+  const paletteBytes = 1 + ids.reduce((s, b) => s + 1 + b.length, 0);
+  const out = new Uint8Array(HEADER_BYTES + PLANES_V2 * n + paletteBytes);
   const view = new DataView(out.buffer);
 
   for (let i = 0; i < 4; i++) out[i] = TERRAIN_MAGIC.charCodeAt(i);
@@ -74,15 +141,26 @@ export function encodeTerrain(t: Terrain): Uint8Array {
   out[6] = t.gridH;
   view.setFloat32(7, t.tileSize, true);
 
-  out.set(t.types, HEADER_BYTES);
-  out.set(t.heights, HEADER_BYTES + n);
-  out.set(t.depths, HEADER_BYTES + 2 * n);
+  let off = HEADER_BYTES;
+  for (const p of planes(t)) {
+    out.set(p, off);
+    off += n;
+  }
+  out[off++] = ids.length;
+  for (const b of ids) {
+    out[off++] = b.length;
+    out.set(b, off);
+    off += b.length;
+  }
   return out;
 }
 
 /**
  * 解码并校验。任何一处不对就抛 TerrainFormatError——地形错位是那种「跑起来才发现、
  * 而且看起来像渲染 bug」的故障，宁可入库时就拒收。
+ * 兼容 v1（旧导出工具/存量库）：item/edge 平面补零、palette 为空。
+ * 这里只做格式级校验；「引用的物品实体是否存在/占地是否冲突」是语义校验，
+ * 需要实体表在手，见 items.ts 的 validateTerrainItems。
  */
 export function decodeTerrain(buf: Uint8Array): Terrain {
   if (buf.length < HEADER_BYTES) throw new TerrainFormatError(`too short: ${buf.length} B`);
@@ -91,7 +169,9 @@ export function decodeTerrain(buf: Uint8Array): Terrain {
   if (magic !== TERRAIN_MAGIC) throw new TerrainFormatError(`magic ${JSON.stringify(magic)}`);
 
   const version = buf[4]!;
-  if (version !== TERRAIN_VERSION) throw new TerrainFormatError(`version ${version}, expect ${TERRAIN_VERSION}`);
+  if (version !== TERRAIN_VERSION_1 && version !== TERRAIN_VERSION) {
+    throw new TerrainFormatError(`version ${version}, expect ${TERRAIN_VERSION_1}|${TERRAIN_VERSION}`);
+  }
 
   const gridW = buf[5]!;
   const gridH = buf[6]!;
@@ -104,20 +184,64 @@ export function decodeTerrain(buf: Uint8Array): Terrain {
   if (!Number.isFinite(tileSize) || tileSize <= 0) throw new TerrainFormatError(`tileSize ${tileSize}`);
 
   const n = gridW * gridH;
-  const want = HEADER_BYTES + 3 * n;
-  if (buf.length !== want) throw new TerrainFormatError(`length ${buf.length}, expect ${want}`);
+  const t = emptyTerrain();
+  t.tileSize = tileSize;
 
-  const types = buf.slice(HEADER_BYTES, HEADER_BYTES + n);
-  const heights = buf.slice(HEADER_BYTES + n, HEADER_BYTES + 2 * n);
-  const depths = buf.slice(HEADER_BYTES + 2 * n, want);
+  if (version === TERRAIN_VERSION_1) {
+    const want = HEADER_BYTES + 3 * n;
+    if (buf.length !== want) throw new TerrainFormatError(`length ${buf.length}, expect ${want}`);
+    t.types = buf.slice(HEADER_BYTES, HEADER_BYTES + n);
+    t.heights = buf.slice(HEADER_BYTES + n, HEADER_BYTES + 2 * n);
+    t.depths = buf.slice(HEADER_BYTES + 2 * n, want);
+  } else {
+    const planesEnd = HEADER_BYTES + PLANES_V2 * n;
+    if (buf.length < planesEnd + 1) throw new TerrainFormatError(`length ${buf.length}, expect >= ${planesEnd + 1}`); // palette 至少 count 一个字节
+    let off = HEADER_BYTES;
+    t.types = buf.slice(off, off + n); off += n;
+    t.heights = buf.slice(off, off + n); off += n;
+    t.depths = buf.slice(off, off + n); off += n;
+    t.itemRef = buf.slice(off, off + n); off += n;
+    t.itemArg = buf.slice(off, off + n); off += n;
+    for (let e = 0; e < 4; e++) { t.edges[e] = buf.slice(off, off + n); off += n; }
 
-  for (const v of types) {
+    const count = buf[off]!; off += 1;
+    const seen = new Set<string>();
+    for (let i = 0; i < count; i++) {
+      if (off >= buf.length) throw new TerrainFormatError(`palette truncated at entry ${i}`);
+      const len = buf[off]!; off += 1;
+      if (len < 1) throw new TerrainFormatError(`palette entry ${i} empty`);
+      if (off + len > buf.length) throw new TerrainFormatError(`palette truncated at entry ${i}`);
+      let id: string;
+      try {
+        id = utf8Dec.decode(buf.slice(off, off + len));
+      } catch {
+        throw new TerrainFormatError(`palette entry ${i} bad utf-8`);
+      }
+      if (seen.has(id)) throw new TerrainFormatError(`palette duplicate ${JSON.stringify(id)}`);
+      seen.add(id);
+      t.palette.push(id);
+      off += len;
+    }
+    if (off !== buf.length) throw new TerrainFormatError(`length ${buf.length}, expect ${off}（palette 后有多余尾巴）`);
+
+    // 引用平面的索引必须落在 palette 内
+    const refPlanes: Array<[string, Uint8Array]> = [
+      ['itemRef', t.itemRef], ['edgeN', t.edges[0]], ['edgeE', t.edges[1]], ['edgeS', t.edges[2]], ['edgeW', t.edges[3]],
+    ];
+    for (const [name, plane] of refPlanes) {
+      for (let i = 0; i < n; i++) {
+        if (plane[i]! > count) throw new TerrainFormatError(`${name}[${i}] = ${plane[i]}, palette 只有 ${count} 项`);
+      }
+    }
+  }
+
+  for (const v of t.types) {
     if (v !== T_GRASS && v !== T_PATH && v !== T_WATER) throw new TerrainFormatError(`tile type ${v}`);
   }
   // 非水格不该有水深——真出现说明导出端画错了，别把错误数据喂给渲染
   for (let i = 0; i < n; i++) {
-    if (types[i] !== T_WATER && depths[i] !== 0) throw new TerrainFormatError(`depth ${depths[i]} on non-water tile ${i}`);
+    if (t.types[i] !== T_WATER && t.depths[i] !== 0) throw new TerrainFormatError(`depth ${t.depths[i]} on non-water tile ${i}`);
   }
 
-  return { gridW, gridH, tileSize, types, heights, depths };
+  return t;
 }

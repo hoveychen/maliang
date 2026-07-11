@@ -5,8 +5,11 @@ extends Node3D
 ## 重定位每个 slot，并按「wrap 后的区块索引」决定外观（autotile 地面 + 布景）。
 ## 越过 GRID 接缝时，区块 (39,·) 之后接 (0,·)，外观连续 → 无缝。
 ##
-## 布景两层：LANDMARKS 手工地标（民居/水井/风车/泉石，全局 tile 锚点）+
-## _deco_kind 分区散布（按地形分西南密林/果园/山地岩/岸边苇/村核心/草甸，逐 tile 确定性）。
+## 布景数据源 = 地形矩阵物品层（万物皆物品，docs/scene-item-refactor-design.md）：
+## 逐 tile 读 TerrainMap.tile_item_id → ItemCatalog 实体定义 → 按 renderRef 分发
+## （烘焙树/KayKit 走 MultiMesh 合批，建筑独立节点，SDF 物件 from_spec）。
+## 布置规则（散布分区/地标表）在导出工具 tools/scene_compose.gd——运行时只吃矩阵，
+## 不判定、不找位、不登记占地（静态占用由 ItemCatalog.apply_static_occupancy 派生）。
 
 const CHUNK_TILES := 25
 const CHUNK_WORLD := float(CHUNK_TILES) * WorldGrid.TILE_SIZE          ## 50.0
@@ -68,43 +71,25 @@ const STONE_MEAN := Color(91.0 / 255.0, 91.0 / 255.0, 97.0 / 255.0)
 const WATER_MEAN := Color(72.0 / 255.0, 122.0 / 255.0, 132.0 / 255.0)
 const WATER_DIP := 0.35   ## 水面低于岸沿的落差（米）：露出一小截岸壁 = 可读的水位线
 
-## 手工地标（tile 为全局 tile 锚点；reserve=1 → 占地 3×3，找不到空位沿环外扩 search 圈）。
-## 村核心 8 栋民居沿广场四角与辐路布置、水井坐镇广场（地标特批压路）、
-## 风车立东南瞭望丘 h3 平台、两块泉石守着主峰南麓涌泉。
-const LANDMARKS := [
-	{ "scene": WELL_SCENE, "tile": Vector2i(37, 37), "scale": 4.5, "yaw": 0.0, "reserve": 1, "search": 0, "path_ok": true },
-	{ "scene": WINDMILL_SCENE, "tile": Vector2i(59, 54), "scale": HOUSE_SCALE, "yaw": 180.0, "reserve": 1, "search": 1 },
-	{ "scene": HOUSE_SCENES[0], "tile": Vector2i(31, 31), "scale": HOUSE_SCALE, "yaw": 90.0, "reserve": 1, "search": 2 },
-	{ "scene": HOUSE_SCENES[1], "tile": Vector2i(44, 31), "scale": HOUSE_SCALE, "yaw": 180.0, "reserve": 1, "search": 2 },
-	{ "scene": HOUSE_SCENES[2], "tile": Vector2i(31, 44), "scale": HOUSE_SCALE, "yaw": 90.0, "reserve": 1, "search": 2 },
-	{ "scene": HOUSE_SCENES[3], "tile": Vector2i(44, 44), "scale": HOUSE_SCALE, "yaw": 270.0, "reserve": 1, "search": 2 },
-	{ "scene": HOUSE_SCENES[1], "tile": Vector2i(27, 40), "scale": HOUSE_SCALE, "yaw": 0.0, "reserve": 1, "search": 2 },
-	{ "scene": HOUSE_SCENES[0], "tile": Vector2i(47, 35), "scale": HOUSE_SCALE, "yaw": 180.0, "reserve": 1, "search": 2 },
-	{ "scene": HOUSE_SCENES[2], "tile": Vector2i(34, 58), "scale": HOUSE_SCALE, "yaw": 90.0, "reserve": 1, "search": 2 },
-	{ "scene": HOUSE_SCENES[3], "tile": Vector2i(33, 23), "scale": HOUSE_SCALE, "yaw": 270.0, "reserve": 1, "search": 2 },
-	{ "scene": ROCK_SCENES[2], "tile": Vector2i(30, 12), "scale": 2.4, "yaw": 40.0 },
-	{ "scene": ROCK_SCENES[0], "tile": Vector2i(28, 12), "scale": 1.7, "yaw": 210.0 },
-]
-
-## SDF blend-shell 可动物件/建筑（spec 即 JSON，见 assets/sdf_props/）。
-## 与 LANDMARKS 同一套 tile 锚点+占地逻辑；wander 是围绕锚点的漫游半径（米），
-## reserve 1（3×3 tile = 6m 见方）足够容纳游走范围。
-const SDF_PROPS := [
-	{ "spec": "res://assets/sdf_props/walking_hut.json", "tile": Vector2i(24, 47), "yaw": 150.0, "reserve": 1, "search": 2, "wander": 1.6 },
-	{ "spec": "res://assets/sdf_props/hop_mailbox.json", "tile": Vector2i(41, 34), "yaw": 200.0, "reserve": 1, "search": 2, "wander": 1.2 },
-	{ "spec": "res://assets/sdf_props/nodding_flower.json", "tile": Vector2i(3, 4), "yaw": 160.0, "reserve": 0, "search": 2, "wander": 0.0 },
-	{ "spec": "res://assets/sdf_props/pinwheel.json", "tile": Vector2i(40, 40), "yaw": 200.0, "reserve": 0, "search": 2, "wander": 0.0 },
-	{ "spec": "res://assets/sdf_props/paper_note.json", "tile": Vector2i(33, 34), "yaw": 30.0, "reserve": 0, "search": 2, "wander": 0.0 },
-	{ "spec": "res://assets/sdf_props/crayon.json", "tile": Vector2i(34, 34), "yaw": 300.0, "reserve": 0, "search": 2, "wander": 0.0 },
-	{ "spec": "res://assets/sdf_props/village_sign.json", "tile": Vector2i(36, 24), "yaw": 190.0, "reserve": 0, "search": 2, "wander": 0.0 },
-]
-
-## 分区散布的判定结果
-const DECO_NONE := 0
-const DECO_TREE := 1
-const DECO_BUSH := 2
-const DECO_ROCK := 3
-const DECO_TUFT := 4
+## 渲染绑定：矩阵物品 renderRef 的资源侧（编译期 preload，语义在实体定义里）。
+## 合批散布（key = renderRef 冒号后段）：
+const BAKED_MESHES := {
+	"tree_puff_a": TREE_MESHES[0], "tree_puff_b": TREE_MESHES[1], "tree_puff_c": TREE_MESHES[2],
+	"bush_puff": BUSH_MESH,
+}
+const KAYKIT_SCATTER := {
+	"rock_0": ROCK_SCENES[0], "rock_1": ROCK_SCENES[1], "rock_2": ROCK_SCENES[2],
+	"tuft_0": TUFT_SCENES[0], "tuft_1": TUFT_SCENES[1],
+}
+## 独立节点建筑（微缩 KayKit 需放大；缩放是渲染属性，不进矩阵）：
+const KAYKIT_NODES := {
+	"house_0": { "scene": HOUSE_SCENES[0], "scale": HOUSE_SCALE },
+	"house_1": { "scene": HOUSE_SCENES[1], "scale": HOUSE_SCALE },
+	"house_2": { "scene": HOUSE_SCENES[2], "scale": HOUSE_SCALE },
+	"house_3": { "scene": HOUSE_SCENES[3], "scale": HOUSE_SCALE },
+	"well": { "scene": WELL_SCENE, "scale": 4.5 },
+	"windmill": { "scene": WINDMILL_SCENE, "scale": HOUSE_SCALE },
+}
 
 ## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, water:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
@@ -149,11 +134,6 @@ func set_props_shown(on: bool) -> void:
 ## 语音生成的动态 SDF 物件（运行时登记，区块重刷幸存）：
 ## { "spec_data": Dictionary, "tile": Vector2i(全局), "yaw": float, "wander": float }
 var _dynamic_props: Array = []
-
-## 当前场景 id（模型 B）。散布 deco（_deco_kind）与手工地标（LANDMARKS/SDF_PROPS）都按它取规则：
-## village=村庄分区（村核心/果园/密林/山地…）+ 村庄建筑；forest=林地铺满树 + 河岸苇 + 空地留白、
-## 无村庄建筑。换场景 rebuild 前由 world.gd 置好，再重铺全图。
-var scene_id := "village"
 
 func _ready() -> void:
 	# 槽位与 wrapped 区块恒等绑定：3×3 槽位恰好覆盖 3×3 环面世界一遍（CHUNKS_PER_SIDE
@@ -262,9 +242,28 @@ func rebuild() -> void:
 	for slot in _slots:
 		slot["skinned"] = false
 
+## 局部重铺（terrain_patch 后调用）：只失效被改 tile 波及的 wrapped 区块——
+## autotile 掩码/崖壁/水面角点色都看 ±1 邻居，故按每个 tile 的 3×3 邻域求区块并集
+## （tile 在区块边缘时连带邻区块）。清对应 mesh 缓存 + 槽位复位，update() 分帧重铺
+## （单块真机 80-200ms，一次编辑最多波及 4 块）。返回失效区块数（测试断言用）。
+func rebuild_tiles(tiles: Array) -> int:
+	var n := WorldGrid.GRID_TILES
+	var affected := {}
+	for t: Vector2i in tiles:
+		for dz in range(-1, 2):
+			for dx in range(-1, 2):
+				var q := Vector2i(posmod(t.x + dx, n), posmod(t.y + dz, n))
+				affected[Vector2i(q.x / CHUNK_TILES, q.y / CHUNK_TILES)] = true
+	for w: Vector2i in affected:
+		_chunk_meshes.erase(w)
+		_water_meshes.erase(w)
+		if not _slots.is_empty():
+			_slot_of(w)["skinned"] = false
+	return affected.size()
+
 ## 清空语音生成的动态物件（换场景卸旧时调用）。释放它们登记的占地、free 掉节点、
 ## 清空运行时清单——否则 rebuild() 后 _skin 会照旧清单把上一个场景的物件重生成到新场景。
-## 手工锚点物件（SDF_PROPS/LANDMARKS 常量表）随新地形重铺自然重摆，不在此列。
+## 矩阵物品层的静态布置随新地形重铺自然重摆，不在此列。
 func clear_dynamic_props() -> void:
 	for dp in _dynamic_props:
 		var tile: Vector2i = dp.get("tile", Vector2i(-999, -999))
@@ -316,8 +315,9 @@ func update(player_logical: Vector2) -> void:
 		if ms > 30.0:
 			print("SPIKE chunk skin %s %.0fms" % [e[2], ms])
 
-## 按 wrapped 索引刷新区块外观（autotile 地面 + 地标 + 分区散布）。
+## 按 wrapped 索引刷新区块外观（autotile 地面 + 矩阵物品层 + 语音动态物件）。
 ## 地面棋盘/路/水全部由 TerrainMap+TerrainAtlas 决定，不再逐区块调色。
+## 静态物品不判定、不找位、不登记占地——矩阵说了算（占用由 ItemCatalog 派生）。
 func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	var tile: MeshInstance3D = slot["tile"]
 	tile.mesh = _chunk_mesh(wrapped)
@@ -328,35 +328,10 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	for c in deco.get_children():
 		c.queue_free()
 
-	# L1 摆放网格化：装饰全部吸附 tile 中心，占地经 OccupancyMap 全局登记
-	# （类型/高度检查 + 占用互斥）。重刷先释放本区块旧占地。
+	# 重刷先释放本区块旧动态占地（语音物件原位重生成时重新登记）。
 	for cl in _claims.get(wrapped, []):
 		OccupancyMap.free_rect(OccupancyMap.tile_to_cell(cl[0]), cl[1] * 2, cl[2] * 2)
 	_claims[wrapped] = []
-
-	# 手工地标 + SDF 可动物件是村庄专属（民居/水井/风车/信箱…），只在 village 场景摆；
-	# 森林等其它场景不铺村庄建筑（布景全交给散布 deco 与语音造物）。
-	if scene_id == "village":
-		# 先放手工地标（锚点落在本区块的），后散布——地标优先占地。
-		# 顺便收集地标落点+水平半径，末尾铺一层同款斜阳椭圆贴片影（房子也有锚定感）。
-		var building_shadows: Array = []
-		for lm in LANDMARKS:
-			var anchor: Vector2i = lm["tile"] - wrapped * CHUNK_TILES
-			if anchor.x < 0 or anchor.x >= CHUNK_TILES or anchor.y < 0 or anchor.y >= CHUNK_TILES:
-				continue
-			var inst := _spawn_on_tile(deco, wrapped, lm["scene"], anchor, lm["scale"], lm["yaw"],
-				int(lm.get("reserve", 0)), int(lm.get("search", 0)), bool(lm.get("path_ok", false)))
-			if inst != null:
-				var ext := _visual_extent(inst, lm["scale"])
-				building_shadows.append([inst.position, ext.x, ext.y])
-		_flush_building_shadows(deco, building_shadows)
-
-		# SDF 可动物件：与地标同权重的手工锚点，先于散布占地。
-		for sp in SDF_PROPS:
-			var sp_anchor: Vector2i = sp["tile"] - wrapped * CHUNK_TILES
-			if sp_anchor.x < 0 or sp_anchor.x >= CHUNK_TILES or sp_anchor.y < 0 or sp_anchor.y >= CHUNK_TILES:
-				continue
-			_spawn_sdf_on_tile(deco, wrapped, sp, sp_anchor, false)
 
 	# 语音生成的动态物件：落位 tile 归属本区块的，重刷时原位重生成（search 0 钉死）。
 	for dp in _dynamic_props:
@@ -365,146 +340,68 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 			continue
 		_spawn_sdf_on_tile(deco, wrapped, dp, dp_anchor, false)
 
-	# 分区散布：逐 tile 确定性判定。草丛不占位（可穿行的纯点缀），其余占 1×1。
-	# 视觉不逐个建节点：按 mesh 种类收集变换，每区块每种一个 MultiMesh——
+	# 矩阵物品层：逐 tile 读引用（多 tile 物品只在锚点有值），按实体 renderRef 分发。
+	# 散布类不逐个建节点：按渲染键收集变换，每区块每种一个 MultiMesh——
 	# 500+ 散布逐个 MeshInstance3D（×阴影 pass 再翻倍）是 DC 2000+ 的主因。
+	# 独立节点建筑顺便收集落点+半径+高度，末尾铺一层斜阳椭圆贴片影（与树影同一个太阳）。
 	var batches := {}
+	var building_shadows: Array = []
 	for j in range(CHUNK_TILES):
 		for i in range(CHUNK_TILES):
 			var ti := Vector2i(i, j)
 			var gt := wrapped * CHUNK_TILES + ti
-			var kind := _deco_kind(gt)
-			if kind == DECO_NONE:
+			var id := TerrainMap.tile_item_id(gt)
+			if id.is_empty():
 				continue
-			var hk := hash(gt)
+			var yaw := TerrainMap.tile_item_yaw_deg(gt)
 			var pos := _tile_local(ti, wrapped)
-			if kind == DECO_TUFT:
-				_batch(batches, "tuft%d" % posmod(hk, TUFT_SCENES.size()), pos, 1.5 + float(posmod(hk, 3)) * 0.3, float(posmod(hk, 360)))
-				continue
-			if not OccupancyMap.prop_area_ok(gt, 1, 1, false, false):
-				continue
-			_claim(wrapped, gt, 1, 1)
-			match kind:
-				DECO_TREE:
-					_batch(batches, "tree%d" % posmod(hk, TREE_MESHES.size()), pos, 0.85 + float(posmod(hk, 5)) * 0.09, float(posmod(hk, 360)))
-				DECO_BUSH:
-					_batch(batches, "bush", pos, 1.0 + float(posmod(hk, 3)) * 0.25, float(posmod(hk, 360)))
-				DECO_ROCK:
-					_batch(batches, "rock%d" % posmod(hk, ROCK_SCENES.size()), pos, 1.6 + float(posmod(hk, 3)) * 0.4, float(posmod(hk, 360)))
+			var hk := hash(gt) # 外观抖动 hash（缩放/游走种子），与导出组装同款
+			var def := ItemCatalog.get_def(id)
+			var rref := String(def.get("renderRef", ""))
+			var key := rref.get_slice(":", 1)
+			if BAKED_MESHES.has(key) or KAYKIT_SCATTER.has(key):
+				_batch(batches, key, pos, _jitter_scale(key, hk), yaw)
+			elif KAYKIT_NODES.has(key):
+				var nb: Dictionary = KAYKIT_NODES[key]
+				var inst := _spawn(deco, nb["scene"], pos, float(nb["scale"]), yaw)
+				var ext := _visual_extent(inst, float(nb["scale"]))
+				building_shadows.append([inst.position, ext.x, ext.y])
+			elif rref == "sdf_inline" or rref.begins_with("sdf_res:"):
+				_spawn_static_sdf(deco, def, rref, pos, yaw, hk)
+			elif rref.is_empty():
+				push_warning("[items] 未知物品实体 %s（catalog 未载入?），跳过渲染" % id)
 	_flush_batches(deco, batches)
 	_flush_shadows(deco, batches)
+	_flush_building_shadows(deco, building_shadows)
 
-## 散布 deco 判定：全局 tile → 长什么（确定性，只在草地上长）。按当前场景取规则。
-func _deco_kind(gt: Vector2i) -> int:
-	if scene_id == "forest":
-		return _deco_kind_forest(gt)
-	return _deco_kind_village(gt)
+## 静态 SDF 物件（矩阵物品层）：spec 来自打包 json（sdf_res:<name>）或实体行内联
+## （sdf_inline，语音造物）。wander 来自实体定义；不登记占地（矩阵派生）。
+func _spawn_static_sdf(parent: Node3D, def: Dictionary, rref: String, pos: Vector3, yaw: float, seed_v: int) -> void:
+	var prop: SdfProp
+	if rref == "sdf_inline":
+		var spec: Variant = def.get("spec", null)
+		if typeof(spec) != TYPE_DICTIONARY:
+			return
+		prop = SdfProp.from_spec(spec)
+	else:
+		prop = SdfProp.from_json_file("res://assets/sdf_props/%s.json" % rref.get_slice(":", 1))
+	if prop == null:
+		return
+	prop.position = pos
+	prop.rotation_degrees = Vector3(0.0, yaw, 0.0)
+	prop.visible = _props_shown  # 沿用画质开关态（chunk 重铺不打回默认）
+	parent.add_child(prop)
+	prop.enable_wander(float(def.get("wander", 0.0)), seed_v)
 
-## village 分区散布：从北往南——山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、
-## 果园（规则行距的浆果灌木）、瞭望丘坡面、村核心（整洁）、出生空地（开阔）、
-## 岸边一圈芦苇灌木、其余草甸疏树。
-static func _deco_kind_village(gt: Vector2i) -> int:
-	if TerrainMap.tile_type(gt) != TerrainMap.T_GRASS:
-		return DECO_NONE
-	var h := TerrainMap.tile_height(gt)
-	var roll := posmod(hash(Vector2i(gt.x * 3 + 11, gt.y * 7 + 5)), 100)  # 与外观 hash 解耦
-	# 岸边芦苇灌木：紧邻水面一圈
-	if _near_water(gt):
-		if roll < 26:
-			return DECO_BUSH
-		return DECO_TUFT if roll < 52 else DECO_NONE
-	# 出生林间空地（环面距原点 8 tile 内）：保持开阔便于新手起步
-	if _tor_dist(gt, Vector2i.ZERO) <= 8.0:
-		return DECO_TUFT if roll < 10 else DECO_NONE
-	# 北部山地（主峰 + 东肩丘一带）：低台地松树、中台地岩石、峰顶零星立石
-	if gt.y <= 14 and gt.x >= 22:
-		if h == 0:
-			if roll < 7:
-				return DECO_TREE
-			if roll < 11:
-				return DECO_ROCK
-			return DECO_TUFT if roll < 18 else DECO_NONE
-		if h <= 2:
-			if roll < 11:
-				return DECO_TREE
-			if roll < 17:
-				return DECO_ROCK
-			return DECO_NONE
-		if h <= 6:
-			return DECO_ROCK if roll < 8 else DECO_NONE
-		return DECO_ROCK if roll < 4 else DECO_NONE
-	# 西南密林（沼泽小潭周边）：隔位下种防挤团，密度仍显著高于草甸
-	if gt.x >= 4 and gt.x <= 16 and gt.y >= 36 and gt.y <= 66:
-		if posmod(gt.x + gt.y, 2) == 0 and roll < 42:
-			return DECO_TREE
-		if roll < 10:
-			return DECO_BUSH
-		return DECO_TUFT if roll < 20 else DECO_NONE
-	# 果园：集市东侧规则行距的浆果灌木（一眼看出是人种的）
-	if gt.x >= 43 and gt.x <= 50 and gt.y >= 55 and gt.y <= 62:
-		if posmod(gt.x, 3) == 1 and posmod(gt.y, 3) == 1:
-			return DECO_BUSH
-		return DECO_TUFT if roll < 8 else DECO_NONE
-	# 瞭望丘等缓坡草面：草丛 + 零星岩石
-	if h > 0:
-		if roll < 5:
-			return DECO_ROCK
-		return DECO_TUFT if roll < 16 else DECO_NONE
-	# 村核心（切比雪夫距广场 12 tile 内）：保持整洁
-	if maxi(absi(gt.x - 37), absi(gt.y - 37)) <= 12:
-		if roll < 3:
-			return DECO_BUSH
-		return DECO_TUFT if roll < 7 else DECO_NONE
-	# 其余草甸：疏树 + 灌木 + 石 + 草丛
-	if roll < 5:
-		return DECO_TREE
-	if roll < 9:
-		return DECO_BUSH
-	if roll < 11:
-		return DECO_ROCK
-	return DECO_TUFT if roll < 21 else DECO_NONE
-
-## forest 林地散布：林地草铺满树（郁闭林冠）、河岸芦苇灌木、高地/knoll 是留白空地（疏草+零星石）。
-## 与 village 同样只在草地上长、逐 tile 确定性；用同一把 roll 哈希，密度整体拉高成森林。
-static func _deco_kind_forest(gt: Vector2i) -> int:
-	if TerrainMap.tile_type(gt) != TerrainMap.T_GRASS:
-		return DECO_NONE
-	var roll := posmod(hash(Vector2i(gt.x * 3 + 11, gt.y * 7 + 5)), 100)
-	# 河岸一圈：芦苇灌木 + 草丛（紧邻小河/水潭）
-	if _near_water(gt):
-		if roll < 30:
-			return DECO_BUSH
-		return DECO_TUFT if roll < 60 else DECO_NONE
-	# 空地/高地（knoll，height>0）：留白便于活动——疏草 + 零星石，几乎不长树
-	if TerrainMap.tile_height(gt) > 0:
-		if roll < 5:
-			return DECO_ROCK
-		return DECO_TUFT if roll < 18 else DECO_NONE
-	# 林地草（平坦林床）：郁闭林冠——密树 + 灌木下层 + 草丛
-	if roll < 50:
-		return DECO_TREE
-	if roll < 62:
-		return DECO_BUSH
-	if roll < 66:
-		return DECO_ROCK
-	return DECO_TUFT if roll < 86 else DECO_NONE
-
-## 8 邻里有水（环面 wrap 由 TerrainMap._idx 兜底）。
-static func _near_water(gt: Vector2i) -> bool:
-	for dz in range(-1, 2):
-		for dx in range(-1, 2):
-			if dx == 0 and dz == 0:
-				continue
-			if TerrainMap.tile_type(gt + Vector2i(dx, dz)) == TerrainMap.T_WATER:
-				return true
-	return false
-
-## tile 间环面距离（tile 单位）。
-static func _tor_dist(a: Vector2i, b: Vector2i) -> float:
-	var n := WorldGrid.GRID_TILES
-	var dx := absi(a.x - b.x)
-	var dz := absi(a.y - b.y)
-	return Vector2(float(mini(dx, n - dx)), float(mini(dz, n - dz))).length()
+## 散布缩放抖动（迁自旧散布逻辑，逐 tile hash 确定性；朝向抖动已烘进矩阵 arg）。
+static func _jitter_scale(key: String, hk: int) -> float:
+	if key.begins_with("tree_puff"):
+		return 0.85 + float(posmod(hk, 5)) * 0.09
+	if key == "bush_puff":
+		return 1.0 + float(posmod(hk, 3)) * 0.25
+	if key.begins_with("rock_"):
+		return 1.6 + float(posmod(hk, 3)) * 0.4
+	return 1.5 + float(posmod(hk, 3)) * 0.3 # tuft
 
 ## 构建（或取缓存）一个 wrapped 区块的地面 ArrayMesh：
 ## 25×25 tile，每 tile 按 Autotile 拆 4 个半 tile 角 quad，UV 指向 atlas 对应变体 cell。
@@ -726,14 +623,6 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 func _wall_exists(tile: Vector2i, n_off: Vector2i, lvl: int) -> bool:
 	return TerrainMap.tile_floor_level(tile) > lvl and lvl >= TerrainMap.tile_floor_level(tile + n_off)
 
-## 实例化 SDF 烘焙布景网格（共享 mesh + 共享 bend 顶点色材质，普通网格随便缩放）。
-func _spawn_baked(parent: Node3D, mesh: ArrayMesh, pos: Vector3, scale_f: float, yaw_deg: float) -> void:
-	var mi := SdfStaticBaker.instance(mesh)
-	mi.position = pos
-	mi.rotation_degrees = Vector3(0.0, yaw_deg, 0.0)
-	mi.scale = Vector3.ONE * scale_f
-	parent.add_child(mi)
-
 ## 散布合批：种类 key → 收集实例变换（_flush_batches 一次性建 MultiMesh）。
 func _batch(batches: Dictionary, key: String, pos: Vector3, scale_f: float, yaw_deg: float) -> void:
 	var basis := Basis(Vector3.UP, deg_to_rad(yaw_deg)).scaled(Vector3.ONE * scale_f)
@@ -782,7 +671,7 @@ func _shadow_xform(pos: Vector3, short_r: float, height: float) -> Transform3D:
 func _shadow_xforms(batches: Dictionary) -> Array[Transform3D]:
 	var xforms: Array[Transform3D] = []
 	for key: String in batches:
-		if not (key.begins_with("tree") or key == "bush"):
+		if not (key.begins_with("tree_puff") or key == "bush_puff"):
 			continue  # 石/草太矮太碎，不铺影
 		var aabb: AABB = _scatter_kind(key)["mesh"].get_aabb()
 		var base_r := maxf(aabb.size.x, aabb.size.z) * 0.5 * SHADOW_RADIUS_FACTOR
@@ -848,7 +737,7 @@ func _flush_building_shadows(parent: Node3D, centers: Array) -> void:
 	parent.add_child(mmi)
 	mmi.add_to_group("perf_scatter")
 
-## 散布种类注册表（懒建）：key → { mesh, mat }。
+## 散布种类注册表（懒建）：渲染键（renderRef 冒号后段）→ { mesh, mat }。
 ## 树/灌木用烘焙 mesh + SdfStaticBaker 共享材质；石/草从 KayKit 场景剥出
 ## mesh 和 bend 包裹后的材质（_wrap_material 有缓存，同调色板 atlas 只建一份）。
 static var _scatter_kinds: Dictionary = {}
@@ -857,13 +746,10 @@ func _scatter_kind(key: String) -> Dictionary:
 	if _scatter_kinds.has(key):
 		return _scatter_kinds[key]
 	var info := {}
-	if key.begins_with("tree"):
-		info = { "mesh": TREE_MESHES[int(key.trim_prefix("tree"))], "mat": SdfStaticBaker.material() }
-	elif key == "bush":
-		info = { "mesh": BUSH_MESH, "mat": SdfStaticBaker.material() }
+	if BAKED_MESHES.has(key):
+		info = { "mesh": BAKED_MESHES[key], "mat": SdfStaticBaker.material() }
 	else:
-		var scene: PackedScene = ROCK_SCENES[int(key.trim_prefix("rock"))] if key.begins_with("rock") \
-				else TUFT_SCENES[int(key.trim_prefix("tuft"))]
+		var scene: PackedScene = KAYKIT_SCATTER[key]
 		var inst := scene.instantiate()
 		var mi: MeshInstance3D = inst.find_children("*", "MeshInstance3D", true, false)[0]
 		info = { "mesh": mi.mesh, "mat": BendMat.wrap_material(mi.get_active_material(0)) }
@@ -885,23 +771,7 @@ func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, ya
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return inst
 
-## L1 摆放核心：把场景吸附到 tile 中心。anchor 是区块内 tile 索引(0..24)²，
-## 占地或压路/水时沿螺旋环向外找至多 search 圈；reserve 是占地半径（0→1×1，1→3×3）。
-## allow_path 供地标（水井）压路。找不到空位就放弃（确定性，不摆歪）。
-## 占地经 OccupancyMap.prop_area_ok 判定（类型+高度一致+占用）并全局登记。
-func _spawn_on_tile(parent: Node3D, wrapped: Vector2i, scene: PackedScene, anchor: Vector2i, scale_f: float, yaw_deg: float, reserve := 0, search := 0, allow_path := false) -> Node3D:
-	var span := reserve * 2 + 1
-	for r in range(search + 1):
-		for ti in _ring(anchor, r):
-			var origin: Vector2i = wrapped * CHUNK_TILES + ti - Vector2i(reserve, reserve)
-			# 确定性重摆不查角色层：角色站占地里不该吞地标（见 prop_area_ok 注释）
-			if not OccupancyMap.prop_area_ok(origin, span, span, allow_path, false):
-				continue
-			_claim(wrapped, origin, span, span)
-			return _spawn(parent, scene, _tile_local(ti, wrapped), scale_f, yaw_deg)
-	return null
-
-## SDF 可动物件版 _spawn_on_tile：同一套占地/螺旋找位，实例化 SdfProp 并启用锚点游走。
+## SDF 语音物件摆放：占地判定 + 螺旋找位，实例化 SdfProp 并启用锚点游走。
 ## 材质自带 world-bend 项（sdf_field.gdshaderinc），不走 BendMat.wrap_scene。
 ## 语音生成的物件进世界：围绕 want_tile 螺旋找空位（钳在区块内防跨块归属混乱），
 ## 成功则登记运行时清单（此后区块重刷自动原位重生成）并返回落位 tile；失败返回 (-1,-1)。
@@ -987,7 +857,7 @@ func _spawn_sdf_on_tile(parent: Node3D, wrapped: Vector2i, entry: Dictionary, an
 			prop.visible = _props_shown  # 沿用画质开关态（chunk 重铺不打回默认）
 			parent.add_child(prop)
 			prop.enable_wander(float(entry.get("wander", 0.0)), hash(str(entry.get("spec", prop.name))) + hash(ti))
-			if entry.has("id"): # 动态物件（语音造物）：记节点引用供拾起拖拽（SDF_PROPS 常量表不可写）
+			if entry.has("id"): # 动态物件（语音造物）：记节点引用供拾起拖拽
 				entry["node"] = prop
 			return wrapped * CHUNK_TILES + ti
 	return Vector2i(-1, -1)

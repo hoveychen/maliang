@@ -56,6 +56,9 @@ UNIT_TESTS=(
   test_positions_report
   test_terrain_export
   test_terrain_load
+  test_terrain_v2
+  test_matrix_skin
+  test_terrain_patch
   test_terrain_rebuild
   test_forest_scene
   test_enter_scene_client
