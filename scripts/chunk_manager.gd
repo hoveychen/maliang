@@ -219,6 +219,9 @@ static func _make_ground_mat() -> ShaderMaterial:
 	m.set_shader_parameter("wall_tint", TerrainAtlas.WALL_TINT)
 	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
 	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
+	m.set_shader_parameter("sand_tint", TerrainAtlas.SAND_TINT)
+	m.set_shader_parameter("snow_tint", TerrainAtlas.SNOW_TINT)
+	m.set_shader_parameter("tile_tint", TerrainAtlas.TILE_TINT)
 	m.set_shader_parameter("curvature", BendMat.CURVATURE)
 	return m
 
@@ -436,7 +439,8 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 			# 草地在「有效级更低」的邻居（矮台地或水域湖床）旁换悬崖边草皮
 			var uv_type := ttype
 			var corners := PackedInt32Array([0, 0, 0, 0])  # 平草地/湖床不看变体
-			if ttype == TerrainMap.T_PATH:
+			if ttype in TerrainMap.BODY_TYPES:
+				# 路 + 新增地表（沙/雪/瓷砖）皆「画在草底上的 body」：与同类邻居 autotile 过渡
 				var same := func(q: Vector2i) -> bool: return TerrainMap.tile_type(q) == ttype
 				corners = Autotile.corners_from_mask(Autotile.mask_of(t, same))
 			elif ttype == TerrainMap.T_GRASS:

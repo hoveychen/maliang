@@ -25,6 +25,15 @@ extends RefCounted
 const T_GRASS := 0
 const T_PATH := 1
 const T_WATER := 2
+## 扩展可行走地表（world-themes P1）：3/4 是 TerrainAtlas 崖唇/崖壁 B 码，不作 tile 类型，故从 5 起。
+## 与 server terrain.ts T_SAND/SNOW/TILE 及 shader body-type ty 5/6/7 一一对应。
+const T_SAND := 5   ## 沙地
+const T_SNOW := 6   ## 雪地
+const T_TILE := 7   ## 瓷砖地板
+## 合法存储 tile 类型（校验/autotile 分组用）。
+const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE]
+## 「画在草底上的 body」类型（autotile 与邻居同类过渡）：路 + 新增地表；水另走整格湖床。
+const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE]
 const MAX_HEIGHT := 255   ## 数据上限（存储为 byte）；默认地形主峰只到 8 级
 const STEP_HEIGHT := 2.0  ## 每级台阶的世界高度（米）= 1 格（tile 边长）；相邻 tile 跳变可超 1 级（陡崖）
 const MAX_DEPTH := 2      ## 默认地形的最大水深级数（1=浅水 2=深水；湖床 = 高度 - 深度）
@@ -192,7 +201,7 @@ static func apply_patch(patch: Dictionary) -> Dictionary:
 		var y := int(d.get("y", -1))
 		if x < 0 or x >= n or y < 0 or y >= n:
 			return { "ok": false, "tiles": [], "error": "tile (%d,%d) 越界" % [x, y] }
-		if d.has("t") and int(d["t"]) != T_GRASS and int(d["t"]) != T_PATH and int(d["t"]) != T_WATER:
+		if d.has("t") and not VALID_TYPES.has(int(d["t"])):
 			return { "ok": false, "tiles": [], "error": "类型 %s 非法" % str(d["t"]) }
 		for k in ["h", "d"]:
 			if d.has(k) and (int(d[k]) < 0 or int(d[k]) > 255):
