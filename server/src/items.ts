@@ -133,6 +133,33 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('mk_wall', '城墙', 'medieval:wall_straight', 3, true, ['medieval_kingdom']),
   themed('mk_wall_corner', '城墙拐角', 'medieval:wall_corner', 3, true, ['medieval_kingdom']),
   themed('mk_watchtower', '瞭望塔', 'medieval:watchtower', 3, true, ['medieval_kingdom']),
+
+  // ── 海底主题（world-themes P5 半覆盖；全 CC0：Quaternius Animated Fish）──
+  // renderRef 'underwater:<key>' → 客户端 assets/packs/underwater/pack.json（node 类）。
+  // 地面走 P1 tile 地基 T_SAND(沙地)+T_WATER(水体)。小鱼 1×1，大型生物 3×3。
+  themed('sea_fish_a', '小鱼·甲', 'underwater:fish_a', 1, true, ['underwater']),
+  themed('sea_fish_b', '小鱼·乙', 'underwater:fish_b', 1, true, ['underwater']),
+  themed('sea_fish_c', '热带鱼', 'underwater:fish_c', 3, true, ['underwater']),
+  themed('sea_dolphin', '海豚', 'underwater:dolphin', 3, true, ['underwater']),
+  themed('sea_whale', '鲸鱼', 'underwater:whale', 3, true, ['underwater']),
+  themed('sea_manta', '蝠鲼', 'underwater:manta', 3, true, ['underwater']),
+  themed('sea_shark', '鲨鱼', 'underwater:shark', 3, true, ['underwater']),
+
+  // ── 冰雪世界主题（world-themes P5 半覆盖；全 CC0：Kenney Holiday Kit）──
+  // renderRef 'winter:<key>' → 客户端 assets/packs/winter/pack.json（node 类）。
+  // 地面走 P1 tile 地基 T_SNOW(雪地)。雪堆非阻挡点缀（pathOk 无关，blocking=false）。
+  themed('snow_snowman', '雪人', 'winter:snowman', 3, true, ['winter']),
+  themed('snow_snowman_hat', '戴帽雪人', 'winter:snowman_hat', 3, true, ['winter']),
+  themed('snow_tree_a', '雪松·甲', 'winter:tree_snow_a', 3, true, ['winter']),
+  themed('snow_tree_b', '雪松·乙', 'winter:tree_snow_b', 3, true, ['winter']),
+  themed('snow_tree_c', '雪松·丙', 'winter:tree_snow_c', 3, true, ['winter']),
+  themed('snow_tree_lit', '装饰雪树', 'winter:tree_decorated_snow', 3, true, ['winter']),
+  themed('snow_reindeer', '驯鹿', 'winter:reindeer', 3, true, ['winter']),
+  themed('snow_sled', '雪橇', 'winter:sled', 3, true, ['winter']),
+  themed('snow_pile', '雪堆', 'winter:snow_pile', 1, false, ['winter']),
+  themed('snow_present_a', '礼物盒·方', 'winter:present_a', 1, true, ['winter']),
+  themed('snow_present_b', '礼物盒·圆', 'winter:present_b', 1, true, ['winter']),
+  themed('snow_nutcracker', '胡桃夹子', 'winter:nutcracker', 1, true, ['winter']),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {

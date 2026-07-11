@@ -1,0 +1,19 @@
+海底主题资产（world-themes P5 半覆盖主题）。全 CC0，作者 Quaternius。
+
+Quaternius Animated Fish Bundle — CC0 1.0（公共领域，署名非强制）
+  https://poly.pizza/bundle/Animated-Fish-Bundle-ZkGbjS8m8g
+  （亦见 https://quaternius.itch.io/lowpoly-animated-fish / https://poly.pizza/u/Quaternius）
+  经 poly.pizza 直链 static.poly.pizza/<uuid>.glb 匿名下载（无需登录）。
+
+选用 7 件海洋生物（node 类，均带游泳动画的 glb，作静态节点摆放）：
+  dolphin  海豚   uuid fcea284f-cafc-4be1-a701-2a0fd811ad5c
+  shark    鲨鱼   uuid d2d374ea-eb1d-4659-8cc7-816a83b82470
+  fish_a   小鱼   uuid 6805b99c-5fd7-4aab-bf57-3bb645e1108a
+  whale    鲸鱼   uuid 7300e697-2543-4a9a-a77d-dedf29251fd7
+  fish_b   小鱼   uuid 311a79f6-ba3e-47aa-80ce-04185fc76b2a
+  fish_c   热带鱼 uuid 8410757e-6594-4011-817a-633730fbcaf8
+  manta    蝠鲼   uuid 32b4e08e-4605-4356-8bd3-e0cf32335a0f
+
+地面：复用 P1 tile 地基 T_SAND(沙地) + T_WATER(水体)，无新地形。
+珊瑚/海草：poly.pizza 上珊瑚多为 Google Poly 存档件（CC-BY 且无直链 glb，获取成本高、
+  署名散乱），本轮不引入以保海底主题 100% CC0、零署名负担；留待后续按需补充。

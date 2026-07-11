@@ -1234,5 +1234,271 @@
     "themes": [
       "medieval_kingdom"
     ]
+  },
+  {
+    "id": "sea_fish_a",
+    "worldId": null,
+    "name": "小鱼·甲",
+    "renderRef": "underwater:fish_a",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_fish_b",
+    "worldId": null,
+    "name": "小鱼·乙",
+    "renderRef": "underwater:fish_b",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_fish_c",
+    "worldId": null,
+    "name": "热带鱼",
+    "renderRef": "underwater:fish_c",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_dolphin",
+    "worldId": null,
+    "name": "海豚",
+    "renderRef": "underwater:dolphin",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_whale",
+    "worldId": null,
+    "name": "鲸鱼",
+    "renderRef": "underwater:whale",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_manta",
+    "worldId": null,
+    "name": "蝠鲼",
+    "renderRef": "underwater:manta",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_shark",
+    "worldId": null,
+    "name": "鲨鱼",
+    "renderRef": "underwater:shark",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "snow_snowman",
+    "worldId": null,
+    "name": "雪人",
+    "renderRef": "winter:snowman",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_snowman_hat",
+    "worldId": null,
+    "name": "戴帽雪人",
+    "renderRef": "winter:snowman_hat",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_tree_a",
+    "worldId": null,
+    "name": "雪松·甲",
+    "renderRef": "winter:tree_snow_a",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_tree_b",
+    "worldId": null,
+    "name": "雪松·乙",
+    "renderRef": "winter:tree_snow_b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_tree_c",
+    "worldId": null,
+    "name": "雪松·丙",
+    "renderRef": "winter:tree_snow_c",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_tree_lit",
+    "worldId": null,
+    "name": "装饰雪树",
+    "renderRef": "winter:tree_decorated_snow",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_reindeer",
+    "worldId": null,
+    "name": "驯鹿",
+    "renderRef": "winter:reindeer",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_sled",
+    "worldId": null,
+    "name": "雪橇",
+    "renderRef": "winter:sled",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_pile",
+    "worldId": null,
+    "name": "雪堆",
+    "renderRef": "winter:snow_pile",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_present_a",
+    "worldId": null,
+    "name": "礼物盒·方",
+    "renderRef": "winter:present_a",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_present_b",
+    "worldId": null,
+    "name": "礼物盒·圆",
+    "renderRef": "winter:present_b",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_nutcracker",
+    "worldId": null,
+    "name": "胡桃夹子",
+    "renderRef": "winter:nutcracker",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
   }
 ]
