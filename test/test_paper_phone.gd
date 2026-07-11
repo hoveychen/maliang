@@ -141,6 +141,11 @@ func _run(phone: PaperPhone, cam: Camera3D) -> void:
 	_check(phone.route_gui_event(cam, _mouse_ev(lpos, true)), "左页点击命中")
 	_check(phone.route_gui_event(cam, _mouse_ev(lpos, false)), "左页松开命中")
 	_check(sclicked[0], "左页点击穿透到跨页视口左半按钮")
+	# 拖拽捕获：按下命中屏区后，拖出机身/机外松手仍归手机（否则 ScrollContainer 丢 release 卡死）
+	_check(phone.route_gui_event(cam, _mouse_ev(lpos, true)), "捕获:按下命中屏区")
+	_check(phone.route_gui_event(cam, _motion_ev(Vector2(1, 1))), "捕获:拖出机身仍归手机")
+	_check(phone.route_gui_event(cam, _mouse_ev(Vector2(1, 1), false)), "捕获:机外松手仍归手机")
+	_check(not phone.route_gui_event(cam, _motion_ev(Vector2(1, 1))), "松手后捕获结束:机外事件不归手机")
 	phone.stow(false)
 	_check(phone.front_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED
 		and phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED,
@@ -165,6 +170,12 @@ func _run(phone: PaperPhone, cam: Camera3D) -> void:
 func _check_hit(hit: Dictionary, msg: String) -> bool:
 	_check(not hit.is_empty(), msg)
 	return not hit.is_empty()
+
+func _motion_ev(pos: Vector2) -> InputEventMouseMotion:
+	var ev := InputEventMouseMotion.new()
+	ev.position = pos
+	ev.global_position = pos
+	return ev
 
 func _mouse_ev(pos: Vector2, pressed: bool) -> InputEventMouseButton:
 	var ev := InputEventMouseButton.new()

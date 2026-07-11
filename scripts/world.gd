@@ -206,6 +206,7 @@ const PHONE_FILL := 0.85            ## 正面态机身高占屏比
 const PHONE_NDC := Vector2(0.52, 0.0)        ## 正面态中心 NDC
 const PHONE_SPREAD_FILL := 0.80     ## 跨页态机身高占屏比
 const PHONE_SPREAD_NDC := Vector2(0.28, 0.0) ## 跨页态中心 NDC
+var _phone_fit_vp := Vector2.ZERO   ## 上次贴合时的视口尺寸（窗口 resize 触发重贴合）
 ## 手机近身相机：开手机时按玩家立绘高度反算距离，让玩家（自适应身高）占屏高约 70%，
 ## 并把焦点右移，使玩家落在屏幕偏左、右侧留给手机（PHONE_PLAYER_NDC_X 方向若反了取负）。
 const PHONE_CAM_FILL := 0.70        ## 玩家立绘占屏高约 70%（按 _char_top 反算距离，自适应身高）
@@ -1052,11 +1053,15 @@ func _setup_hud() -> void:
 	phone_ui = PhoneUi.new(self)
 	phone_ui.build(paper_phone.front_viewport(), paper_phone.spread_viewport())
 	phone_ui.app_opened.connect(func(_id: String) -> void:
-		paper_phone.fit_to_camera(camera, PHONE_SPREAD_FILL, PHONE_SPREAD_NDC)
+		if game_audio != null:
+			game_audio.play_sfx("page") # 翻面纸声（点选 select 已在 PhoneUi 响过）
+		_fit_phone(true)
 		paper_phone.show_spread())
 	phone_ui.back_pressed.connect(func() -> void:
 		if paper_phone.state == PaperPhone.State.SPREAD:
-			paper_phone.fit_to_camera(camera, PHONE_FILL, PHONE_NDC)
+			if game_audio != null:
+				game_audio.play_sfx("page")
+			_fit_phone(false)
 			paper_phone.show_front())
 
 	# 进行中委托的提示 chip（右上角，图标为主：目标 ⇒ 奖励贴纸，_update_task_chip 重建）
@@ -1195,10 +1200,21 @@ func _on_phone_scrim_input(e: InputEvent) -> void:
 func _open_app(id: String) -> void:
 	phone_ui.open_app(id)
 
-## 手机开着时每帧驱动屏幕 UI（banner 秒刷 + 图标分页贴合）；收起时不做事，零开销。
+## 按当前形态贴合持机位（正面贴屏右 / 跨页双宽居中）。
+func _fit_phone(spread: bool) -> void:
+	_phone_fit_vp = get_viewport().get_visible_rect().size
+	if spread:
+		paper_phone.fit_to_camera(camera, PHONE_SPREAD_FILL, PHONE_SPREAD_NDC)
+	else:
+		paper_phone.fit_to_camera(camera, PHONE_FILL, PHONE_NDC)
+
+## 手机开着时每帧驱动屏幕 UI（banner 秒刷 + 图标分页贴合 + 窗口变尺寸重贴合）；
+## 收起时不做事，零开销。
 func _step_phone_ui(delta: float) -> void:
 	if paper_phone == null or paper_phone.state == PaperPhone.State.STOWED:
 		return
+	if get_viewport().get_visible_rect().size != _phone_fit_vp:
+		_fit_phone(paper_phone.state == PaperPhone.State.SPREAD)
 	phone_ui.tick(delta)
 
 ## 可玩时间每帧推进（静态纯函数，便于回测）：
@@ -5106,7 +5122,7 @@ func _toggle_album() -> void:
 ## 顺带关角色 X 光剪影：手机挡住的角色会把剪影画到手机纸面上（实测穿帮），收起时按画质档还原。
 func _open_phone() -> void:
 	PaperCharacter.set_xray_enabled(false, get_tree())
-	paper_phone.fit_to_camera(camera, PHONE_FILL, PHONE_NDC)
+	_fit_phone(false)
 	phone_ui.close_app() # 每次打开手机都回到主屏
 	phone_ui.refresh_album()
 	phone_ui.refresh_banner()

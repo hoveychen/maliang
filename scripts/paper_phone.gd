@@ -42,6 +42,7 @@ var _panel_b: Node3D
 var _faces := {}                   ## face id → { mesh: MeshInstance3D, size: Vector2 }
 var _front_vp: SubViewport         ## 正面主屏内容（create_screens 后有效）
 var _spread_vp: SubViewport        ## 背面跨页内容（左右页各采样一半 UV）
+var _drag_face := ""               ## 拖拽捕获中的贴面 id（按下命中屏区起、松手止）
 var _fold_deg := 180.0
 var _yaw_deg := 0.0
 var _tween: Tween
@@ -190,21 +191,57 @@ static func screen_px(face: String, uv: Vector2, front_px: Vector2i, spread_px: 
 
 ## 屏幕坐标鼠标/触摸(经 emulate mouse)事件 → 射线拾取 → 转发进对应 SubViewport。
 ## 返回 true=命中机身（含壳非屏区，事件被手机吞掉）；false=没打在手机上（调用方决定收起等）。
+## 拖拽捕获：按下命中屏区后，后续拖动/松手投影到同一贴面转发（允许超出面外）——
+## 否则拖出机身边缘会丢 release，ScrollContainer 永远停在拖拽态（图标分页实测）。
 func route_gui_event(cam: Camera3D, ev: InputEvent) -> bool:
 	if _front_vp == null or not (ev is InputEventMouse):
 		return false
 	var pos: Vector2 = (ev as InputEventMouse).position
-	var hit := pick(cam.project_ray_origin(pos), cam.project_ray_normal(pos))
+	var ro := cam.project_ray_origin(pos)
+	var rd := cam.project_ray_normal(pos)
+	if _drag_face != "":
+		var uv: Variant = _face_uv_unclamped(_drag_face, ro, rd)
+		if uv is Vector2:
+			var croute := screen_px(_drag_face, uv, _front_vp.size, _spread_vp.size)
+			if not croute.is_empty():
+				_push_to_vp(ev, croute)
+		if ev is InputEventMouseButton and not (ev as InputEventMouseButton).pressed:
+			_drag_face = "" # 松手结束捕获
+		return true # 捕获期间事件都归手机
+	var hit := pick(ro, rd)
 	if hit.is_empty():
 		return false
 	var route := screen_px(String(hit["face"]), hit["uv"], _front_vp.size, _spread_vp.size)
 	if route.is_empty():
 		return true # 打在纸壳 bezel 上：吞掉但不进屏
+	if ev is InputEventMouseButton and (ev as InputEventMouseButton).pressed:
+		_drag_face = String(hit["face"])
+	_push_to_vp(ev, route)
+	return true
+
+func _push_to_vp(ev: InputEvent, route: Dictionary) -> void:
 	var dup := ev.duplicate() as InputEventMouse
 	dup.position = route["px"]
 	dup.global_position = route["px"]
 	(_front_vp if String(route["vp"]) == "front" else _spread_vp).push_input(dup)
-	return true
+
+## 射线 vs 贴面所在无限平面（不裁剪矩形边界，拖拽捕获用）；平行/背离返回 null。
+func _face_uv_unclamped(id: String, ro: Vector3, rd: Vector3) -> Variant:
+	var f: Dictionary = _faces.get(id, {})
+	if f.is_empty():
+		return null
+	var mesh := f["mesh"] as MeshInstance3D
+	var xf := mesh.global_transform
+	var n := xf.basis.z.normalized()
+	var denom := rd.dot(n)
+	if absf(denom) < 1e-6:
+		return null
+	var t := (xf.origin - ro).dot(n) / denom
+	if t <= 0.0:
+		return null
+	var local := xf.affine_inverse() * (ro + rd * t)
+	var size: Vector2 = (mesh.mesh as QuadMesh).size
+	return Vector2(local.x / size.x + 0.5, 0.5 - local.y / size.y)
 
 ## ── 状态机 ──────────────────────────────────────────────────────────────────
 
@@ -246,6 +283,7 @@ func stow(animate := true) -> void:
 
 func _set_state(s: int) -> void:
 	state = s
+	_drag_face = "" # 状态切换终止拖拽捕获（翻面/收起后旧面不再收事件）
 	_update_screen_activity()
 	state_changed.emit(s)
 
