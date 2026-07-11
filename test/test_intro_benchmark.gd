@@ -16,7 +16,9 @@ var fails := 0
 var done := false
 var saw_bench_node := false      ## 采样期 Benchmark 节点挂上过
 var saw_bench_load := false      ## 采样期见到过 bench_ 压测角色
-var saw_freeze := false          ## 采样期世界被冻结过
+var saw_freeze := false          ## benchmark 全程锁输入/仙子定格（_bench_freeze）出现过
+var saw_still_window := false    ## 采样窗(window)内村民冻结（_bench_still=true）出现过
+var saw_still_gap := false       ## benchmark 期间 warmup 间隙放行成形（_bench_freeze 开着但 _bench_still=false）出现过
 
 func _initialize() -> void:
 	PlayerProfile.clear() # 清画质档（has_saved→false，触发 benchmark）+ intro_seen
@@ -35,8 +37,14 @@ func _tick() -> void:
 	# 采样期锁存观测（benchmark 结束会解冻/退场，只能在窗口内抓）
 	if scene.get_node_or_null("IntroDirector/Benchmark") != null:
 		saw_bench_node = true
-	if bool(scene.get("_bench_freeze")):
+	var frozen := bool(scene.get("_bench_freeze"))
+	var still := bool(scene.get("_bench_still"))
+	if frozen:
 		saw_freeze = true
+		if still:
+			saw_still_window = true # 采样窗内：村民冻结
+		else:
+			saw_still_gap = true # warmup 间隙：放行成形（输入仍锁、仙子仍定格）
 	for n in (scene.get("npcs") as Array):
 		if String((n as Dictionary).get("id", "")).begins_with("bench_"):
 			saw_bench_load = true
@@ -50,7 +58,9 @@ func _finish() -> void:
 	# —— 采样期机制 ——
 	_check("采样期挂上 Benchmark 节点", saw_bench_node, true)
 	_check("采样期塞进压测负载（bench_ 村民雏形）", saw_bench_load, true)
-	_check("采样期世界被冻结（可复现帧）", saw_freeze, true)
+	_check("benchmark 全程锁输入/仙子定格（可复现帧地基）", saw_freeze, true)
+	_check("采样窗(window)内村民冻结（负载恒定）", saw_still_window, true)
+	_check("采样窗间隙(warmup)放行成形（世界有动静）", saw_still_gap, true)
 	# —— 定档收尾：就地应用 + 不换场景 ——
 	_check("测完已定档（has_saved 转真）", GraphicsSettings.has_saved(), true)
 	_check("档来源=bench（内嵌真定档，非骨架默认）", GraphicsSettings.source(), "bench")

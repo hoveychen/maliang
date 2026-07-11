@@ -185,6 +185,10 @@ func _process(delta: float) -> void:
 	if _done or _sampler == null:
 		return
 	_sampler.feed(delta)
+	if embedded:
+		# 采样窗(window)内冻结村民保证可复现帧；warmup 段（帧被丢弃、不计 p95）放行，让画质档切换与村民
+		# 微动在采样窗【间隙】可见地"世界成形"（设计 D5）。计入统计的 window 段始终静止，不污染 p95。
+		_world.call("set_bench_still", not _sampler.is_warming())
 	if _sampler.is_done():
 		_advance(_sampler.p95_ms())
 

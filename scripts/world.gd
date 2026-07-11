@@ -286,7 +286,8 @@ var _executors: Array = []        ## 活跃的 BehaviorExecutor
 var _stage: StageAgent            ## 舞台协议大脑（剧本系统，见 stage_agent.gd）；_setup_backend 接线
 var _hud: HudFactory              ## 舞台 HUD 工厂（计分/倒计时/toast，见 hud_factory.gd）；_setup_hud 建
 var _stage_active := false        ## 观演/游戏态：期间吞玩家输入，StageAgent 全权调度演出
-var _bench_freeze := false         ## intro benchmark 采样期：冻结世界动态（仙子/村民/玩家输入）保证可复现帧
+var _bench_freeze := false         ## intro benchmark 全程：锁玩家输入 + 仙子注魔定格（相机/主角不动）
+var _bench_still := false           ## intro benchmark 采样窗(window)内：冻结村民动态；warmup 间隙放行让世界"成形"
 var _stage_drives: Array = []     ## 进行中的完成型舞台命令 { ex:BehaviorExecutor, done:Callable }
 var _stage_holds: Array = []      ## 设置型持续驱动的执行器（follow/flee）：收场统一 cancel（永不自完成）
 var _stage_speaks: Array = []     ## 进行中的舞台念白 { done:Callable, deadline:float, started:bool }
@@ -2397,8 +2398,8 @@ func _step_remote_actors(_delta: float) -> void:
 		ra["logical"] = buf2.sample(render_ms, ra["logical"])
 
 func _step_executors(delta: float) -> void:
-	if _bench_freeze:
-		return # benchmark 采样期：村民停走定格（不 step 行为脚本），保持可见负载恒定
+	if _bench_still:
+		return # benchmark 采样窗(window)内：村民停走定格保持负载恒定；warmup 间隙放行让世界"成形"有动静
 	for ex in _executors:
 		ex.step(delta)
 	# 单趟分拣（旧版两次 filter 每帧各分配一个数组+Callable，无人完成时纯浪费）
@@ -3686,11 +3687,19 @@ var _intro_active := false
 func intro_active() -> bool:
 	return _intro_active
 
-## intro 内嵌 benchmark 采样期冻结世界动态（由 Benchmark embedded 模式开关，见设计 D5）：
-## 仙子定格、村民停走、吞玩家移动输入——采样对帧时的度量要求可见负载恒定，任何飘/走/点走都会
-## 改变渲染负载 → p95 失真、贪心比的是噪声。采样窗之间画质档爬升本身即「世界越来越清晰」的建造演出。
+## intro 内嵌 benchmark 全程冻结（Benchmark embedded 模式 _ready/finish 开关，见设计 D5）：锁玩家
+## 移动输入（相机/主角不动）+ 仙子注魔定格（含闭嘴，语音让位注魔旁白）。整段 benchmark 都开着，
+## 保证不管在采样窗内还是间隙，玩家/相机/仙子都不动——这是可复现帧的地基。
 func set_bench_freeze(on: bool) -> void:
 	_bench_freeze = on
+	if not on:
+		_bench_still = false # 收尾一并解除采样窗静止，避免残留
+
+## 采样窗(window)内冻结村民动态（Benchmark._process 按 FrameSampler.is_warming 逐帧开关）：计入 p95 的
+## window 段静止 → 负载恒定；warmup 间隙(帧被丢弃)放行村民微动，让世界在采样窗【间隙】"有动静地成形"
+## （设计 D5：采样窗内静止、采样窗之间播建造动静）。仙子的定格/输入锁由 _bench_freeze 全程管，不受此开关。
+func set_bench_still(on: bool) -> void:
+	_bench_still = on
 
 # ── intro 教学「开口说话」步（P4）───────────────────────────────────────────
 # 只用本地 VAD 检测「孩子开口」这个手势——不建 ASR 会话、不上传任何 PCM、不理解内容
