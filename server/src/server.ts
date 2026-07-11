@@ -640,6 +640,38 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       .send(out.stream);
   });
 
+  // 库体检（只读）：死资产引用 + benchmark 众包样本。
+  // 死引用 = 库里记着某张立绘、资产库里却没有 → 客户端会一直拿 404。
+  app.get('/admin/integrity', async (req, reply) => {
+    if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    return {
+      deadSpriteRefs: store.listDeadSpriteRefs(),
+      deviceSamples: store.listDeviceSamples(),
+    };
+  });
+
+  // 清理。**默认 dry-run**——不带 apply=true 只报告将要改什么，一个字节都不动。
+  // 这样误调一次不会毁数据；真要动手必须显式 apply。
+  app.post<{
+    Querystring: { apply?: string };
+    Body: { deviceSamples?: { gpu: string; deviceId: string }[] } | null;
+  }>('/admin/integrity/fix', async (req, reply) => {
+    if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    const apply = req.query.apply === 'true' || req.query.apply === '1';
+    const deadRefs = store.listDeadSpriteRefs();
+    // 要删哪些 benchmark 样本由调用方点名（别在服务端猜"哪条像测试数据"，猜错就是删真数据）
+    const toDelete = req.body?.deviceSamples ?? [];
+
+    if (!apply) {
+      return { dryRun: true, wouldClearSpriteRefs: deadRefs, wouldDeleteDeviceSamples: toDelete };
+    }
+    const cleared = store.clearDeadSpriteRefs();
+    let deleted = 0;
+    for (const d of toDelete) deleted += store.deleteDeviceSample(d.gpu, d.deviceId);
+    app.log.warn({ cleared, deleted }, 'integrity fix applied — 生产库已被清理');
+    return { dryRun: false, clearedSpriteRefs: cleared, deletedDeviceSamples: deleted, details: deadRefs };
+  });
+
   // 上传的备份包直接流式落到磁盘临时文件，不进内存——fastify 默认只认 json/urlencoded，
   // 且默认 bodyLimit 只有 1MB，几十 MB 的包必须走自定义 parser 才不会被顶回来。
   app.addContentTypeParser('application/gzip', (_req, payload, done) => {

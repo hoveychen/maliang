@@ -284,3 +284,18 @@ export interface RestoreResponse {
   /** 被覆盖的旧数据另存成了哪个包（服务器上的路径）。 */
   preRestoreBackup: string;
 }
+
+/** GET /admin/integrity —— 库体检结果。 */
+export interface Integrity {
+  /** 库里记着、但资产库里没有那个文件的引用（客户端会一直拿 404）。 */
+  deadSpriteRefs: { kind: 'player' | 'character'; id: string; name: string; hash: string }[];
+  deviceSamples: { gpu: string; benchVersion: number; deviceId: string; p95Ms: number }[];
+}
+
+/** POST /admin/integrity/fix 的返回（dryRun 与 apply 两种形态）。 */
+export interface IntegrityFix {
+  dryRun: boolean;
+  clearedSpriteRefs?: number;
+  deletedDeviceSamples?: number;
+  wouldClearSpriteRefs?: Integrity['deadSpriteRefs'];
+}

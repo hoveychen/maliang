@@ -414,6 +414,21 @@ export class WorldStore {
       .run(s.gpu, s.benchVersion, s.deviceId, JSON.stringify(s.levels), s.p95Ms, s.hit ? 1 : 0);
   }
 
+  /** 列出全部 benchmark 样本（后台体检用：看有没有测试探针灌进生产众包）。 */
+  listDeviceSamples(): { gpu: string; benchVersion: number; deviceId: string; p95Ms: number }[] {
+    const rows = this.#db
+      .prepare('SELECT gpu, bench_version, device_id, p95_ms FROM device_samples ORDER BY gpu, device_id')
+      .all() as { gpu: string; bench_version: number; device_id: string; p95_ms: number }[];
+    return rows.map((r) => ({ gpu: r.gpu, benchVersion: r.bench_version, deviceId: r.device_id, p95Ms: r.p95_ms }));
+  }
+
+  /** 删掉某台设备的样本（清测试污染）。返回删了几行。 */
+  deleteDeviceSample(gpu: string, deviceId: string): number {
+    const before = this.#count('device_samples');
+    this.#db.prepare('DELETE FROM device_samples WHERE gpu = ? AND device_id = ?').run(gpu, deviceId);
+    return before - this.#count('device_samples');
+  }
+
   /** 某 GPU（同一 benchmark 口径）下所有设备的档位样本；损坏的行跳过。 */
   listDeviceLevels(gpu: string, benchVersion: number): Levels[] {
     const rows = this.#db
@@ -1039,6 +1054,62 @@ export class WorldStore {
   listPlayers(): Player[] {
     const rows = this.#db.prepare('SELECT data FROM players').all() as { data: string }[];
     return rows.map((r) => JSON.parse(r.data) as Player);
+  }
+
+  /**
+   * 某个资产存不存在——只查清单，不读字节（O(1)，不碰磁盘）。
+   * 体检要扫全库的引用，用 getAsset 会把每张图都读进来，纯浪费。
+   */
+  hasAsset(hash: string): boolean {
+    return this.#assetMime.has(hash);
+  }
+
+  /**
+   * 体检：找出"库里引用了、但资产库里没有"的死引用。
+   *
+   * 这种引用会让客户端拿到一个 404 的立绘。已知成因：2026-07-09 切 ghcr 部署时
+   * assets/ 里 7/9 之前的文件没搬过去（world.db 搬过去了）——库记得那张图，盘上没有。
+   */
+  listDeadSpriteRefs(): { kind: 'player' | 'character'; id: string; name: string; hash: string }[] {
+    const dead: { kind: 'player' | 'character'; id: string; name: string; hash: string }[] = [];
+    for (const p of this.listPlayers()) {
+      if (p.spriteAsset && !this.hasAsset(p.spriteAsset)) {
+        dead.push({ kind: 'player', id: p.id, name: p.nickname || p.name || '(无名)', hash: p.spriteAsset });
+      }
+    }
+    const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
+    for (const r of rows) {
+      const c = JSON.parse(r.data) as Character;
+      const hash = c.appearance?.spriteAsset;
+      if (hash && !this.hasAsset(hash)) {
+        dead.push({ kind: 'character', id: c.id, name: c.name, hash });
+      }
+    }
+    return dead;
+  }
+
+  /**
+   * 把死引用置空（那张图已经不存在了，留着引用只会让客户端一直拿 404）。
+   * 置空后玩家/角色回落到默认形象；真要形象，走各自的重生成端点。返回清了几条。
+   */
+  clearDeadSpriteRefs(): number {
+    const dead = this.listDeadSpriteRefs();
+    for (const d of dead) {
+      if (d.kind === 'player') {
+        const p = this.getPlayer(d.id);
+        if (p) this.upsertPlayer({ ...p, spriteAsset: '' });
+      } else {
+        const row = this.#db.prepare('SELECT data FROM characters WHERE id = ?').get(d.id) as
+          | { data: string }
+          | undefined;
+        if (row) {
+          const c = JSON.parse(row.data) as Character;
+          c.appearance = { ...c.appearance, spriteAsset: '' };
+          this.saveCharacter(c);
+        }
+      }
+    }
+    return dead.length;
   }
 
   // ── 长期记忆（P3：结构化，按 owner NPC × aboutPlayer 维度；见 types.MemoryItem）──────
