@@ -407,9 +407,11 @@ export interface CreationState {
   active: boolean;
   goal: CreationGoal;        // 这次会话在造什么（缺省 character，兼容存量调用点）
   attrs: CreationAttrs;
-  askedCategories: string[]; // 已问过的类别，避免重复问
+  askedCategories: string[]; // 已问过的类别（mock 确定性解析用；LLM 路径靠 dialog 自带上下文）
   turnCount: number;         // 兜底：超上限强制造
-  lastQuestion?: string;     // 上一轮追问的问题，喂回 guide 让 LLM 有上下文解读答案（如「毛毛」是在答名字）
+  // 本次创造会话的完整对话（child=小朋友的请求/回答，npc=仙子的追问），按标准多轮 messages 回放给
+  // guide LLM——上下文完整，再笨的模型也不会重复问已问过的问题、也能看懂「毛毛」是在答名字。
+  dialog: ChatTurn[];
 }
 
 /** 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。 */
@@ -436,5 +438,5 @@ export interface GuideCreationResult {
 
 /** 引导式创造会话的初始空状态（缺省造角色，兼容存量调用点）。 */
 export function newCreationState(goal: CreationGoal = 'character'): CreationState {
-  return { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0 };
+  return { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0, dialog: [] };
 }

@@ -1171,7 +1171,9 @@ export async function advanceCreation(
     if (u.traits) state.attrs.traits = u.traits;
   }
   if (r.category) state.askedCategories.push(r.category);
-  if (!r.done) state.lastQuestion = r.question ?? r.replyText; // 下一轮 guide 带上，LLM 才知道答案在答什么
+  // 会话对话入账：这轮小朋友说的 + 仙子接下来的追问，下一轮按多轮 messages 回放给 guide。
+  state.dialog.push({ role: 'child', text: childInput, ts: 0 });
+  if (!r.done) state.dialog.push({ role: 'npc', text: r.question ?? r.replyText, ts: 0 });
   state.turnCount += 1;
   if (r.done) {
     session.creation = null;
