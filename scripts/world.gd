@@ -393,6 +393,11 @@ func _ready() -> void:
 	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
 		Engine.max_fps = 0  # 扫频要真实帧时，解除 menu 设的移动端限帧
 		add_child(PerfSweep.make(self, _env))
+	# 画质 benchmark（新机器定档）：世界的渲染负载到这里已经全部就位，而后端/麦克风/引导
+	# 与渲染无关且会引入噪声（网络等待、TTS 播放）——benchmark 模式到此为止。
+	if Benchmark.pending:
+		add_child(Benchmark.make(self))
+		return
 	_setup_backend()
 	api = Api.new()
 	api.name = "Api"
