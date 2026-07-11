@@ -5,6 +5,8 @@
 #   --local  改连本机后端：起 Node 后端在 :8090，用 MALIANG_API_BASE 让 app 指向它。
 #            （宿主 8080 常被 Docker 等占用，故本地固定用 8090。）
 #   --build  强制重新导出 app（否则仅在 build/maliang.app 缺失时导出）。
+# 导出会自动注入端侧 ASR 模型并 ad-hoc 签名（否则扩展加载不出/无模型）；SIGN_IDENTITY
+# 可覆盖为 Developer ID。分发级（公证）包走 scripts/package-mac-app.sh。
 # 说明：客户端启动时从 api.base 推导后端地址（world.gd），api.gd 支持 MALIANG_API_BASE
 #       环境变量覆盖，故本地/远程切换无需改任何代码。
 # 前置：Godot 导出模板已装；--local 时 server/.env 已配密钥。
@@ -35,6 +37,39 @@ if [ ! -d "$APP" ] || [ "$BUILD" = 1 ]; then
   echo "导出 macOS app（$("$GODOT" --version)）..."
   rm -rf "$APP"
   "$GODOT" --headless --path "$ROOT" --export-debug macOS "$APP"
+
+  # 端侧 ASR：注入模型 + 整包签名。
+  # 模型 73MB 要在签名前放进 .app（Godot 内联签盖不住后加的模型，故 export preset
+  # codesign=0，这里手动签）。本机自测默认 ad-hoc（不依赖证书/公证）；
+  # 要做分发级包用 scripts/package-mac-app.sh（Developer ID + 公证）。
+  ASR_DIR="sherpa-onnx-streaming-zipformer-multi-zh-hans-2023-12-12"
+  # 模型源：优先本 checkout 的 server/models；worktree 里没有则回主 checkout 取。
+  MODEL_SRC="${MODEL_SRC:-$ROOT/server/models}"
+  if [ ! -f "$MODEL_SRC/$ASR_DIR/tokens.txt" ]; then
+    MODEL_SRC="$(cd "$(git -C "$ROOT" rev-parse --git-common-dir)/.." && pwd)/server/models"
+  fi
+  [ -f "$MODEL_SRC/$ASR_DIR/tokens.txt" ] \
+    || { echo "缺 ASR 模型：$MODEL_SRC/$ASR_DIR（先跑 server/scripts/fetch-voice-models.sh）"; exit 1; }
+
+  echo "注入端侧 ASR 模型 ..."
+  DST="$APP/Contents/Resources/asr-models/$ASR_DIR"
+  mkdir -p "$DST"
+  for f in encoder-epoch-20-avg-1-chunk-16-left-128.int8.onnx \
+           decoder-epoch-20-avg-1-chunk-16-left-128.onnx \
+           joiner-epoch-20-avg-1-chunk-16-left-128.int8.onnx tokens.txt; do
+    cp "$MODEL_SRC/$ASR_DIR/$f" "$DST/"
+  done
+
+  # 整包签名（从内到外：dylib/framework → 主程序带 entitlements）。
+  # SIGN_IDENTITY 默认 "-"（ad-hoc）；disable-library-validation 允许加载 sherpa dylib。
+  SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+  ENT="$ROOT/gdextension_asr/maliang.entitlements"
+  FW="$APP/Contents/Frameworks/libmaliang_asr.macos.template_debug.framework"
+  echo "codesign（identity=$SIGN_IDENTITY）..."
+  codesign --force --options runtime -s "$SIGN_IDENTITY" \
+    "$FW/libonnxruntime.1.24.4.dylib" "$FW/libsherpa-onnx-c-api.dylib" \
+    "$FW/libmaliang_asr.macos.template_debug"
+  codesign --force --options runtime --entitlements "$ENT" -s "$SIGN_IDENTITY" "$APP"
 fi
 
 # 2a. 远程模式：双击式启动，连线上服务器，不起本地后端。
