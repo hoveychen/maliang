@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WorldStore } from './persistence.ts';
 import type { Character } from './types.ts';
 import { DEFAULT_SCENE } from './types.ts';
+import { decodeTerrain } from './terrain.ts';
 
 type AuthedFn = (req: { headers: Record<string, unknown>; query: unknown }) => boolean;
 
@@ -145,6 +146,28 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
       characters: store.listCharacters(world.id).map((c) => characterSummary(store, c)),
       props: store.listProps(world.id),
       visits: store.listVisits(world.id),
+    };
+  });
+
+  // 场景地形矩阵（解码成 JSON 供后台矩阵图渲染：地貌三平面 + 物品层 + palette 实体定义）。
+  // 服务端解码复用唯一编解码器（terrain.ts），后台不抄第二份格式实现。
+  app.get<{ Params: { id: string; sid: string } }>('/debug/api/worlds/:id/scenes/:sid/terrain-grid', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    const rec = store.getSceneTerrain(req.params.id, req.params.sid);
+    if (!rec) return reply.code(404).send({ error: 'scene terrain not found' });
+    const t = decodeTerrain(rec.bytes);
+    const resolve = store.itemResolver(req.params.id);
+    return {
+      version: rec.version,
+      gridW: t.gridW,
+      gridH: t.gridH,
+      types: Array.from(t.types),
+      heights: Array.from(t.heights),
+      depths: Array.from(t.depths),
+      itemRef: Array.from(t.itemRef),
+      itemArg: Array.from(t.itemArg),
+      palette: t.palette,
+      items: t.palette.map((id) => resolve(id) ?? null),
     };
   });
 

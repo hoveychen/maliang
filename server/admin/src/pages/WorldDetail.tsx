@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { apiPost, fmtTs, useApi } from '../api.ts';
-import { MAX_FLOWERS, STAMP_GLYPHS, STAMPS_PER_FLOWER, TASK_TYPE_LABELS, type CharacterSummary, type Scene, type WorldDetail, type WorldProp } from '../types.ts';
+import { MAX_FLOWERS, STAMP_GLYPHS, STAMPS_PER_FLOWER, TASK_TYPE_LABELS, type AdminItemDef, type CharacterSummary, type Scene, type TerrainGrid, type WorldDetail, type WorldProp } from '../types.ts';
 import { AnimStatusBadge, Fallback, PageHead, RowLink, ShortId, Sprite, Stats } from '../components.tsx';
 import { playerLabel } from './Worlds.tsx';
 
@@ -68,7 +68,7 @@ const MAP_COLORS = {
  * 按 tile 坐标叠上去。POI/传送门画半径圈，角色/物品是点；每个标记 <title> 悬停显详情。
  * tile (0,0) 在左上角，tileX→x、tileY→y（与客户端一致）。
  */
-function SceneMap({ scene, characters, props }: { scene: Scene; characters: CharacterSummary[]; props: WorldProp[] }) {
+function SceneMap({ scene, characters, props, overlay = false }: { scene: Scene; characters: CharacterSummary[]; props: WorldProp[]; overlay?: boolean }) {
   const n = scene.gridTiles;
   const dot = Math.max(0.7, n / 55); // 点半径（tile 单位）
   const sw = Math.max(0.12, n / 320); // 线宽
@@ -76,8 +76,12 @@ function SceneMap({ scene, characters, props }: { scene: Scene; characters: Char
   const lines: number[] = [];
   for (let i = step; i < n; i += step) lines.push(i);
 
+  // overlay 模式：铺在地貌 canvas 之上（TerrainMatrix），背景透明、占满容器
+  const style = overlay
+    ? ({ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' } as const)
+    : ({ maxWidth: 520, aspectRatio: '1 / 1', background: '#faf8f3', border: '1px solid rgba(0,0,0,0.15)', borderRadius: 6, display: 'block' } as const);
   return (
-    <svg viewBox={`0 0 ${n} ${n}`} width="100%" style={{ maxWidth: 520, aspectRatio: '1 / 1', background: '#faf8f3', border: '1px solid rgba(0,0,0,0.15)', borderRadius: 6, display: 'block' }}>
+    <svg viewBox={`0 0 ${n} ${n}`} width="100%" style={style}>
       {/* 网格 */}
       {lines.map((i) => (
         <g key={`l${i}`} stroke="rgba(0,0,0,0.07)" strokeWidth={sw}>
@@ -158,6 +162,148 @@ function MapLegend() {
         </span>
       ))}
     </div>
+  );
+}
+
+/** 物品实体 → 图层分类（过滤器分组）。 */
+function itemClass(def: AdminItemDef | null): string {
+  if (!def) return '未知';
+  const r = def.renderRef;
+  if (r.startsWith('baked:tree')) return '树';
+  if (r === 'baked:bush_puff') return '灌木';
+  if (r.startsWith('kaykit:rock')) return '岩石';
+  if (r.startsWith('kaykit:tuft')) return '草丛';
+  if (r.startsWith('kaykit:')) return '建筑';
+  if (r === 'sdf_inline') return '造物';
+  return 'SDF物件';
+}
+
+const ITEM_CLASS_COLORS: Record<string, string> = {
+  树: '#1f7a33', 灌木: '#68a834', 岩石: '#8a8f98', 草丛: '#b8d48a',
+  建筑: '#c2410c', SDF物件: '#7c3aed', 造物: '#db2777', 未知: '#111',
+};
+
+/**
+ * 场景矩阵图：地貌底图（canvas：草/路/水 + 高度明暗 + 水深加深）+ 矩阵物品层
+ * （按实体分类上色，可勾选过滤）+ 原 SVG 标记层（POI/传送门/角色/造物）叠最上。
+ * 悬停显示 tile 详情（类型/高度/物品）。矩阵未入库（旧库无 blob）时回落纯标记图。
+ */
+function TerrainMatrix({ worldId, scene, characters, props }: { worldId: string; scene: Scene; characters: CharacterSummary[]; props: WorldProp[] }) {
+  const { data: grid, error } = useApi<TerrainGrid>(
+    `/debug/api/worlds/${encodeURIComponent(worldId)}/scenes/${encodeURIComponent(scene.sceneId)}/terrain-grid`,
+  );
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [hidden, setHidden] = useState<Set<string>>(new Set()); // 被关掉的图层分类
+  const [hover, setHover] = useState('');
+
+  // 分类 → 数量（过滤器旁标数，快速过滤整个世界里的各种东西）
+  const classCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!grid) return counts;
+    for (const ref of grid.itemRef) {
+      if (ref === 0) continue;
+      const cls = itemClass(grid.items[ref - 1] ?? null);
+      counts.set(cls, (counts.get(cls) ?? 0) + 1);
+    }
+    return counts;
+  }, [grid]);
+
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv || !grid) return;
+    const n = grid.gridW;
+    const px = Math.max(4, Math.floor(600 / n)); // 每 tile 像素
+    cv.width = n * px;
+    cv.height = n * px;
+    const ctx = cv.getContext('2d')!;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const i = y * n + x;
+        const t = grid.types[i]!;
+        let rgb: [number, number, number] = t === 1 ? [206, 172, 118] : t === 2 ? [111, 169, 190] : [156, 189, 108];
+        const h = grid.heights[i]!;
+        const d = grid.depths[i]!;
+        // 高度提亮（每级 +6%），水深压暗（每级 -18%）——一眼读出台地与深潭
+        const k = t === 2 ? Math.max(0.4, 1 - d * 0.18) : 1 + h * 0.06;
+        rgb = rgb.map((v) => Math.min(255, Math.round(v * k))) as [number, number, number];
+        ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+        ctx.fillRect(x * px, y * px, px, px);
+      }
+    }
+    // 物品层：按分类上色的内嵌方块（多 tile 物品只画锚点，footprint 画淡框）
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const i = y * n + x;
+        const ref = grid.itemRef[i]!;
+        if (ref === 0) continue;
+        const def = grid.items[ref - 1] ?? null;
+        const cls = itemClass(def);
+        if (hidden.has(cls)) continue;
+        ctx.fillStyle = ITEM_CLASS_COLORS[cls] ?? '#111';
+        const pad = Math.max(1, Math.floor(px / 4));
+        ctx.fillRect(x * px + pad, y * px + pad, px - pad * 2, px - pad * 2);
+        const fw = def?.footprintW ?? 1;
+        const fh = def?.footprintH ?? 1;
+        if (fw > 1 || fh > 1) {
+          ctx.strokeStyle = ITEM_CLASS_COLORS[cls] ?? '#111';
+          ctx.lineWidth = 1;
+          ctx.strokeRect((x - (fw - 1) / 2) * px + 0.5, (y - (fh - 1) / 2) * px + 0.5, fw * px - 1, fh * px - 1);
+        }
+      }
+    }
+  }, [grid, hidden]);
+
+  if (error || !grid) {
+    // 矩阵未入库/拉取失败：回落纯标记图（与旧版一致）
+    return <SceneMap scene={scene} characters={characters} props={props} />;
+  }
+
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const n = grid.gridW;
+    const x = Math.floor(((e.clientX - rect.left) / rect.width) * n);
+    const y = Math.floor(((e.clientY - rect.top) / rect.height) * n);
+    if (x < 0 || x >= n || y < 0 || y >= n) return setHover('');
+    const i = y * n + x;
+    const tname = ['草', '路', '水'][grid.types[i]!] ?? '?';
+    const ref = grid.itemRef[i]!;
+    const def = ref === 0 ? null : grid.items[ref - 1] ?? null;
+    const item = ref === 0 ? '' : ` · 物品 ${grid.palette[ref - 1]}${def ? `（${def.name}）` : ''}`;
+    const depth = grid.types[i] === 2 ? ` 深${grid.depths[i]}` : '';
+    setHover(`(${x},${y}) ${tname} 高${grid.heights[i]}${depth}${item}`);
+  };
+
+  const classes = ['树', '灌木', '岩石', '草丛', '建筑', 'SDF物件', '造物', '未知'].filter((c) => (classCounts.get(c) ?? 0) > 0);
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '6px 0', fontSize: 12, alignItems: 'center' }}>
+        <span className="aux">矩阵 v{grid.version} · 物品图层：</span>
+        {classes.map((c) => (
+          <label key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={!hidden.has(c)}
+              onChange={() => setHidden((prev) => {
+                const next = new Set(prev);
+                if (next.has(c)) next.delete(c); else next.add(c);
+                return next;
+              })}
+            />
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: ITEM_CLASS_COLORS[c], display: 'inline-block' }} />
+            {c} <span className="aux">{classCounts.get(c)}</span>
+          </label>
+        ))}
+      </div>
+      <div
+        style={{ position: 'relative', maxWidth: 520, aspectRatio: '1 / 1', border: '1px solid rgba(0,0,0,0.15)', borderRadius: 6, overflow: 'hidden' }}
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover('')}
+      >
+        <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', imageRendering: 'pixelated' }} />
+        <SceneMap scene={scene} characters={characters} props={props} overlay />
+      </div>
+      <div className="mono aux" style={{ minHeight: 18, fontSize: 12, marginTop: 4 }}>{hover || '悬停查看 tile 详情'}</div>
+    </>
   );
 }
 
@@ -254,7 +400,7 @@ export function WorldDetailPage() {
                         <dt>标记</dt><dd className="mono">POI {s.pois.length} · 传送门 {s.portals.length} · 角色 {chars.length} · 物品 {scProps.length}</dd>
                       </dl>
                       <MapLegend />
-                      <SceneMap scene={s} characters={chars} props={scProps} />
+                      <TerrainMatrix worldId={id} scene={s} characters={chars} props={scProps} />
 
                       <details style={{ marginTop: 10 }}>
                         <summary className="mono" style={{ cursor: 'pointer' }}>展开明细表</summary>

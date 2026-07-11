@@ -129,6 +129,35 @@ export interface Scene {
   gridTiles: number;
   pois: ScenePoi[];
   portals: ScenePortal[];
+  /** 地形矩阵版本（tile 编辑每次 +1；0 = 尚无矩阵 blob）。 */
+  terrainVersion: number;
+}
+
+/** 物品实体定义（与 server/src/types.ts ItemDef 对齐；矩阵 palette 的解引用）。 */
+export interface AdminItemDef {
+  id: string;
+  worldId: string | null;
+  name: string;
+  renderRef: string;
+  footprintW: number;
+  footprintH: number;
+  blocking: boolean;
+  pathOk: boolean;
+  wander: number;
+}
+
+/** 场景地形矩阵（/debug/api/worlds/:id/scenes/:sid/terrain-grid 的解码 JSON）。 */
+export interface TerrainGrid {
+  version: number;
+  gridW: number;
+  gridH: number;
+  types: number[];    // 0 草 / 1 路 / 2 水
+  heights: number[];  // 台阶级
+  depths: number[];   // 水深（仅水 tile 非零）
+  itemRef: number[];  // 0=无 / 1..=palette 索引
+  itemArg: number[];  // 朝向 256 档
+  palette: string[];
+  items: (AdminItemDef | null)[]; // 与 palette 同序（无法解析的为 null）
 }
 
 export interface CharacterSummary {

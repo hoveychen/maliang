@@ -5,6 +5,7 @@ import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { ANON_PLAYER } from '../src/types.ts';
 import type { Character, WorldProp } from '../src/types.ts';
+import { emptyTerrain, encodeTerrain, REQUIRED_GRID } from '../src/terrain.ts';
 
 function makeCharacter(id: string, worldId: string, name: string, isFairy = false): Character {
   return {
@@ -225,5 +226,45 @@ test('/debug/api/*：配置 MALIANG_ADMIN_TOKEN 后无 token 拒绝、带 token 
     await app.close();
     if (prev === undefined) delete process.env.MALIANG_ADMIN_TOKEN;
     else process.env.MALIANG_ADMIN_TOKEN = prev;
+  }
+});
+
+test('GET /debug/api/worlds/:id/scenes/:sid/terrain-grid：解码矩阵 + palette 实体', async () => {
+  const store = new WorldStore();
+  seed(store);
+  const t = emptyTerrain();
+  t.palette = ['tree_puff_a'];
+  t.itemRef[10 * REQUIRED_GRID + 10] = 1;
+  t.types[0] = 2; t.depths[0] = 1; t.heights[5] = 3;
+  store.setSceneTerrain('w1', 'village', encodeTerrain(t), 4);
+  process.env.MALIANG_ADMIN_TOKEN = 'sesame'; // 门禁 token 在 buildServer 时捕获，必须先设
+  const app = await buildServer({ adapters: createMockAdapters(), store });
+  try {
+    const denied = await app.inject({ method: 'GET', url: '/debug/api/worlds/w1/scenes/village/terrain-grid' });
+    assert.equal(denied.statusCode, 403, 'admin token 门禁');
+
+    const res = await app.inject({
+      method: 'GET', url: '/debug/api/worlds/w1/scenes/village/terrain-grid',
+      headers: { 'x-admin-token': 'sesame' },
+    });
+    assert.equal(res.statusCode, 200);
+    const g = res.json() as { version: number; gridW: number; types: number[]; heights: number[]; depths: number[]; itemRef: number[]; palette: string[]; items: { id: string; name: string }[] };
+    assert.equal(g.version, 4);
+    assert.equal(g.gridW, REQUIRED_GRID);
+    assert.equal(g.types[0], 2);
+    assert.equal(g.depths[0], 1);
+    assert.equal(g.heights[5], 3);
+    assert.equal(g.itemRef[10 * REQUIRED_GRID + 10], 1);
+    assert.deepEqual(g.palette, ['tree_puff_a']);
+    assert.equal(g.items[0]!.name, '蓬蓬树·甲', 'palette 实体定义已解引用');
+
+    const missing = await app.inject({
+      method: 'GET', url: '/debug/api/worlds/w1/scenes/ghost/terrain-grid',
+      headers: { 'x-admin-token': 'sesame' },
+    });
+    assert.equal(missing.statusCode, 404);
+  } finally {
+    delete process.env.MALIANG_ADMIN_TOKEN;
+    await app.close();
   }
 });
