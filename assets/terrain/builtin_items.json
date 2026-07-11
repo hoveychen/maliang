@@ -912,5 +912,327 @@
     "themes": [
       "kitchen"
     ]
+  },
+  {
+    "id": "mv_home_a",
+    "worldId": null,
+    "name": "民居·甲",
+    "renderRef": "medieval:building_home_A_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_home_b",
+    "worldId": null,
+    "name": "民居·乙",
+    "renderRef": "medieval:building_home_B_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_blacksmith",
+    "worldId": null,
+    "name": "铁匠铺",
+    "renderRef": "medieval:building_blacksmith_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_market",
+    "worldId": null,
+    "name": "集市",
+    "renderRef": "medieval:building_market_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_tavern",
+    "worldId": null,
+    "name": "酒馆",
+    "renderRef": "medieval:building_tavern_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_church",
+    "worldId": null,
+    "name": "教堂",
+    "renderRef": "medieval:building_church_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_windmill",
+    "worldId": null,
+    "name": "风车",
+    "renderRef": "medieval:building_windmill_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_watermill",
+    "worldId": null,
+    "name": "水车",
+    "renderRef": "medieval:building_watermill_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_lumbermill",
+    "worldId": null,
+    "name": "伐木场",
+    "renderRef": "medieval:building_lumbermill_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_mine",
+    "worldId": null,
+    "name": "矿场",
+    "renderRef": "medieval:building_mine_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_well",
+    "worldId": null,
+    "name": "水井",
+    "renderRef": "medieval:building_well_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mk_castle",
+    "worldId": null,
+    "name": "城堡",
+    "renderRef": "medieval:building_castle_blue",
+    "footprintW": 5,
+    "footprintH": 5,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_barracks",
+    "worldId": null,
+    "name": "兵营",
+    "renderRef": "medieval:building_barracks_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_archery",
+    "worldId": null,
+    "name": "箭馆",
+    "renderRef": "medieval:building_archeryrange_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_tower_a",
+    "worldId": null,
+    "name": "塔楼·甲",
+    "renderRef": "medieval:building_tower_A_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_tower_b",
+    "worldId": null,
+    "name": "塔楼·乙",
+    "renderRef": "medieval:building_tower_B_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_tower_base",
+    "worldId": null,
+    "name": "塔基",
+    "renderRef": "medieval:building_tower_base_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_catapult",
+    "worldId": null,
+    "name": "投石塔",
+    "renderRef": "medieval:building_tower_catapult_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_gate",
+    "worldId": null,
+    "name": "城门",
+    "renderRef": "medieval:wall_gate",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_gate_closed",
+    "worldId": null,
+    "name": "闭合城门",
+    "renderRef": "medieval:wall_gate_closed",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_wall",
+    "worldId": null,
+    "name": "城墙",
+    "renderRef": "medieval:wall_straight",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_wall_corner",
+    "worldId": null,
+    "name": "城墙拐角",
+    "renderRef": "medieval:wall_corner",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_watchtower",
+    "worldId": null,
+    "name": "瞭望塔",
+    "renderRef": "medieval:watchtower",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
   }
 ]

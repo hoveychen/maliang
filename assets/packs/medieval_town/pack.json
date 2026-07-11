@@ -1,0 +1,16 @@
+{
+  "_comment": "中世纪小镇主题（world-themes P4）。全 node 类，全 CC0：KayKit Medieval Hexagon Pack（与游戏已装基础村庄民居同包同画风），来源见 assets/medieval/SOURCES.txt。gltf 引用同名 .bin + 共享 hexagons_medieval.png（已同目录保留）。scale=7.0 与基础村庄民居一致（微缩 0.93m 建筑放大到 ~6.5m），真机手感微调留 P5。",
+  "entries": {
+    "building_home_A_blue":    { "category": "node", "path": "res://assets/medieval/hexagon/building_home_A_blue.gltf",    "scale": 7.0 },
+    "building_home_B_blue":    { "category": "node", "path": "res://assets/medieval/hexagon/building_home_B_blue.gltf",    "scale": 7.0 },
+    "building_blacksmith_blue":{ "category": "node", "path": "res://assets/medieval/hexagon/building_blacksmith_blue.gltf","scale": 7.0 },
+    "building_market_blue":    { "category": "node", "path": "res://assets/medieval/hexagon/building_market_blue.gltf",    "scale": 7.0 },
+    "building_tavern_blue":    { "category": "node", "path": "res://assets/medieval/hexagon/building_tavern_blue.gltf",    "scale": 7.0 },
+    "building_church_blue":    { "category": "node", "path": "res://assets/medieval/hexagon/building_church_blue.gltf",    "scale": 7.0 },
+    "building_windmill_blue":  { "category": "node", "path": "res://assets/medieval/hexagon/building_windmill_blue.gltf",  "scale": 7.0 },
+    "building_watermill_blue": { "category": "node", "path": "res://assets/medieval/hexagon/building_watermill_blue.gltf", "scale": 7.0 },
+    "building_lumbermill_blue":{ "category": "node", "path": "res://assets/medieval/hexagon/building_lumbermill_blue.gltf","scale": 7.0 },
+    "building_mine_blue":      { "category": "node", "path": "res://assets/medieval/hexagon/building_mine_blue.gltf",      "scale": 7.0 },
+    "building_well_blue":      { "category": "node", "path": "res://assets/medieval/hexagon/building_well_blue.gltf",      "scale": 7.0 }
+  }
+}

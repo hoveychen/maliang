@@ -105,6 +105,34 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('kit_hood', '抽油烟机', 'kitchen:hoodModern', 1, true, ['kitchen']),
   themed('kit_bar', '吧台', 'kitchen:kitchenBar', 1, true, ['kitchen']),
   themed('kit_stool', '吧凳', 'kitchen:stoolBar', 1, true, ['kitchen']),
+
+  // ── 中世纪小镇主题（world-themes P4；全 CC0：KayKit Medieval Hexagon，与基础村庄同画风）──
+  // renderRef 'medieval:<KayKit 原名>' → 客户端 assets/packs/medieval_town/pack.json（node 类）
+  themed('mv_home_a', '民居·甲', 'medieval:building_home_A_blue', 3, true, ['medieval_town']),
+  themed('mv_home_b', '民居·乙', 'medieval:building_home_B_blue', 3, true, ['medieval_town']),
+  themed('mv_blacksmith', '铁匠铺', 'medieval:building_blacksmith_blue', 3, true, ['medieval_town']),
+  themed('mv_market', '集市', 'medieval:building_market_blue', 3, true, ['medieval_town']),
+  themed('mv_tavern', '酒馆', 'medieval:building_tavern_blue', 3, true, ['medieval_town']),
+  themed('mv_church', '教堂', 'medieval:building_church_blue', 3, true, ['medieval_town']),
+  themed('mv_windmill', '风车', 'medieval:building_windmill_blue', 3, true, ['medieval_town']),
+  themed('mv_watermill', '水车', 'medieval:building_watermill_blue', 3, true, ['medieval_town']),
+  themed('mv_lumbermill', '伐木场', 'medieval:building_lumbermill_blue', 3, true, ['medieval_town']),
+  themed('mv_mine', '矿场', 'medieval:building_mine_blue', 3, true, ['medieval_town']),
+  themed('mv_well', '水井', 'medieval:building_well_blue', 3, true, ['medieval_town']),
+
+  // ── 中世纪王国主题（world-themes P4；全 CC0：KayKit Medieval Hexagon 军事 + Medieval Builder 城防）──
+  themed('mk_castle', '城堡', 'medieval:building_castle_blue', 5, true, ['medieval_kingdom']),
+  themed('mk_barracks', '兵营', 'medieval:building_barracks_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_archery', '箭馆', 'medieval:building_archeryrange_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_tower_a', '塔楼·甲', 'medieval:building_tower_A_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_tower_b', '塔楼·乙', 'medieval:building_tower_B_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_tower_base', '塔基', 'medieval:building_tower_base_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_catapult', '投石塔', 'medieval:building_tower_catapult_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_gate', '城门', 'medieval:wall_gate', 3, true, ['medieval_kingdom']),
+  themed('mk_gate_closed', '闭合城门', 'medieval:wall_gate_closed', 3, true, ['medieval_kingdom']),
+  themed('mk_wall', '城墙', 'medieval:wall_straight', 3, true, ['medieval_kingdom']),
+  themed('mk_wall_corner', '城墙拐角', 'medieval:wall_corner', 3, true, ['medieval_kingdom']),
+  themed('mk_watchtower', '瞭望塔', 'medieval:watchtower', 3, true, ['medieval_kingdom']),
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
