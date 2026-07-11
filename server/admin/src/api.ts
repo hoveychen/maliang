@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { BackupManifest, RestoreResponse } from './types.ts';
+import type { BackupManifest, IntegrityFix, RestoreResponse } from './types.ts';
 
 // token：?token= 进来先落 localStorage（后续导航/刷新不用带参），请求走 x-admin-token 头。
 const KEY = 'maliang_admin_token';
@@ -111,4 +111,12 @@ export async function uploadRestore(file: File): Promise<RestoreResponse> {
     throw new ApiError(res.status, detail ?? `${res.status} ${res.statusText}`);
   }
   return res.json() as Promise<RestoreResponse>;
+}
+
+/** 清理库（死引用 + 点名的 benchmark 样本）。不传 apply 就是 dry-run，只报告不动数据。 */
+export async function fixIntegrity(
+  deviceSamples: { gpu: string; deviceId: string }[],
+  apply: boolean,
+): Promise<IntegrityFix> {
+  return apiPost<IntegrityFix>(`/admin/integrity/fix${apply ? '?apply=true' : ''}`, { deviceSamples });
 }
