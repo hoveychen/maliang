@@ -28,8 +28,9 @@ const STAGE_HOP_DUR := 0.32       ## 玩家跳到站位的小跳时长（秒）
 const STAGE_HOP_HEIGHT := 1.1     ## 小跳竖直弧线峰高（米）
 const DIALOG_FILL := 0.5          ## 基础构图：最高者高度占屏中间 50%（1/4 → 3/4）
 const DIALOG_ZOOM_MIN := 6.0      ## 对话态轨道距离下限（远小于 god 态 ZOOM_MIN，允许贴近构图小体型角色）
-const CREATION_CAM_DIST := 8.5    ## 创造视图特写：推近仙子单人（比双人对话更近，背景弱化）
+const CREATION_CAM_DIST := 11.0   ## 创造视图特写：框住仙子 + 她身旁的降生蛋/魔法熔炉（答案要「看得见飞进去」）
 const CREATION_CAM_SHIFT := 3.0   ## 焦点右移量：让仙子渲染到屏幕偏左，右侧留给 2×2 大卡
+const CREATION_PLACEHOLDER_OFFSET := Vector2(2.0, 1.5) ## 引导期占位符相对仙子的落位（与她同框，孩子看得见）
 const SPEAK_SHIFT := 0.35         ## 说话人跟随：焦点朝说话方偏移的比例（0=两人中点，1=完全对准说话方）
 const SPEAK_ZOOM_BLEND := 0.45    ## 说话人跟随：轨道距离朝「说话方单独占 50%」混合的比例（小体型→距离更近→zoom 更多）
 const PICK_RADIUS_PX := 80.0
@@ -177,6 +178,7 @@ var _creation_dots: HBoxContainer  ## 顶部进度圆点（每答一轮点亮一
 var _creation_step := 0            ## 已走过的轮数（点亮的圆点数）
 var _creation_cam := false         ## 创造视图相机特写态（推近仙子；退出创造复位）
 var _in_creation := false          ## 正在引导式创造（造角色或造物；期间语音/点选都是这次会话的答复）
+var _creation_goal := "character"  ## 这次引导在造什么（服务端 creation_prompt.goal）：character→降生蛋，prop→魔法熔炉
 var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
 var album_button: Button           ## 左下角手机启动器按钮（AIGC 手机图标）
@@ -2921,6 +2923,7 @@ func _exit_interaction() -> void:
 	if _in_creation:
 		_in_creation = false # 退出与小仙子的交互：取消未完成的造角色会话
 		_hide_creation_cards()
+		_clear_creation_placeholder() # 造还没开工：引导期立的蛋/炉跟着收，别留在地上空烧
 		if online:
 			backend.send_creation_cancel()
 	_mic.stop()
@@ -2963,6 +2966,7 @@ func _setup_backend() -> void:
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.creation_prompt.connect(_on_creation_prompt)
+	backend.creation_cancelled.connect(_on_creation_cancelled)
 	backend.prop_pending.connect(_on_prop_pending)
 	backend.item_created.connect(_on_item_created)
 	backend.prop_failed.connect(_on_prop_failed)
@@ -3661,12 +3665,15 @@ const PLACEHOLDER_PORTAL_ID := "__casting_portal"
 const PLACEHOLDER_FORGE_ID := "__casting_forge"
 var _placeholders := {} ## 占位符 id → 落位 tile（Vector2i）
 
-## 在玩家身旁立起占位符。gen_progress 会来好几次（逐阶段），只认第一次。
-func _spawn_placeholder(id: String, spec: Dictionary) -> void:
+## 立起占位符。anchor 缺省玩家身旁（施法态）；引导期锚仙子（见 _raise_creation_placeholder）。
+## gen_progress 会来好几次（逐阶段），只认第一次；引导期已立起的这里直接返回，不重复立。
+func _spawn_placeholder(id: String, spec: Dictionary, anchor := Vector2.INF, offset := Vector2(3.0, 2.0)) -> void:
 	if _placeholders.has(id):
 		return
-	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
-	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
+	var base: Vector2 = anchor
+	if base == Vector2.INF:
+		base = player["logical"] if not player.is_empty() else focus_logical
+	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(base + offset))
 	var placed := chunk_manager.add_dynamic_prop(spec, want, 0.0, 0.0, id)
 	if placed.x < 0:
 		return # 放不下就不立：成品照旧在玩家身旁落位（下面的兜底分支）
@@ -3685,6 +3692,25 @@ func _clear_placeholder(id: String) -> Vector2i:
 		if is_instance_valid(node):
 			node.queue_free()
 	return tile
+
+## 引导一开始（首个 creation_prompt）就在仙子身旁立起占位符：造角色=降生蛋，造物=魔法熔炉。
+## 孩子的每个回答会被「扔」进它（见 _throw_answer_into_placeholder），一眼看懂答案有用。
+## 幂等：每轮 prompt 都会调，已立起的直接返回。放不下就不立——后续路径都容忍占位符缺席。
+func _raise_creation_placeholder() -> void:
+	var is_prop := _creation_goal == "prop"
+	var id := PLACEHOLDER_FORGE_ID if is_prop else PLACEHOLDER_PORTAL_ID
+	var spec: Dictionary = PlaceholderSpecs.FORGE if is_prop else PlaceholderSpecs.PORTAL
+	# 锚在仙子身旁（不是玩家）：创造视图是仙子特写，蛋/炉要与她同框，答案才「看得见飞进去」
+	var anchor := Vector2.INF
+	if _locked != null and is_instance_valid(_locked):
+		anchor = _find_npc_dict(_locked).get("logical", Vector2.INF)
+	_spawn_placeholder(id, spec, anchor, CREATION_PLACEHOLDER_OFFSET)
+
+## 收起引导期立的占位符（取消/走开/花不够）。造没开工，蛋/炉不能留在地上。
+## 两个 id 都收：引导期只会立其中一个，另一个是 no-op。
+func _clear_creation_placeholder() -> void:
+	_clear_placeholder(PLACEHOLDER_PORTAL_ID)
+	_clear_placeholder(PLACEHOLDER_FORGE_ID)
 
 ## 造角色开工：引导会话已结束，服务端开造。退出对话，立起传送门。
 func _on_gen_progress(_stage: String) -> void:
@@ -3790,6 +3816,7 @@ func _on_reward_denied(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet"))
 	_in_creation = false
 	_hide_creation_cards()
+	_clear_creation_placeholder() # 没花可扣、造不成：引导期立的蛋/炉收起来，别让孩子空等
 	thinking_label.visible = false
 	banner.text = String(data.get("message", "小红花用完啦，去帮小伙伴攒盖章换小红花吧！"))
 	banner.visible = true
@@ -4268,7 +4295,9 @@ func _on_creation_prompt(data: Dictionary) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
 	thinking_label.visible = false
+	_creation_goal = String(data.get("goal", "character")) # 造角色→降生蛋，造物→魔法熔炉
 	_enter_creation_view() # 首轮：退出普通对话构图、相机推近仙子特写、点亮创造视图
+	_raise_creation_placeholder() # 引导一开始就立起蛋/炉：孩子的回答一会儿要扔进去
 	# 问题只给家长看的字幕（幼儿不识字，靠 TTS 念）
 	_creation_q.text = String(data.get("question", data.get("replyText", "")))
 	_creation_q.visible = true
@@ -4280,6 +4309,29 @@ func _on_creation_prompt(data: Dictionary) -> void:
 	else:
 		# clientTts：仙子问句本地 edge 合成（幼儿不识字，念不出来就降级服务端）
 		_speak_line(String(data.get("replyText", data.get("question", ""))), String(data.get("voiceId", "")))
+
+## 服务端判定小朋友说了「算了/不要了」：收创造视图 + 收蛋/炉，回到普通对话（她还站在仙子面前，
+## 可以接着说别的）。不走 _exit_interaction——取消的是这次创造，不是这场对话。
+func _on_creation_cancelled(data: Dictionary) -> void:
+	if _think_timer != null:
+		_think_timer.stop()
+	_end_creation_locally()
+	banner.text = "好呀，那我们不造啦"
+	banner.visible = true
+	# 仙子把安抚语念出来（幼儿不识字）
+	var asset := String(data.get("ttsAsset", ""))
+	if not asset.is_empty():
+		_play_tts(asset)
+	else:
+		_speak_line(String(data.get("replyText", "")), String(data.get("voiceId", "")))
+
+## 本地收摊创造态：收视图（相机复位）+ 收占位符 + 关「施法中…」。
+## 服务端判的取消（creation_cancelled）与孩子点右上角叉（_on_creation_cancel_pressed）共用。
+func _end_creation_locally() -> void:
+	_in_creation = false
+	_hide_creation_cards()
+	_clear_creation_placeholder()
+	thinking_label.visible = false
 
 ## 填充居中 2×2 大卡：图标就绪(iconAsset 非空)显示图标，否则先显示中文 label。点一下即答复小仙子。
 func _build_creation_cards(options: Array) -> void:

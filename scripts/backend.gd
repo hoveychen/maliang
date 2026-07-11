@@ -9,8 +9,10 @@ signal tts_end
 signal gen_progress(stage: String)
 signal gen_complete(data: Dictionary)      ## 含 character + 最新 wallet
 signal gen_denied(data: Dictionary)        ## 小红花不足，未进造角色（reason=no_flowers + 引导语 + wallet）
-## 引导式造角色：小仙子追问一轮（含图标选项 + 仙子问句 TTS 资源）
+## 引导式造角色：小仙子追问一轮（含图标选项 + 仙子问句 TTS 资源 + goal 决定占位符）
 signal creation_prompt(data: Dictionary)
+## 引导会话被取消（小朋友说「算了/不要了」，服务端 guide 判的）：收创造视图 + 收占位符 + 念安抚语
+signal creation_cancelled(data: Dictionary)
 signal prop_pending(data: Dictionary)      ## 造物开工（已扣花）：客户端立起魔法熔炉，含最新 wallet
 signal item_created(data: Dictionary)      ## 造物落成：{ item(实体行), wallet, bag }（万物皆物品）
 signal prop_denied(data: Dictionary)       ## 小红花不足，未造物（reason=no_flowers + 引导语 + wallet）
@@ -231,6 +233,8 @@ func _dispatch(data: Dictionary) -> void:
 			gen_denied.emit(data)
 		"creation_prompt":
 			creation_prompt.emit(data)
+		"creation_cancelled":
+			creation_cancelled.emit(data)
 		"world_state":
 			world_state.emit(data)
 		"task_complete":
