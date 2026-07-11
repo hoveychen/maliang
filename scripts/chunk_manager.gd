@@ -809,6 +809,18 @@ func dynamic_prop_at(tile: Vector2i) -> String:
 					return String(dp.get("id", ""))
 	return ""
 
+## 只读取节点（不摘除，与 pickup_dynamic_prop 相对）：拿来做特效锚点（如把答案「扔」进占位符时
+## 求它的屏幕投影、给它一个弹动）。区块重刷后节点会换新，故每次现取，不许缓存。
+func dynamic_prop_node(id: String) -> Node3D:
+	if id.is_empty():
+		return null
+	for dp in _dynamic_props:
+		if String(dp.get("id", "")) != id:
+			continue
+		var node = dp.get("node", null)
+		return node if node is Node3D and is_instance_valid(node) else null
+	return null
+
 ## 拾起：释放占地、从清单摘除（重刷不再重生成），交出节点给调用方拖拽。
 ## 返回 { id, spec_data, yaw, wander, tile, node }；找不到返回空字典。
 func pickup_dynamic_prop(id: String) -> Dictionary:

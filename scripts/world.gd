@@ -28,8 +28,14 @@ const STAGE_HOP_DUR := 0.32       ## 玩家跳到站位的小跳时长（秒）
 const STAGE_HOP_HEIGHT := 1.1     ## 小跳竖直弧线峰高（米）
 const DIALOG_FILL := 0.5          ## 基础构图：最高者高度占屏中间 50%（1/4 → 3/4）
 const DIALOG_ZOOM_MIN := 6.0      ## 对话态轨道距离下限（远小于 god 态 ZOOM_MIN，允许贴近构图小体型角色）
-const CREATION_CAM_DIST := 8.5    ## 创造视图特写：推近仙子单人（比双人对话更近，背景弱化）
+const CREATION_CAM_DIST := 11.0   ## 创造视图特写：框住仙子 + 她身旁的降生蛋/魔法熔炉（答案要「看得见飞进去」）
 const CREATION_CAM_SHIFT := 3.0   ## 焦点右移量：让仙子渲染到屏幕偏左，右侧留给 2×2 大卡
+## 引导期占位符相对仙子的落位：落到屏幕左下的空地——右边是 2×2 大卡、底部中央是麦克风条，
+## 都不能压着（人眼 QA screenshots/creation_view.png 逐版校过）。
+const CREATION_PLACEHOLDER_OFFSET := Vector2(-1.0, 2.5)
+const CREATION_PLACEHOLDER_SCALE := 1.35 ## 引导期占位符放大些：远景里的蛋/炉太小，孩子看不清答案飞进了哪儿
+const THROW_TIME := 0.55          ## 答案卡飞进蛋/炉的时长（够看清，又不拖慢一轮追问）
+const THROW_END_SCALE := 0.18     ## 飞到终点时缩到多小（被「吸」进去的感觉）
 const SPEAK_SHIFT := 0.35         ## 说话人跟随：焦点朝说话方偏移的比例（0=两人中点，1=完全对准说话方）
 const SPEAK_ZOOM_BLEND := 0.45    ## 说话人跟随：轨道距离朝「说话方单独占 50%」混合的比例（小体型→距离更近→zoom 更多）
 const PICK_RADIUS_PX := 80.0
@@ -174,9 +180,11 @@ var _creation_view: Control        ## 创造视图根（全屏暗底 + 居中大
 var _creation_cards: GridContainer ## 居中 2×2 大图标卡网格
 var _creation_q: Label             ## 顶部问题字幕（语音为主，字给家长）
 var _creation_dots: HBoxContainer  ## 顶部进度圆点（每答一轮点亮一个）
+var _creation_cancel_btn: Button   ## 右上角圆叉：随时退出创造（蛋/炉一起收）
 var _creation_step := 0            ## 已走过的轮数（点亮的圆点数）
 var _creation_cam := false         ## 创造视图相机特写态（推近仙子；退出创造复位）
 var _in_creation := false          ## 正在引导式创造（造角色或造物；期间语音/点选都是这次会话的答复）
+var _creation_goal := "character"  ## 这次引导在造什么（服务端 creation_prompt.goal）：character→降生蛋，prop→魔法熔炉
 var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
 var album_button: Button           ## 左下角手机启动器按钮（AIGC 手机图标）
@@ -2921,6 +2929,7 @@ func _exit_interaction() -> void:
 	if _in_creation:
 		_in_creation = false # 退出与小仙子的交互：取消未完成的造角色会话
 		_hide_creation_cards()
+		_clear_creation_placeholder() # 造还没开工：引导期立的蛋/炉跟着收，别留在地上空烧
 		if online:
 			backend.send_creation_cancel()
 	_mic.stop()
@@ -2963,6 +2972,7 @@ func _setup_backend() -> void:
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.creation_prompt.connect(_on_creation_prompt)
+	backend.creation_cancelled.connect(_on_creation_cancelled)
 	backend.prop_pending.connect(_on_prop_pending)
 	backend.item_created.connect(_on_item_created)
 	backend.prop_failed.connect(_on_prop_failed)
@@ -3661,12 +3671,15 @@ const PLACEHOLDER_PORTAL_ID := "__casting_portal"
 const PLACEHOLDER_FORGE_ID := "__casting_forge"
 var _placeholders := {} ## 占位符 id → 落位 tile（Vector2i）
 
-## 在玩家身旁立起占位符。gen_progress 会来好几次（逐阶段），只认第一次。
-func _spawn_placeholder(id: String, spec: Dictionary) -> void:
+## 立起占位符。anchor 缺省玩家身旁（施法态）；引导期锚仙子（见 _raise_creation_placeholder）。
+## gen_progress 会来好几次（逐阶段），只认第一次；引导期已立起的这里直接返回，不重复立。
+func _spawn_placeholder(id: String, spec: Dictionary, anchor := Vector2.INF, offset := Vector2(3.0, 2.0)) -> void:
 	if _placeholders.has(id):
 		return
-	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
-	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
+	var base: Vector2 = anchor
+	if base == Vector2.INF:
+		base = player["logical"] if not player.is_empty() else focus_logical
+	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(base + offset))
 	var placed := chunk_manager.add_dynamic_prop(spec, want, 0.0, 0.0, id)
 	if placed.x < 0:
 		return # 放不下就不立：成品照旧在玩家身旁落位（下面的兜底分支）
@@ -3685,6 +3698,29 @@ func _clear_placeholder(id: String) -> Vector2i:
 		if is_instance_valid(node):
 			node.queue_free()
 	return tile
+
+## 引导一开始（首个 creation_prompt）就在仙子身旁立起占位符：造角色=降生蛋，造物=魔法熔炉。
+## 孩子的每个回答会被「扔」进它（见 _throw_answer_into_placeholder），一眼看懂答案有用。
+## 幂等：每轮 prompt 都会调，已立起的直接返回。放不下就不立——后续路径都容忍占位符缺席。
+func _raise_creation_placeholder() -> void:
+	var is_prop := _creation_goal == "prop"
+	var id := PLACEHOLDER_FORGE_ID if is_prop else PLACEHOLDER_PORTAL_ID
+	var spec: Dictionary = PlaceholderSpecs.FORGE if is_prop else PlaceholderSpecs.PORTAL
+	# 锚在仙子身旁（不是玩家）：创造视图是仙子特写，蛋/炉要与她同框，答案才「看得见飞进去」
+	var anchor := Vector2.INF
+	if _locked != null and is_instance_valid(_locked):
+		anchor = _find_npc_dict(_locked).get("logical", Vector2.INF)
+	_spawn_placeholder(id, spec, anchor, CREATION_PLACEHOLDER_OFFSET)
+	# 引导期放大：远景里原尺寸的蛋/炉只有几十像素，孩子看不清答案飞进了哪儿
+	var node := chunk_manager.dynamic_prop_node(id)
+	if node != null:
+		node.scale = Vector3.ONE * CREATION_PLACEHOLDER_SCALE
+
+## 收起引导期立的占位符（取消/走开/花不够）。造没开工，蛋/炉不能留在地上。
+## 两个 id 都收：引导期只会立其中一个，另一个是 no-op。
+func _clear_creation_placeholder() -> void:
+	_clear_placeholder(PLACEHOLDER_PORTAL_ID)
+	_clear_placeholder(PLACEHOLDER_FORGE_ID)
 
 ## 造角色开工：引导会话已结束，服务端开造。退出对话，立起传送门。
 func _on_gen_progress(_stage: String) -> void:
@@ -3790,6 +3826,7 @@ func _on_reward_denied(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet"))
 	_in_creation = false
 	_hide_creation_cards()
+	_clear_creation_placeholder() # 没花可扣、造不成：引导期立的蛋/炉收起来，别让孩子空等
 	thinking_label.visible = false
 	banner.text = String(data.get("message", "小红花用完啦，去帮小伙伴攒盖章换小红花吧！"))
 	banner.visible = true
@@ -4109,6 +4146,8 @@ func _utterance_commit() -> void:
 	thinking_label.visible = true
 	banner.visible = false
 	_flush_pending_chunk()
+	if _in_creation:
+		_throw_voice_answer() # 说完就把「这句话」扔进蛋/炉：孩子看得见自己的回答被用上了
 	if _local_asr_session:
 		_asr_local.stopSession() # final_result 信号回来后走 voice_transcript
 	else:
@@ -4249,6 +4288,20 @@ func _build_creation_view(host: CanvasLayer) -> void:
 	_creation_cards.add_theme_constant_override("v_separation", 22)
 	center.add_child(_creation_cards)
 
+	# 右上角圆叉：随时退出创造（蛋/炉一起收）。放在角上不与选项卡同列——幼儿不会把它当成第五个答案。
+	_creation_cancel_btn = Button.new()
+	_creation_cancel_btn.name = "CreationCancel"
+	_creation_cancel_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_creation_cancel_btn.offset_left = -128.0
+	_creation_cancel_btn.offset_top = 32.0
+	_creation_cancel_btn.custom_minimum_size = Vector2(96.0, 96.0)
+	_creation_cancel_btn.size = Vector2(96.0, 96.0)
+	_creation_cancel_btn.text = "✕"
+	UiAssets.style_card_button(_creation_cancel_btn, 48.0) # 圆角拉满=圆形，与选项卡同一贴纸质感
+	_creation_cancel_btn.add_theme_font_size_override("font_size", 46)
+	_creation_cancel_btn.pressed.connect(_on_creation_cancel_pressed)
+	_creation_view.add_child(_creation_cancel_btn)
+
 ## 进创造视图：退出普通对话构图（关横幅/情绪气泡/听到字幕，麦保留——孩子仍可语音答复），
 ## 相机推近仙子特写、背景压暗，点亮创造视图。幂等（每轮 creation_prompt 都可安全调）。
 func _enter_creation_view() -> void:
@@ -4268,7 +4321,9 @@ func _on_creation_prompt(data: Dictionary) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
 	thinking_label.visible = false
+	_creation_goal = String(data.get("goal", "character")) # 造角色→降生蛋，造物→魔法熔炉
 	_enter_creation_view() # 首轮：退出普通对话构图、相机推近仙子特写、点亮创造视图
+	_raise_creation_placeholder() # 引导一开始就立起蛋/炉：孩子的回答一会儿要扔进去
 	# 问题只给家长看的字幕（幼儿不识字，靠 TTS 念）
 	_creation_q.text = String(data.get("question", data.get("replyText", "")))
 	_creation_q.visible = true
@@ -4280,6 +4335,31 @@ func _on_creation_prompt(data: Dictionary) -> void:
 	else:
 		# clientTts：仙子问句本地 edge 合成（幼儿不识字，念不出来就降级服务端）
 		_speak_line(String(data.get("replyText", data.get("question", ""))), String(data.get("voiceId", "")))
+
+## 服务端判定小朋友说了「算了/不要了」：收创造视图 + 收蛋/炉，并退出对话回到自由跑动
+## （老板拍板：取消 = 退出这个状态，别把孩子留在仙子面前干站着）。
+func _on_creation_cancelled(data: Dictionary) -> void:
+	if _think_timer != null:
+		_think_timer.stop()
+	_end_creation_locally() # 先清 _in_creation，_exit_interaction 才不会再发一次 creation_cancel
+	if selected != null:
+		_exit_interaction()
+	banner.text = "好呀，那我们不造啦" # 摆在 _exit_interaction 之后：它会先把横幅收掉
+	banner.visible = true
+	# 仙子把安抚语念出来（幼儿不识字）
+	var asset := String(data.get("ttsAsset", ""))
+	if not asset.is_empty():
+		_play_tts(asset)
+	else:
+		_speak_line(String(data.get("replyText", "")), String(data.get("voiceId", "")))
+
+## 本地收摊创造态：收视图（相机复位）+ 收占位符 + 关「施法中…」。
+## 服务端判的取消（creation_cancelled）与孩子点右上角叉（_on_creation_cancel_pressed）共用。
+func _end_creation_locally() -> void:
+	_in_creation = false
+	_hide_creation_cards()
+	_clear_creation_placeholder()
+	thinking_label.visible = false
 
 ## 填充居中 2×2 大卡：图标就绪(iconAsset 非空)显示图标，否则先显示中文 label。点一下即答复小仙子。
 func _build_creation_cards(options: Array) -> void:
@@ -4299,7 +4379,7 @@ func _build_creation_cards(options: Array) -> void:
 		var icon_asset := String((opt as Dictionary).get("iconAsset", ""))
 		if not icon_asset.is_empty():
 			_apply_card_icon(card, icon_asset) # 图标就绪：异步贴图（不阻塞卡片弹出）
-		card.pressed.connect(_on_creation_card.bind(oid))
+		card.pressed.connect(_on_creation_card.bind(oid, card)) # 带上卡片自己：点了要把它扔进蛋/炉
 		_creation_cards.add_child(card)
 
 ## 选项卡图标（生成后 iconAsset 才非空）：异步拉图贴到按钮，失败保留文字兜底。
@@ -4310,15 +4390,107 @@ func _apply_card_icon(card: Button, asset: String) -> void:
 		card.expand_icon = true
 		card.text = "" # 有图就不显字
 
-## 点了某张大卡：答复小仙子，转「施法中…」等下一轮/成品（视图仍留着，等下一个 prompt 或退出）。
-func _on_creation_card(option_id: String) -> void:
+## 点了某张大卡：把这张卡「扔」进蛋/炉，答复小仙子，转「施法中…」等下一轮/成品
+## （视图仍留着，等下一个 prompt 或退出）。
+func _on_creation_card(option_id: String, card: Button = null) -> void:
 	if not _in_creation or selected == null:
 		return
 	game_audio.play_sfx("bell")
+	if card != null and is_instance_valid(card):
+		_throw_into_placeholder(card.global_position, card.size, card.icon, card.text)
 	backend.send_creation_reply(world_id, _selected_id(), option_id)
 	for c in _creation_cards.get_children():
 		c.queue_free()
 	_creation_q.text = "施法中…"
+
+# ── 把答案「扔」进占位符 ────────────────────────────────────────────────────
+# 3 岁孩子不识字、也不懂「服务端在攒属性」。她只需要看见：我选的那张卡（或我说的那句话）
+# 飞进了那颗蛋/那座炉——我的回答被用上了。点选与语音两条路都走这里，视觉一致。
+
+## 本次引导立的占位符 id（造角色=降生蛋，造物=魔法熔炉）。
+func _creation_placeholder_id() -> String:
+	return PLACEHOLDER_FORGE_ID if _creation_goal == "prop" else PLACEHOLDER_PORTAL_ID
+
+## 占位符在屏幕上的落点（略高于底座，落在蛋身/炉口上）。没立成/不在视野内返回 INF。
+func _placeholder_screen_pos() -> Vector2:
+	if camera == null:
+		return Vector2.INF
+	var node := chunk_manager.dynamic_prop_node(_creation_placeholder_id())
+	if node == null:
+		return Vector2.INF
+	if camera.is_position_behind(node.global_position):
+		return Vector2.INF # 转到镜头背后：不做飞行动画，答复照常走
+	return camera.unproject_position(node.global_position + Vector3(0.0, 0.7, 0.0))
+
+## 一张「答案卡」从起点飞进占位符：缩小 + 淡出 + 末尾一记白闪；落地时占位符弹一下 + pop 一声。
+## 占位符没立成（放不下/离线）就静默跳过——答复照常提交，只是少了这段动画。
+func _throw_into_placeholder(from: Vector2, size: Vector2, icon: Texture2D, text: String) -> void:
+	var target := _placeholder_screen_pos()
+	if target == Vector2.INF or _hud_layer == null:
+		return
+	var fx := Button.new()
+	fx.name = "ThrowFx" # headless 测试凭这个名字确认动画确实起飞了
+	# 不用 disabled：那会套上灰掉的 disabled 样式，飞起来像张作废的卡（人眼 QA 抓到过）。
+	# 不可点即可：吃不到鼠标、也不抢焦点。
+	fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fx.focus_mode = Control.FOCUS_NONE
+	fx.size = size
+	fx.pivot_offset = size * 0.5
+	fx.global_position = from
+	UiAssets.style_card_button(fx, 24.0)
+	fx.add_theme_font_size_override("font_size", 40)
+	if icon != null:
+		fx.icon = icon
+		fx.expand_icon = true
+	else:
+		fx.text = text
+	_hud_layer.add_child(fx) # 挂 HUD 层（后加=盖在创造视图之上，且视图收起也不打断飞行）
+	var tw := fx.create_tween()
+	tw.set_parallel(true)
+	# BACK/EASE_IN：先微微后坐再甩出去——「扔」的手感；CUBIC/EASE_IN 前段太慢，看着像卡住不动。
+	tw.tween_property(fx, "global_position", target - size * 0.5 * THROW_END_SCALE, THROW_TIME) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	tw.tween_property(fx, "scale", Vector2.ONE * THROW_END_SCALE, THROW_TIME) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	# 只在末段白闪着消失（被吸进去），前段保持实心可见
+	tw.tween_property(fx, "modulate", Color(1.6, 1.6, 1.6, 0.0), THROW_TIME * 0.35).set_delay(THROW_TIME * 0.65)
+	tw.chain().tween_callback(func() -> void:
+		fx.queue_free()
+		_bump_placeholder()
+		if game_audio != null:
+			game_audio.play_sfx("pop"))
+
+## 答案落进去时占位符弹一下（吸收的手感）。区块重刷会换节点，故现取现用。
+func _bump_placeholder() -> void:
+	var node := chunk_manager.dynamic_prop_node(_creation_placeholder_id())
+	if node == null:
+		return
+	var base := node.scale
+	var tw := node.create_tween()
+	tw.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(node, "scale", base * 1.18, 0.12)
+	tw.tween_property(node, "scale", base, 0.18)
+
+## 语音答复（说了一句话，不管点没点卡）：从屏幕底部麦克风那儿飞一个小圆卡进去。
+## 幼儿不识字，卡上不写字——飞行动作本身就是「你说的话被收下了」。
+func _throw_voice_answer() -> void:
+	var vp := get_viewport().get_visible_rect().size
+	var size := Vector2(120.0, 120.0)
+	var from := Vector2(vp.x * 0.5 - size.x * 0.5, vp.y - 190.0) # 麦克风指示器上方
+	_throw_into_placeholder(from, size, null, "···")
+
+## 点了右上角的叉：本地立刻收摊（视图/蛋/炉全收）+ 告诉服务端别再等答复 + 退出对话。
+## 与服务端语义取消（creation_cancelled）落到同一个状态。
+func _on_creation_cancel_pressed() -> void:
+	if not _in_creation:
+		return
+	if online:
+		backend.send_creation_cancel() # 主动上报：清 _in_creation 后 _exit_interaction 不会再发
+	_end_creation_locally()
+	if selected != null:
+		_exit_interaction() # 退出音效由它播
+	banner.text = "好呀，那我们不造啦"
+	banner.visible = true
 
 ## 进度圆点推进：新点亮一个（每答一轮一个）。
 func _advance_creation_dots() -> void:

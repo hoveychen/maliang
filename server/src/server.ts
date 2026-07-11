@@ -1172,6 +1172,27 @@ export async function advanceCreation(
     await finishCreate(summarize() || childInput);
     return;
   }
+  // 小朋友反悔（guide 判的语义取消：「算了」「不要了」）：清会话 + 通知客户端收视图/收占位符，绝不开造、不扣花。
+  // 入口那轮的前置话语不再念——孩子已经改主意了，接着念「好呀我这就变出来」只会更乱。
+  if (r.cancelled) {
+    session.creation = null;
+    let ttsAsset = '';
+    if (!session.clientTts) {
+      try {
+        ttsAsset = store.putAsset(await adapters.tts.synthesize(r.replyText, fairyVoice));
+      } catch (err) {
+        console.warn(`取消安抚语 TTS 失败（不阻塞，客户端仍会收视图）：${String(err)}`);
+      }
+    }
+    socket.send(JSON.stringify({
+      type: 'creation_cancelled',
+      goal: state.goal,
+      replyText: r.replyText,
+      ttsAsset,
+      voiceId: fairyVoice,
+    }));
+    return;
+  }
   // 累积这轮解析出的增量
   const u = r.updatedAttrs;
   if (u) {
@@ -1214,6 +1235,7 @@ export async function advanceCreation(
   }
   socket.send(JSON.stringify({
     type: 'creation_prompt',
+    goal: state.goal, // 客户端据此在仙子身旁立降生蛋（character）还是魔法熔炉（prop）
     replyText: spoken,
     question: r.question ?? r.replyText, // 纯问句：客户端拿它做选项卡标题，不带前置话语
     category: r.category,
