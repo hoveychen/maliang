@@ -49,6 +49,24 @@ export function fallbackVoice(characterId: string): string {
   return MAIN_POOL[h.readUInt32BE(0) % MAIN_POOL.length];
 }
 
+/**
+ * 玩家音色池（玩家间对话的 ASR 文本中继在对端 TTS 出声用，见 docs/player-interaction-design.md）。
+ * 按 profile 性别分池、playerId 稳定哈希落一款：同一玩家在所有端永远同声。
+ * 池子只收儿童/少年向音色——出声的是「小朋友的角色」，不能是大叔播音腔。
+ */
+const PLAYER_VOICES: Record<string, string[]> = {
+  boy: ['zh-CN-YunxiaNeural', 'zh-CN-YunxiNeural'],
+  girl: ['zh-CN-XiaoyiNeural', 'zh-CN-XiaoxiaoNeural'],
+};
+const PLAYER_VOICES_ANY = [...PLAYER_VOICES.boy, ...PLAYER_VOICES.girl];
+
+/** 玩家 id → 稳定音色（gender 缺省/未知时落全池）。 */
+export function voiceForPlayer(playerId: string, gender?: string): string {
+  const pool = PLAYER_VOICES[gender ?? ''] ?? PLAYER_VOICES_ANY;
+  const h = createHash('sha1').update(playerId).digest();
+  return pool[h.readUInt32BE(0) % pool.length];
+}
+
 /** 目录渲染成 prompt 行（注入 designCharacter 的 system）。 */
 export function voicePromptLines(): string {
   return VOICE_CATALOG
