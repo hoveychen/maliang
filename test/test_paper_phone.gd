@@ -28,14 +28,13 @@ func _run(phone: PaperPhone, cam: Camera3D) -> void:
 	var W := PaperPhone.PANEL_W
 	var T := PaperPhone.PANEL_T
 
-	# 初始：收起、隐藏
-	_check(phone.state == PaperPhone.State.STOWED, "初始 STOWED")
-	_check(not phone.visible, "初始隐藏")
+	# 初始：停靠态、首次 fit_dock 前隐藏（防原点闪现）
+	_check(phone.state == PaperPhone.State.DOCKED, "初始 DOCKED")
+	_check(not phone.visible, "首次贴合前隐藏")
 
 	# ── 合拢正面态 ──
 	phone.show_front(false)
 	_check(phone.state == PaperPhone.State.FRONT, "show_front → FRONT")
-	_check(phone.visible, "FRONT 可见")
 	var front_xf := phone.face_transform(PaperPhone.FACE_FRONT)
 	_check(front_xf.basis.z.z > 0.99, "正面壳法线朝 +Z(相机)")
 	_check(absf(front_xf.origin.x) < 1e-4, "正面壳居中(x≈0)")
@@ -146,26 +145,35 @@ func _run(phone: PaperPhone, cam: Camera3D) -> void:
 	_check(phone.route_gui_event(cam, _motion_ev(Vector2(1, 1))), "捕获:拖出机身仍归手机")
 	_check(phone.route_gui_event(cam, _mouse_ev(Vector2(1, 1), false)), "捕获:机外松手仍归手机")
 	_check(not phone.route_gui_event(cam, _motion_ev(Vector2(1, 1))), "松手后捕获结束:机外事件不归手机")
-	phone.stow(false)
+	phone.dock(false)
+	_check(phone.state == PaperPhone.State.DOCKED, "dock → DOCKED")
 	_check(phone.front_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED
 		and phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED,
-		"收起后两视口都停更新")
+		"停靠后两视口都停更新")
+	phone.refresh_dock_screen()
+	_check(phone.front_viewport().render_target_update_mode == SubViewport.UPDATE_ONCE,
+		"停靠低频刷屏 = UPDATE_ONCE（渲一帧自动回停）")
 
 	# ── 相机贴合（fit 只读相机参数，不必真挂相机下；ready 回调里 reparent 会撞 parent-busy）──
-	phone.fit_to_camera(cam, 0.8, Vector2(0.3, 0.0))
-	_check(phone.scale.x > 0.0, "fit 后 scale>0")
-	_check(absf(phone.position.z + 0.42) < 1e-4, "fit 后位于相机前 0.42")
+	phone.show_front(false)
+	phone.fit_hand(cam, 0.8, Vector2(0.3, 0.0))
+	_check(phone.scale.x > 0.0, "fit_hand 后 scale>0")
+	_check(absf(phone.position.z + 0.42) < 1e-4, "fit_hand 后位于相机前 0.42")
 	_check(phone.position.x > 0.0, "ndc.x=0.3 → 落屏右侧")
+	var hand_scale := phone.scale.x
+	phone.dock(false)
+	phone.fit_dock(cam, 0.2, Vector2(-0.6, -0.6))
+	_check(phone.visible, "首次 fit_dock 后现身")
+	_check(phone.scale.x < hand_scale, "停靠比持机小")
+	_check(phone.position.x < 0.0 and phone.position.y < 0.0, "停靠位落屏左下")
 
-	# ── 收起 + 动画路径不崩 ──
-	phone.stow(false)
-	_check(phone.state == PaperPhone.State.STOWED and not phone.visible, "stow → 隐藏")
-	phone.show_front(true)   # 动画路径（tween 不等完成，验证不崩+状态即时生效）
-	_check(phone.state == PaperPhone.State.FRONT and phone.visible, "动画 show_front 状态即时生效")
+	# ── 动画路径不崩（tween 不等完成，验证状态即时生效）──
+	phone.show_front(true)
+	_check(phone.state == PaperPhone.State.FRONT, "动画 show_front 状态即时生效")
 	phone.show_spread(true)
 	_check(phone.state == PaperPhone.State.SPREAD, "动画 show_spread 状态即时生效")
-	phone.stow(true)
-	_check(phone.state == PaperPhone.State.STOWED, "动画 stow 状态即时生效")
+	phone.dock(true)
+	_check(phone.state == PaperPhone.State.DOCKED, "动画 dock 状态即时生效")
 
 func _check_hit(hit: Dictionary, msg: String) -> bool:
 	_check(not hit.is_empty(), msg)

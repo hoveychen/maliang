@@ -207,6 +207,7 @@ const PHONE_NDC := Vector2(0.52, 0.0)        ## 正面态中心 NDC
 const PHONE_SPREAD_FILL := 0.80     ## 跨页态机身高占屏比
 const PHONE_SPREAD_NDC := Vector2(0.28, 0.0) ## 跨页态中心 NDC
 var _phone_fit_vp := Vector2.ZERO   ## 上次贴合时的视口尺寸（窗口 resize 触发重贴合）
+var _phone_dock_t := 0.0            ## 停靠态低频渲帧计时（60s 一帧，熄屏画面时钟走字）
 ## 手机近身相机：开手机时按玩家立绘高度反算距离，让玩家（自适应身高）占屏高约 70%，
 ## 并把焦点右移，使玩家落在屏幕偏左、右侧留给手机（PHONE_PLAYER_NDC_X 方向若反了取负）。
 const PHONE_CAM_FILL := 0.70        ## 玩家立绘占屏高约 70%（按 _char_top 反算距离，自适应身高）
@@ -1049,7 +1050,10 @@ func _setup_hud() -> void:
 	album_button.offset_right = 128.0
 	album_button.offset_bottom = -20.0
 	album_button.pressed.connect(_toggle_album)
-	_style_phone_launcher(album_button)
+	# 透明热区：图标就是停靠在此处的 3D 手机本体（_dock_fit 对齐此按钮矩形），按钮只收点击
+	album_button.flat = true
+	for st in ["normal", "hover", "pressed", "focus"]:
+		album_button.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 	layer.add_child(album_button)
 
 	# 手机开着时的全屏透明遮罩：点手机外的任何位置→收起手机（吞掉该点击，不当世界移动指令）。
@@ -1076,6 +1080,7 @@ func _setup_hud() -> void:
 		paper_phone.set_face_texture(PaperPhone.FACE_BACK, shell_back)
 	phone_ui = PhoneUi.new(self)
 	phone_ui.build(paper_phone.front_viewport(), paper_phone.spread_viewport())
+	phone_ui.set_screen_off(true) # 停靠常驻=熄屏黑屏，点亮才见主屏
 	phone_ui.app_opened.connect(func(_id: String) -> void:
 		if game_audio != null:
 			game_audio.play_sfx("page") # 翻面纸声（点选 select 已在 PhoneUi 响过）
@@ -1148,61 +1153,6 @@ func _style_label(l: Label, size: int) -> void:
 	l.add_theme_color_override("font_outline_color", Color.BLACK)
 	l.add_theme_constant_override("outline_size", 6)
 
-## 左下角手机启动器外观：有当前皮肤的 AIGC 手机图标就用图标（透明底），否则程序化画一台
-## 竖屏手机占位（深色圆角机身 + 奶油屏幕 + home 点），等专属图标落盘后自动切图。换皮可重复调。
-func _style_phone_launcher(b: Button) -> void:
-	for c in b.get_children():
-		c.queue_free()
-	var art := UiAssets.tex(PHONE_LAUNCHER_ICON)
-	if art != null:
-		b.icon = art
-		b.expand_icon = true
-		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		b.flat = true
-		for st in ["normal", "hover", "pressed", "focus"]:
-			b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
-		return
-	# —— 程序化占位手机（AIGC 手机图标落盘前顶上）——
-	b.icon = null
-	var body := StyleBoxFlat.new()
-	body.bg_color = Color(0.16, 0.16, 0.20)
-	body.set_corner_radius_all(24)
-	body.set_border_width_all(3)
-	body.border_color = Color(0.32, 0.32, 0.40)
-	body.shadow_color = Color(0.20, 0.14, 0.06, 0.35)
-	body.shadow_size = 10
-	body.shadow_offset = Vector2(0.0, 5.0)
-	var hover: StyleBoxFlat = body.duplicate()
-	hover.bg_color = Color(0.22, 0.22, 0.27)
-	b.add_theme_stylebox_override("normal", body)
-	b.add_theme_stylebox_override("hover", hover)
-	b.add_theme_stylebox_override("pressed", hover)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	var screen := Panel.new()  # 屏幕（奶油底）
-	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	screen.set_anchors_preset(Control.PRESET_FULL_RECT)
-	screen.offset_left = 11.0
-	screen.offset_top = 13.0
-	screen.offset_right = -11.0
-	screen.offset_bottom = -22.0
-	var ss := StyleBoxFlat.new()
-	ss.bg_color = UiAssets.CARD_BG
-	ss.set_corner_radius_all(10)
-	screen.add_theme_stylebox_override("panel", ss)
-	b.add_child(screen)
-	var home := Panel.new()  # home 键小圆点（下巴处）
-	home.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	home.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	home.offset_left = -7.0
-	home.offset_right = 7.0
-	home.offset_top = -18.0
-	home.offset_bottom = -4.0
-	var hs := StyleBoxFlat.new()
-	hs.bg_color = Color(0.40, 0.40, 0.48)
-	hs.set_corner_radius_all(8)
-	home.add_theme_stylebox_override("panel", hs)
-	b.add_child(home)
-
 ## 手机遮罩点击：先做 3D 手机命中——打在机身上的鼠标事件转发进屏幕视口（或被壳吞掉）；
 ## 没打在手机上的按下→收起手机（吞掉事件，不下发为世界移动指令）。
 func _on_phone_scrim_input(e: InputEvent) -> void:
@@ -1224,21 +1174,44 @@ func _on_phone_scrim_input(e: InputEvent) -> void:
 func _open_app(id: String) -> void:
 	phone_ui.open_app(id)
 
-## 按当前形态贴合持机位（正面贴屏右 / 跨页双宽居中）。
+## 按当前形态贴合持机位（正面贴屏右 / 跨页双宽居中）+ 停靠位（对齐左下角热区按钮）。
 func _fit_phone(spread: bool) -> void:
 	_phone_fit_vp = get_viewport().get_visible_rect().size
 	if spread:
-		paper_phone.fit_to_camera(camera, PHONE_SPREAD_FILL, PHONE_SPREAD_NDC)
+		paper_phone.fit_hand(camera, PHONE_SPREAD_FILL, PHONE_SPREAD_NDC)
 	else:
-		paper_phone.fit_to_camera(camera, PHONE_FILL, PHONE_NDC)
+		paper_phone.fit_hand(camera, PHONE_FILL, PHONE_NDC)
+	_fit_phone_dock()
 
-## 手机开着时每帧驱动屏幕 UI（banner 秒刷 + 图标分页贴合 + 窗口变尺寸重贴合）；
-## 收起时不做事，零开销。
-func _step_phone_ui(delta: float) -> void:
-	if paper_phone == null or paper_phone.state == PaperPhone.State.STOWED:
+## 停靠位从热区按钮矩形反推 NDC/占屏比：布局改按钮即可挪手机图标，零手调常量。
+func _fit_phone_dock() -> void:
+	var vp := get_viewport().get_visible_rect().size
+	if vp.y <= 1.0 or album_button == null:
 		return
-	if get_viewport().get_visible_rect().size != _phone_fit_vp:
-		_fit_phone(paper_phone.state == PaperPhone.State.SPREAD)
+	var r := album_button.get_global_rect()
+	if r.size.y <= 1.0:
+		return
+	var c := r.get_center()
+	var ndc := Vector2(c.x / vp.x * 2.0 - 1.0, 1.0 - c.y / vp.y * 2.0)
+	paper_phone.fit_dock(camera, r.size.y / vp.y, ndc)
+
+## 每帧驱动手机：resize/首帧重贴合；停靠态 60s 低频渲一帧（熄屏画面的时钟走字）；
+## 使用态跑 banner 秒刷 + 图标分页贴合。
+func _step_phone_ui(delta: float) -> void:
+	if paper_phone == null:
+		return
+	if get_viewport().get_visible_rect().size != _phone_fit_vp or not paper_phone.visible:
+		var was_hidden := not paper_phone.visible
+		_fit_phone(paper_phone.state == PaperPhone.State.SPREAD) # 首帧按钮布局就绪前 visible=false，逐帧兜底
+		if was_hidden and paper_phone.visible:
+			_phone_dock_t = 0.0 # 首次现身立即渲一帧熄屏画面（视口从未渲过是垃圾纹理）
+	if paper_phone.state == PaperPhone.State.DOCKED:
+		_phone_dock_t -= delta
+		if _phone_dock_t <= 0.0:
+			_phone_dock_t = 60.0
+			phone_ui.refresh_banner() # 熄屏 AOD 时钟走字
+			paper_phone.refresh_dock_screen()
+		return
 	phone_ui.tick(delta)
 
 ## 可玩时间每帧推进（静态纯函数，便于回测）：
@@ -5474,10 +5447,13 @@ func _fly_reward_to_album(icon_id: String) -> void:
 	tw.tween_callback(_pulse_album_button)
 
 func _pulse_album_button() -> void:
-	album_button.pivot_offset = album_button.size * 0.5
+	# 热区按钮透明：弹的是停靠在那里的 3D 手机本体（提示「收进手机了」）
+	if paper_phone == null or paper_phone.state != PaperPhone.State.DOCKED or not paper_phone.visible:
+		return
+	var base := paper_phone.scale
 	var tw := create_tween()
-	tw.tween_property(album_button, "scale", Vector2(1.3, 1.3), 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_property(album_button, "scale", Vector2.ONE, 0.2)
+	tw.tween_property(paper_phone, "scale", base * 1.3, 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(paper_phone, "scale", base, 0.2)
 
 ## 手机开合（点左下角手机按钮切换）：开→3D 手机弹出+遮罩+进近身相机；关→反之。
 ## 音效挂在这里而非 _open_phone/_close_phone：那两个是幂等内部函数，
@@ -5485,7 +5461,7 @@ func _pulse_album_button() -> void:
 func _toggle_album() -> void:
 	if game_audio != null:
 		game_audio.play_sfx("page")
-	if paper_phone.state != PaperPhone.State.STOWED:
+	if paper_phone.state != PaperPhone.State.DOCKED:
 		_close_phone()
 	else:
 		_open_phone()
@@ -5495,6 +5471,7 @@ func _toggle_album() -> void:
 func _open_phone() -> void:
 	PaperCharacter.set_xray_enabled(false, get_tree())
 	_fit_phone(false)
+	phone_ui.set_screen_off(false) # 点亮
 	phone_ui.close_app() # 每次打开手机都回到主屏
 	phone_ui.refresh_album()
 	phone_ui.refresh_banner()
@@ -5503,11 +5480,13 @@ func _open_phone() -> void:
 		_phone_scrim.visible = true
 	_enter_phone_cam()
 
-## 收起手机：3D 手机收起 + 遮罩隐藏，相机还原到近身前视角（幂等，未开则不动）。
+## 收起手机：搬回左下角停靠位 + 遮罩隐藏，相机还原到近身前视角（幂等，未开则不动）。
 func _close_phone() -> void:
-	if paper_phone == null or paper_phone.state == PaperPhone.State.STOWED:
+	if paper_phone == null or paper_phone.state == PaperPhone.State.DOCKED:
 		return
-	paper_phone.stow()
+	paper_phone.dock()
+	phone_ui.set_screen_off(true) # 放回=熄屏；渲一帧黑底后视口彻底停更
+	paper_phone.refresh_dock_screen()
 	if _phone_scrim != null:
 		_phone_scrim.visible = false
 	_exit_phone_cam()

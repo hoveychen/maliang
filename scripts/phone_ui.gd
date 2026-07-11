@@ -42,6 +42,8 @@ var _phone_page := 0                ## 当前页
 var _phone_page_w := 0.0            ## 单页宽
 var _phone_pager_dragging := false  ## 拖拽中（松手贴合最近页）
 var _phone_ui_t := 0.0              ## banner 刷新节流计时
+var _screen_cover: Control          ## 熄屏画面（停靠=AOD 黑底暗时钟/点亮隐藏）
+var _aod_clock: Label               ## 熄屏大时钟（随 refresh_banner 走字）
 
 # —— 跨页 app 视图 ——
 var _phone_app_title: Label         ## 打开的 app 标题
@@ -165,6 +167,31 @@ func _build_front(vp: SubViewport) -> void:
 	_phone_dots.add_theme_constant_override("separation", 8)
 	vbox.add_child(_phone_dots)
 	_rebuild_phone_dots()
+	# 熄屏画面（AOD 息屏显示风）：黑底+暗调手写大时钟+星星点缀；停靠=显示、点亮=隐藏，
+	# 盖住含灵动岛在内的一切。时钟由 refresh_banner 同步走字（world 停靠态 60s 低频渲一帧）。
+	_screen_cover = Control.new()
+	_screen_cover.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_screen_cover.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var cover_bg := ColorRect.new()
+	cover_bg.color = Color(0.07, 0.07, 0.09)
+	cover_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_screen_cover.add_child(cover_bg)
+	var aod_box := VBoxContainer.new()
+	aod_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	aod_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	aod_box.add_theme_constant_override("separation", 18)
+	_screen_cover.add_child(aod_box)
+	_aod_clock = Label.new()
+	_aod_clock.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if ResourceLoader.exists(HAND_FONT):
+		_aod_clock.add_theme_font_override("font", load(HAND_FONT) as Font)
+	_aod_clock.add_theme_font_size_override("font_size", 110)
+	_aod_clock.add_theme_color_override("font_color", Color(0.62, 0.63, 0.70, 0.75)) # 暗调月光灰
+	aod_box.add_child(_aod_clock)
+	var aod_star := UiAssets.icon_rect("st_star", 64.0)
+	aod_star.modulate = Color(1.0, 1.0, 1.0, 0.28) # 暗夜里一颗淡星
+	aod_box.add_child(aod_star)
+	vp.add_child(_screen_cover)
 
 ## 跨页 app 视图：返回条（返回键+标题）+ 竖向滚动的页面宿主（flowers/items/settings）。
 func _build_spread(vp: SubViewport) -> void:
@@ -390,6 +417,11 @@ func _on_phone_pager_input(e: InputEvent) -> void:
 			_phone_page = clampi(int(round(_phone_pager.scroll_horizontal / _phone_page_w)), 0, last)
 			_highlight_phone_dot()
 
+## 熄屏/点亮（world 在停靠/掏出时切）。
+func set_screen_off(off: bool) -> void:
+	if _screen_cover != null:
+		_screen_cover.visible = off
+
 ## ── 每帧驱动（world 在手机打开时调）────────────────────────────────────────
 
 ## 分页步进 + banner 每秒刷新（时钟走字/信号格/饼图）。
@@ -461,6 +493,8 @@ func refresh_banner() -> void:
 		_phone_playpie.set_state(_w._play_remaining_frac, _w._play_blocked, _w._play_cooldown_frac)
 	if _phone_flowers != null:
 		_phone_flowers.text = "x%d" % _w._red_flower_count()
+	if _aod_clock != null:
+		_aod_clock.text = _phone_clock.text # 熄屏画面同步走字
 	if _phone_signal != null:
 		var online: bool = _w.backend != null and _w.backend.is_online()
 		var col := Color(0.30, 0.78, 0.42) if online else Color(0.60, 0.60, 0.60, 0.5)
