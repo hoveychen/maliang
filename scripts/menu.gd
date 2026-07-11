@@ -20,6 +20,7 @@ func _ready() -> void:
 	_setup_fairy()
 	_setup_title()
 	_setup_tap_entry()
+	_setup_credits()
 	game_audio = GameAudio.new()
 	game_audio.name = "GameAudio"
 	add_child(game_audio)
@@ -85,6 +86,23 @@ func _setup_tap_entry() -> void:
 	_hint.pivot_offset = Vector2(90.0, 90.0)
 	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE # 别挡全屏按钮
 	add_child(_hint)
+
+## BGM 用了 Kevin MacLeod 的 CC-BY 4.0 曲，许可要求可见署名。菜单没有 credits 屏
+## （3 岁娃零文字设计），就在底部垫一行小号半透明署名——满足 CC-BY 合规又不打扰娃。
+## mouse_filter=IGNORE：不挡全屏「任点即进」按钮。全套曲目/许可细节见 assets/audio/bgm/LICENSE.txt。
+func _setup_credits() -> void:
+	var credit := Label.new()
+	credit.text = "音乐 Music by Kevin MacLeod (incompetech.com) · CC BY 4.0"
+	credit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	credit.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	credit.offset_top = -34.0
+	credit.offset_bottom = -8.0
+	credit.add_theme_font_size_override("font_size", 18)
+	credit.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.55))
+	credit.add_theme_color_override("font_outline_color", Color(0.2, 0.3, 0.4, 0.5))
+	credit.add_theme_constant_override("outline_size", 4)
+	credit.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(credit)
 
 ## 入口分流：有档案直接进世界，没档案先走童话书 onboarding。
 static func target_scene() -> String:
