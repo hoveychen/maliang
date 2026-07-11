@@ -9,6 +9,7 @@ import { applyTileEdits } from './terrain_edit.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
 import type { ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
+import { sanitizeLevels, type DeviceSample, type Levels } from './device_profile.ts';
 
 /** 初始钱包（冷启动/旧档迁移）：预置初始小红花，零盖章进度。 */
 function freshWallet(): Wallet {
@@ -177,6 +178,17 @@ export class WorldStore {
         option_id TEXT PRIMARY KEY,
         asset_hash TEXT NOT NULL
       );
+      -- 设备画质档众包（见 device_profile.ts）：按 GPU 分桶，一台设备一行——
+      -- 同一台机器重测会覆盖自己那行，不会往众包里重复灌票。
+      CREATE TABLE IF NOT EXISTS device_samples (
+        gpu           TEXT NOT NULL,
+        bench_version INTEGER NOT NULL,
+        device_id     TEXT NOT NULL,
+        levels        TEXT NOT NULL,
+        p95_ms        REAL NOT NULL,
+        hit           INTEGER NOT NULL,
+        PRIMARY KEY (gpu, bench_version, device_id)
+      );
       CREATE TABLE IF NOT EXISTS wallets (
         world_id TEXT NOT NULL,
         player_id TEXT NOT NULL,
@@ -268,6 +280,31 @@ export class WorldStore {
       { option_id: string; asset_hash: string }[];
     const out: Record<string, string> = {};
     for (const r of rows) out[r.option_id] = r.asset_hash;
+    return out;
+  }
+
+  /** 记录一台设备的 benchmark 结果（同设备重测覆盖自己那行）。 */
+  putDeviceSample(s: DeviceSample): void {
+    this.#db
+      .prepare(
+        `INSERT INTO device_samples (gpu, bench_version, device_id, levels, p95_ms, hit)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(gpu, bench_version, device_id) DO UPDATE SET
+           levels = excluded.levels, p95_ms = excluded.p95_ms, hit = excluded.hit`,
+      )
+      .run(s.gpu, s.benchVersion, s.deviceId, JSON.stringify(s.levels), s.p95Ms, s.hit ? 1 : 0);
+  }
+
+  /** 某 GPU（同一 benchmark 口径）下所有设备的档位样本；损坏的行跳过。 */
+  listDeviceLevels(gpu: string, benchVersion: number): Levels[] {
+    const rows = this.#db
+      .prepare('SELECT levels FROM device_samples WHERE gpu = ? AND bench_version = ?')
+      .all(gpu, benchVersion) as { levels: string }[];
+    const out: Levels[] = [];
+    for (const r of rows) {
+      const lv = sanitizeLevels(JSON.parse(r.levels));
+      if (lv) out.push(lv);
+    }
     return out;
   }
 

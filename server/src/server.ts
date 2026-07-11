@@ -18,6 +18,7 @@ import { validateSdfPropSpec } from './sdf_prop.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
 import { BUILTIN_ITEMS, creationItemDef, validateTerrainItems } from './items.ts';
 import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrain_edit.ts';
+import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type ChatTurn, type CreationGoal, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
@@ -183,6 +184,27 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   await app.register(websocket);
 
   app.get('/health', async () => ({ ok: true, service: 'maliang-server', version: process.env.GIT_SHA ?? 'dev' }));
+
+  // —— 设备画质档众包（见 device_profile.ts）——
+  // 启动时按 GPU 查：命中就直接用别人测过的档，这台机器不用当小白鼠跑 benchmark。
+  app.get<{ Querystring: { gpu?: string; benchVersion?: string } }>('/device-profile', async (req, reply) => {
+    const gpu = normalizeGpu(req.query.gpu);
+    if (!gpu) return reply.code(400).send({ error: 'gpu required' });
+    const version = Number(req.query.benchVersion ?? BENCH_VERSION);
+    if (!Number.isInteger(version) || version < 1) return reply.code(400).send({ error: 'bad benchVersion' });
+    const samples = store.listDeviceLevels(gpu, version);
+    const levels = aggregateLevels(samples);
+    return { found: levels !== null, levels: levels ?? undefined, samples: samples.length, gpu, benchVersion: version };
+  });
+
+  // benchmark 跑完上传本机结果，回传的是「算上你这票之后」的聚合档。
+  app.post('/device-profile', async (req, reply) => {
+    const sample = sanitizeSample(req.body);
+    if (!sample) return reply.code(400).send({ error: 'bad sample' });
+    store.putDeviceSample(sample);
+    const levels = aggregateLevels(store.listDeviceLevels(sample.gpu, sample.benchVersion));
+    return { ok: true, levels: levels ?? sample.levels, samples: store.listDeviceLevels(sample.gpu, sample.benchVersion).length };
+  });
 
   // 新建世界（种入小神仙）
   app.post('/worlds', async () => {
