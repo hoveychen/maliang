@@ -7,6 +7,7 @@ var fails := 0
 
 func _initialize() -> void:
 	_test_bake_snaps_to_surface()
+	_test_ambient_occlusion()
 	_test_baked_assets_fresh()
 	if fails == 0:
 		print("sdf_static_baker tests PASS")
@@ -62,6 +63,29 @@ func _test_bake_snaps_to_surface() -> void:
 			greenest = c
 	_check("红端顶点色以红为主", reddest.r > 0.6 and reddest.g < 0.4, true)
 	_check("绿端顶点色以绿为主", greenest.g > 0.6 and greenest.r < 0.4, true)
+
+## SDF AO：孤立凸面几乎不压暗（≈1），两球融合的缝隙被邻壳遮蔽明显更暗。
+func _test_ambient_occlusion() -> void:
+	var one: Array = SdfSpec.build_rig(SdfSpec.parse({
+		"name": "one", "palette": ["#888888"], "blend": 0.1, "outline": 0.0, "color_k": 0.5,
+		"parts": [{"shape": "sphere", "pos": [0, 0, 0], "r": 0.5, "color": 0}],
+		"locomotion": {"type": "none"}, "ropes": [],
+	})).prims
+	var ao_open := SdfStaticBaker._ambient_occlusion(one, Vector3(0.5, 0, 0), Vector3(1, 0, 0), 0.1)
+	_check("孤立凸面 AO 接近 1（不压暗）", ao_open > 0.9, true)
+
+	var two: Array = SdfSpec.build_rig(SdfSpec.parse({
+		"name": "two", "palette": ["#888888"], "blend": 0.3, "outline": 0.0, "color_k": 0.5,
+		"parts": [{"shape": "sphere", "pos": [0, 0, 0], "r": 0.5, "color": 0},
+			{"shape": "sphere", "pos": [0.6, 0, 0], "r": 0.5, "color": 0}],
+		"locomotion": {"type": "none"}, "ropes": [],
+	})).prims
+	# 两球上方交界的缝隙点：吸附到融合面后沿法线外推会撞另一侧壳 → 被遮蔽
+	var seam := SdfMath.project(two, Vector3(0.3, 0.6, 0), 0.3)
+	var g := SdfMath.gradient(two, seam, 0.3).normalized()
+	var ao_seam := SdfStaticBaker._ambient_occlusion(two, seam, g, 0.3)
+	_check("融合缝隙 AO < 孤立凸面（被遮蔽压暗）", ao_seam < ao_open, true)
+	_check("AO 不低于地板", ao_seam >= SdfStaticBaker.AO_FLOOR, true)
 
 ## baked/*.res 必须与 spec 烘焙结果同步（顶点数一致即认为未过期）。
 func _test_baked_assets_fresh() -> void:

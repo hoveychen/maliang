@@ -31,6 +31,14 @@ static func instance(mesh: Mesh) -> MeshInstance3D:
 ## 是平板 fps<10 的主因（500 棵占世界三角形 96%），0.34 档压到 ~1k 面。
 const SHELL_DENSITY := 0.34
 
+## SDF 环境遮蔽（Inigo Quilez 五步法）：沿外法线逐步外推采样场值，附近若有其它壳面
+## 挡着 → 场值远小于步距 → 判定被遮蔽、压暗。烘进顶点色让棉花糖树的 blob 缝隙/底部
+## 有明暗体积感（关实时阴影后补一层自阴影），凸处几乎不动。纯几何、随 .res 一起落盘。
+const AO_STEPS := 5
+const AO_STEP := 0.12     ## 每步外推距离(米)：×5 ≈ 0.6m 采样邻域，够抓 blob 缝
+const AO_STRENGTH := 0.9  ## 遮蔽压暗强度
+const AO_FLOOR := 0.45    ## 最暗地板：缝隙再深也不压成死黑
+
 ## spec 字典 → 烘焙 ArrayMesh；spec 不合法返回 null 并 push_warning。
 static func bake_spec(spec: Dictionary) -> ArrayMesh:
 	var cfg := SdfSpec.parse(spec)
@@ -59,7 +67,9 @@ static func bake_spec(spec: Dictionary) -> ArrayMesh:
 		var g := SdfMath.gradient(prims, p, k)
 		out_v[i] = p
 		out_n[i] = g.normalized() if g.length() > 1e-6 else Vector3.UP
-		out_c[i] = _blend_color(prims, p, k, cfg.color_k)
+		var ao := _ambient_occlusion(prims, p, out_n[i], k)
+		var base_c := _blend_color(prims, p, k, cfg.color_k)
+		out_c[i] = Color(base_c.r * ao, base_c.g * ao, base_c.b * ao, base_c.a)
 	var out: Array = []
 	out.resize(Mesh.ARRAY_MAX)
 	out[Mesh.ARRAY_VERTEX] = out_v
@@ -76,6 +86,18 @@ static func bake_json_file(path: String) -> ArrayMesh:
 		push_warning("SdfStaticBaker JSON 解析失败: %s" % path)
 		return null
 	return bake_spec(data)
+
+## SDF 环境遮蔽系数 [AO_FLOOR,1]：沿外法线 n 从表面点 p 逐步外推，累计"步距 − 实际
+## 场值"（凹处邻壳更近 → 场值小 → 累计大 → 越暗），IQ 五步衰减法。乘进顶点色。
+static func _ambient_occlusion(prims: Array, p: Vector3, n: Vector3, k: float) -> float:
+	var occ := 0.0
+	var sca := 1.0
+	for i in range(1, AO_STEPS + 1):
+		var d := float(i) * AO_STEP
+		var f := SdfMath.eval(prims, p + n * d, k)
+		occ += (d - f) * sca
+		sca *= 0.6
+	return clampf(1.0 - AO_STRENGTH * occ, AO_FLOOR, 1.0)
 
 ## 颜色软混：与 sdf_field.gdshaderinc 的 sdf_color 同一公式（按场值贴近度加权）。
 static func _blend_color(prims: Array, p: Vector3, k: float, color_k: float) -> Color:

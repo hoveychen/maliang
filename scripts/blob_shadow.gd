@@ -8,6 +8,10 @@ extends Object
 ## world._place_on_bent_ground CPU 预下压的角色（再弯一次会双重下坠钻进地里）。
 static var _meshes := {}
 
+## world 开实时角色阴影(CHARACTER_SHADOWS)时置真：落地角色(bend=false)改用真实定向
+## 投影，脚下暗斑让位避免双影；SdfProp(bend=true)不投实时阴影，仍保留脚下 blob。
+static var suppress_actor_blob := false
+
 static func _shared_mesh(bend: bool) -> QuadMesh:
 	if not _meshes.has(bend):
 		var m := ShaderMaterial.new()
@@ -25,6 +29,8 @@ static func attach(parent: Node3D, radius: float, bend := false) -> void:
 	var old := parent.get_node_or_null("BlobShadow")
 	if old != null:
 		old.queue_free()
+	if suppress_actor_blob and not bend:
+		return  # 落地角色改用实时定向阴影，不挂脚下暗斑（避免双影）
 	var mi := MeshInstance3D.new()
 	mi.name = "BlobShadow"
 	mi.mesh = _shared_mesh(bend)
@@ -39,3 +45,21 @@ static func detach(parent: Node3D) -> void:
 	var old := parent.get_node_or_null("BlobShadow")
 	if old != null:
 		old.queue_free()
+
+## 散布布景（树/灌木）批量脚下影用的共享 mesh：走 MultiMesh 一次 draw call，与逐节点
+## blob 同一 shader，恒取 bend 档（散布节点未 CPU 预弯，弯曲交给 shader，远处不悬空）。
+## strength 独立可调——散布数量大、影斑常重叠，调淡防叠成脏斑；按 strength 缓存一份。
+static var _mm_meshes := {}
+
+static func multimesh_mesh(strength: float) -> QuadMesh:
+	if not _mm_meshes.has(strength):
+		var m := ShaderMaterial.new()
+		m.shader = load("res://shaders/blob_shadow.gdshader")
+		m.set_shader_parameter("curvature", BendMat.CURVATURE)
+		m.set_shader_parameter("strength", strength)
+		var q := QuadMesh.new()
+		q.orientation = PlaneMesh.FACE_Y
+		q.size = Vector2.ONE
+		q.material = m
+		_mm_meshes[strength] = q
+	return _mm_meshes[strength]
