@@ -30,7 +30,10 @@ const DIALOG_FILL := 0.5          ## 基础构图：最高者高度占屏中间 
 const DIALOG_ZOOM_MIN := 6.0      ## 对话态轨道距离下限（远小于 god 态 ZOOM_MIN，允许贴近构图小体型角色）
 const CREATION_CAM_DIST := 11.0   ## 创造视图特写：框住仙子 + 她身旁的降生蛋/魔法熔炉（答案要「看得见飞进去」）
 const CREATION_CAM_SHIFT := 3.0   ## 焦点右移量：让仙子渲染到屏幕偏左，右侧留给 2×2 大卡
-const CREATION_PLACEHOLDER_OFFSET := Vector2(2.0, 1.5) ## 引导期占位符相对仙子的落位（与她同框，孩子看得见）
+## 引导期占位符相对仙子的落位：落到屏幕左下的空地——右边是 2×2 大卡、底部中央是麦克风条，
+## 都不能压着（人眼 QA screenshots/creation_view.png 逐版校过）。
+const CREATION_PLACEHOLDER_OFFSET := Vector2(-1.0, 2.5)
+const CREATION_PLACEHOLDER_SCALE := 1.35 ## 引导期占位符放大些：远景里的蛋/炉太小，孩子看不清答案飞进了哪儿
 const THROW_TIME := 0.55          ## 答案卡飞进蛋/炉的时长（够看清，又不拖慢一轮追问）
 const THROW_END_SCALE := 0.18     ## 飞到终点时缩到多小（被「吸」进去的感觉）
 const SPEAK_SHIFT := 0.35         ## 说话人跟随：焦点朝说话方偏移的比例（0=两人中点，1=完全对准说话方）
@@ -3708,6 +3711,10 @@ func _raise_creation_placeholder() -> void:
 	if _locked != null and is_instance_valid(_locked):
 		anchor = _find_npc_dict(_locked).get("logical", Vector2.INF)
 	_spawn_placeholder(id, spec, anchor, CREATION_PLACEHOLDER_OFFSET)
+	# 引导期放大：远景里原尺寸的蛋/炉只有几十像素，孩子看不清答案飞进了哪儿
+	var node := chunk_manager.dynamic_prop_node(id)
+	if node != null:
+		node.scale = Vector3.ONE * CREATION_PLACEHOLDER_SCALE
 
 ## 收起引导期立的占位符（取消/走开/花不够）。造没开工，蛋/炉不能留在地上。
 ## 两个 id 都收：引导期只会立其中一个，另一个是 no-op。
@@ -4421,8 +4428,10 @@ func _throw_into_placeholder(from: Vector2, size: Vector2, icon: Texture2D, text
 		return
 	var fx := Button.new()
 	fx.name = "ThrowFx" # headless 测试凭这个名字确认动画确实起飞了
-	fx.disabled = true
+	# 不用 disabled：那会套上灰掉的 disabled 样式，飞起来像张作废的卡（人眼 QA 抓到过）。
+	# 不可点即可：吃不到鼠标、也不抢焦点。
 	fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fx.focus_mode = Control.FOCUS_NONE
 	fx.size = size
 	fx.pivot_offset = size * 0.5
 	fx.global_position = from
@@ -4436,10 +4445,13 @@ func _throw_into_placeholder(from: Vector2, size: Vector2, icon: Texture2D, text
 	_hud_layer.add_child(fx) # 挂 HUD 层（后加=盖在创造视图之上，且视图收起也不打断飞行）
 	var tw := fx.create_tween()
 	tw.set_parallel(true)
-	tw.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
-	tw.tween_property(fx, "global_position", target - size * 0.5 * THROW_END_SCALE, THROW_TIME)
-	tw.tween_property(fx, "scale", Vector2.ONE * THROW_END_SCALE, THROW_TIME)
-	tw.tween_property(fx, "modulate", Color(1.6, 1.6, 1.6, 0.0), THROW_TIME).set_delay(THROW_TIME * 0.55)
+	# BACK/EASE_IN：先微微后坐再甩出去——「扔」的手感；CUBIC/EASE_IN 前段太慢，看着像卡住不动。
+	tw.tween_property(fx, "global_position", target - size * 0.5 * THROW_END_SCALE, THROW_TIME) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	tw.tween_property(fx, "scale", Vector2.ONE * THROW_END_SCALE, THROW_TIME) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	# 只在末段白闪着消失（被吸进去），前段保持实心可见
+	tw.tween_property(fx, "modulate", Color(1.6, 1.6, 1.6, 0.0), THROW_TIME * 0.35).set_delay(THROW_TIME * 0.65)
 	tw.chain().tween_callback(func() -> void:
 		fx.queue_free()
 		_bump_placeholder()
