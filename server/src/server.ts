@@ -20,7 +20,7 @@ import { BUILTIN_ITEMS, creationItemDef, validateTerrainItems } from './items.ts
 import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrain_edit.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type CreationGoal, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type ChatTurn, type CreationGoal, type CreationState, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
@@ -725,6 +725,14 @@ export interface VisitState {
   worldId: string;
   playerId: string;
   pending: Map<string, { child: string; npc: string }[]>; // characterId → 尚未抽取的对话增量
+  // characterId → 本段 Visit 与该角色的完整对话（不随中途 flush 清空）。整段回喂 routeIntent：
+  // session 内上下文完整、不截尾；Visit 结束即弃，重进世界从零开始（长期记忆走 memories）。
+  history: Map<string, ChatTurn[]>;
+}
+
+/** 取当前 Visit 里与某角色的完整对话（无 Visit/首轮 → 空数组=全新 session）。 */
+export function visitHistory(session: VoiceSession, characterId: string): ChatTurn[] {
+  return session.visit?.history.get(characterId) ?? [];
 }
 
 /** 边说边识别的单连接语音会话：voice_start 开识别流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
@@ -765,7 +773,7 @@ export function startSessionVisit(
   now: number,
 ): void {
   if (session.visit) void endSessionVisit(session, adapters, store, now); // 收尾旧的（同步排空 pending，抽取后台跑）
-  session.visit = { id: store.startVisit(worldId, playerId, now), worldId, playerId, pending: new Map() };
+  session.visit = { id: store.startVisit(worldId, playerId, now), worldId, playerId, pending: new Map(), history: new Map() };
 }
 
 /** 记一轮对话进当前 Visit 的增量；单角色超阈值即中途 flush 兜底（后台跑，不阻塞回复路径）。 */
@@ -781,9 +789,13 @@ export function recordVisitTurn(
 ): void {
   // 兜底：没经 world_info 起过 Visit（旧客户端/直连）时惰性开一段。
   if (!session.visit) {
-    session.visit = { id: store.startVisit(worldId, playerId, Date.now()), worldId, playerId, pending: new Map() };
+    session.visit = { id: store.startVisit(worldId, playerId, Date.now()), worldId, playerId, pending: new Map(), history: new Map() };
   }
   const visit = session.visit;
+  // session 全量历史：供下一轮 routeIntent 整段回喂（不随中途 flush 清空，Visit 结束即弃）。
+  const hist = visit.history.get(characterId) ?? [];
+  hist.push({ role: 'child', text: transcript, ts: 0 }, { role: 'npc', text: replyText, ts: 0 });
+  visit.history.set(characterId, hist);
   const turns = visit.pending.get(characterId) ?? [];
   turns.push({ child: transcript, npc: replyText });
   visit.pending.set(characterId, turns);
@@ -1421,7 +1433,7 @@ export async function handleWsMessage(
         await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store);
         return;
       }
-      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene);
+      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene, visitHistory(session, msg.characterId ?? ''));
       // 造角色/造物入口：开引导会话，不发普通回应（问句 TTS + 图标卡由会话驱动）。
       if (response.characterRequest) {
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText);
@@ -1476,6 +1488,7 @@ export async function handleWsMessage(
         ttsHooks,
         session.clientTts,
         session.currentScene,
+        visitHistory(session, msg.characterId ?? ''),
       );
       // 造角色/造物入口：respondToTranscript 识别到意图但没出声，这里开引导会话，不发普通回应。
       if (response.characterRequest) {
@@ -1603,7 +1616,7 @@ export async function handleWsMessage(
         onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
         onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
       };
-      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene);
+      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene, visitHistory(session, characterId));
       // 造角色/造物入口：开引导会话，不发普通回应。
       if (response.characterRequest) {
         await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store, response.replyText);

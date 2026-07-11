@@ -1,6 +1,6 @@
 import type { ServiceAdapters, AudioBlob } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
-import type { Character, VoiceResponse } from './types.ts';
+import type { Character, ChatTurn, VoiceResponse } from './types.ts';
 import { effectiveAbilities } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
 import { pickGreeting } from './greetings.ts';
@@ -13,7 +13,7 @@ export interface VoiceInput {
   audio: AudioBlob;
 }
 
-const RECENT_TURNS = 6; // 回喂给角色的近期对话轮数（child+npc 各算一条）
+const RECENT_TURNS = 6; // 旧路径兜底：调用方没给 session 历史时，回喂持久 chat_turns 的近 N 条（child+npc 各算一条）
 
 export class CharacterNotFoundError extends Error {
   constructor(worldId: string, characterId: string) {
@@ -64,6 +64,10 @@ export async function respondToTranscript(
   hooks?: TTSStreamHooks,
   clientTts = false,
   sceneId?: string,
+  // 当前 session（Visit）里与该角色的完整对话（WS 层从 VisitState 取）。给了就整段回喂——
+  // session 内上下文完整、跨 session 不串（重进世界=新 session，长期记忆走 memories）。
+  // 不给（旧 HTTP 路径/直调）退回持久 chat_turns 截尾的老行为。
+  sessionHistory?: ChatTurn[],
 ): Promise<VoiceResponse> {
   const character = store.getCharacter(worldId, characterId);
   if (!character) throw new CharacterNotFoundError(worldId, characterId);
@@ -86,7 +90,7 @@ export async function respondToTranscript(
     personality: character.personality,
     // 基础集 ∪ 角色自带；小仙子减去需要走动的能力——她不会走，给了也兑现不了
     abilities: effectiveAbilities(character),
-    recentHistory: store.getRecentTurns(characterId, playerId, RECENT_TURNS), // 这轮之前的近 N 轮（按玩家）
+    recentHistory: sessionHistory ?? store.getRecentTurns(characterId, playerId, RECENT_TURNS),
     memory: memories,
     worldCharacters: roster,
     locations: store.getLocations(worldId, sceneId),
