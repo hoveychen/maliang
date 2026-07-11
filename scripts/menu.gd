@@ -87,16 +87,24 @@ func _setup_tap_entry() -> void:
 	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE # 别挡全屏按钮
 	add_child(_hint)
 
-## BGM 用了 Kevin MacLeod 的 CC-BY 4.0 曲，许可要求可见署名。菜单没有 credits 屏
-## （3 岁娃零文字设计），就在底部垫一行小号半透明署名——满足 CC-BY 合规又不打扰娃。
-## mouse_filter=IGNORE：不挡全屏「任点即进」按钮。全套曲目/许可细节见 assets/audio/bgm/LICENSE.txt。
+## BGM 用了 Kevin MacLeod 的 CC-BY 4.0 曲、中国古代主题用了 poly.pizza 上几件 CC-BY 3.0
+## 3D 模型，两者许可都要求可见署名。菜单没有 credits 屏（3 岁娃零文字设计），就在底部
+## 垫两行小号半透明署名——满足 CC-BY 合规又不打扰娃（CC0 资产无需署名，此处不列）。
+## mouse_filter=IGNORE：不挡全屏「任点即进」按钮。完整清单见 docs/asset-credits.md，
+## 曲目细节见 assets/audio/bgm/LICENSE.txt。
 func _setup_credits() -> void:
+	# 底行：音乐署名（CC BY 4.0）
+	_add_credit_line("音乐 Music by Kevin MacLeod (incompetech.com) · CC BY 4.0", -34.0, -8.0)
+	# 上行：美术署名（中国古代主题的 CC BY 3.0 模型作者）
+	_add_credit_line("美术 Art: Poly by Google · Jacques Fourie · Aidan K McLaughlin · CC BY 3.0", -58.0, -34.0)
+
+func _add_credit_line(text: String, top: float, bottom: float) -> void:
 	var credit := Label.new()
-	credit.text = "音乐 Music by Kevin MacLeod (incompetech.com) · CC BY 4.0"
+	credit.text = text
 	credit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	credit.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	credit.offset_top = -34.0
-	credit.offset_bottom = -8.0
+	credit.offset_top = top
+	credit.offset_bottom = bottom
 	credit.add_theme_font_size_override("font_size", 18)
 	credit.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.55))
 	credit.add_theme_color_override("font_outline_color", Color(0.2, 0.3, 0.4, 0.5))
