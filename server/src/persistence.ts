@@ -55,6 +55,13 @@ function settleWallet(w: Wallet): boolean {
  */
 export const BACKUP_VERSION = 1;
 
+/**
+ * 资产字节缓存的预算（默认 32MB）。热数据 = 当前在线小朋友看到的立绘与图集，几十 MB 足够；
+ * 关键是它**封顶**——资产总量随小朋友造角色只增不减（生产已 70MB），不能再让它全量常驻。
+ * 超预算就驱逐最久未用的，下次要用再回源读盘。测试可通过构造参数调小。
+ */
+const ASSET_CACHE_BYTES = 32 * 1024 * 1024;
+
 /** 备份包里的 manifest.json：既是导入前的完整性校验，也是给管理台看的"包里有什么"。 */
 export interface BackupManifest {
   version: number;
@@ -121,14 +128,29 @@ export interface World {
 export class WorldStore {
   readonly #dir: string | null;
   #db!: DatabaseSync;
-  readonly #assets = new Map<string, ImageBlob>();
+  /**
+   * 资产清单：hash → mime。**常驻**内存，但每条只有几十字节（生产 122 个资产 ≈ 几 KB）。
+   * 资产的字节不在这里——见 #assetCache。
+   */
+  readonly #assetMime = new Map<string, string>();
+  /**
+   * 资产字节的 LRU 缓存（Map 保序，队尾 = 最近使用）。
+   *
+   * 持久化 store 下这是**纯缓存**：miss 就回源读盘，超预算就驱逐最久未用的。
+   * 内存 store（dataDir=null，测试用）下它是字节的**唯一**落点，因此永不驱逐——
+   * 那里驱逐一张就等于把数据弄丢了。
+   */
+  readonly #assetCache = new Map<string, ImageBlob>();
+  #cacheBytes = 0;
+  readonly #cacheBudget: number;
   // 立绘 hash → idle 动画记录（sprite_anims.json 持久化，跨重启保留）
   readonly #spriteAnims = new Map<string, SpriteAnimRecord>();
   // 世界地点名清单（POI，客户端 world_info 上报）：纯内存，客户端每次连上重发，不持久化
   readonly #locations = new Map<string, string[]>();
 
-  constructor(dataDir?: string) {
+  constructor(dataDir?: string, opts?: { assetCacheBytes?: number }) {
     this.#dir = dataDir ?? null;
+    this.#cacheBudget = opts?.assetCacheBytes ?? ASSET_CACHE_BYTES;
     this.#open();
   }
 
@@ -158,7 +180,9 @@ export class WorldStore {
    */
   reload(): void {
     this.#db.close();
-    this.#assets.clear();
+    this.#assetMime.clear();
+    this.#assetCache.clear();
+    this.#cacheBytes = 0;
     this.#spriteAnims.clear();
     this.#locations.clear();
     this.#open();
@@ -195,7 +219,7 @@ export class WorldStore {
     this.#db.exec(`VACUUM INTO '${dbOut.replace(/'/g, "''")}'`);
 
     const assetIndex: Record<string, string> = {};
-    for (const [hash, blob] of this.#assets) assetIndex[hash] = blob.mime;
+    for (const [hash, mime] of this.#assetMime) assetIndex[hash] = mime;
     writeFileSync(join(stagingDir, 'assets.json'), JSON.stringify(assetIndex));
 
     const anims: Record<string, SpriteAnimRecord> = {};
@@ -211,7 +235,7 @@ export class WorldStore {
         worlds: this.#count('worlds'),
         characters: this.#count('characters'),
         items: this.#count('items'),
-        assets: this.#assets.size,
+        assets: this.#assetMime.size,
         spriteAnims: this.#spriteAnims.size,
       },
     };
@@ -456,21 +480,50 @@ export class WorldStore {
     writeFileSync(join(this.#dir, 'sprite_anims.json'), JSON.stringify(obj));
   }
 
+  /**
+   * 启动只加载**清单**（hash → mime），不读任何资产字节——字节等到 getAsset 时才回源读盘。
+   *
+   * 这里曾经是把 assets/ 下每个文件都 readFileSync 进内存，常驻内存随资产数线性增长
+   * （生产 122 个资产 = 70MB 白占，且只会越来越多）。
+   *
+   * 仍然逐个 existsSync 过滤：清单里有、盘上没有的孤儿条目不登记，免得 exportSnapshot
+   * 把它们写进备份的 assets.json（122 次 existsSync 在启动路径上可以忽略不计）。
+   */
   #loadAssets(): void {
     const mf = join(this.#dir as string, 'assets.json');
     if (!existsSync(mf)) return;
     const mimes = JSON.parse(readFileSync(mf, 'utf8')) as Record<string, string>;
     for (const hash of Object.keys(mimes)) {
-      const p = join(this.#assetsDir(), hash);
-      if (existsSync(p)) this.#assets.set(hash, { bytes: new Uint8Array(readFileSync(p)), mime: mimes[hash]! });
+      if (existsSync(join(this.#assetsDir(), hash))) this.#assetMime.set(hash, mimes[hash]!);
     }
   }
 
   #persistAssetIndex(): void {
     if (this.#dir === null) return;
     const idx: Record<string, string> = {};
-    for (const [hash, blob] of this.#assets) idx[hash] = blob.mime;
+    for (const [hash, mime] of this.#assetMime) idx[hash] = mime;
     writeFileSync(join(this.#dir, 'assets.json'), JSON.stringify(idx));
+  }
+
+  /**
+   * 放进 LRU 缓存，必要时把最久未用的挤出去。
+   * 内存 store 不驱逐：那里没有磁盘可回源，挤掉一张 = 数据丢了。
+   */
+  #cachePut(hash: string, blob: ImageBlob): void {
+    const old = this.#assetCache.get(hash);
+    if (old) {
+      this.#cacheBytes -= old.bytes.length;
+      this.#assetCache.delete(hash);
+    }
+    this.#assetCache.set(hash, blob);
+    this.#cacheBytes += blob.bytes.length;
+    if (this.#dir === null) return;
+    for (const [h, b] of this.#assetCache) {
+      if (this.#cacheBytes <= this.#cacheBudget) break;
+      if (h === hash) continue; // 刚放进来的这张别立刻又扔了
+      this.#assetCache.delete(h);
+      this.#cacheBytes -= b.bytes.length;
+    }
   }
 
   createWorld(id: string = randomUUID()): World {
@@ -1167,7 +1220,8 @@ export class WorldStore {
   /** 存入资源，返回内容寻址 hash。 */
   putAsset(blob: ImageBlob): string {
     const hash = createHash('sha256').update(blob.bytes).digest('hex').slice(0, 16);
-    this.#assets.set(hash, blob);
+    this.#assetMime.set(hash, blob.mime);
+    this.#cachePut(hash, blob);
     if (this.#dir !== null) {
       mkdirSync(this.#assetsDir(), { recursive: true });
       writeFileSync(join(this.#assetsDir(), hash), Buffer.from(blob.bytes));
@@ -1176,8 +1230,26 @@ export class WorldStore {
     return hash;
   }
 
+  /**
+   * 取资源字节。缓存命中直接给；未命中就回源读盘并放进缓存（内存 store 没有盘可回源，
+   * 缓存里没有就是真没有）。清单里没登记 / 盘上文件不在 → undefined。
+   */
   getAsset(hash: string): ImageBlob | undefined {
-    return this.#assets.get(hash);
+    const hit = this.#assetCache.get(hash);
+    if (hit) {
+      // LRU：命中的挪到队尾（Map 保序，delete + set 即"刚用过"）
+      this.#assetCache.delete(hash);
+      this.#assetCache.set(hash, hit);
+      return hit;
+    }
+    if (this.#dir === null) return undefined;
+    const mime = this.#assetMime.get(hash);
+    if (mime === undefined) return undefined;
+    const p = join(this.#assetsDir(), hash);
+    if (!existsSync(p)) return undefined; // 清单有、盘上没有的孤儿条目
+    const blob: ImageBlob = { bytes: new Uint8Array(readFileSync(p)), mime };
+    this.#cachePut(hash, blob);
+    return blob;
   }
 
   /** 取某立绘的 idle 动画记录（无则 undefined，客户端据此保留静态或轮询）。 */
