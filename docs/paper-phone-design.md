@@ -63,12 +63,16 @@ FRONT ──点手机外/再点入口──▶ STOWED
 
 | 资产 | 用途 |
 |---|---|
-| `phone3d_front_shell` | A 外面:纸质机身正面框(铅笔 bezel、灵动岛),屏幕区留白由 viewport quad 覆盖 |
-| `phone3d_back_shell` | B 外面:纸质背面(铅笔三摄岛、蜡笔装饰、贴纸) |
-| `phone3d_spread_bg` | 跨页内页底(2:1 横幅,蜡笔边框手账感) |
-| `phone3d_paper_edge` | 面板侧面纸板毛边(可平铺) |
-| `phone3d_digits` | 铅笔手写 0-9+冒号 贴片(状态栏时钟逐字拼) |
-| app 图标 | 复用现有 `app_flowers/app_items/app_settings` 贴纸;违和再重生成 |
+| `phone3d_front_shell` | A 外面:纸质机身正面框(铅笔 bezel),屏幕区由 viewport quad 覆盖 |
+| `phone3d_back_shell` | B 外面:纸质背面(铅笔三摄岛、蜡笔贴纸;圆角外程序白化) |
+| `phone3d_spread_bg` | 跨页内页底(蓝红蜡笔双页框+装订线,裁掉木桌边) |
+| `phone3d_island` | 灵动岛石墨药丸贴片(悬浮正面视口顶部中央) |
+| `phone3d_digit_0..9/colon` | 铅笔手写数字贴片(状态栏时钟逐字拼,Label 隐藏作测试锚点) |
+| app 图标 | 复用现有 `app_flowers/app_items/app_settings` 贴纸 |
+
+落地备注:面板侧面纸边不用贴图(米白纯色已够);数字/灵动岛走生成器新增的
+`pencil` 模式(白纸生成+亮度键抠,绿幕会吃掉铅笔灰细线);港区 403 时生成走
+两段式 `--emit-jobs` → 首尔机 `fetch_openrouter_images.py` → `--raw-dir`。
 
 屏幕区几何由代码常量定义(正面壳按固定屏占比设计),**不再用旧的"从壳贴图自动检测屏区"逻辑**。
 
