@@ -942,6 +942,7 @@ async function openCreationSession(
   store: WorldStore,
   leadIn = '', // 入口那轮 routeIntent 生成的仙子应答句（缺陷 ②：此前被丢弃）
   goal: CreationGoal = 'character',
+  spawn?: SpawnCtx, // 造角色的降生上下文（落在发起者身边 + 广播给同场景的人）
 ): Promise<void> {
   if (!hasFlower(store, worldId, session.playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, goal === 'prop' ? 'prop' : 'character', session.clientTts);
@@ -951,7 +952,7 @@ async function openCreationSession(
   // 仙子最近帮这个小朋友造过的东西：注入 guide，「帮我造刚才的小动物」这类指代能对上
   const creations = store.getMemories(fairyId, session.playerId).filter((m) => m.kind === 'creation');
   if (creations.length > 0) session.creation.recentCreations = creations.slice(-5).map((m) => m.text);
-  await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn);
+  await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn, spawn);
 }
 
 async function pushLineTts(
@@ -1044,6 +1045,7 @@ export async function createCharacterAsync(
   toSpriteSheet?: ToSpriteSheet,
   clientTts = false,
   creatorId = '', // 造角色的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
+  spawn?: SpawnCtx, // 降生上下文：落在发起者所在场景/身边 + 向同场景其他人广播 character_spawned
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'character', clientTts);
@@ -1052,8 +1054,12 @@ export async function createCharacterAsync(
   const requestId = randomUUID();
   let created = false;
   try {
+    // 降生位置/场景：跟发起者走。不给的话 createCharacter 会一律落到 DEFAULT_SCENE 的世界中心，
+    // 于是「在森林里造的角色出现在村子中央」——别人重进场景时才会发现它跑错地方了。
+    const sceneId = spawn?.sceneId;
+    const position = sceneId ? store.getPlayerTile(worldId, sceneId, playerId) : undefined;
     const character = await createCharacter(
-      { worldId, intentText: description, byFairy: true },
+      { worldId, intentText: description, byFairy: true, sceneId, position },
       adapters,
       store,
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
@@ -1064,6 +1070,14 @@ export async function createCharacterAsync(
       store.addMemory(creatorId, { text: `帮小朋友造过新伙伴「${character.name}」（${description.slice(0, 60)}）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
     }
     socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId, playerId) }));
+    // 同场景其他人：实时看见新伙伴降生（排除发起者——它已经靠 gen_complete 降生过了）。
+    if (spawn?.hub && sceneId) {
+      spawn.hub.broadcastScene(
+        worldId, sceneId,
+        { type: 'character_spawned', sceneId, character },
+        spawn.connKey,
+      );
+    }
     // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     if (character.appearance.spriteAsset) {
       triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
@@ -1142,6 +1156,7 @@ export async function advanceCreation(
   adapters: ServiceAdapters,
   store: WorldStore,
   leadIn = '',
+  spawn?: SpawnCtx, // 造角色的降生上下文（落在发起者身边 + 广播给同场景的人）
 ): Promise<void> {
   const state = session.creation;
   if (!state) return;
@@ -1149,9 +1164,10 @@ export async function advanceCreation(
   // 会话目标决定汇总描述用哪套：造物 composePropDesc，造角色 describeCreationAttrs。
   const summarize = () => isProp ? composePropDesc(state.attrs) : describeCreationAttrs(state);
   // done 时按目标分派到对应的异步造：造物 createPropAsync，造角色 createCharacterAsync。
+  // 造物进的是背包（私有，不广播；摆到地上时 terrain_patch 自带实体定义），只有造角色要降生广播。
   const finishCreate = (desc: string) => isProp
     ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId)
-    : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId);
+    : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId, spawn);
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
   // 超轮兜底（适配器无关）：已追问满上限还没 done，就用现有属性直接造——绝不无限追问。
   // 此前只有 mock 在 turnCount>=5 时强制 done，线上 LLM 属性解析不进去就会原地循环。
@@ -1262,6 +1278,17 @@ function describeCreationAttrs(state: CreationState): string {
  * 位置流只在人动起来时才发，静止的玩家在别人屏幕上根本不存在——presence 让进场即可见，
  * 并把 spriteAsset 带过去，对端才能渲染真实立绘而不是一个泛蓝的占位小人。
  */
+/**
+ * 造角色的降生上下文：新角色落在发起者所在场景/身边，并向同场景其他人广播 character_spawned。
+ * hub 缺省（单测/直连）时只影响广播，落位仍按 sceneId 走。
+ */
+export interface SpawnCtx {
+  sceneId: string;
+  hub?: WorldHub;
+  /** 发起者连接：广播时排除它（它已经靠 gen_complete 降生过了，再收一次会重复）。 */
+  connKey?: string;
+}
+
 export interface ActorPresence {
   playerId: string;
   name: string;
@@ -1349,6 +1376,8 @@ export async function handleWsMessage(
   hub?: WorldHub,
   stages?: StageDirector,
 ): Promise<void> {
+  // 造角色的降生上下文：取当下所在场景（enter_scene 会改它，故求值而非提前快照）。
+  const spawnCtx = (): SpawnCtx => ({ sceneId: session.currentScene, hub, connKey });
   let msg: {
     type?: string;
     worldId?: string;
@@ -1510,7 +1539,7 @@ export async function handleWsMessage(
       return;
     }
     try {
-      await createCharacterAsync(socket, msg.worldId ?? '', session.playerId, msg.intentText ?? '', adapters, store, undefined, session.clientTts, msg.characterId ?? '');
+      await createCharacterAsync(socket, msg.worldId ?? '', session.playerId, msg.intentText ?? '', adapters, store, undefined, session.clientTts, msg.characterId ?? '', spawnCtx());
     } finally {
       gate.release();
     }
@@ -1550,7 +1579,7 @@ export async function handleWsMessage(
         socket.send(JSON.stringify({ type: 'voice_failed', reason: '造角色答复为空' }));
         return;
       }
-      await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', childInput, adapters, store);
+      await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', childInput, adapters, store, '', spawnCtx());
     } catch (err) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
     } finally {
@@ -1576,17 +1605,17 @@ export async function handleWsMessage(
       const transcript = (await adapters.asr.transcribe({ bytes: audioBytes, mime: msg.format ?? 'audio/wav' })).trim();
       // 造角色引导会话进行中：这句话当造角色答复，不走 routeIntent。
       if (session.creation?.active) {
-        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store);
+        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', spawnCtx());
         return;
       }
       const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene, visitContext(session, msg.characterId ?? ''));
       // 造角色/造物入口：开引导会话，不发普通回应（问句 TTS + 图标卡由会话驱动）。
       if (response.characterRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText);
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText, 'character', spawnCtx());
         return;
       }
       if (response.propRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop');
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
         return;
       }
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
@@ -1615,7 +1644,7 @@ export async function handleWsMessage(
       }
       // 造角色引导会话进行中：这句话当造角色答复，不走 routeIntent。
       if (session.creation?.active) {
-        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store);
+        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', spawnCtx());
         return;
       }
     // 流式 TTS 钩子：character_response 先行（文字/行为脚本提前到达），音频分片随合成推送。
@@ -1638,11 +1667,11 @@ export async function handleWsMessage(
       );
       // 造角色/造物入口：respondToTranscript 识别到意图但没出声，这里开引导会话，不发普通回应。
       if (response.characterRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText);
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText, 'character', spawnCtx());
         return;
       }
       if (response.propRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop');
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
         return;
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
@@ -1754,7 +1783,7 @@ export async function handleWsMessage(
       const transcript = await asr.finish(); // 识别尾巴：流式期间已基本识完
       // 造角色引导会话进行中：这句话当造角色答复，不走 routeIntent。
       if (session.creation?.active) {
-        await advanceCreation(socket, session, worldId, characterId, transcript, adapters, store);
+        await advanceCreation(socket, session, worldId, characterId, transcript, adapters, store, '', spawnCtx());
         return;
       }
       const ttsHooks = {
@@ -1765,11 +1794,11 @@ export async function handleWsMessage(
       const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene, visitContext(session, characterId));
       // 造角色/造物入口：开引导会话，不发普通回应。
       if (response.characterRequest) {
-        await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store, response.replyText);
+        await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store, response.replyText, 'character', spawnCtx());
         return;
       }
       if (response.propRequest) {
-        await openCreationSession(socket, session, worldId, characterId, response.propRequest, adapters, store, response.replyText, 'prop');
+        await openCreationSession(socket, session, worldId, characterId, response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
         return;
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
