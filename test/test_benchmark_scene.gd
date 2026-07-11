@@ -3,8 +3,11 @@ extends SceneTree
 ## 塞进 EXTRA_CHARS 个额外角色，跑完一次测量并 emit finished。
 ##
 ## 注意：headless 的帧时是假的（无 GPU、固定步长），所以这里只断言「接线跑通」——
-## p95 的数值正确性由 test_frame_sampler 用构造序列验证，真机数值只能在真机看。
-## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 30 \
+## p95 的数值正确性由 test_frame_sampler 验证，贪心决策由 test_benchmark_greedy 注入 p95 验证，
+## 真机数值只能在真机看。
+## 固定 60fps（帧时 16.7ms ≤ 达标线）→ 走「基线即达标、零试降」路径，一次测量就收工；
+## 若用 30fps，帧时恰好 33.33ms 卡在 33.3ms 达标线外，会触发 9 次试降、跑不完。
+## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 60 \
 ##       --quit-after 400 --script res://test/test_benchmark_scene.gd
 
 var scene: Node
@@ -45,6 +48,7 @@ func _tick() -> void:
 		_check("测量期间解除限帧", Engine.max_fps, 0)
 	elif frame == 380:
 		_check("测量跑完并 emit finished", _finished, true)
+		_check("基线达标 → 零试降，画质全保", _got_levels.get("hi_res", -1), GraphicsSettings.max_level("hi_res"))
 		_check("出档含全部 9 个旋钮", _got_levels.size(), 9)
 		_check("采到帧时（p95 > 0）", _got_p95 > 0.0, true)
 		if _backup.is_empty():
