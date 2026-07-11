@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ActiveTask, ChatTurn, Character, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
@@ -47,6 +47,27 @@ function settleWallet(w: Wallet): boolean {
   // 满 9 溢出：最多把一组已满的章留作待兑换（停在 STAMPS_PER_FLOWER），多出来的丢弃，避免无限累积。
   if (w.stampProgress > STAMPS_PER_FLOWER) w.stampProgress = STAMPS_PER_FLOWER;
   return gained;
+}
+
+/**
+ * 备份包格式版本。导入时严格比对：版本不同 = 布局可能变了，宁可拒绝也不要在老板的灾难恢复
+ * 现场"尽力而为"地导进半套数据。往后改布局必须 +1，并在 restore 里显式写迁移。
+ */
+export const BACKUP_VERSION = 1;
+
+/** 备份包里的 manifest.json：既是导入前的完整性校验，也是给管理台看的"包里有什么"。 */
+export interface BackupManifest {
+  version: number;
+  createdAt: number;
+  gitSha: string;
+  counts: {
+    players: number;
+    worlds: number;
+    characters: number;
+    items: number;
+    assets: number;
+    spriteAnims: number;
+  };
 }
 
 /**
@@ -99,7 +120,7 @@ export interface World {
  */
 export class WorldStore {
   readonly #dir: string | null;
-  readonly #db: DatabaseSync;
+  #db!: DatabaseSync;
   readonly #assets = new Map<string, ImageBlob>();
   // 立绘 hash → idle 动画记录（sprite_anims.json 持久化，跨重启保留）
   readonly #spriteAnims = new Map<string, SpriteAnimRecord>();
@@ -108,6 +129,11 @@ export class WorldStore {
 
   constructor(dataDir?: string) {
     this.#dir = dataDir ?? null;
+    this.#open();
+  }
+
+  /** 开库 + schema + 迁移 + 加载内存态。构造与 reload（导入备份后）共用同一条路径。 */
+  #open(): void {
     if (this.#dir !== null) mkdirSync(this.#dir, { recursive: true });
     this.#db = new DatabaseSync(this.#dir !== null ? join(this.#dir, 'world.db') : ':memory:');
     this.#initSchema();
@@ -122,6 +148,75 @@ export class WorldStore {
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
       this.#migratePropsToItems(); // 依赖场景矩阵已就位（placed 物件要写进矩阵）
     }
+  }
+
+  /**
+   * 关库重开，把进程内状态与（被外部整体换掉的）落盘数据重新对齐。
+   * 唯一调用方是导入备份：dataDir 被原子替换后，旧的 db 句柄指着已被 rename 走的 inode，
+   * 内存里的 assets/spriteAnims 也全是旧数据——不 reload 就得重启进程才能生效。
+   * locations 是纯内存态（客户端每次连上重发），清掉即可。
+   */
+  reload(): void {
+    this.#db.close();
+    this.#assets.clear();
+    this.#spriteAnims.clear();
+    this.#locations.clear();
+    this.#open();
+  }
+
+  /** 持久化目录（内存 store 为 null）。备份/恢复据此定位 assets/ 与同卷临时目录。 */
+  get dataDir(): string | null {
+    return this.#dir;
+  }
+
+  #count(table: string): number {
+    return (this.#db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c;
+  }
+
+  /**
+   * 导出一份自洽快照到 stagingDir，供 backup.ts 打包（见那里的整体流程注释）。
+   *
+   * world.db 走 SQLite 的 `VACUUM INTO`：在线安全，拿到的是事务一致的快照。直接拷正在被写的
+   * db 文件会拿到撕裂内容，而 node:sqlite 没有 .backup()（实测 v26.4 上是 undefined），
+   * VACUUM INTO 是这个 runtime 上唯一的一致性快照手段。
+   *
+   * 两份清单从内存态重新序列化，而不是拷 dataDir 里的现成文件：#persistAssetIndex 是全量
+   * writeFileSync 重写、并非原子，拷文件可能正撞上重写、读到半截 JSON。
+   *
+   * assets/ 不在这里处理——它内容寻址、只增不改，打包时直接从 dataDir 取就是安全的。
+   */
+  exportSnapshot(stagingDir: string): BackupManifest {
+    if (this.#dir === null) throw new Error('in-memory store has nothing to back up');
+    mkdirSync(stagingDir, { recursive: true });
+    mkdirSync(this.#assetsDir(), { recursive: true }); // 空库也得有 assets/，否则 tar 报源不存在
+
+    const dbOut = join(stagingDir, 'world.db');
+    rmSync(dbOut, { force: true }); // VACUUM INTO 拒绝覆盖已存在的文件
+    this.#db.exec(`VACUUM INTO '${dbOut.replace(/'/g, "''")}'`);
+
+    const assetIndex: Record<string, string> = {};
+    for (const [hash, blob] of this.#assets) assetIndex[hash] = blob.mime;
+    writeFileSync(join(stagingDir, 'assets.json'), JSON.stringify(assetIndex));
+
+    const anims: Record<string, SpriteAnimRecord> = {};
+    for (const [hash, rec] of this.#spriteAnims) anims[hash] = rec;
+    writeFileSync(join(stagingDir, 'sprite_anims.json'), JSON.stringify(anims));
+
+    const manifest: BackupManifest = {
+      version: BACKUP_VERSION,
+      createdAt: Date.now(),
+      gitSha: process.env.GIT_SHA ?? 'dev',
+      counts: {
+        players: this.#count('players'),
+        worlds: this.#count('worlds'),
+        characters: this.#count('characters'),
+        items: this.#count('items'),
+        assets: this.#assets.size,
+        spriteAnims: this.#spriteAnims.size,
+      },
+    };
+    writeFileSync(join(stagingDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    return manifest;
   }
 
   #initSchema(): void {

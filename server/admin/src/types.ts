@@ -261,3 +261,26 @@ export const TASK_TYPE_LABELS: Record<string, string> = {
   visit: '到访',
   gift: '送礼',
 };
+
+/** 备份包的 manifest（服务端 persistence.ts BackupManifest 的手工副本，改一处必须改两处）。 */
+export interface BackupManifest {
+  version: number;
+  createdAt: number;
+  gitSha: string;
+  counts: {
+    players: number;
+    worlds: number;
+    characters: number;
+    items: number;
+    assets: number;
+    spriteAnims: number;
+  };
+}
+
+/** POST /admin/restore 的返回。 */
+export interface RestoreResponse {
+  ok: boolean;
+  manifest: BackupManifest;
+  /** 被覆盖的旧数据另存成了哪个包（服务器上的路径）。 */
+  preRestoreBackup: string;
+}

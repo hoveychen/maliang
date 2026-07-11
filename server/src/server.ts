@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createWriteStream, existsSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { pipeline } from 'node:stream';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
@@ -8,6 +10,19 @@ import type { ServiceAdapters, ASRStream } from './adapters/types.ts';
 import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
+import { startBackup, restoreBackup, type BackupExport } from './backup.ts';
+
+/** 上传备份包的体量兜底。正常包只有几十 MB，这个数只是防止有人拿它当上传洞。 */
+const MAX_RESTORE_UPLOAD = 2 * 1024 * 1024 * 1024;
+
+/**
+ * If-None-Match 是否命中某个 ETag。按 RFC 9110：可以是逗号分隔的多个 tag，
+ * 也可能带弱校验前缀 W/（代理/浏览器都会这么发），逐个剥掉再比。
+ */
+function etagMatches(header: string | string[] | undefined, etag: string): boolean {
+  if (typeof header !== 'string') return false;
+  return header.split(',').some((t) => t.trim().replace(/^W\//, '') === etag);
+}
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
 import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
@@ -511,10 +526,20 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { spec: validated.spec };
   });
 
-  // 取生成的 sprite 资源
+  // 取生成的 sprite 资源。
+  //
+  // 内容寻址 = URL 里的 hash 就是内容的 SHA-256 摘要，同一个 URL 的字节永远不可能变——
+  // 内容变了 hash 就变了，URL 也跟着变。所以这里可以放心地 immutable + 一年 max-age，
+  // 不存在缓存陈旧的风险。ETag 直接用 hash（它本来就是摘要），命中就回 304 连字节都不用传。
+  //
+  // Godot 客户端因为自己有 user://asset_cache（同样按 hash 存、永不失效）本来就不重复拉，
+  // 这组头是给管理台、浏览器、以及将来任何 CDN / 反代用的。
   app.get<{ Params: { hash: string } }>('/assets/:hash', async (req, reply) => {
     const asset = store.getAsset(req.params.hash);
     if (!asset) return reply.code(404).send({ error: 'asset not found' });
+    const etag = `"${req.params.hash}"`;
+    reply.header('cache-control', 'public, max-age=31536000, immutable').header('etag', etag);
+    if (etagMatches(req.headers['if-none-match'], etag)) return reply.code(304).send();
     return reply.header('content-type', asset.mime).send(Buffer.from(asset.bytes));
   });
 
@@ -589,6 +614,73 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   });
   // 资源化只读 API（/debug/api/*）：React 多页面后台分资源拉取（见 debug_api.ts）。
   registerDebugApi(app, store, debugAuthed);
+
+  // ── 全量数据备份 / 恢复 ──
+  // 数据只有持久卷一个落点，卷没了就全没了；这两个端点是唯一的兜底。
+  //
+  // 门禁刻意比 debugAuthed 更严：debugAuthed 在**未配** MALIANG_ADMIN_TOKEN 时一律放行
+  //（"开发环境开放"），但导出 = 全量数据出境、导入 = 全量数据被覆盖。真要是哪天生产漏配了
+  // token，那条规则等于把删库按钮挂在公网上。所以没 token 就直接关掉这两个端点。
+  const backupAuthed = (req: { headers: Record<string, unknown>; query: unknown }): boolean =>
+    Boolean(debugToken) && debugAuthed(req);
+
+  app.get('/admin/backup', async (req, reply) => {
+    if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    let out: BackupExport;
+    try {
+      out = startBackup(store);
+    } catch (e) {
+      return reply.code(500).send({ error: (e as Error).message });
+    }
+    // manifest 走响应头：管理台不用解包就能显示"这一包里有多少玩家/角色/资产"。
+    return reply
+      .header('content-type', 'application/gzip')
+      .header('content-disposition', `attachment; filename="${out.filename}"`)
+      .header('x-backup-manifest', JSON.stringify(out.manifest))
+      .send(out.stream);
+  });
+
+  // 上传的备份包直接流式落到磁盘临时文件，不进内存——fastify 默认只认 json/urlencoded，
+  // 且默认 bodyLimit 只有 1MB，几十 MB 的包必须走自定义 parser 才不会被顶回来。
+  app.addContentTypeParser('application/gzip', (_req, payload, done) => {
+    const tarPath = path.join(os.tmpdir(), `maliang-restore-${randomUUID()}.tar.gz`);
+    const ws = createWriteStream(tarPath);
+    let size = 0;
+    payload.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_RESTORE_UPLOAD) payload.destroy(new Error('备份包过大'));
+    });
+    pipeline(payload, ws, (err) => {
+      if (err) {
+        rmSync(tarPath, { force: true });
+        done(err);
+        return;
+      }
+      done(null, { tarPath });
+    });
+  });
+
+  // 全量数据导入：**破坏性**，当前数据会被整个换掉。restoreBackup 内部保证——
+  // 包坏了在校验阶段就失败（现网数据没动过），且覆盖前会先把当前数据另存一份兜底包。
+  app.post('/admin/restore', async (req, reply) => {
+    if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    const tarPath = (req.body as { tarPath?: string } | undefined)?.tarPath;
+    if (!tarPath) {
+      return reply.code(400).send({ error: '请以 content-type: application/gzip 上传 .tar.gz 备份包' });
+    }
+    try {
+      const res = await restoreBackup(store, tarPath);
+      app.log.warn(
+        { manifest: res.manifest, preRestoreBackup: res.preRestoreBackup },
+        'data restored from backup — 现网数据已被整体替换',
+      );
+      return { ok: true, manifest: res.manifest, preRestoreBackup: res.preRestoreBackup };
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    } finally {
+      rmSync(tarPath, { force: true });
+    }
+  });
   // /debug 页面：优先托管 admin/dist（React 多页面管理台，Docker 多阶段构建产出）。
   // HTML/JS 是公开壳子不含数据（数据全在带门禁的 /debug/api/*），页面本身不设 token 门——
   // 打开后 SPA 里粘 token 即可用（也兼容 ?token= 透传）。未构建（本地测试）回退旧版内嵌单页。
