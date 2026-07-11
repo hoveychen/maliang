@@ -48,6 +48,8 @@ signal player_emote(data: Dictionary)
 ## { sceneId, fromPlayerId, targetPlayerId, text, lang, voiceId }。voiceId 服务端按发送者盖章，
 ## 本端据此 TTS 出声 + 头顶气泡；targetPlayerId==自己 ⇒ 对我说的（自动回礼判定用）。
 signal player_speech(data: Dictionary)
+## 收到爱心（别的小朋友送❤）：{ wallet }。爱心只增不减、不动小红花，集邮册展示。
+signal hearts_update(data: Dictionary)
 ## 换场景（模型 B，走 portal）：收到目标场景的地形 + 角色 + items 实体 + pois + 该场景玩家最后位置。
 ## data = { worldId, sceneId, scene:Dictionary|null, characters:Array, items:Array, playerPos:Dictionary|null }
 ## （摆着的造物在场景矩阵物品层里，不再单发 props）
@@ -308,5 +310,7 @@ func _dispatch(data: Dictionary) -> void:
 			player_emote.emit(data)
 		"player_speech":
 			player_speech.emit(data)
+		"hearts_update":
+			hearts_update.emit(data)
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))

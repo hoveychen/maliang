@@ -2086,13 +2086,23 @@ export async function handleWsMessage(
       socket.send(JSON.stringify({ type: 'error', error: `unknown emote action: ${action}` }));
       return;
     }
-    hub.broadcastScene(msg.worldId ?? '', session.currentScene, {
+    const worldId = msg.worldId ?? '';
+    const target = typeof msg.targetPlayerId === 'string' ? msg.targetPlayerId : '';
+    hub.broadcastScene(worldId, session.currentScene, {
       type: 'player_emote',
       sceneId: session.currentScene,
       fromPlayerId: session.playerId,
-      targetPlayerId: typeof msg.targetPlayerId === 'string' ? msg.targetPlayerId : '',
+      targetPlayerId: target,
       action,
     }, connKey);
+    // 送❤入账：收方爱心 +1（只增不减、不动小红花）。离线/跨场景也入账——孩子的心意不丢；
+    // 收方在线则单播最新钱包（hearts_update），集邮册立即点亮。
+    if (action === 'heart' && target && target !== session.playerId) {
+      const w = store.addHeart(worldId, target);
+      for (const m of hub.membersIn(worldId)) {
+        if (m.playerId === target) m.send({ type: 'hearts_update', wallet: w });
+      }
+    }
     return;
   }
 
