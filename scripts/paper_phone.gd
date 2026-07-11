@@ -30,12 +30,18 @@ const FACE_FRONT := "front"        ## A 外面：手机正面壳
 const FACE_BACK := "back"          ## B 外面：手机背面壳（三摄岛）
 const FACE_SPREAD_L := "spread_l"  ## A 内面：跨页左页
 const FACE_SPREAD_R := "spread_r"  ## B 内面：跨页右页
+const FACE_SCREEN := "screen"      ## A 外面的屏幕区（正面壳内嵌，SubViewport 贴上来）
+const SCREEN_FRAC := Vector2(0.90, 0.94)  ## 正面屏占面板比例（四周留纸质 bezel）
 
 var state: int = State.STOWED
 
 var _pivot: Node3D                 ## 整机翻转（yaw）+ 跨页居中平移
 var _hinge: Node3D                 ## 铰链（fold）
+var _panel_a: Node3D
+var _panel_b: Node3D
 var _faces := {}                   ## face id → { mesh: MeshInstance3D, size: Vector2 }
+var _front_vp: SubViewport         ## 正面主屏内容（create_screens 后有效）
+var _spread_vp: SubViewport        ## 背面跨页内容（左右页各采样一半 UV）
 var _fold_deg := 180.0
 var _yaw_deg := 0.0
 var _tween: Tween
@@ -55,25 +61,25 @@ func _build() -> void:
 	_pivot.name = "Pivot"
 	add_child(_pivot)
 	# 面板 A（固定）：薄纸板 + 外面(正面壳)/内面(跨页左页)两片贴面
-	var panel_a := Node3D.new()
-	panel_a.name = "PanelA"
-	_pivot.add_child(panel_a)
-	panel_a.add_child(_make_slab())
-	_add_face(FACE_FRONT, panel_a, Vector3(0.0, 0.0, PANEL_T * 0.5 + FACE_EPS), false)
-	_add_face(FACE_SPREAD_L, panel_a, Vector3(0.0, 0.0, -PANEL_T * 0.5 - FACE_EPS), true)
+	_panel_a = Node3D.new()
+	_panel_a.name = "PanelA"
+	_pivot.add_child(_panel_a)
+	_panel_a.add_child(_make_slab())
+	_add_face(FACE_FRONT, _panel_a, Vector3(0.0, 0.0, PANEL_T * 0.5 + FACE_EPS), false)
+	_add_face(FACE_SPREAD_L, _panel_a, Vector3(0.0, 0.0, -PANEL_T * 0.5 - FACE_EPS), true)
 	# 铰链在 A 左缘的背面边（纸板对折的真实轴）：绕 Y 转 180° 正好把 B 叠到 A 背后
 	_hinge = Node3D.new()
 	_hinge.name = "Hinge"
 	_hinge.position = Vector3(-PANEL_W * 0.5, 0.0, -PANEL_T * 0.5)
 	_pivot.add_child(_hinge)
 	# 面板 B（挂铰链）：摊平时占铰链系 x∈[-W,0]、z∈[0,T]（背面与 A 背面共面）
-	var panel_b := Node3D.new()
-	panel_b.name = "PanelB"
-	panel_b.position = Vector3(-PANEL_W * 0.5, 0.0, PANEL_T * 0.5)
-	_hinge.add_child(panel_b)
-	panel_b.add_child(_make_slab())
-	_add_face(FACE_BACK, panel_b, Vector3(0.0, 0.0, PANEL_T * 0.5 + FACE_EPS), false)
-	_add_face(FACE_SPREAD_R, panel_b, Vector3(0.0, 0.0, -PANEL_T * 0.5 - FACE_EPS), true)
+	_panel_b = Node3D.new()
+	_panel_b.name = "PanelB"
+	_panel_b.position = Vector3(-PANEL_W * 0.5, 0.0, PANEL_T * 0.5)
+	_hinge.add_child(_panel_b)
+	_panel_b.add_child(_make_slab())
+	_add_face(FACE_BACK, _panel_b, Vector3(0.0, 0.0, PANEL_T * 0.5 + FACE_EPS), false)
+	_add_face(FACE_SPREAD_R, _panel_b, Vector3(0.0, 0.0, -PANEL_T * 0.5 - FACE_EPS), true)
 
 ## 纸板芯：面板的厚度体（侧面即纸边）。贴面用独立 quad 盖在两大面上。
 func _make_slab() -> MeshInstance3D:
@@ -87,9 +93,10 @@ func _make_slab() -> MeshInstance3D:
 	return mi
 
 ## 贴面 quad：flip=true 时绕 Y 转 180°（面朝 -Z 且从该侧看贴图左右不镜像）。
-func _add_face(id: String, parent: Node3D, pos: Vector3, flip: bool) -> void:
+func _add_face(id: String, parent: Node3D, pos: Vector3, flip: bool,
+		size := Vector2(PANEL_W, PANEL_H)) -> void:
 	var q := QuadMesh.new()
-	q.size = Vector2(PANEL_W, PANEL_H)
+	q.size = size
 	var mi := MeshInstance3D.new()
 	mi.name = "Face_" + id
 	mi.mesh = q
@@ -99,7 +106,7 @@ func _add_face(id: String, parent: Node3D, pos: Vector3, flip: bool) -> void:
 	mi.material_override = _paper_mat(Color(0.98, 0.96, 0.90)) # 白卡纸占位
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(mi)
-	_faces[id] = { "mesh": mi, "size": Vector2(PANEL_W, PANEL_H) }
+	_faces[id] = { "mesh": mi, "size": size }
 
 ## 纸面材质：unshaded 保证纸面亮度稳定（不吃场景光/world-bend），有贴图时走贴图。
 static func _paper_mat(albedo: Color) -> StandardMaterial3D:
@@ -119,6 +126,85 @@ func set_face_texture(id: String, tex: Texture2D, alpha := false) -> void:
 	mat.albedo_texture = tex
 	if alpha:
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+
+## ── SubViewport 屏幕 ────────────────────────────────────────────────────────
+
+## 建两块屏幕内容视口并贴上贴面：正面主屏(front_px) + 背面跨页(spread_px，左右页各采样一半)。
+## Control 树由业务层(phone_ui)塞进 front_viewport()/spread_viewport()。
+func create_screens(front_px: Vector2i, spread_px: Vector2i) -> void:
+	_front_vp = _make_screen_vp(front_px)
+	_spread_vp = _make_screen_vp(spread_px)
+	# 正面屏幕区：内嵌于正面壳的 quad（浮出 2ε，拾取时先于 front 命中）
+	_add_face(FACE_SCREEN, _panel_a, Vector3(0.0, 0.0, PANEL_T * 0.5 + FACE_EPS * 2.0), false,
+		Vector2(PANEL_W, PANEL_H) * SCREEN_FRAC)
+	_bind_vp_texture(FACE_SCREEN, _front_vp, Vector3.ONE, Vector3.ZERO)
+	# 跨页左右页：同一块 spread 视口的左半/右半（uv1 scale/offset 切）
+	_bind_vp_texture(FACE_SPREAD_L, _spread_vp, Vector3(0.5, 1.0, 1.0), Vector3.ZERO)
+	_bind_vp_texture(FACE_SPREAD_R, _spread_vp, Vector3(0.5, 1.0, 1.0), Vector3(0.5, 0.0, 0.0))
+	_update_screen_activity()
+
+func _make_screen_vp(px: Vector2i) -> SubViewport:
+	var vp := SubViewport.new()
+	vp.size = px
+	vp.disable_3d = true
+	vp.render_target_update_mode = SubViewport.UPDATE_DISABLED # 收起时不烧 GPU
+	add_child(vp)
+	return vp
+
+func _bind_vp_texture(face: String, vp: SubViewport, uv_scale: Vector3, uv_offset: Vector3) -> void:
+	var f: Dictionary = _faces.get(face, {})
+	if f.is_empty():
+		return
+	var mat := (f["mesh"] as MeshInstance3D).material_override as StandardMaterial3D
+	mat.albedo_color = Color.WHITE
+	mat.albedo_texture = vp.get_texture()
+	mat.uv1_scale = uv_scale
+	mat.uv1_offset = uv_offset
+
+func front_viewport() -> SubViewport:
+	return _front_vp
+
+func spread_viewport() -> SubViewport:
+	return _spread_vp
+
+## 只让可见屏更新：正面态跑主屏、跨页态跑跨页、收起全停。
+func _update_screen_activity() -> void:
+	if _front_vp != null:
+		_front_vp.render_target_update_mode = \
+			SubViewport.UPDATE_ALWAYS if state == State.FRONT else SubViewport.UPDATE_DISABLED
+	if _spread_vp != null:
+		_spread_vp.render_target_update_mode = \
+			SubViewport.UPDATE_ALWAYS if state == State.SPREAD else SubViewport.UPDATE_DISABLED
+
+## 贴面 uv → 屏幕视口像素（纯函数，headless 可单测）。
+## 命中屏幕内容返回 { "vp": "front"|"spread", "px": Vector2 }；非屏区（壳）返回 {}。
+static func screen_px(face: String, uv: Vector2, front_px: Vector2i, spread_px: Vector2i) -> Dictionary:
+	match face:
+		FACE_SCREEN:
+			return { "vp": "front", "px": uv * Vector2(front_px) }
+		FACE_SPREAD_L:
+			return { "vp": "spread", "px": Vector2(uv.x * 0.5, uv.y) * Vector2(spread_px) }
+		FACE_SPREAD_R:
+			return { "vp": "spread", "px": Vector2(0.5 + uv.x * 0.5, uv.y) * Vector2(spread_px) }
+	return {}
+
+## 屏幕坐标鼠标/触摸(经 emulate mouse)事件 → 射线拾取 → 转发进对应 SubViewport。
+## 返回 true=命中机身（含壳非屏区，事件被手机吞掉）；false=没打在手机上（调用方决定收起等）。
+func route_gui_event(cam: Camera3D, ev: InputEvent) -> bool:
+	if _front_vp == null or not (ev is InputEventMouse):
+		return false
+	var pos: Vector2 = (ev as InputEventMouse).position
+	var hit := pick(cam.project_ray_origin(pos), cam.project_ray_normal(pos))
+	if hit.is_empty():
+		return false
+	var route := screen_px(String(hit["face"]), hit["uv"], _front_vp.size, _spread_vp.size)
+	if route.is_empty():
+		return true # 打在纸壳 bezel 上：吞掉但不进屏
+	var dup := ev.duplicate() as InputEventMouse
+	dup.position = route["px"]
+	dup.global_position = route["px"]
+	(_front_vp if String(route["vp"]) == "front" else _spread_vp).push_input(dup)
+	return true
 
 ## ── 状态机 ──────────────────────────────────────────────────────────────────
 
@@ -160,6 +246,7 @@ func stow(animate := true) -> void:
 
 func _set_state(s: int) -> void:
 	state = s
+	_update_screen_activity()
 	state_changed.emit(s)
 
 ## ── 动画/姿态 ───────────────────────────────────────────────────────────────
@@ -239,7 +326,8 @@ static func face_uv(xf: Transform3D, size: Vector2, ro: Vector3, rd: Vector3) ->
 func _pickable_faces() -> Array:
 	match state:
 		State.FRONT:
-			return [FACE_FRONT]
+			# 屏幕 quad 浮在正面壳之上（更近），pick 取最近命中 → 屏区优先给 screen
+			return [FACE_SCREEN, FACE_FRONT] if _faces.has(FACE_SCREEN) else [FACE_FRONT]
 		State.SPREAD:
 			return [FACE_SPREAD_L, FACE_SPREAD_R]
 	return []
