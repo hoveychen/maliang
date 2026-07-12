@@ -33,11 +33,13 @@ interface Actor {
   /** 说一句（用该角色自己的音色），可带一个动作；说完才 resolve。 */
   say(text: string, action?: string): Promise<void>;
   /**
-   * 做一个动作，做完才 resolve。20 种纸片动作：
+   * 做一个动作，做完才 resolve。26 种纸片动作：
    * wave挥手 jump跳 spin转圈 nod点头 flip翻跟头 backflip后空翻 cartwheel侧手翻
    * twirl芭蕾旋 helicopter直升机旋 paperflip翻面 peek侧身隐身 lie_down躺平
    * faceplant扑街 curl_up卷纸筒 shiver发抖 wiggle扭扭舞 puff挺胸鼓气
-   * bounce弹弹球 squish拍扁 stretch长高高（其他名字会退化成 wave，别自造）。
+   * bounce弹弹球 squish拍扁 stretch长高高 fold对折 bow_fold折纸鞠躬
+   * corner_wink折角卖萌 paper_plane纸飞机 accordion风琴折 crumple_ball揉纸团
+   * （其他名字会退化成 wave，别自造）。
    */
   do(action: string): Promise<void>;
   /** 设置型：持续跟随，客户端本地跑，不逐帧过网。发出即返回。 */
