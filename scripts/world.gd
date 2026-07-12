@@ -2124,9 +2124,10 @@ static func action_pose(action: String, t: float, dur: float) -> Dictionary:
 		"bow_fold": # 折纸鞠躬：上半张沿横中线向前折下（道谢/道歉）
 			var be := _hold_env(k, 0.3, 0.7)
 			fold = { "f1": Vector4(0.0, 0.55, 1.0, 0.0), "a1": deg_to_rad(115.0) * be }
-		"corner_wink": # 折角卖萌：右上角沿斜痕折下来再弹回，像给书页折个角
+		"corner_wink": # 折角卖萌：右上角沿斜痕折下来再弹回，像给书页折个角。
+			# 痕要切得深（穿过头/耳区）：立绘内容居中，四角是透明 alpha，浅痕折了个寂寞
 			var ce := _hold_env(k, 0.25, 0.55)
-			fold = { "f1": Vector4(0.15, 1.0, 0.88, -0.47), "a1": deg_to_rad(140.0) * ce }
+			fold = { "f1": Vector4(-0.1, 0.9, 0.93, -0.38), "a1": deg_to_rad(140.0) * ce }
 			rot.z = deg_to_rad(-4.0) * ce # 顺势歪头
 		"paper_plane": # 纸飞机：两肩向后折成箭头，前倾滑翔原地绕一小圈再展开
 			var pe := _hold_env(k, 0.22, 0.8)

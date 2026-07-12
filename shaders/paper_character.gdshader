@@ -60,7 +60,9 @@ void vertex() {
 	apply_fold(v, fold1, fold1_angle, quad_size);
 	apply_fold(v, fold2, fold2_angle, quad_size);
 	if (pleat_amp > 0.0) {
+		// z 折深 + 相位错开的 x 锯齿：unshaded 材质正面看不出 z 折，锯齿剪影才读得出"风琴"
 		v.z += pleat_amp * (abs(fract(yn * pleat_freq) - 0.5) * 2.0 - 0.5);
+		v.x += pleat_amp * 0.6 * (abs(fract(yn * pleat_freq + 0.25) - 0.5) * 2.0 - 0.5);
 	}
 	if (crumple_amp > 0.0) {
 		v += crumple_amp * 0.5 * vec3(
