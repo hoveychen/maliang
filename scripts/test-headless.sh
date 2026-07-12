@@ -68,6 +68,18 @@ UNIT_TESTS=(
   test_matrix_skin
   test_terrain_patch
   test_terrain_rebuild
+  test_terrain_layers
+  test_terrain_seafloor
+  test_terrain_icesnow
+  test_terrain_jurassic
+  test_terrain_medieval
+  test_terrain_roman
+  test_terrain_ancient_china
+  test_terrain_modern_city
+  test_terrain_toy_room
+  test_terrain_kitchen
+  test_terrain_hospital
+  test_terrain_future_robot
   test_sticker_edges
   test_character_anchors
   test_fairy_anchors

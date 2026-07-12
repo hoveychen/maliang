@@ -38,7 +38,7 @@ func _tick() -> void:
 		gm != null and gm.shader.resource_path == "res://shaders/terrain_ground.gdshader", true)
 	if gm != null:
 		_check("控制图已挂载", gm.get_shader_parameter("control_tex") != null, true)
-		_check("水彩草地贴图已挂载", gm.get_shader_parameter("grass_tex") != null, true)
+		_check("顶面贴图数组已挂载", gm.get_shader_parameter("top_array") != null, true)
 
 	# 池塘区块 (0,0)：湖床下沉 + 岸壁
 	var pond := Vector2i(0, 0)
