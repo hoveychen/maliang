@@ -138,6 +138,25 @@ func _init() -> void:
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 112, "op": "prop_remove", "args": { "id": "egg1" } })
 	fails += _eq("prop_remove 触宿主", String(host.last("prop_remove").get("id", "")), "egg1")
 
+	# spawn_ball：完成型——host 落位后回 done 才 ack，回执带球 id；at 原样透传
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 120, "op": "spawn_ball", "args": { "id": "ball1", "at": [10, 20] } })
+	fails += _eq("spawn_ball 触宿主", String(host.last("spawn_ball").get("id", "")), "ball1")
+	fails += _eq("spawn_ball at 透传", (host.last("spawn_ball").get("at", []) as Array), [10, 20])
+	fails += _eq("spawn_ball 未完成不回执", _ack_for(120).is_empty(), true)
+	host.last_ball_done.call(true, { "id": "ball1" })
+	fails += _eq("spawn_ball 完成回执带 id", String((_ack_for(120).get("result", {}) as Dictionary).get("id", "")), "ball1")
+
+	# ball_reset：完成型——host 复位后回 done 才 ack
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 121, "op": "ball_reset", "args": { "id": "ball1", "at": [0, 0] } })
+	fails += _eq("ball_reset 触宿主", String(host.last("ball_reset").get("id", "")), "ball1")
+	fails += _eq("ball_reset 未完成不回执", _ack_for(121).is_empty(), true)
+	host.last_ball_done.call(true, {})
+	fails += _eq("ball_reset 完成回执", _ack_for(121).is_empty(), false)
+	# 完成型失败：回执带 error
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 122, "op": "spawn_ball", "args": { "id": "ball2", "at": [0, 0] } })
+	host.last_ball_done.call(false, { "error": "球没地方放" })
+	fails += _eq("spawn_ball 失败回执带 error", String(_ack_for(122).get("error", "")), "球没地方放")
+
 	# watch/unwatch（cmdId=-1，无 ack）+ 规则事件上行
 	_events.clear()
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": -1, "op": "watch", "args": { "subId": "sub_tap", "ev": "tap", "params": { "actorId": "duck" } } })

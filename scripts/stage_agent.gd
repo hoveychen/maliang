@@ -162,6 +162,14 @@ func on_stage_cmd(data: Dictionary) -> void:
 		"prop_remove":
 			_host.stage_prop_remove(String(args.get("id", "")))
 			_ack(cmd_id)
+		"spawn_ball":
+			# C 档球落位（完成型）：host 建球节点（默认所有者）后回 done → ack。球位置像角色一样
+			# 进复制流，全端都渲染同一个球，故不走 _skip_npc_sim（同 prop_spawn，非 host 也建可见球）。
+			# 踢球是客户端玩家动作、不在脚本；所有权转移/预测/和解见 P2c。
+			_host.stage_spawn_ball(String(args.get("id", "")), args.get("at"), _done(cmd_id))
+		"ball_reset":
+			# 进球后复位（完成型）：host 把球移回落点、清零速度，落位后回 done → ack。
+			_host.stage_ball_reset(String(args.get("id", "")), args.get("at"), _done(cmd_id))
 		"watch":
 			_on_watch(args)  # 布置规则探测器（无 ack，cmdId=-1）
 		"unwatch":

@@ -8,6 +8,7 @@ var last_action_done := Callable()
 var last_say_done := Callable()
 var last_narrate_done := Callable()
 var last_prop_done := Callable()
+var last_ball_done := Callable()
 
 func stage_begin(actors: Array) -> void:
 	calls.append({ "m": "begin", "actors": actors })
@@ -70,6 +71,14 @@ func stage_prop_place(id: String, at: Variant) -> void:
 
 func stage_prop_remove(id: String) -> void:
 	calls.append({ "m": "prop_remove", "id": id })
+
+func stage_spawn_ball(id: String, at: Variant, done: Callable) -> void:
+	calls.append({ "m": "spawn_ball", "id": id, "at": at })
+	last_ball_done = done
+
+func stage_ball_reset(id: String, at: Variant, done: Callable) -> void:
+	calls.append({ "m": "ball_reset", "id": id, "at": at })
+	last_ball_done = done
 
 ## 某类调用的次数。
 func count(m: String) -> int:
