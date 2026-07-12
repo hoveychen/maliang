@@ -15,6 +15,7 @@ let cmdSeq = 0;
 let issued = 0;
 let subSeq = 0;
 let hudSeq = 0;
+let rgSeq = 0;
 let mainResolved = false;
 let finished = false;
 const pendingCmds = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -93,6 +94,13 @@ port.on('message', (m: HostToWorkerMsg) => {
 
 // ---- Stage SDK(沙箱内可见的对象) ----
 
+interface SdkRegion {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly r: number;
+}
+
 interface SdkActor {
   readonly id: string;
   readonly name: string;
@@ -127,6 +135,10 @@ function onEvent(ev: string, ...rest: unknown[]): () => void {
     const [a, b, dist, fn] = rest as [SdkActor, SdkActor, number, () => void];
     return subscribe('near', { a: a.id, b: b.id, dist }, fn);
   }
+  if (ev === 'enter') {
+    const [obj, region, fn] = rest as [SdkActor, SdkRegion, () => void];
+    return subscribe('enter', { obj: obj.id, x: region.x, y: region.y, r: region.r }, fn);
+  }
   if (ev === 'tap') {
     const [a, fn] = rest as [SdkActor, () => void];
     return subscribe('tap', { actorId: a.id }, fn);
@@ -156,6 +168,7 @@ const stage = {
     return typeof r?.text === 'string' ? r.text : '';
   },
   end: (result?: Record<string, unknown>) => finish(result),
+  region: (area: { x: number; y: number; r: number }): SdkRegion => ({ id: `rg${++rgSeq}`, x: area.x, y: area.y, r: area.r }),
   prop: {
     create: (desc: string, near: unknown) =>
       sendCmd('prop_create', { desc, near: typeof near === 'object' && near !== null && 'id' in near ? (near as SdkActor).id : near }),

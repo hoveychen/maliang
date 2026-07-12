@@ -31,10 +31,12 @@ export interface StageEventMsg {
   payload?: Record<string, unknown>;
 }
 
-/** near 订阅登记：服务端对复制位置求值（单点判定无双端分歧），不下发客户端探测器。 */
+/** 服务端求值的规则订阅登记（near/enter：对复制位置单点判定，无双端分歧，不下发客户端探测器）。 */
 export interface NearRegistry {
   add(subId: string, a: string, b: string, dist: number): void;
-  /** 撤销订阅；返回 true 表示确是 near 订阅（据此免发 unwatch）。 */
+  /** enter：obj 进入以 (x,y) 为心、r 为半径的世界坐标圆。 */
+  addEnter(subId: string, obj: string, x: number, y: number, r: number): void;
+  /** 撤销订阅；返回 true 表示确是服务端求值订阅（near/enter，据此免发 unwatch）。 */
   remove(subId: string): boolean;
 }
 
@@ -93,6 +95,10 @@ class WsStageBackend implements StageBackend {
       this.#near.add(sub.subId, String(sub.params.a ?? ''), String(sub.params.b ?? ''), Number(sub.params.dist ?? 0));
       return;
     }
+    if (sub.ev === 'enter') {
+      this.#near.addEnter(sub.subId, String(sub.params.obj ?? ''), Number(sub.params.x ?? 0), Number(sub.params.y ?? 0), Number(sub.params.r ?? 0));
+      return;
+    }
     this.#hub.broadcast(this.#worldId, {
       type: 'stage_cmd', stageId: this.#stageId, cmdId: -1, op: 'watch',
       args: { subId: sub.subId, ev: sub.ev, params: sub.params },
@@ -128,6 +134,15 @@ interface NearSub {
   inside: boolean;
 }
 
+/** 一条 enter 订阅的服务端求值状态。区域是世界坐标圆 (x,y,r)；inside 语义同 NearSub。 */
+interface EnterSub {
+  obj: string;
+  x: number;
+  y: number;
+  r: number;
+  inside: boolean;
+}
+
 /** 复制位置一次更新（世界坐标）。 */
 export interface PositionUpdate {
   id: string;
@@ -146,11 +161,15 @@ class StageSession {
   #positions = new Map<string, { x: number; y: number }>();
   /** subId → near 订阅状态。 */
   #nearSubs = new Map<string, NearSub>();
+  /** subId → enter 订阅状态。 */
+  #enterSubs = new Map<string, EnterSub>();
 
   constructor(hub: WorldHub, worldId: string, propMaker?: StagePropMaker) {
     const near: NearRegistry = {
       add: (subId, a, b, dist) => this.#nearSubs.set(subId, { a, b, dist, inside: false }),
-      remove: (subId) => this.#nearSubs.delete(subId),
+      addEnter: (subId, obj, x, y, r) => this.#enterSubs.set(subId, { obj, x, y, r, inside: false }),
+      // subId 只会落在一个表里；|| 短路即可，返回 true 表示是服务端求值订阅（免发 unwatch）。
+      remove: (subId) => this.#nearSubs.delete(subId) || this.#enterSubs.delete(subId),
     };
     this.backend = new WsStageBackend(hub, worldId, this.stageId, near, propMaker);
     this.runner = new ScriptRunner(this.backend);
@@ -172,6 +191,19 @@ class StageSession {
         s.inside = true;
         this.runner.emitEvent(subId, { dist: d });
       } else if (!near && s.inside) {
+        s.inside = false;
+      }
+    }
+    // enter：obj 进入世界坐标圆 (x,y,r)。边沿语义同 near——外→内触发一次，离开后可再触发。
+    for (const [subId, s] of this.#enterSubs) {
+      const p = this.#positions.get(s.obj);
+      if (!p) continue;
+      const d = Math.hypot(p.x - s.x, p.y - s.y);
+      const inside = d <= s.r;
+      if (inside && !s.inside) {
+        s.inside = true;
+        this.runner.emitEvent(subId, { dist: d });
+      } else if (!inside && s.inside) {
         s.inside = false;
       }
     }
