@@ -26,7 +26,7 @@ func _initialize() -> void:
 
 ## 纯函数层：全部 20 种动作的动画数学逐一体检。
 func _test_action_pose_math() -> void:
-	_check("action table has 20 entries", BehaviorExecutor.ACTION_DUR.size(), 20)
+	_check("action table has 26 entries", BehaviorExecutor.ACTION_DUR.size(), 26)
 	for a in BehaviorExecutor.ACTION_DUR:
 		var dur := float(BehaviorExecutor.ACTION_DUR[a])
 		var moved := false
@@ -38,7 +38,8 @@ func _test_action_pose_math() -> void:
 			var y := float(p["y"])
 			if not (rot.is_finite() and sc.is_finite() and is_finite(y)):
 				finite = false
-			if rot != Vector3.ZERO or y != 0.0 or sc != Vector3.ONE or p.has("motion"):
+			if rot != Vector3.ZERO or y != 0.0 or sc != Vector3.ONE or p.has("motion") \
+					or p.has("fold") or p.has("xz"):
 				moved = true
 			if p.has("motion") and not (p["motion"] as Vector2).is_finite():
 				finite = false
@@ -48,9 +49,10 @@ func _test_action_pose_math() -> void:
 	var pu: Dictionary = WorldScript.action_pose("moonwalk", 0.5, 1.0)
 	_check("unknown action is identity",
 		pu["rot"] == Vector3.ZERO and float(pu["y"]) == 0.0
-		and pu["scale"] == Vector3.ONE and not pu.has("motion"), true)
+		and pu["scale"] == Vector3.ONE and not pu.has("motion")
+		and not pu.has("fold") and not pu.has("xz"), true)
 	# 起步平滑：k≈0 时 scale 类动作不许瞬间跳变（防"啪一下压扁"）
-	for a2 in ["bounce", "squish", "stretch", "puff", "shiver"]:
+	for a2 in ["bounce", "squish", "stretch", "puff", "shiver", "accordion", "crumple_ball"]:
 		var p0: Dictionary = WorldScript.action_pose(a2, 0.01, float(BehaviorExecutor.ACTION_DUR[a2]))
 		var sc0 := p0["scale"] as Vector3
 		_check("%s starts near identity scale" % a2, sc0.distance_to(Vector3.ONE) < 0.15, true)

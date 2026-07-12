@@ -2019,6 +2019,8 @@ func _update_paper_motion(n: Dictionary, node: PaperCharacter, lean: float, delt
 ## 动作数学在纯函数 action_pose（可单测），这里只负责应用与生命周期（推进 t/清键/scale 复位）。
 ## 旋转/位移叠加在正常姿态之上（姿态每帧重算，加性安全）；scale 无人复位，动作层自管：
 ## 动作期间写绝对值，结束硬复位 ONE，动作被外部清除（交互叫停等）时弹性回正兜底。
+const _FOLD_ID := Vector4(0.0, 0.0, 0.0, 1.0) ## 恒等折痕（角度 0，方向占位竖直）
+
 func _update_action_anim(n: Dictionary, node: PaperCharacter, delta: float) -> void:
 	var action := String(n.get("paper_action", ""))
 	if action.is_empty():
@@ -2026,6 +2028,7 @@ func _update_action_anim(n: Dictionary, node: PaperCharacter, delta: float) -> v
 			node.scale = node.scale.lerp(Vector3.ONE, minf(1.0, 12.0 * delta))
 			if node.scale.is_equal_approx(Vector3.ONE):
 				node.scale = Vector3.ONE
+		node.set_paper_fold(_FOLD_ID, 0.0, _FOLD_ID, 0.0, 0.0, 0.0) # 外部清键兜底（恒等零上传）
 		return
 	var t := float(n.get("paper_action_t", 0.0)) + delta
 	var dur := float(BehaviorExecutor.ACTION_DUR.get(action, 1.2))
@@ -2033,11 +2036,16 @@ func _update_action_anim(n: Dictionary, node: PaperCharacter, delta: float) -> v
 		n.erase("paper_action")
 		n.erase("paper_action_t")
 		node.scale = Vector3.ONE
+		node.set_paper_fold(_FOLD_ID, 0.0, _FOLD_ID, 0.0, 0.0, 0.0)
 		return
 	n["paper_action_t"] = t
 	var p := action_pose(action, t, dur)
 	node.rotation += p["rot"] as Vector3
 	node.position.y += float(p["y"])
+	if p.has("xz"): # 视觉位移（纸飞机绕圈）：只动渲染节点，逻辑坐标/占用图不动
+		var xz := p["xz"] as Vector2
+		node.position.x += xz.x
+		node.position.z += xz.y
 	var sc := p["scale"] as Vector3
 	if sc != Vector3.ONE:
 		node.scale = sc
@@ -2046,14 +2054,22 @@ func _update_action_anim(n: Dictionary, node: PaperCharacter, delta: float) -> v
 	if p.has("motion"): # 覆盖本帧呼吸/走路的 shader 参数（下一帧姿态层自动恢复）
 		var m := p["motion"] as Vector2
 		node.set_paper_motion(m.x, m.y)
+	# 折纸机关：折纸类动作逐帧驱动；其余动作恒等调用=零上传快路径（并顺手清掉顶替残留）
+	var f: Dictionary = p.get("fold", {})
+	node.set_paper_fold(
+		f.get("f1", _FOLD_ID), float(f.get("a1", 0.0)),
+		f.get("f2", _FOLD_ID), float(f.get("a2", 0.0)),
+		float(f.get("pleat", 0.0)), float(f.get("crumple", 0.0)))
 
 ## 「起-保持-收」包络：[0,up] 平滑升到 1，保持，[down,1] 平滑落回 0。翻面/躺平类动作用。
 static func _hold_env(k: float, up: float, down: float) -> float:
 	return smoothstep(0.0, up, k) * (1.0 - smoothstep(down, 1.0, k))
 
-## 纯函数（可单测）：动作在 t 时刻的演出偏移。20 种纸片动作的动画数学单一来源。
+## 纯函数（可单测）：动作在 t 时刻的演出偏移。26 种纸片动作的动画数学单一来源。
 ## 返回 { "rot": Vector3 加性欧拉角, "y": float 加性抬升, "scale": Vector3 绝对值（ONE=不动）,
-## "motion": Vector2(flutter, curl) 仅在覆盖 shader 纸形变时存在 }。
+## "motion": Vector2(flutter, curl) 仅在覆盖 shader 纸形变时存在,
+## "xz": Vector2 视觉平移 仅纸飞机绕圈存在,
+## "fold": {f1,a1,f2,a2,pleat,crumple} 仅折纸类动作存在（格式见 paper_character.gdshader）}。
 ## 朝向约定：相机在 +Z；rotation.x 正=顶朝相机倒（扑街脸着地），负=后仰（躺平脸朝天）。
 static func action_pose(action: String, t: float, dur: float) -> Dictionary:
 	var k := clampf(t / dur, 0.0, 1.0)
@@ -2062,6 +2078,8 @@ static func action_pose(action: String, t: float, dur: float) -> Dictionary:
 	var y := 0.0
 	var sc := Vector3.ONE
 	var motion := Vector2.INF # INF = 不覆盖
+	var fold := {}
+	var xz := Vector2.INF # INF = 无视觉平移
 	match action:
 		# —— 基础 4 种（与旧版一致）——
 		"wave":
@@ -2129,9 +2147,53 @@ static func action_pose(action: String, t: float, dur: float) -> Dictionary:
 			var env2 := _hold_env(k, 0.3, 0.7)
 			sc = Vector3(1.0 - 0.22 * env2, 1.0 + 0.4 * env2, 1.0)
 			rot.z = deg_to_rad(6.0) * sin(t * TAU * 1.2) * env2
+		# —— 折纸（shader 折痕机关）——
+		"fold": # 对折躲猫猫：沿竖中线把左半张朝相机折过来盖住右半，停一拍弹开
+			var fe := _hold_env(k, 0.25, 0.75)
+			fold = { "f1": Vector4(0.0, 0.0, 0.0, 1.0), "a1": deg_to_rad(165.0) * fe }
+			rot.y = deg_to_rad(-14.0) * fe # 微侧身让对折立体可读
+		"bow_fold": # 折纸鞠躬：上半张沿横中线向前折下（道谢/道歉）
+			var be := _hold_env(k, 0.3, 0.7)
+			fold = { "f1": Vector4(0.0, 0.55, 1.0, 0.0), "a1": deg_to_rad(115.0) * be }
+		"corner_wink": # 折角卖萌：右上角沿斜痕折下来再弹回，像给书页折个角。
+			# 痕要切得深（穿过头/耳区）：立绘内容居中，四角是透明 alpha，浅痕折了个寂寞
+			var ce := _hold_env(k, 0.25, 0.55)
+			fold = { "f1": Vector4(-0.1, 0.9, 0.93, -0.38), "a1": deg_to_rad(140.0) * ce }
+			rot.z = deg_to_rad(-4.0) * ce # 顺势歪头
+		"paper_plane": # 纸飞机：两肩向后折成箭头，前倾滑翔原地绕一小圈再展开
+			var pe := _hold_env(k, 0.22, 0.8)
+			# 两条痕都从头顶中点出发：f1 向右下（法侧=右肩）、f2 向右上（法侧=左肩），
+			# 角度同为负=向后（-Z）折；痕线方向决定法侧在哪半边，改动须重验折的是肩不是身
+			fold = {
+				"f1": Vector4(0.0, 1.0, 0.48, -0.88), "a1": -deg_to_rad(120.0) * pe,
+				"f2": Vector4(0.0, 1.0, 0.48, 0.88), "a2": -deg_to_rad(120.0) * pe,
+			}
+			rot.x = deg_to_rad(55.0) * pe # 机头前倾
+			var prog := smoothstep(0.2, 0.8, k) # 飞行段：绕圈一周
+			rot.y = TAU * prog
+			xz = Vector2(sin(TAU * prog), cos(TAU * prog) - 1.0) * 1.0
+			y = e * 1.2
+		"accordion": # 风琴折：zigzag 折成半高的小风琴，"啵"地弹开
+			var ae := _hold_env(k, 0.3, 0.65)
+			fold = { "pleat": 0.32 * ae }
+			sc = Vector3(1.0 + 0.12 * ae, 1.0 - 0.45 * ae, 1.0)
+			rot.z = deg_to_rad(5.0) * sin(t * TAU * 3.0) * e * (1.0 - ae) # 弹开时的余晃
+		"crumple_ball": # 揉纸团：揉皱缩成一团滚一整圈，再展开抖平
+			var re := _hold_env(k, 0.3, 0.7)
+			fold = { "crumple": 0.45 * re }
+			sc = Vector3.ONE * (1.0 - 0.5 * re)
+			# 旋转绕的是脚底锚点：不抬升的话滚到侧面/头朝下时整团甩进地里（实录实证）。
+			# 按 y=R(1-cosθ) 抬升让"纸团中心"保持定高≈贴地滚动；整圈收尾角度归零不跳变
+			var roll := TAU * smoothstep(0.15, 0.85, k)
+			rot.z = roll
+			y = 1.5 * (1.0 - cos(roll)) # R≈缩团后半高，θ=π 时抬满一个团高，脚底锚点滚不进地
 	var p := { "rot": rot, "y": y, "scale": sc }
 	if motion != Vector2.INF:
 		p["motion"] = motion
+	if not fold.is_empty():
+		p["fold"] = fold
+	if xz != Vector2.INF:
+		p["xz"] = xz
 	return p
 
 ## 纯判定（可单测）：近身空闲村民本帧是否该打招呼。busy=选中/聊天/叫停/正在做动作。

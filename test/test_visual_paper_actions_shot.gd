@@ -16,9 +16,10 @@ const ALL_ACTIONS := [
 	"paperflip", "peek", "lie_down", "faceplant",
 	"curl_up", "shiver", "wiggle", "puff",
 	"bounce", "squish", "stretch",
+	"fold", "bow_fold", "corner_wink", "paper_plane", "accordion", "crumple_ball",
 ]
 var ACTIONS: Array = ALL_ACTIONS if OS.get_environment("ONLY").is_empty() \
-		else [OS.get_environment("ONLY")]
+		else Array(OS.get_environment("ONLY").split(","))
 
 var scene: Node
 var frame := 0
@@ -51,10 +52,8 @@ func _tick() -> void:
 			var l: Variant = scene.get(lbl)
 			if l != null and is_instance_valid(l):
 				(l as Control).visible = false
-		for n in (scene.get("npcs") as Array): # 清场：藏全体 NPC（含仙子）+压住主动打招呼气泡
-			n["in_chat"] = true
-			(n["node"] as Node3D).visible = false
 		return
+	_cleanup_stage() # 每帧幂等清场：NPC 是陆续 spawn 的，只在 frame 1 清会漏掉后到的
 	if frame < _next_at:
 		return
 	_idx += 1
@@ -69,3 +68,16 @@ func _tick() -> void:
 	var frames := int(ceil(dur * FPS))
 	print("SHOT %s frames %d..%d (dur %.1fs)" % [a, frame, frame + frames, dur])
 	_next_at = frame + frames + GAP
+
+## 幂等清场：藏全体 NPC（含仙子）+压聊天/打招呼演出+掐在途脚本。NPC 与其 ambient
+## 脚本在加载后陆续出现，只在开场清一次会漏掉后到的，须每帧重申；
+## in_chat 同时挡住 _resume_ambient 与 notice 的随机挥手。
+func _cleanup_stage() -> void:
+	for ex in (scene.get("_executors") as Array):
+		(ex as BehaviorExecutor).cancel()
+	for n in (scene.get("npcs") as Array):
+		n["in_chat"] = true
+		n.erase("chat_with")
+		var node := n["node"] as Node3D
+		if node != null and is_instance_valid(node) and node.visible:
+			node.visible = false

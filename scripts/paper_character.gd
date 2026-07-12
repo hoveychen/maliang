@@ -252,6 +252,26 @@ func set_paper_motion(flutter_amp: float, curl: float) -> void:
 		_xray_mat.set_shader_parameter("flutter_amp", qf)
 		_xray_mat.set_shader_parameter("curl", qc)
 
+## 折纸机关参数（动作层每帧驱动，仅折纸类动作期间非零）。折痕格式见 shader 注释：
+## crease=Vector4(痕点 xn,yn, 痕方向 dx,dy)（归一化纸面坐标）。全零→全零是恒等快路径，
+## 待机时零上传；动作期间角度连续变化，逐帧重传（每场景同时折纸的角色至多一两个）。
+var _fold_active := false
+
+func set_paper_fold(f1: Vector4, a1: float, f2: Vector4, a2: float, pleat: float, crumple: float) -> void:
+	var active := a1 != 0.0 or a2 != 0.0 or pleat != 0.0 or crumple != 0.0
+	if not active and not _fold_active:
+		return
+	_fold_active = active
+	var mats := [_mat] if _mat.next_pass == null else [_mat, _xray_mat]
+	for m in mats:
+		var sm := m as ShaderMaterial
+		sm.set_shader_parameter("fold1", f1)
+		sm.set_shader_parameter("fold1_angle", a1)
+		sm.set_shader_parameter("fold2", f2)
+		sm.set_shader_parameter("fold2_angle", a2)
+		sm.set_shader_parameter("pleat_amp", pleat)
+		sm.set_shader_parameter("crumple_amp", crumple)
+
 ## 从静态立绘切到 idle 动画图集。meta 为服务端 SpriteSheetMeta（cols/rows/frameCount/fps/cellW/cellH）。
 ## world_height：期望世界高度（米），与切换前静态立绘保持一致，观感不跳。phase：相位偏移（秒）。
 func play_idle(atlas: Texture2D, meta: Dictionary, world_height: float, phase := 0.0) -> void:

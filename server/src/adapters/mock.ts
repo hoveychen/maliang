@@ -166,8 +166,10 @@ export function createMockAdapters(): ServiceAdapters {
             performerName,
           };
         }
-        // 有序匹配：长词在前防"翻跟头/翻面"这类同前缀误吞（20 种动作见 openrouter_llm ABILITY_DESC）
+        // 有序匹配：长词在前防"翻跟头/翻面/对折/折角"这类同前缀误吞（26 种动作见 openrouter_llm ABILITY_DESC）
         const ACTION_WORDS: Array<[RegExp, string]> = [
+          [/纸飞机/, 'paper_plane'], [/折个?角/, 'corner_wink'], [/对折/, 'fold'],
+          [/鞠个?躬/, 'bow_fold'], [/风琴/, 'accordion'], [/揉成?纸?团|揉一?揉/, 'crumple_ball'],
           [/翻个?跟头|前滚翻/, 'flip'], [/后空翻/, 'backflip'], [/侧手翻/, 'cartwheel'],
           [/翻个?面/, 'paperflip'], [/躺平|躺下/, 'lie_down'], [/扑街|摔一?跤/, 'faceplant'],
           [/卷起来|卷成/, 'curl_up'], [/发抖|哆嗦/, 'shiver'], [/扭一?扭/, 'wiggle'],
