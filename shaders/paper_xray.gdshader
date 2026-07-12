@@ -16,6 +16,15 @@ uniform float curl = 0.0;
 uniform float flutter_amp = 0.0;
 uniform float flutter_speed = 7.0;
 
+// 折纸机关参数与主 pass 完全一致（见 paper_character.gdshader 注释），剪影随折叠同步变形
+uniform vec4 fold1 = vec4(0.0, 0.0, 0.0, 1.0);
+uniform float fold1_angle = 0.0;
+uniform vec4 fold2 = vec4(0.0, 0.0, 0.0, 1.0);
+uniform float fold2_angle = 0.0;
+uniform float pleat_amp = 0.0;
+uniform float pleat_freq = 4.0;
+uniform float crumple_amp = 0.0;
+
 // 与主 pass 相同的 sprite-sheet 分格参数（保证剪影与当前动画格同步）
 uniform int sheet_cols = 1;
 uniform int sheet_rows = 1;
@@ -49,9 +58,41 @@ float sample_alpha(vec2 base) {
 	return texture(albedo_tex, sheet_uv(base)).a;
 }
 
+// 与主 pass 逐行一致的折痕函数（paper_character.gdshader）
+void apply_fold(inout vec3 v, vec4 crease, float ang, vec2 qs) {
+	if (abs(ang) < 1e-4) {
+		return;
+	}
+	vec2 o = vec2(crease.x * qs.x * 0.5, crease.y * qs.y);
+	vec2 d = normalize(vec2(crease.z * qs.x * 0.5, crease.w * qs.y));
+	vec2 n = vec2(-d.y, d.x);
+	float t = dot(v.xy - o, d);
+	float dist = dot(v.xy - o, n);
+	if (dist <= 0.0) {
+		return;
+	}
+	float c = cos(ang);
+	float s = sin(ang);
+	v.xy = o + d * t + n * (dist * c - v.z * s);
+	v.z = dist * s + v.z * c;
+}
+
 void vertex() {
 	float xn = VERTEX.x / max(quad_size.x * 0.5, 0.001);
 	float yn = clamp(VERTEX.y / max(quad_size.y, 0.001), 0.0, 1.0);
+	vec3 v = VERTEX;
+	apply_fold(v, fold1, fold1_angle, quad_size);
+	apply_fold(v, fold2, fold2_angle, quad_size);
+	if (pleat_amp > 0.0) {
+		v.z += pleat_amp * (abs(fract(yn * pleat_freq) - 0.5) * 2.0 - 0.5);
+	}
+	if (crumple_amp > 0.0) {
+		v += crumple_amp * 0.5 * vec3(
+			sin(VERTEX.x * 13.1 + VERTEX.y * 7.7),
+			sin(VERTEX.x * 9.3 - VERTEX.y * 11.9 + 3.1),
+			sin(VERTEX.x * 15.7 + VERTEX.y * 5.3 + 1.7));
+	}
+	VERTEX = v;
 	VERTEX.z += curl * xn * xn;
 	VERTEX.z += flutter_amp * (1.0 - yn) * sin(yn * 9.0 - TIME * flutter_speed + xn * 1.5);
 }
