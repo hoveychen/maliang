@@ -182,12 +182,51 @@ test('编码期自检：平面长度与 grid 不符 / palette 超上限直接抛
   assert.throws(() => encodeTerrain(t), /types length/);
 
   const t2 = terrain();
-  t2.itemRef = new Uint8Array(N + 1);
+  t2.itemRef = new Uint16Array(N + 1);
   assert.throws(() => encodeTerrain(t2), /itemRef length/);
 
   const t3 = terrain();
-  t3.palette = Array.from({ length: 256 }, (_, i) => `it${i}`);
-  assert.throws(() => encodeTerrain(t3), /palette 256/);
+  t3.palette = Array.from({ length: 65536 }, (_, i) => `it${i}`);
+  assert.throws(() => encodeTerrain(t3), /palette 65536/);
+});
+
+// ── v3：palette > 255 时 itemRef/edge 平面 + palette count 升 u16 ──────────
+test('v3 round-trip：palette 256 项、高索引物品 itemRef/edge 无损往返', () => {
+  const t = terrain((x) => {
+    x.palette = Array.from({ length: 256 }, (_, i) => `it${i}`);   // 触发 v3
+    x.itemRef[100] = 256; x.itemArg[100] = 57;   // 高于 u8 上限的索引
+    x.itemRef[200] = 1;   x.itemArg[200] = 128;
+    x.edges[0][300] = 256;                        // 边缘也能引用高索引
+    x.edges[3][400] = 200;
+  });
+  const buf = encodeTerrain(t);
+  assert.equal(buf[4], 3, '触发 v3 版本位');
+
+  const back = decodeTerrain(buf);
+  assert.deepEqual(back.itemRef, t.itemRef);
+  assert.deepEqual(back.itemArg, t.itemArg);
+  for (let e = 0; e < 4; e++) assert.deepEqual(back.edges[e], t.edges[e]);
+  assert.equal(back.palette.length, 256);
+  assert.equal(back.palette[255], 'it255');
+  assert.equal(back.itemRef[100], 256);
+  assert.equal(back.edges[0][300], 256);
+});
+
+test('v3 体积：itemRef+4 边缘平面各 2 字节、其余 1 字节、palette count 2 字节', () => {
+  const t = terrain((x) => { x.palette = Array.from({ length: 256 }, (_, i) => `i${i}`); });
+  const buf = encodeTerrain(t);
+  // 平面：types/heights/depths/itemArg 各 1B(4×N)，itemRef+4 边缘各 2B(5×2N)
+  const planeBytes = 4 * N + 5 * 2 * N;
+  // palette 尾段：count u16(2B) + 256×(len u8 + utf8)；'i0'..'i255' 长度 2~4
+  const paletteBytes = 2 + t.palette.reduce((s, id) => s + 1 + Buffer.byteLength(id), 0);
+  assert.equal(buf.length, HEADER_BYTES + planeBytes + paletteBytes);
+});
+
+test('v3 兼容：palette 恰好 255 仍写 v2（自适应，存量场景零膨胀）', () => {
+  const t = terrain((x) => { x.palette = Array.from({ length: 255 }, (_, i) => `i${i}`); });
+  const buf = encodeTerrain(t);
+  assert.equal(buf[4], TERRAIN_VERSION, '255 项走 v2');
+  assert.equal(decodeTerrain(buf).palette.length, 255);
 });
 
 test('水格可以有水深，草/路格水深为 0 —— 合法数据不该被误杀', () => {

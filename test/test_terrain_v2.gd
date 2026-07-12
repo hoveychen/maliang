@@ -7,6 +7,7 @@ extends SceneTree
 
 const EX := preload("res://tools/export_terrain.gd")
 const HEADER := 11
+const EDGE_W_IDX := 3   ## 与 TerrainMap.EDGE_W 对齐（N/E/S/W = 0/1/2/3）
 
 func _init() -> void:
 	var fails := 0
@@ -57,6 +58,30 @@ func _init() -> void:
 		fails += _check("拒收 %s" % c["why"], r["ok"], false)
 	fails += _check("拒收后物品仍在", TerrainMap.tile_item_id(tile), "tree_puff_a")
 
+	# ── v3：palette >255，itemRef/edge 升 u16 小端；高索引物品读回 ──────────
+	var pal256: Array = []
+	for i in range(256):
+		pal256.append("it%d" % i)   # 256 项 → 触发 v3
+	var t3 := Vector2i(20, 20)
+	var i3 := t3.y * n + t3.x
+	# itemRef=256(超 u8)、edgeW=200；朝向 90°(arg=64)
+	var v3 := _v3_from_v1(v1, pal256, { i3: [256, 64] }, { EDGE_W_IDX: { i3: 200 } })
+	TerrainMap.reset()
+	r = TerrainMap.load_from_bytes(v3)
+	fails += _check("v3 载入 ok", r["ok"], true)
+	fails += _check("v3 版本位=3", v3[4], 3)
+	fails += _check("v3 高索引物品读回(palette 第 256 项)", TerrainMap.tile_item_id(t3), "it255")
+	fails += _check("v3 边缘高索引读回", TerrainMap.edge_item_id(t3, TerrainMap.EDGE_W), "it199")
+	fails += _check("v3 palette 256 项", TerrainMap.palette().size(), 256)
+	fails += _check("v3 朝向 90°", TerrainMap.tile_item_yaw_deg(t3), 90.0)
+	fails += _check("v3 空 tile 无物品", TerrainMap.tile_item_id(Vector2i(21, 21)), "")
+	# v3 拒收：itemRef 越出 palette
+	var v3_over := v3.duplicate()
+	v3_over.encode_u16(HEADER + 3 * count + 2 * i3, 300) # palette 只有 256 项，itemRef 写 300
+	TerrainMap.reset()
+	r = TerrainMap.load_from_bytes(v3_over)
+	fails += _check("v3 拒收索引越 palette", r["ok"], false)
+
 	TerrainMap.reset()
 	print("test_terrain_v2: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
@@ -81,6 +106,38 @@ func _v2_from_v1(v1: PackedByteArray, palette: Array, refs: Dictionary) -> Packe
 	zeros.resize(4 * count) # 四张空边缘平面
 	out.append_array(zeros)
 	out.append(palette.size())
+	for id: String in palette:
+		var b := id.to_utf8_buffer()
+		out.append(b.size())
+		out.append_array(b)
+	return out
+
+## v1 载荷 → v3：版本改 3，itemRef+4 边缘平面 u16 小端，palette count u16 小端。
+## item_refs: { 平面索引: [palette引用(1起), arg字节] }；edge_refs: { 边side: { 平面索引: 引用 } }
+func _v3_from_v1(v1: PackedByteArray, palette: Array, item_refs: Dictionary, edge_refs: Dictionary) -> PackedByteArray:
+	var n := WorldGrid.GRID_TILES
+	var count := n * n
+	var out := v1.slice(0, HEADER + 3 * count)
+	out[4] = TerrainMap.MLTR_VERSION_3
+	# itemRef u16 平面
+	var item_ref := PackedByteArray(); item_ref.resize(count * 2)
+	var item_arg := PackedByteArray(); item_arg.resize(count)
+	for i in item_refs:
+		item_ref.encode_u16(i * 2, item_refs[i][0])
+		item_arg[i] = item_refs[i][1]
+	out.append_array(item_ref)
+	out.append_array(item_arg)
+	# 4 张边缘 u16 平面
+	for side in range(4):
+		var edge := PackedByteArray(); edge.resize(count * 2)
+		if edge_refs.has(side):
+			for i in edge_refs[side]:
+				edge.encode_u16(i * 2, edge_refs[side][i])
+		out.append_array(edge)
+	# palette count u16 小端 + 项
+	var pc := PackedByteArray(); pc.resize(2)
+	pc.encode_u16(0, palette.size())
+	out.append_array(pc)
 	for id: String in palette:
 		var b := id.to_utf8_buffer()
 		out.append(b.size())

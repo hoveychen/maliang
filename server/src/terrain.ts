@@ -21,18 +21,28 @@
  *   edgeN/E/S/W u8[W*H] ×4      边缘挂载 palette 索引，一期恒 0
  *   palette  count u8 + count × (len u8 + item_id UTF-8)
  *
+ * v3（palette > 255 时自动启用）：itemRef 与 4 张边缘平面升 u16（小端），palette
+ * count 尾段也升 u16——让单场景可同时引用 65535 种物品。itemArg（朝向）与地貌三
+ * 平面仍 u8。palette ≤255 时编码器仍写 v2（字节与旧版逐字节一致，存量场景零膨胀）。
+ * 三个版本解码侧全兼容（v1 存量/v2 存量/v3 新写）；编码侧按 palette 长度自适应选 v2/v3。
+ *
  * 75×75 v1 → 11 + 3×5625 = 16886 B（gzip 后实测 495 B）；
- * v2 → 11 + 9×5625 + palette ≈ 50.7 KB（item 平面低熵，gzip 预计 <3 KB）。
+ * v2 → 11 + 9×5625 + palette ≈ 50.7 KB（item 平面低熵，gzip 预计 <3 KB）；
+ * v3 → 11 + 14×5625 + palette ≈ 78.8 KB（5 张升 u16 的平面 itemRef 低熵、4 边缘恒 0，gzip 后近乎无增量）。
  */
 
 export const TERRAIN_MAGIC = 'MLTR';
 export const TERRAIN_VERSION_1 = 1;
 export const TERRAIN_VERSION = 2;
+export const TERRAIN_VERSION_3 = 3;
 export const HEADER_BYTES = 11;
-/** v2 的平面数（v1 是前 3 张）。 */
+/** v2 的平面数（v1 是前 3 张；v3 平面数同 9，只是 5 张变宽）。 */
 export const PLANES_V2 = 9;
-/** palette 容量上限：itemRef 是 u8，0 留给「无物品」。 */
-export const MAX_PALETTE = 255;
+/**
+ * palette 容量上限：v2 的 itemRef/count 是 u8（≤255），v3 升 u16（≤65535），
+ * 0 恒留给「无物品」。编码器按 palette 长度自适应，>255 走 v3。
+ */
+export const MAX_PALETTE = 65535;
 
 /**
  * 第一版所有场景一律 75×75。
@@ -75,13 +85,13 @@ export interface Terrain {
   types: Uint8Array;
   heights: Uint8Array;
   depths: Uint8Array;
-  /** 物品引用平面：0=无 / 1..N=palette 索引（多 tile 物品只写锚点 tile）。 */
-  itemRef: Uint8Array;
-  /** 物品参数平面：朝向全字节 256 档（argYawDeg/yawToArg）。 */
+  /** 物品引用平面：0=无 / 1..N=palette 索引（多 tile 物品只写锚点 tile）。u16 容纳 v3 高索引。 */
+  itemRef: Uint16Array;
+  /** 物品参数平面：朝向全字节 256 档（argYawDeg/yawToArg）。恒 u8。 */
   itemArg: Uint8Array;
-  /** 边缘挂载平面 N/E/S/W（一期恒 0，数据位）。 */
-  edges: [Uint8Array, Uint8Array, Uint8Array, Uint8Array];
-  /** palette：u8 索引-1 → 物品实体 id（items.ts / items 表）。 */
+  /** 边缘挂载平面 N/E/S/W（一期恒 0，数据位）。u16 与 itemRef 同宽（共享 palette）。 */
+  edges: [Uint16Array, Uint16Array, Uint16Array, Uint16Array];
+  /** palette：索引-1 → 物品实体 id（items.ts / items 表）。 */
   palette: string[];
 }
 
@@ -98,8 +108,8 @@ export function emptyTerrain(): Terrain {
   return {
     gridW: REQUIRED_GRID, gridH: REQUIRED_GRID, tileSize: DEFAULT_TILE_SIZE,
     types: new Uint8Array(n), heights: new Uint8Array(n), depths: new Uint8Array(n),
-    itemRef: new Uint8Array(n), itemArg: new Uint8Array(n),
-    edges: [new Uint8Array(n), new Uint8Array(n), new Uint8Array(n), new Uint8Array(n)],
+    itemRef: new Uint16Array(n), itemArg: new Uint8Array(n),
+    edges: [new Uint16Array(n), new Uint16Array(n), new Uint16Array(n), new Uint16Array(n)],
     palette: [],
   };
 }
@@ -115,7 +125,7 @@ export function yawToArg(deg: number): number {
   return Math.round(norm / (360 / 256)) % 256;
 }
 
-function planes(t: Terrain): Uint8Array[] {
+function planes(t: Terrain): (Uint8Array | Uint16Array)[] {
   return [t.types, t.heights, t.depths, t.itemRef, t.itemArg, ...t.edges];
 }
 
@@ -132,7 +142,10 @@ function assertPlanes(t: Terrain): void {
 const utf8Enc = new TextEncoder();
 const utf8Dec = new TextDecoder('utf-8', { fatal: true });
 
-/** 编码恒为 v2（v1 只在解码侧兼容旧库存量/旧导出工具）。 */
+/**
+ * 编码自适应版本：palette ≤255 写 v2（字节与旧版逐字节一致，存量场景零膨胀），
+ * >255 写 v3（itemRef+4 边缘平面 + palette count 升 u16 小端）。v1 只在解码侧兼容。
+ */
 export function encodeTerrain(t: Terrain): Uint8Array {
   assertPlanes(t);
   if (t.gridW > 255 || t.gridH > 255 || t.gridW < 1 || t.gridH < 1) {
@@ -145,23 +158,34 @@ export function encodeTerrain(t: Terrain): Uint8Array {
     return b;
   });
 
+  const wide = t.palette.length > 255;         // v3 门槛：超出 u8 索引域
   const n = t.gridW * t.gridH;
-  const paletteBytes = 1 + ids.reduce((s, b) => s + 1 + b.length, 0);
-  const out = new Uint8Array(HEADER_BYTES + PLANES_V2 * n + paletteBytes);
+  // v2：9 平面各 1B + palette(count u8 + 项)；v3：itemRef+4 边缘各 2B、其余 1B + palette(count u16 + 项)
+  const planeBytes = wide ? (4 * n + 5 * 2 * n) : PLANES_V2 * n;
+  const countBytes = wide ? 2 : 1;
+  const paletteBytes = countBytes + ids.reduce((s, b) => s + 1 + b.length, 0);
+  const out = new Uint8Array(HEADER_BYTES + planeBytes + paletteBytes);
   const view = new DataView(out.buffer);
 
   for (let i = 0; i < 4; i++) out[i] = TERRAIN_MAGIC.charCodeAt(i);
-  out[4] = TERRAIN_VERSION;
+  out[4] = wide ? TERRAIN_VERSION_3 : TERRAIN_VERSION;
   out[5] = t.gridW;
   out[6] = t.gridH;
   view.setFloat32(7, t.tileSize, true);
 
   let off = HEADER_BYTES;
-  for (const p of planes(t)) {
-    out.set(p, off);
-    off += n;
-  }
-  out[off++] = ids.length;
+  const putU8 = (p: Uint8Array | Uint16Array) => { out.set(p, off); off += n; };
+  const putU16 = (p: Uint16Array) => {
+    for (let i = 0; i < n; i++) { view.setUint16(off, p[i]!, true); off += 2; }
+  };
+  // 顺序恒 types,heights,depths,itemRef,itemArg,edgeN,E,S,W——v2 全 u8，v3 仅 itemRef 与 4 边缘 u16
+  putU8(t.types); putU8(t.heights); putU8(t.depths);
+  wide ? putU16(t.itemRef) : putU8(t.itemRef);
+  putU8(t.itemArg);
+  for (const e of t.edges) wide ? putU16(e) : putU8(e);
+
+  if (wide) { view.setUint16(off, ids.length, true); off += 2; }
+  else { out[off++] = ids.length; }
   for (const b of ids) {
     out[off++] = b.length;
     out.set(b, off);
@@ -184,8 +208,8 @@ export function decodeTerrain(buf: Uint8Array): Terrain {
   if (magic !== TERRAIN_MAGIC) throw new TerrainFormatError(`magic ${JSON.stringify(magic)}`);
 
   const version = buf[4]!;
-  if (version !== TERRAIN_VERSION_1 && version !== TERRAIN_VERSION) {
-    throw new TerrainFormatError(`version ${version}, expect ${TERRAIN_VERSION_1}|${TERRAIN_VERSION}`);
+  if (version !== TERRAIN_VERSION_1 && version !== TERRAIN_VERSION && version !== TERRAIN_VERSION_3) {
+    throw new TerrainFormatError(`version ${version}, expect ${TERRAIN_VERSION_1}|${TERRAIN_VERSION}|${TERRAIN_VERSION_3}`);
   }
 
   const gridW = buf[5]!;
@@ -209,17 +233,31 @@ export function decodeTerrain(buf: Uint8Array): Terrain {
     t.heights = buf.slice(HEADER_BYTES + n, HEADER_BYTES + 2 * n);
     t.depths = buf.slice(HEADER_BYTES + 2 * n, want);
   } else {
-    const planesEnd = HEADER_BYTES + PLANES_V2 * n;
-    if (buf.length < planesEnd + 1) throw new TerrainFormatError(`length ${buf.length}, expect >= ${planesEnd + 1}`); // palette 至少 count 一个字节
+    const wide = version === TERRAIN_VERSION_3;   // v3：itemRef+4 边缘 + count 升 u16 小端
+    const refWidth = wide ? 2 : 1;
+    const countWidth = wide ? 2 : 1;
+    // 平面字节：types/heights/depths/itemArg 各 1B，itemRef+4 边缘各 refWidth
+    const planeBytes = 4 * n + 5 * refWidth * n;
+    const planesEnd = HEADER_BYTES + planeBytes;
+    if (buf.length < planesEnd + countWidth) throw new TerrainFormatError(`length ${buf.length}, expect >= ${planesEnd + countWidth}`); // palette 至少 count 字段
+    const readU16Plane = (from: number): Uint16Array => {
+      const p = new Uint16Array(n);
+      for (let i = 0; i < n; i++) p[i] = view.getUint16(from + 2 * i, true);
+      return p;
+    };
     let off = HEADER_BYTES;
     t.types = buf.slice(off, off + n); off += n;
     t.heights = buf.slice(off, off + n); off += n;
     t.depths = buf.slice(off, off + n); off += n;
-    t.itemRef = buf.slice(off, off + n); off += n;
+    if (wide) { t.itemRef = readU16Plane(off); off += 2 * n; }
+    else { t.itemRef = Uint16Array.from(buf.slice(off, off + n)); off += n; }
     t.itemArg = buf.slice(off, off + n); off += n;
-    for (let e = 0; e < 4; e++) { t.edges[e] = buf.slice(off, off + n); off += n; }
+    for (let e = 0; e < 4; e++) {
+      if (wide) { t.edges[e] = readU16Plane(off); off += 2 * n; }
+      else { t.edges[e] = Uint16Array.from(buf.slice(off, off + n)); off += n; }
+    }
 
-    const count = buf[off]!; off += 1;
+    const count = wide ? view.getUint16(off, true) : buf[off]!; off += countWidth;
     const seen = new Set<string>();
     for (let i = 0; i < count; i++) {
       if (off >= buf.length) throw new TerrainFormatError(`palette truncated at entry ${i}`);
@@ -240,7 +278,7 @@ export function decodeTerrain(buf: Uint8Array): Terrain {
     if (off !== buf.length) throw new TerrainFormatError(`length ${buf.length}, expect ${off}（palette 后有多余尾巴）`);
 
     // 引用平面的索引必须落在 palette 内
-    const refPlanes: Array<[string, Uint8Array]> = [
+    const refPlanes: Array<[string, Uint16Array]> = [
       ['itemRef', t.itemRef], ['edgeN', t.edges[0]], ['edgeE', t.edges[1]], ['edgeS', t.edges[2]], ['edgeW', t.edges[3]],
     ];
     for (const [name, plane] of refPlanes) {
