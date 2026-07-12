@@ -93,7 +93,7 @@ static func ensure_player_id() -> String:
 ## 上报给服务端 world_info 的玩家档案子集（首见建档用；键名对齐 server types.Player 的驼峰口径）。
 static func upload_dict() -> Dictionary:
 	var p := load_profile()
-	return {
+	var d := {
 		"name": String(p.get("name", "")),
 		"nickname": String(p.get("nickname", "")),
 		"gender": String(p.get("gender", "")),
@@ -102,6 +102,11 @@ static func upload_dict() -> Dictionary:
 		"createdAt": String(p.get("created_at", "")),
 		"device": device_dict(), # activity 记录：机型/系统/分辨率（IP/UA 服务端另补）
 	}
+	# 贴纸锚点随档案上报：服务端存进 Player、经 presence 转发给别人，「别人看到的我」贴纸位才准（design §5）。
+	var anchors: Variant = p.get("anchors")
+	if typeof(anchors) == TYPE_DICTIONARY and not (anchors as Dictionary).is_empty():
+		d["anchors"] = anchors
+	return d
 
 ## 设备信息块（world_info.profile.device）：给后台 activity 记录看"用什么设备来玩的"。
 ## 只报能稳定拿到的静态信息，不含任何可定位/隐私字段（IP 由服务端从连接层取）。

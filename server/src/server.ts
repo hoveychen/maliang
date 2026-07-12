@@ -82,7 +82,7 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
@@ -1639,9 +1639,30 @@ export interface ActorPresence {
   /** 玩家音色（playerId 稳定哈希，见 voiceForPlayer）：对端播放其 player_speech/招呼语用。 */
   voiceId: string;
   tile?: TilePos;
+  /** 贴纸锚点（design §5 actors 流转发）：让「别人看到的我」也吃真锚点，老档缺省走对端 alpha 兜底。 */
+  anchors?: CharacterAnchors;
 }
 
-function presenceOf(store: WorldStore, worldId: string, sceneId: string, playerId: string): ActorPresence {
+/** 夹紧不可信的上报 anchors（world_info.profile 是设备端自报）：三点齐全且 x,y 有限才收、坐标夹到 [0,1]；否则 undefined。 */
+export function sanitizeAnchors(v: unknown): CharacterAnchors | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const o = v as Record<string, unknown>;
+  const pt = (raw: unknown): AnchorPoint | undefined => {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const r = raw as Record<string, unknown>;
+    const x = Number(r.x);
+    const y = Number(r.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+    return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+  };
+  const headTop = pt(o.headTop);
+  const handL = pt(o.handL);
+  const handR = pt(o.handR);
+  if (!headTop || !handL || !handR) return undefined;
+  return { headTop, handL, handR, source: o.source === 'vision' ? 'vision' : 'fallback' };
+}
+
+export function presenceOf(store: WorldStore, worldId: string, sceneId: string, playerId: string): ActorPresence {
   const p = store.getPlayer(playerId);
   return {
     playerId,
@@ -1649,6 +1670,7 @@ function presenceOf(store: WorldStore, worldId: string, sceneId: string, playerI
     spriteAsset: p?.spriteAsset ?? '',
     voiceId: voiceForPlayer(playerId, p?.gender),
     tile: store.getPlayerTile(worldId, sceneId, playerId),
+    ...(p?.anchors ? { anchors: p.anchors } : {}),
   };
 }
 
@@ -1791,6 +1813,7 @@ export async function handleWsMessage(
       color?: string;
       spriteAsset?: string;
       createdAt?: string;
+      anchors?: unknown; // 设备端自报的贴纸锚点；服务端 sanitizeAnchors 夹紧后落库（design §5）
       device?: DeviceReport; // 设备信息上报（机型/系统等）；服务端另并入 IP/UA
     };
   };
@@ -1828,6 +1851,7 @@ export async function handleWsMessage(
     // 也不覆盖已有真实档（断线重连时客户端档案若丢失，服务端记录不被抹掉）。
     if (typeof msg.playerId === 'string' && msg.playerId && msg.profile) {
       const p = msg.profile;
+      const anchors = sanitizeAnchors(p.anchors); // 设备端自报，夹紧后随 Player 落库供 presence 转发（design §5）
       const player: Player = {
         id: msg.playerId,
         name: String(p.name ?? ''),
@@ -1836,6 +1860,7 @@ export async function handleWsMessage(
         color: String(p.color ?? ''),
         spriteAsset: String(p.spriteAsset ?? ''),
         createdAt: String(p.createdAt ?? ''),
+        ...(anchors ? { anchors } : {}),
       };
       if (player.name !== '' || player.spriteAsset !== '') store.upsertPlayer(player);
     }
