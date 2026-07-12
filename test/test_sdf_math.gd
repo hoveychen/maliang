@@ -33,6 +33,34 @@ func _init() -> void:
 	fails += _check("box face +x", SdfMath.prim_dist(bx, Vector3(2.0, 0, 0)), 1.0)
 	fails += _check("box inside", SdfMath.prim_dist(bx, Vector3.ZERO) < 0.0, true)
 
+	# ---- 环面（满环 R=1, r=0.2；环在 XY 平面、孔轴沿 Z）----
+	var tor := SdfMath.torus(Transform3D.IDENTITY, 1.0, 0.2, 180.0)
+	fails += _check("torus centerline", SdfMath.prim_dist(tor, Vector3(1, 0, 0)), -0.2)
+	fails += _check("torus outer surface", SdfMath.prim_dist(tor, Vector3(1.2, 0, 0)), 0.0)
+	fails += _check("torus z surface", SdfMath.prim_dist(tor, Vector3(1, 0, 0.2)), 0.0)
+	fails += _check("torus hole center", SdfMath.prim_dist(tor, Vector3(0, 0, 0)), 0.8)
+	fails += _check("torus outside", SdfMath.prim_dist(tor, Vector3(2.2, 0, 0)), 1.0)
+	# 开口 C 环（arc_deg=90，开口在 -Y）：+Y 侧在管内，-Y 侧在开口外
+	var arc := SdfMath.torus(Transform3D.IDENTITY, 1.0, 0.2, 90.0)
+	fails += _check("arc top inside", SdfMath.prim_dist(arc, Vector3(0, 1, 0)), -0.2)
+	fails += _check("arc gap far", SdfMath.prim_dist(arc, Vector3(0, -1, 0)), sqrt(2.0) - 0.2)
+
+	# ---- 弯管（贝塞尔 A(原点)→B→C，圆截面）----
+	# 直线退化：B=中点 (0.5,0)，C=(1,0)，r=0.2 → 一根沿 +X 的直管
+	var line := SdfMath.bezier(Transform3D.IDENTITY, Vector2(0.5, 0), Vector2(1, 0), 0.2, 0.2)
+	fails += _check("bezier line centerline", SdfMath.prim_dist(line, Vector3(0.5, 0, 0)), -0.2)
+	fails += _check("bezier line y surface", SdfMath.prim_dist(line, Vector3(0.5, 0.2, 0)), 0.0)
+	fails += _check("bezier line z surface", SdfMath.prim_dist(line, Vector3(0.5, 0, 0.2)), 0.0)
+	fails += _check("bezier line side", SdfMath.prim_dist(line, Vector3(0.5, 0.5, 0)), 0.3)
+	# 端点半径变径：A 处 r0=0.3、C 处 r1=0.1
+	var taper := SdfMath.bezier(Transform3D.IDENTITY, Vector2(0.5, 0), Vector2(1, 0), 0.3, 0.1)
+	fails += _check("bezier taper r0 at A", SdfMath.prim_dist(taper, Vector3(0, 0.3, 0)), 0.0)
+	fails += _check("bezier taper r1 at C", SdfMath.prim_dist(taper, Vector3(1, 0.1, 0)), 0.0)
+	# 弯曲管（B 抬高）：A(0,0)→B(0.5,0.6)→C(1,0)，中点应在 y>0 处
+	var bend := SdfMath.bezier(Transform3D.IDENTITY, Vector2(0.5, 0.6), Vector2(1, 0), 0.15, 0.15)
+	var t_mid := SdfMath.prim_dist(bend, Vector3(0.5, 0.3, 0))
+	fails += _check("bezier bend mid inside", t_mid < 0.0, true)
+
 	# ---- smooth-min ----
 	fails += _check("smin far = min", SdfMath.smin(1.0, 5.0, 0.3), 1.0)
 	fails += _check("smin symmetric", SdfMath.smin(0.2, 0.3, 0.3), SdfMath.smin(0.3, 0.2, 0.3))
