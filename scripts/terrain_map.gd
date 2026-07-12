@@ -51,18 +51,23 @@ const T_RUBBLE := 21        ## 碎石（罗马碎石共用）
 const T_COBBLE := 22        ## 鹅卵石（中国卵石庭共用）
 const T_STONE_SLAB := 23    ## 石板（中国青石板/罗马石板共用，可抬高）
 const T_FARM_FURROW := 24   ## 农田垄
+## 罗马主题地表（themed-terrain P3）：罗马石板复用 T_STONE_SLAB、碎石复用 T_RUBBLE、斗兽场沙土复用 T_CRACKED_EARTH。
+const T_MARBLE := 25        ## 大理石（可抬高）
+const T_MOSAIC := 26        ## 马赛克地
+## 中国古代主题地表（themed-terrain P3）：青石板复用 T_STONE_SLAB、夯土复用 T_CRACKED_EARTH、卵石庭复用 T_COBBLE。
+const T_WOOD_FLOOR := 27    ## 木地板（廊；玩具/厨房共用，可抬高）
 ## 合法存储 tile 类型（校验/autotile 分组用）。
 const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
 	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
 	T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW,
 	T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE,
-	T_COBBLE, T_STONE_SLAB, T_FARM_FURROW]
+	T_COBBLE, T_STONE_SLAB, T_FARM_FURROW, T_MARBLE, T_MOSAIC, T_WOOD_FLOOR]
 ## 「画在草底上的 body」类型（autotile 与邻居同类过渡）：路 + 新增地表；水另走整格湖床。
 const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE,
 	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
 	T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW,
 	T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE,
-	T_COBBLE, T_STONE_SLAB, T_FARM_FURROW]
+	T_COBBLE, T_STONE_SLAB, T_FARM_FURROW, T_MARBLE, T_MOSAIC, T_WOOD_FLOOR]
 const MAX_HEIGHT := 255   ## 数据上限（存储为 byte）；默认地形主峰只到 8 级
 const STEP_HEIGHT := 2.0  ## 每级台阶的世界高度（米）= 1 格（tile 边长）；相邻 tile 跳变可超 1 级（陡崖）
 const MAX_DEPTH := 2      ## 默认地形的最大水深级数（1=浅水 2=深水；湖床 = 高度 - 深度）

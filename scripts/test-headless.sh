@@ -71,6 +71,8 @@ UNIT_TESTS=(
   test_terrain_icesnow
   test_terrain_jurassic
   test_terrain_medieval
+  test_terrain_roman
+  test_terrain_ancient_china
   test_sticker_edges
   test_forest_scene
   test_forest_reach

@@ -75,6 +75,11 @@ export const T_RUBBLE = 21;        // 碎石（罗马碎石共用）
 export const T_COBBLE = 22;        // 鹅卵石（中国卵石庭共用）
 export const T_STONE_SLAB = 23;    // 石板（中国青石板/罗马石板共用，可抬高）
 export const T_FARM_FURROW = 24;   // 农田垄
+// 罗马主题地表（themed-terrain P3）：罗马石板复用 T_STONE_SLAB、碎石复用 T_RUBBLE、斗兽场沙土复用 T_CRACKED_EARTH。
+export const T_MARBLE = 25;        // 大理石（可抬高）
+export const T_MOSAIC = 26;        // 马赛克地
+// 中国古代主题地表（themed-terrain P3）：青石板复用 T_STONE_SLAB、夯土复用 T_CRACKED_EARTH、卵石庭复用 T_COBBLE。
+export const T_WOOD_FLOOR = 27;    // 木地板（廊；玩具/厨房共用，可抬高）
 
 /** 合法的存储 tile 类型集合（校验用；3/4 是客户端崖壁 B 码，不入此集）。 */
 export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
@@ -82,7 +87,7 @@ export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
   T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
   T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW,
   T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE,
-  T_COBBLE, T_STONE_SLAB, T_FARM_FURROW,
+  T_COBBLE, T_STONE_SLAB, T_FARM_FURROW, T_MARBLE, T_MOSAIC, T_WOOD_FLOOR,
 ]);
 /** 可行走地表（非水）——新地形一律按草地行走规则；仅水阻挡。 */
 export function isWalkableTileType(t: number): boolean {
