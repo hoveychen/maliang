@@ -16,6 +16,7 @@ import {
 import { CREATION_OPTIONS, optionsByCategory, sizeToScale, inferSizeFromText } from '../creation_options.ts';
 import type { CreatureSize } from '../creation_options.ts';
 import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
+import { STICKER_CREATION_OPTIONS, STICKER_CREATION_ASK, stickerOptionsByCategory, composeStickerDesc, stickerIconPrompt } from '../sticker_creation_options.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
 
 // 1x1 透明 PNG，作为生图占位。（须是合法 PNG：Godot 客户端会真解码，CRC 错会拒收；
@@ -137,6 +138,19 @@ export function createMockAdapters(): ServiceAdapters {
             replyText: '好呀，我这就变出来！',
             behaviorScript: {
               commands: [{ type: 'create_character', params: { description: transcript } }],
+              loop: false,
+            },
+            emotion: 'happy',
+          };
+        }
+        // 造贴纸意图（仅拥有 create_sticker 能力的角色，如小神仙）：出现「贴纸/贴画」。
+        // 放在 create_prop 前：「做个贴纸」的「做个」也会命中造物，贴纸关键词优先归造贴纸。
+        if (ctx.abilities.includes('create_sticker') && /(贴纸|贴画|贴贴)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好呀，我们来做贴纸！',
+            behaviorScript: {
+              commands: [{ type: 'create_sticker', params: { description: transcript } }],
               loop: false,
             },
             emotion: 'happy',
@@ -288,6 +302,40 @@ export function createMockAdapters(): ServiceAdapters {
         const next: CreationCategory = !attrs.kind ? 'kind' : !attrs.color ? 'color' : !attrs.motion ? 'motion' : 'size';
         const optionIds = propOptionsByCategory(next).slice(0, 4).map((o) => o.id);
         return { replyText: PROP_CREATION_ASK[next], done: false, question: PROP_CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
+      },
+      async guideSticker(state: CreationState, childInput: string): Promise<GuideCreationResult> {
+        if (CANCEL_WORDS.test(childInput)) return { replyText: CANCEL_LINE, done: false, cancelled: true };
+        // 造贴纸 mock：从输入按图标 label 认属性（kind 图案/color 颜色），凑够 kind 或超轮即造。
+        const attrs = { ...state.attrs, traits: [...state.attrs.traits] };
+        const updated: Partial<CreationAttrs> = {};
+        const text = childInput.trim();
+        for (const o of STICKER_CREATION_OPTIONS) {
+          if (!text.includes(o.label)) continue;
+          if (o.category === 'kind' && !attrs.kind) { attrs.kind = o.label; updated.kind = o.label; }
+          else if (o.category === 'color' && !attrs.color) { attrs.color = o.label; updated.color = o.label; }
+        }
+        const early = /(就这样|好了|够了|够啦|可以了)/.test(text);
+        const enough = !!attrs.kind; // 有图案就能造（颜色可选）
+        const forced = state.turnCount >= 5;
+        if (early || enough || forced) {
+          const desc = composeStickerDesc(attrs);
+          return { replyText: `好呀，我这就做出${desc}！`, done: true, description: desc, updatedAttrs: updated };
+        }
+        // 追问下一个缺失类别（kind→color）
+        const next: CreationCategory = !attrs.kind ? 'kind' : 'color';
+        const optionIds = stickerOptionsByCategory(next).slice(0, 4).map((o) => o.id);
+        return { replyText: STICKER_CREATION_ASK[next], done: false, question: STICKER_CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
+      },
+      async designSticker(intentText: string): Promise<{ name: string; prompt: string }> {
+        // mock：确定性从中文描述里认图案 label → 贴纸名 + 英文扁平贴纸生图 prompt（真实接 LLM 自由理解）
+        const kindOpt = STICKER_CREATION_OPTIONS.find((o) => o.category === 'kind' && intentText.includes(o.label));
+        const colorOpt = STICKER_CREATION_OPTIONS.find((o) => o.category === 'color' && intentText.includes(o.label));
+        const kindLabel = kindOpt?.label ?? '图案';
+        const name = `${colorOpt?.label ?? ''}${kindLabel}贴纸`;
+        // prompt 走英文图案描述（图案 id → STICKER_ICON_PROMPTS），颜色用英文 id 前缀，喂 generateIcon。
+        const kindPrompt = kindOpt ? stickerIconPrompt(kindOpt.id) : 'a cute flat sticker';
+        const prompt = colorOpt ? `${colorOpt.id} colored ${kindPrompt}` : kindPrompt;
+        return { name, prompt };
       },
       async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
         // mock：确定性地扫整段会话的每轮「我叫X」「我喜欢X」抽要点并分类，去重后返回（真实接 LLM 自由判断）

@@ -37,6 +37,10 @@ export interface LLMAdapter {
   guideCreation(state: CreationState, childInput: string): Promise<GuideCreationResult>;
   /** 引导式造物品一轮：与 guideCreation 平行，问的是 kind/color/size/motion，产物描述喂 designSdfProp。 */
   guideProp(state: CreationState, childInput: string): Promise<GuideCreationResult>;
+  /** 引导式造贴纸一轮：与 guideProp 平行，问的是 kind(图案)/color，产物描述喂 designSticker。 */
+  guideSticker(state: CreationState, childInput: string): Promise<GuideCreationResult>;
+  /** 按贴纸的中文描述给出贴纸中文名 + 英文扁平贴纸生图 prompt（喂 generateIconAsset 管线）。 */
+  designSticker(intentText: string): Promise<{ name: string; prompt: string }>;
   /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条，各带分类 kind；去重、归属玩家由 voice 落地）。 */
   extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]>;
   /** session 超长压缩：把较旧轮次（并入上次摘要）压成一段中文摘要，session 内继续对话时注入。 */
