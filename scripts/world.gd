@@ -743,16 +743,42 @@ func _setup_player() -> void:
 	OccupancyMap.char_register(PLAYER_ID, spawn, PLAYER_SPAN)
 
 ## 档案里有生成形象时，从服务端拉取替换占位（离线/失败静默保留占位）。
+## 锚点(贴纸附着位)随档案一起下发：造角色时服务端 /player-sprite 返回体带 anchors、客户端存档
+## （见 onboarding/phone_ui），这里读出灌进玩家节点。老档案缺 anchors 时按 hash 现算一次补回。
 func _apply_player_sprite() -> void:
 	if player.is_empty():
 		return
-	var asset := String(PlayerProfile.load_profile().get("sprite_asset", ""))
-	_apply_player_sprite_to(player["node"] as PaperCharacter, asset)
+	var prof := PlayerProfile.load_profile()
+	var asset := String(prof.get("sprite_asset", ""))
+	var a: Variant = prof.get("anchors")
+	var anchors: Dictionary = a if typeof(a) == TYPE_DICTIONARY else {}
+	_apply_player_sprite_to(player["node"] as PaperCharacter, asset, anchors)
+	# 老档案（本次修复前造的角色）只有 sprite_asset 没有 anchors：按 hash 现算一次并落档（设计 §2.3）。
+	if not asset.is_empty() and anchors.is_empty():
+		_backfill_player_anchors(asset)
+
+## 老档案锚点补算（设计 §2.3）：服务端按 spriteAsset 现算 anchors → 存回设备档案 + 灌进玩家节点。
+## fire-and-forget、失败静默（离线/404 就继续走客户端 alpha 兜底）。
+func _backfill_player_anchors(asset: String) -> void:
+	var res: Dictionary = await api.post_json("/player-sprite/anchors", { "spriteAsset": asset })
+	var got: Variant = res.get("anchors")
+	if typeof(got) != TYPE_DICTIONARY or (got as Dictionary).is_empty():
+		return
+	var prof := PlayerProfile.load_profile()
+	if String(prof.get("sprite_asset", "")) != asset:
+		return # 期间玩家换了形象，别用旧 hash 的锚点覆盖新形象
+	prof["anchors"] = got
+	PlayerProfile.save_profile(prof)
+	if not player.is_empty() and is_instance_valid(player["node"]):
+		(player["node"] as PaperCharacter).set_anchors(got)
 
 ## 把某张玩家立绘应用到一个 PaperCharacter：本地玩家与远端玩家共用同一套归一化与 idle 轮询，
 ## 别人看到的我 = 我看到的我。node 可能中途被销毁（换场景/离场），每步 is_instance_valid 守卫。
 ## fire-and-forget 调用（不 await）：跑到首个 await 就返回，图到了再替换占位。
-func _apply_player_sprite_to(node: PaperCharacter, asset: String) -> void:
+## anchors 可选：本地玩家从设备档案传入（真·vision 锚点）；远端玩家副本无档案、留空走 alpha 兜底。
+func _apply_player_sprite_to(node: PaperCharacter, asset: String, anchors := {}) -> void:
+	if is_instance_valid(node) and not anchors.is_empty():
+		node.set_anchors(anchors) # 锚点与贴图解耦：先灌（离线/图未到也生效），贴纸后到自动重摆
 	if asset.is_empty() or not is_instance_valid(node):
 		return
 	var tex := await api.fetch_texture(asset)

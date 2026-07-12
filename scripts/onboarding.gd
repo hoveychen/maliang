@@ -73,6 +73,7 @@ var _gen_confirm: Control = null
 var _prefetch_state := ""          ## "" | pending | done | failed
 var _prefetch_hash := ""
 var _prefetch_tex: Texture2D = null
+var _prefetch_anchors: Dictionary = {}  ## /player-sprite 返回体带的贴纸锚点（headTop/handL/handR），随档案落盘
 
 func _ready() -> void:
 	_setup_background()
@@ -444,6 +445,8 @@ func _start_avatar_prefetch() -> void:
 	if tex == null:
 		_prefetch_state = "failed"
 		return
+	var anch: Variant = res.get("anchors")
+	_prefetch_anchors = anch if typeof(anch) == TYPE_DICTIONARY else {}
 	_prefetch_hash = hash
 	_prefetch_tex = tex
 	_prefetch_state = "done"
@@ -471,6 +474,7 @@ func _on_gen_confirm(yes: bool) -> void:
 	if yes:
 		game_audio.play_sfx("confirm")
 		answers["sprite_asset"] = _prefetch_hash
+		answers["anchors"] = _prefetch_anchors # 与 sprite_asset 成对落档，_apply_player_sprite 灌进玩家节点
 		_next_page()
 		return
 	_play("ob_regen")
