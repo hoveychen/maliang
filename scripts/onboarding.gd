@@ -99,7 +99,6 @@ func _ready() -> void:
 	_vc.cancelled.connect(_on_capture_cancelled)
 	_vc.asr_ready.connect(_on_capture_ready)
 	add_child(_vc)
-	_setup_skip()
 	_next_page()
 
 func _exit_tree() -> void:
@@ -168,22 +167,6 @@ func _setup_book() -> void:
 	_book.offset_top = -300.0
 	_book.offset_bottom = 300.0
 	add_child(_book)
-
-func _setup_skip() -> void:
-	# 家长用的小跳过按钮（右上角，半透明不抢戏）
-	var skip := Button.new()
-	skip.text = "跳过 ▸"
-	skip.add_theme_font_size_override("font_size", 22)
-	skip.modulate = Color(1, 1, 1, 0.55)
-	skip.flat = true
-	skip.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	skip.offset_left = -140.0
-	skip.offset_top = 16.0
-	skip.offset_bottom = 56.0
-	skip.pressed.connect(func() -> void:
-		game_audio.play_sfx("click")
-		_finish())
-	add_child(skip)
 
 # ── 翻页与页面渲染 ─────────────────────────────────────────────────────────
 
@@ -539,7 +522,7 @@ func _finish() -> void:
 	if _finishing:
 		return
 	_finishing = true
-	_vc.close() # 家长中途点「跳过」时可能正开着麦：关掉,别留悬空会话
+	_vc.close() # 收尾时可能正开着麦（名字页）：关掉,别留悬空会话
 	var profile := PlayerProfile.load_profile()
 	for k in answers:
 		profile[k] = answers[k]
