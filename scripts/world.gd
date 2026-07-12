@@ -3179,6 +3179,8 @@ func _setup_backend() -> void:
 	backend.prop_pending.connect(_on_prop_pending)
 	backend.item_created.connect(_on_item_created)
 	backend.prop_failed.connect(_on_prop_failed)
+	backend.sticker_pending.connect(_on_sticker_pending)
+	backend.sticker_failed.connect(_on_sticker_failed)
 	backend.prop_denied.connect(_on_reward_denied)
 	backend.bag_update.connect(_on_bag_update)
 	backend.sticker_bought.connect(_on_sticker_bought)
@@ -4127,6 +4129,7 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 # 魔法熔炉=新物件要造出来了。孩子可以绕着它跑，成品从占位符所在的位置出现。
 const PLACEHOLDER_PORTAL_ID := "__casting_portal"
 const PLACEHOLDER_FORGE_ID := "__casting_forge"
+const PLACEHOLDER_EASEL_ID := "__casting_easel" # 造贴纸占位符（魔法画板，sticker-ux）
 var _placeholders := {} ## 占位符 id → 落位 tile（Vector2i）
 
 ## 立起占位符。anchor 缺省玩家身旁（施法态）；引导期锚仙子（见 _raise_creation_placeholder）。
@@ -4157,13 +4160,12 @@ func _clear_placeholder(id: String) -> Vector2i:
 			node.queue_free()
 	return tile
 
-## 引导一开始（首个 creation_prompt）就在仙子身旁立起占位符：造角色=降生蛋，造物=魔法熔炉。
+## 引导一开始（首个 creation_prompt）就在仙子身旁立起占位符：造角色=降生蛋，造物=魔法熔炉，造贴纸=魔法画板。
 ## 孩子的每个回答会被「扔」进它（见 _throw_answer_into_placeholder），一眼看懂答案有用。
 ## 幂等：每轮 prompt 都会调，已立起的直接返回。放不下就不立——后续路径都容忍占位符缺席。
 func _raise_creation_placeholder() -> void:
-	var is_prop := _creation_goal == "prop"
-	var id := PLACEHOLDER_FORGE_ID if is_prop else PLACEHOLDER_PORTAL_ID
-	var spec: Dictionary = PlaceholderSpecs.FORGE if is_prop else PlaceholderSpecs.PORTAL
+	var id := _creation_placeholder_id()
+	var spec: Dictionary = _creation_placeholder_spec()
 	# 锚在仙子身旁（不是玩家）：创造视图是仙子特写，蛋/炉要与她同框，答案才「看得见飞进去」
 	var anchor := Vector2.INF
 	if _locked != null and is_instance_valid(_locked):
@@ -4179,6 +4181,7 @@ func _raise_creation_placeholder() -> void:
 func _clear_creation_placeholder() -> void:
 	_clear_placeholder(PLACEHOLDER_PORTAL_ID)
 	_clear_placeholder(PLACEHOLDER_FORGE_ID)
+	_clear_placeholder(PLACEHOLDER_EASEL_ID)
 
 ## 造角色开工：引导会话已结束，服务端开造。退出对话，立起传送门。
 func _on_gen_progress(_stage: String) -> void:
@@ -4223,6 +4226,18 @@ func _on_prop_pending(data: Dictionary) -> void:
 	banner.text = "魔法熔炉烧起来啦！"
 	banner.visible = true
 
+## 造贴纸开工（已扣花）：退出对话、就地立起魔法画板占位符，孩子看得见「正在做贴纸」。
+func _on_sticker_pending(data: Dictionary) -> void:
+	_apply_wallet(data.get("wallet")) # 花在开造那一刻就扣掉
+	_in_creation = false
+	_hide_creation_cards()
+	if selected != null:
+		_exit_interaction()
+	thinking_label.visible = false
+	_spawn_placeholder(PLACEHOLDER_EASEL_ID, PlaceholderSpecs.EASEL)
+	banner.text = "魔法画板刷刷刷！"
+	banner.visible = true
+
 ## 语音造物完成（万物皆物品）：实体定义入目录 + 背包一份到手；在熔炉/玩家旁本地找位
 ## 发 item_place，渲染统一等 terrain_patch 广播回来落地。找不到位/离线就留在背包
 ## （物品页可再摆），成品绝不凭空消失。
@@ -4256,8 +4271,11 @@ func _on_item_created(data: Dictionary) -> void:
 	ItemCatalog.set_defs([item]) # 新实体先入目录（patch 回来才认得 renderRef/spec）
 	_prewarm_sticker_assets([item]) # 造贴纸:预热网络贴图(打包贴纸/造物无 @ 前缀,跳过)
 	thinking_label.visible = false
-	# 先收熔炉腾出格子，成品就落在那儿；熔炉没立成就退回玩家身旁
+	# 先收占位符腾出格子，成品就落在那儿；占位符没立成就退回玩家身旁。
+	# 造物立熔炉、造贴纸立画板——哪个在就收哪个（另一个 no-op 返回负值）。
 	var tile := _clear_placeholder(PLACEHOLDER_FORGE_ID)
+	if tile.x < 0:
+		tile = _clear_placeholder(PLACEHOLDER_EASEL_ID)
 	var want := tile
 	if want.x < 0:
 		var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
@@ -4319,6 +4337,14 @@ func _on_prop_failed(_reason: String) -> void:
 	thinking_label.visible = false
 	_clear_placeholder(PLACEHOLDER_FORGE_ID) # 造砸了：熔炉收起来，别让它烧到天荒地老
 	banner.text = "没变出来，再说一次试试"
+	banner.visible = true
+
+## 造贴纸失败（审核/异常，服务端已退花）：收起画板 + oops 提示。
+func _on_sticker_failed(_reason: String) -> void:
+	thinking_label.visible = false
+	_clear_placeholder(PLACEHOLDER_EASEL_ID) # 做砸了：画板收起来
+	game_audio.play_sfx("oops")
+	banner.text = "没做出来，再说一次试试"
 	banner.visible = true
 
 ## 小红花不足被拦（造物/造角色）：同步钱包 + 横幅引导 + 播服务端带来的仙子引导语。
@@ -5009,9 +5035,19 @@ func _on_creation_card(option_id: String, card: Button = null) -> void:
 # 3 岁孩子不识字、也不懂「服务端在攒属性」。她只需要看见：我选的那张卡（或我说的那句话）
 # 飞进了那颗蛋/那座炉——我的回答被用上了。点选与语音两条路都走这里，视觉一致。
 
-## 本次引导立的占位符 id（造角色=降生蛋，造物=魔法熔炉）。
+## 本次引导立的占位符 id（造物=魔法熔炉，造贴纸=魔法画板，造角色=降生蛋）。
 func _creation_placeholder_id() -> String:
-	return PLACEHOLDER_FORGE_ID if _creation_goal == "prop" else PLACEHOLDER_PORTAL_ID
+	match _creation_goal:
+		"prop": return PLACEHOLDER_FORGE_ID
+		"sticker": return PLACEHOLDER_EASEL_ID
+		_: return PLACEHOLDER_PORTAL_ID
+
+## 本次引导立的占位符 spec（与 _creation_placeholder_id 同分派）。
+func _creation_placeholder_spec() -> Dictionary:
+	match _creation_goal:
+		"prop": return PlaceholderSpecs.FORGE
+		"sticker": return PlaceholderSpecs.EASEL
+		_: return PlaceholderSpecs.PORTAL
 
 ## 占位符在屏幕上的落点（略高于底座，落在蛋身/炉口上）。没立成/不在视野内返回 INF。
 func _placeholder_screen_pos() -> Vector2:
