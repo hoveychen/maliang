@@ -102,6 +102,14 @@ export function sizeToScale(size: string | null | undefined): number {
   return SIZE_TO_SCALE.medium; // medium/中/正常/其它 一律中号
 }
 
+/** scale 反推体型档（用于给存量/新角色落 appearance.size 标记）；就近归档，非法→medium。 */
+export function scaleToSize(scale: number | null | undefined): CreatureSize {
+  if (typeof scale !== 'number' || !isFinite(scale)) return 'medium';
+  if (scale <= 0.85) return 'small';
+  if (scale >= 1.2) return 'big';
+  return 'medium';
+}
+
 /**
  * 从文本（中文意图 / 引导式汇总描述 / 英文 visualDescription）里推断体型，
  * 供 mock 确定性产出、真实 LLM 缺省兜底、以及存量角色回填（英文外观描述）。

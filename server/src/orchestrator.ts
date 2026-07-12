@@ -4,6 +4,7 @@ import { flipHorizontal, addStickerBorder, trimToContent } from './adapters/chro
 import { detectCharacterAnchors } from './anchors.ts';
 import type { WorldStore } from './persistence.ts';
 import { DEFAULT_SCENE, WORLD_CENTER_TILE } from './types.ts';
+import { scaleToSize } from './creation_options.ts';
 import type { Character, CharacterAnchors, CharacterSpec, CreateCharacterInput, GenStage } from './types.ts';
 
 /** 内容审核拦截（文字环节）。 */
@@ -35,6 +36,7 @@ function buildCharacter(
       visualDescription: spec.visualDescription,
       spriteAsset: assetHash,
       scale: spec.scale,
+      size: scaleToSize(spec.scale), // 体型档标记：让 /admin/calibrate-size 认得「已标定」（含 medium），重跑幂等
       ...(anchors ? { anchors } : {}),
     },
     memory: [],

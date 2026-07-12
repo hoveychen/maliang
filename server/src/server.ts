@@ -558,14 +558,17 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
           results.push({ id: c.id, name: c.name, skipped: 'no description' });
           continue;
         }
-        // 已标定（scale 明显偏离 1.0）且非 force → 跳过，不覆盖手动/已回填的结果
-        if (!force && Math.abs((c.appearance.scale ?? 1.0) - 1.0) > 0.01) {
+        // 已标定 → 跳过（非 force）。判据：显式 appearance.size 标记（含 medium，重跑幂等），
+        // 或旧数据的 scale 明显偏离 1.0（标记位上线前回填的 non-medium 仍认得，不重复处理）。
+        // 唯一漏网：标记位上线前回填的 medium（scale=1.0 无标记）会被再处理一次——补上标记后即永久粘住。
+        if (!force && (c.appearance.size || Math.abs((c.appearance.scale ?? 1.0) - 1.0) > 0.01)) {
           results.push({ id: c.id, name: c.name, skipped: 'already calibrated' });
           continue;
         }
         const size = await adapters.llm.classifyCreatureSize(desc);
         const scale = sizeToScale(size);
         c.appearance.scale = scale;
+        c.appearance.size = size; // 落标记位：下次重跑认得已标定（含 medium）
         store.saveCharacter(c);
         results.push({ id: c.id, name: c.name, size, scale });
       }
