@@ -353,8 +353,37 @@ export interface VoiceResponse {
   characterRequest?: string;
   /** create_sticker 意图的贴纸描述：不下发客户端，由 WS 层摘走并异步造贴纸（sticker_pending/item_created 推送）。仅小仙子有此能力。 */
   stickerRequest?: string;
+  /** play_game 意图的游戏口语描述（「踢球」「老鹰抓小鸡」）：不下发客户端，由 WS 层摘走→LLM 生成剧本→过 typecheck→开演（stage_begin 广播）。仅小仙子有此能力。 */
+  gameRequest?: string;
   /** 主动招呼（进对话对方先开口）：transcript 为空且非玩家发起，客户端据此跳过「没听清」提示。 */
   greeting?: boolean;
+}
+
+// ── 剧本生成层（realtime-primitives P5 / docs/realtime-game-primitives-design §9）──
+// 口语「我们来踢球吧」→ routeIntent 识别 play_game → LLM 照 stage_sdk.d.ts 生成【真 TS】剧本
+// → checkScreenplay 过 typecheck（失败带错回喂重生成 1-2 次）→ stripTypeScriptTypes → vm 沙箱开演。
+
+/** 喂给剧本生成 LLM 的上下文：孩子想玩的游戏 + 当前可选的演员（防腐纪律：规则进脚本、原语已在客户端）。 */
+export interface ScreenplayGenContext {
+  /** 孩子的口语游戏描述，尽量保留原话（「踢球」「老鹰抓小鸡」「捉迷藏」）。 */
+  gameDesc: string;
+  /** 当前场景里可当演员的村民名字（不含小仙子/玩家）；LLM 的 cast 角色数不得超过这个数量。 */
+  villagerNames: string[];
+  /** 场上是否有小朋友在玩（有则剧本可用 stage.player）。 */
+  hasPlayer: boolean;
+}
+
+/**
+ * 生成的剧本草案：过了 typecheck 才返回。
+ * cast 是【有序角色名】，与 stage_debut 的 PLAY_ROLES 同套路——运行时把它按序映射到真实村民，
+ * 并把演员的 name 设成这些角色名，脚本里的 cast('老鹰') 才能对上（坐标/玩法名不写死在脚本）。
+ * soccer 这类无需命名演员的玩法 cast 为空数组（只用 stage.player + 球 + region）。
+ */
+export interface ScreenplayDraft {
+  /** 真 TS 剧本源码（异步函数体，全局只有 stage/cast/console，未剥类型）。 */
+  code: string;
+  /** 有序角色名，映射到真实村民；空数组=不需要命名演员。 */
+  cast: string[];
 }
 
 /** 世界里由语音生成的 SDF 物件（spec 结构见 sdf_prop.ts；tile 为客户端落位后回报）。 */

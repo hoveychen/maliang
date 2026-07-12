@@ -92,7 +92,7 @@ export function createAdapters(config: Config): ServiceAdapters {
   // 朝向检测带图上传（base64 后 1-2MB），25s 客户端偶发不够，给 60s。
   const visionClient = new OpenRouterClient(config.openrouterApiKey as string, 60000);
   return {
-    llm: new OpenRouterLLMAdapter(client, config.llmModel),
+    llm: new OpenRouterLLMAdapter(client, config.llmModel, config.screenplayModel),
     image: new OpenRouterImageAdapter(imageClient, config.imageModel),
     cutout: new ChromaKeyCutoutAdapter(),
     // idle 动画：异步补，慢（60~90s），自带长超时轮询，不共享上面的 client。
