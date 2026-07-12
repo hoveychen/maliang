@@ -1,9 +1,27 @@
 extends SceneTree
-## 传送点纯函数 + 两张地图的传送点数据对拍（scene-portal P6）。
+## 传送点纯函数 + 全场景连通图对拍（scene-portal-graph）。
 ## 1) World.parse_server_portals：服务端载荷 → 运行期结构，坏条目跳过不连坐。
 ## 2) World.portal_hit：半径判定走环面最短距离（跨接缝也认）。
-## 3) village ↔ forest 的 build_portal_json() 必须互指，且落点在各自地形上站得住（非水面）。
+## 3) 13 个场景 build_portal_json() 组成连通图：每条边两端互指、场景内 tile 不重、
+##    落点在各自地形上站得住（非水面、非高墙），且 BFS 从 village 可达全部 13 个场景。
 ## 运行: godot --headless --path . --script res://test/test_portal.gd
+
+## sceneId → 导出脚本路径。village/forest 用现成脚本，11 主题各自的 export_<t>.gd。
+const SCENE_SCRIPTS := {
+	"village": "res://tools/export_terrain.gd",
+	"forest": "res://tools/export_forest.gd",
+	"seafloor": "res://tools/export_seafloor.gd",
+	"icesnow": "res://tools/export_icesnow.gd",
+	"jurassic": "res://tools/export_jurassic.gd",
+	"medieval": "res://tools/export_medieval.gd",
+	"roman": "res://tools/export_roman.gd",
+	"ancient_china": "res://tools/export_ancient_china.gd",
+	"modern_city": "res://tools/export_modern_city.gd",
+	"future_robot": "res://tools/export_future_robot.gd",
+	"hospital": "res://tools/export_hospital.gd",
+	"kitchen": "res://tools/export_kitchen.gd",
+	"toy_room": "res://tools/export_toy_room.gd",
+}
 
 func _init() -> void:
 	var fails := 0
@@ -40,32 +58,79 @@ func _init() -> void:
 	var across := WorldGrid.wrap_pos(WorldGrid.from_tile_center(Vector2i(0, 0)) - Vector2(2.0, 0.0))
 	fails += _check("跨接缝仍命中", (w.portal_hit(seam, across) as Dictionary).is_empty(), false)
 
-	# ── 两张图的传送点必须互指 ────────────────────────────────────────────
-	var village: GDScript = load("res://tools/export_terrain.gd")
-	var forest: GDScript = load("res://tools/export_forest.gd")
-	var vp: Array = village.build_portal_json()
-	var fp: Array = forest.build_portal_json()
-	fails += _check("村庄一个传送点", vp.size(), 1)
-	fails += _check("森林一个传送点", fp.size(), 1)
-	var v: Dictionary = vp[0]
-	var f: Dictionary = fp[0]
-	fails += _check("村庄传送点通往 forest", v["toScene"], "forest")
-	fails += _check("森林传送点通往 village", f["toScene"], "village")
-	fails += _check("村庄落点 == 森林传送点所在", v["toTile"], f["tile"])
-	fails += _check("森林落点 == 村庄传送点所在", f["toTile"], v["tile"])
+	# ── 收集全部 13 个场景的传送点 ────────────────────────────────────────
+	var portals := {}  # sceneId → Array[Dictionary]
+	for sid in SCENE_SCRIPTS.keys():
+		var gd: GDScript = load(SCENE_SCRIPTS[sid])
+		portals[sid] = gd.build_portal_json()
 
-	# ── 落点在各自地形上站得住（水面上的传送点＝掉进水里出不来）────────────
-	TerrainMap.reset() # 回到客户端确定性生成的村庄地形
-	fails += _check("村庄传送点不在水里", _dry(_tile(v["tile"])), true)
-	fails += _check("村庄落点（森林那侧回来的落脚处）不在水里", _dry(_tile(f["toTile"])), true)
-	var r := TerrainMap.load_from_bytes(forest.build_terrain_bytes())
-	fails += _check("森林地形载入成功", r["ok"], true)
-	fails += _check("森林传送点不在水里", _dry(_tile(f["tile"])), true)
-	fails += _check("森林落点（村庄那侧过来的落脚处）不在水里", _dry(_tile(v["toTile"])), true)
+	# ── 每个场景 ~3 个 portal（toy_room 末梢 2 个）────────────────────────
+	for sid in portals.keys():
+		var m: int = (portals[sid] as Array).size()
+		if sid == "toy_room":
+			fails += _check("%s 传送点数 == 2" % sid, m, 2)
+		else:
+			fails += _check("%s 传送点数 >= 3" % sid, m >= 3, true)
+
+	# ── 场景内 tile 互不重复（半径不重叠）────────────────────────────────
+	for sid in portals.keys():
+		var seen := {}
+		for q in portals[sid]:
+			var key := "%d,%d" % [int(q["tile"][0]), int(q["tile"][1])]
+			fails += _check("%s tile %s 不重复" % [sid, key], seen.has(key), false)
+			seen[key] = true
+
+	# ── 每条边两端互指：S 的 portal→(T,toTile) 必有 T 的 portal{tile==toTile, toScene==S, toTile==本tile} ──
+	for sid in portals.keys():
+		for q in portals[sid]:
+			var to_scene: String = String(q["toScene"])
+			var to_tile := _tile(q["toTile"])
+			var my_tile := _tile(q["tile"])
+			fails += _check("%s→%s 目标场景存在" % [sid, to_scene], portals.has(to_scene), true)
+			if not portals.has(to_scene):
+				continue
+			var matched := false
+			for r in portals[to_scene]:
+				if _tile(r["tile"]) == to_tile and String(r["toScene"]) == sid and _tile(r["toTile"]) == my_tile:
+					matched = true
+					break
+			fails += _check("%s@%s→%s@%s 有反向互指" % [sid, my_tile, to_scene, to_tile], matched, true)
+
+	# ── BFS 从 village 可达全部 13 个场景 ────────────────────────────────
+	var reached := {"village": true}
+	var queue := ["village"]
+	while not queue.is_empty():
+		var cur: String = queue.pop_front()
+		for q in portals[cur]:
+			var nxt: String = String(q["toScene"])
+			if portals.has(nxt) and not reached.has(nxt):
+				reached[nxt] = true
+				queue.append(nxt)
+	fails += _check("BFS 从 village 可达场景数 == 13", reached.size(), portals.size())
+	for sid in portals.keys():
+		fails += _check("%s 从 village 可达" % sid, reached.has(sid), true)
+
+	# ── 落点站得住：每个 portal tile 在其所在场景既非水面又非高墙（height<=2）──
+	## height<=2 放行森林 knoll（顶面 h2），但拦下室内围墙(h3)/mound 峰顶(h3)——传送到墙上会卡死。
+	for sid in portals.keys():
+		_load_scene_terrain(sid)
+		for q in portals[sid]:
+			var t := _tile(q["tile"])
+			fails += _check("%s 传送点 %s 不在水里" % [sid, t], _dry(t), true)
+			fails += _check("%s 传送点 %s 不在高墙上(h<=2)" % [sid, t], TerrainMap.tile_height(t) <= 2, true)
 	TerrainMap.reset()
 
 	print("test_portal: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
+
+## 把指定场景的地形灌进 TerrainMap（village 用客户端确定性生成，其余用各自 build_terrain_bytes）。
+func _load_scene_terrain(sid: String) -> void:
+	if sid == "village":
+		TerrainMap.reset()  # 客户端确定性村庄地形（== export_terrain 产出）
+		return
+	var gd: GDScript = load(SCENE_SCRIPTS[sid])
+	var r: Dictionary = TerrainMap.load_from_bytes(gd.build_terrain_bytes())
+	assert(r["ok"], "%s 地形载入失败: %s" % [sid, r.get("error", "")])
 
 static func _tile(raw: Variant) -> Vector2i:
 	var a: Array = raw

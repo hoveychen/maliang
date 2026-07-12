@@ -58,9 +58,13 @@ static func build_poi_json() -> Array:
 ## 森林侧传送点：林间空地（20,18）中央，走进半径就穿回村庄西南小树林（18,52）。
 ## radius 单位是世界坐标（TILE_SIZE=2.0），3.0 ≈ 1.5 格：玩家还没踩到中心就已触发。
 ## 与 export_terrain.gd 的 build_portal_json() 必须互指（test_portal.gd 对拍两边）。
+## forest 是自然簇门户：village 那对保留原样（互指村庄），另加通往 jurassic 与 seafloor
+## 的两对双向 portal。新落点选东/西南边缘干地，避开中央小河与 knoll。与对向场景互指（scene-portal-graph）。
 static func build_portal_json() -> Array:
 	return [
 		{ "tile": [20, 18], "radius": 3.0, "toScene": "village", "toTile": [18, 52] },
+		{ "tile": [65, 40], "radius": 3.0, "toScene": "jurassic", "toTile": [12, 12] },
+		{ "tile": [12, 65], "radius": 3.0, "toScene": "seafloor", "toTile": [12, 12] },
 	]
 
 ## 构建森林 .mltr 字节流。抽成静态供回测直接调用（test_forest_scene.gd）。

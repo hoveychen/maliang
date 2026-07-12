@@ -34,8 +34,14 @@ static func build_poi_json() -> Array:
 		{ "tile": [28, 28], "radius": 6.0, "trigger": "poi_ward", "name": "病房", "aliases": ["病房", "浅蓝区", "蓝地胶"] },
 	]
 
+## 传送点（scene-portal-graph）：现代城市/未来/厨房 各一对双向 portal。
+## 室内落点选房间内部地板角（[20..54] 内），避开中央台(37,37) 与病房抬高区(28,46)。与对向场景互指。
 static func build_portal_json() -> Array:
-	return []
+	return [
+		{ "tile": [24, 24], "radius": 3.0, "toScene": "modern_city", "toTile": [12, 37] },
+		{ "tile": [50, 24], "radius": 3.0, "toScene": "future_robot", "toTile": [50, 24] },
+		{ "tile": [50, 50], "radius": 3.0, "toScene": "kitchen", "toTile": [50, 24] },
+	]
 
 static func build_terrain_bytes() -> PackedByteArray:
 	var n := WorldGrid.GRID_TILES

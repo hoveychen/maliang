@@ -34,8 +34,15 @@ static func build_poi_json() -> Array:
 		{ "tile": [28, 28], "radius": 6.0, "trigger": "poi_glowfloor", "name": "发光区", "aliases": ["发光", "光砖", "亮地"] },
 	]
 
+## 传送点（scene-portal-graph）：现代城市/医院/厨房/玩具房 各一对双向 portal（度 4，室内簇枢纽）。
+## 室内落点选房间内部地板角（[20..54] 内），避开中央基座(37,37) 与发光区(28,46)。与对向场景互指。
 static func build_portal_json() -> Array:
-	return []
+	return [
+		{ "tile": [24, 24], "radius": 3.0, "toScene": "modern_city", "toTile": [65, 12] },
+		{ "tile": [50, 24], "radius": 3.0, "toScene": "hospital", "toTile": [50, 24] },
+		{ "tile": [50, 50], "radius": 3.0, "toScene": "kitchen", "toTile": [24, 24] },
+		{ "tile": [24, 50], "radius": 3.0, "toScene": "toy_room", "toTile": [50, 24] },
+	]
 
 static func build_terrain_bytes() -> PackedByteArray:
 	var n := WorldGrid.GRID_TILES

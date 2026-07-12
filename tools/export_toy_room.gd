@@ -58,8 +58,13 @@ static func build_poi_json() -> Array:
 		{ "tile": [28, 46], "radius": 6.0, "trigger": "poi_puzzle", "name": "拼图角", "aliases": ["拼图", "拼图垫", "垫子"] },
 	]
 
+## 传送点（scene-portal-graph）：厨房/未来 各一对双向 portal（室内簇末梢，度 2）。
+## 室内落点选房间内部地板角（[20..54] 内），避开中央玩具台(37,37)。与对向场景互指。
 static func build_portal_json() -> Array:
-	return []
+	return [
+		{ "tile": [24, 24], "radius": 3.0, "toScene": "kitchen", "toTile": [50, 50] },
+		{ "tile": [50, 24], "radius": 3.0, "toScene": "future_robot", "toTile": [24, 50] },
+	]
 
 ## 构建 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_toy_room.gd）。
 static func build_terrain_bytes() -> PackedByteArray:
