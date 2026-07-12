@@ -2991,12 +2991,32 @@ func _on_sticker_slot(slot: String) -> void:
 	_sticker_pick = ""
 	_refresh_sticker_view()
 
-## 贴纸实体 → 贴图（renderRef sticker:<name> 经 PackRegistry）；非贴纸/未注册 → null。
+## 贴纸实体 → 贴图；非贴纸/未注册 → null。保持同步（贴纸盘/角色锚点都是同步 UI 构建）。
+## 打包贴纸 renderRef 'sticker:<name>' 经 PackRegistry 同步 load；
+## 造贴纸 'sticker:@<hash>' 从 ChunkManager 资产缓存读（_prewarm_sticker_assets 已按哈希预热网络贴图）；
+## 未预热到则返回 null（贴纸盘据此暂不列，角色锚点暂不挂）——预热在实体入目录时触发，通常已就绪。
 func _sticker_tex(item_id: String) -> Texture2D:
 	var rref := String(ItemCatalog.get_def(item_id).get("renderRef", ""))
 	if not rref.begins_with("sticker:"):
 		return null
-	return PackRegistry.load_resource(rref.get_slice(":", 1)) as Texture2D
+	var skey := rref.get_slice(":", 1)
+	if skey.begins_with("@"):
+		return ChunkManager.get_sticker_asset(skey.substr(1))
+	return PackRegistry.load_resource(skey) as Texture2D
+
+## 角色锚点贴纸取图（可 await，attach 信号处理器用）：先走同步 _sticker_tex（打包/已缓存）；
+## 造贴纸未缓存（别的客户端收到 attach 广播时可能还没预热）则 await 拉网络并回灌缓存，避免贴不上。
+func _resolve_sticker_tex(item_id: String) -> Texture2D:
+	var tex := _sticker_tex(item_id)
+	if tex != null:
+		return tex
+	var rref := String(ItemCatalog.get_def(item_id).get("renderRef", ""))
+	if rref.begins_with("sticker:@") and api != null:
+		var hash := rref.substr("sticker:@".length())
+		tex = await api.fetch_texture(hash)
+		if tex != null:
+			ChunkManager.cache_sticker_asset(hash, tex)
+	return tex
 
 ## character_attach 广播落地：按 id 现查角色副本（勿持引用），挂/摘贴纸。
 func _on_character_attach(data: Dictionary) -> void:
@@ -3010,7 +3030,7 @@ func _on_character_attach(data: Dictionary) -> void:
 	if item_v == null or String(item_v).is_empty():
 		npc.detach_sticker(slot)
 		return
-	var tex := _sticker_tex(String(item_v))
+	var tex := await _resolve_sticker_tex(String(item_v))
 	if tex != null:
 		npc.attach_sticker(slot, tex)
 
@@ -3019,7 +3039,7 @@ func _apply_attachments(npc: PaperCharacter, c: Dictionary) -> void:
 	for a in c.get("attachments", []):
 		if typeof(a) != TYPE_DICTIONARY:
 			continue
-		var tex := _sticker_tex(String((a as Dictionary).get("itemId", "")))
+		var tex := await _resolve_sticker_tex(String((a as Dictionary).get("itemId", "")))
 		if tex != null:
 			npc.attach_sticker(String((a as Dictionary).get("slot", "")), tex)
 
@@ -3458,6 +3478,7 @@ func _on_terrain_patch(data: Dictionary) -> void:
 	if String(data.get("sceneId", "")) != _scene_id:
 		return # 其他场景的编辑：下次进那场景时按 version 全量对齐
 	ItemCatalog.set_defs(data.get("items", [])) # 新引用的造物实体定义随 patch 带上
+	_prewarm_sticker_assets(data.get("items", [])) # 造贴纸摆到边缘随 patch 到:预热网络贴图
 	var version := int(data.get("version", 0))
 	if version == _terrain_version + 1:
 		var r: Dictionary = TerrainMap.apply_patch(data)
@@ -3645,6 +3666,7 @@ func _on_scene_entered(data: Dictionary) -> void:
 		_end_placement() # 换场景丢弃在飞的摆放（tile 索引跨场景无意义）
 	_unload_scene()
 	ItemCatalog.set_defs(data.get("items", [])) # 新场景可能引用没见过的造物实体
+	_prewarm_sticker_assets(data.get("items", [])) # 造贴纸:预热网络贴图
 
 	# 地形先就位（_apply_scene changed 时会 rebuild 区块）；scene 为 null 表示该场景未入库，
 	# 保留当前地形（离线/未入库容错）。
@@ -3760,6 +3782,7 @@ func _bootstrap_fetch() -> Dictionary:
 	if world.is_empty():
 		return {}
 	ItemCatalog.set_defs(world.get("items", [])) # 实体定义先就位（矩阵 palette 的解引用依据，纯数据）
+	_prewarm_sticker_assets(world.get("items", [])) # 造贴纸:预热网络贴图（进世界即预热已摆的）
 	var chars: Array = _filter_boot_characters(world.get("characters", []))
 	# 先并发预取所有角色素材（anim 优先，跳静态大图）：冷启动从「逐个立绘串行下载」的长尾
 	# 降到「最慢一个并发」，杜绝首次进世界接近 25s 揭幕硬超时、村民后补的观感。素材只落缓存。
@@ -4203,11 +4226,35 @@ func _on_prop_pending(data: Dictionary) -> void:
 ## 语音造物完成（万物皆物品）：实体定义入目录 + 背包一份到手；在熔炉/玩家旁本地找位
 ## 发 item_place，渲染统一等 terrain_patch 广播回来落地。找不到位/离线就留在背包
 ## （物品页可再摆），成品绝不凭空消失。
+## 造贴纸(renderRef 'sticker:@<hash>')的网络贴图预热：ItemCatalog 收到新实体定义后，把资产哈希
+## 拉成 Texture2D 灌进 ChunkManager 缓存，边缘竖片渲染据此上真图（打包贴纸不需此步）。
+## 异步 fire-and-forget：拉完若确有新图，触发一次 chunk rebuild——此前竖片是透明占位，重建换真图。
+func _prewarm_sticker_assets(defs: Array) -> void:
+	if api == null:
+		return
+	var fetched := false
+	for d in defs:
+		if typeof(d) != TYPE_DICTIONARY:
+			continue
+		var rref := String((d as Dictionary).get("renderRef", ""))
+		if not rref.begins_with("sticker:@"):
+			continue
+		var hash := rref.substr("sticker:@".length())
+		if hash.is_empty() or ChunkManager.has_sticker_asset(hash):
+			continue
+		var tex: Texture2D = await api.fetch_texture(hash)
+		if tex != null:
+			ChunkManager.cache_sticker_asset(hash, tex)
+			fetched = true
+	if fetched and chunk_manager != null:
+		chunk_manager.rebuild() # 占位→真图，重建受影响的边缘竖片
+
 func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包
 	_apply_bag(data.get("bag"))
 	var item: Dictionary = data.get("item", {})
 	ItemCatalog.set_defs([item]) # 新实体先入目录（patch 回来才认得 renderRef/spec）
+	_prewarm_sticker_assets([item]) # 造贴纸:预热网络贴图(打包贴纸/造物无 @ 前缀,跳过)
 	thinking_label.visible = false
 	# 先收熔炉腾出格子，成品就落在那儿；熔炉没立成就退回玩家身旁
 	var tile := _clear_placeholder(PLACEHOLDER_FORGE_ID)
