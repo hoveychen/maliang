@@ -167,6 +167,7 @@ export class WorldStore {
       this.#migrateLegacyPlayerPositions();
       this.#migrateLegacyEntityScenes();
       this.#migrateVisitsDevice();
+      this.#migrateFairyStickerAbility(); // fairy-stickers：存量仙子补 create_sticker 能力
       this.#loadAssets();
       this.#loadSpriteAnims();
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
@@ -182,6 +183,29 @@ export class WorldStore {
     const cols = this.#db.prepare('PRAGMA table_info(visits)').all() as { name: string }[];
     if (!cols.some((c) => c.name === 'device')) {
       this.#db.exec('ALTER TABLE visits ADD COLUMN device TEXT');
+    }
+  }
+
+  /**
+   * fairy-stickers：给存量世界的仙子补 create_sticker 能力。
+   * seedFairy 只在建世界时贑（新世界自带），老库里的仙子从 DB 读能力、缺这条就不认「做个贴纸」意图。
+   * 幂等：已有该能力/非仙子的跳过；只 UPDATE 真改到的行（getCharacter 直读 DB，无内存 Map 需刷新）。
+   */
+  #migrateFairyStickerAbility(): void {
+    const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
+    const upd = this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?');
+    for (const r of rows) {
+      let c: Character;
+      try {
+        c = JSON.parse(r.data) as Character;
+      } catch {
+        continue;
+      }
+      if (!c.isFairy) continue;
+      const abilities = Array.isArray(c.abilities) ? c.abilities : [];
+      if (abilities.includes('create_sticker')) continue;
+      c.abilities = [...abilities, 'create_sticker'];
+      upd.run(JSON.stringify(c), r.id);
     }
   }
 
