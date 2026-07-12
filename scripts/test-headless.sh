@@ -38,6 +38,9 @@ UNIT_TESTS=(
   test_occupancy_map
   test_pathfinder
   test_mover
+  test_ball_body
+  test_ball_ownership
+  test_ball_replication_buffer
   test_behavior_executor
   test_edge_tts
   test_fairy_voice
@@ -129,6 +132,7 @@ run_test test_scene_unload         --fixed-fps 10 --quit-after 40
 run_test test_boot_scene_filter    --fixed-fps 10 --quit-after 40
 run_test test_stage_camera        --fixed-fps 10 --quit-after 110
 run_test test_stage_staging       --fixed-fps 10 --quit-after 130
+run_test test_stage_ball          --fixed-fps 10 --quit-after 90
 run_test test_visual_menu          --fixed-fps 10 --quit-after 60
 run_test test_visual_loading       --fixed-fps 10 --quit-after 90
 run_test test_visual_fairy         --fixed-fps 10 --quit-after 100
