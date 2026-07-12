@@ -89,9 +89,10 @@ void vertex() {
 		v.x += pleat_amp * 0.6 * (abs(fract(yn * pleat_freq + 0.25) - 0.5) * 2.0 - 0.5);
 	}
 	if (crumple_amp > 0.0) {
+		// y 分量按 yn 锚在脚底：底边噪声往下拱会把纸压进地面
 		v += crumple_amp * 0.5 * vec3(
 			sin(VERTEX.x * 13.1 + VERTEX.y * 7.7),
-			sin(VERTEX.x * 9.3 - VERTEX.y * 11.9 + 3.1),
+			sin(VERTEX.x * 9.3 - VERTEX.y * 11.9 + 3.1) * yn,
 			sin(VERTEX.x * 15.7 + VERTEX.y * 5.3 + 1.7));
 	}
 	VERTEX = v;

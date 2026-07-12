@@ -2147,12 +2147,15 @@ static func action_pose(action: String, t: float, dur: float) -> Dictionary:
 			fold = { "pleat": 0.32 * ae }
 			sc = Vector3(1.0 + 0.12 * ae, 1.0 - 0.45 * ae, 1.0)
 			rot.z = deg_to_rad(5.0) * sin(t * TAU * 3.0) * e * (1.0 - ae) # 弹开时的余晃
-		"crumple_ball": # 揉纸团：揉皱缩成一团滚半圈，再展开抖平
+		"crumple_ball": # 揉纸团：揉皱缩成一团滚一整圈，再展开抖平
 			var re := _hold_env(k, 0.3, 0.7)
 			fold = { "crumple": 0.45 * re }
 			sc = Vector3.ONE * (1.0 - 0.5 * re)
-			rot.z = PI * smoothstep(0.2, 0.8, k) # 滚半圈
-			y = absf(sin(k * PI * 3.0)) * 0.25 * re
+			# 旋转绕的是脚底锚点：不抬升的话滚到侧面/头朝下时整团甩进地里（实录实证）。
+			# 按 y=R(1-cosθ) 抬升让"纸团中心"保持定高≈贴地滚动；整圈收尾角度归零不跳变
+			var roll := TAU * smoothstep(0.15, 0.85, k)
+			rot.z = roll
+			y = 1.5 * (1.0 - cos(roll)) # R≈缩团后半高，θ=π 时抬满一个团高，脚底锚点滚不进地
 	var p := { "rot": rot, "y": y, "scale": sc }
 	if motion != Vector2.INF:
 		p["motion"] = motion
