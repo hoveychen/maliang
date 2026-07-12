@@ -90,7 +90,7 @@ import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
-import { StageDirector, type StageStartOpts } from './stage_session.ts';
+import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
 import { buildDebut, DebutError } from './stage_debut.ts';
 import { SCREENPLAYS, type ScreenplayName } from './screenplays.ts';
 import type { StagePropMaker } from './stage_types.ts';
@@ -998,7 +998,9 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       return null;
     }
   };
-  const stages = new StageDirector(hub, makeStageProp);
+  // 全局并发演出上限(worker 内存/线程防线):环境变量 MAX_CONCURRENT_STAGES 覆盖缺省。
+  const maxStages = Number(process.env.MAX_CONCURRENT_STAGES) || DEFAULT_MAX_CONCURRENT_STAGES;
+  const stages = new StageDirector(hub, makeStageProp, maxStages);
 
   // 管理端点：拿一个手写剧本在指定世界开演（试演/真机验收用；Plan 2 上线后由语音意图触发）。
   // 演出广播给世界里所有连接，孩子的平板会直接进观演态——所以世界里得先有人。
@@ -1015,6 +1017,8 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
         return reply.code(400).send({ error: `screenplay must be one of ${SCREENPLAYS.join(', ')}` });
       }
       if (stages.activeIn(req.params.id)) return reply.code(409).send({ error: '这个世界正在演出' });
+      // 全局并发上限:太多世界在演出就先拒(503),别把 worker 撑爆。前端可提示「稍等再玩」。
+      if (stages.atCapacity()) return reply.code(503).send({ error: '同时演出太多了，稍等一下再开演' });
       let opts: StageStartOpts;
       try {
         opts = buildDebut(store, hub, req.params.id, name as ScreenplayName, req.body?.sceneId);

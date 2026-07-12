@@ -211,19 +211,34 @@ class StageSession {
 }
 
 /** 每个 world 至多一场演出的调度台。 */
+/** 全局并发演出上限缺省值。每场演出 = 一个 worker_threads.Worker(完整 V8 isolate,占内存+线程)。
+ *  一世界至多一场,故这也是并发 worker 上限,防 100 世界同时开演 spawn 上百 worker OOM。可用环境变量覆盖。 */
+export const DEFAULT_MAX_CONCURRENT_STAGES = 16;
+
 export class StageDirector {
   #hub: WorldHub;
   #propMaker?: StagePropMaker;
   #active = new Map<string, StageSession>();
+  #maxConcurrent: number;
 
-  constructor(hub: WorldHub, propMaker?: StagePropMaker) {
+  constructor(hub: WorldHub, propMaker?: StagePropMaker, maxConcurrent = DEFAULT_MAX_CONCURRENT_STAGES) {
     this.#hub = hub;
     this.#propMaker = propMaker;
+    this.#maxConcurrent = Math.max(1, maxConcurrent);
   }
 
   activeIn(worldId: string): boolean {
     return this.#active.has(worldId);
   }
+
+  /** 全局并发演出是否已达上限(admission control)。端点据此明确回「太多演出了」而非静默失败。 */
+  atCapacity(): boolean {
+    return this.#active.size >= this.#maxConcurrent;
+  }
+
+  /** 当前并发演出数 / 上限(观测用)。 */
+  get activeCount(): number { return this.#active.size; }
+  get maxConcurrent(): number { return this.#maxConcurrent; }
 
   /**
    * 中途加入快照：世界正在演出时，给刚进来的连接补发 stage_begin（锁交互 + 准备接收后续命令）。
@@ -242,6 +257,12 @@ export class StageDirector {
    */
   startStage(worldId: string, opts: StageStartOpts): Promise<StageRunResult> | null {
     if (this.#active.has(worldId)) return null;
+    // 全局并发上限(admission control):达上限即拒,别再 spawn worker。交互式演出「几分钟后才开」无意义,
+    // 故拒绝而非排队;端点已预检 atCapacity 回明确错误,此处是硬防线。不静默丢——记一行。
+    if (this.#active.size >= this.#maxConcurrent) {
+      console.warn(`[stage] 全局并发演出已满(${this.#active.size}/${this.#maxConcurrent}),拒绝世界 ${worldId} 开演`);
+      return null;
+    }
     const session = new StageSession(this.#hub, worldId, this.#propMaker);
     session.actors = opts.actors;
     this.#active.set(worldId, session);
