@@ -1934,6 +1934,7 @@ export async function handleWsMessage(
         playerId: session.playerId,
         sceneId: session.currentScene,
         send: (m) => socket.send(JSON.stringify(m)),
+        sendText: (s) => socket.send(s),
       });
       joined.departed?.newHost?.send({ type: 'world_host', isHost: true });
       socket.send(JSON.stringify({ type: 'world_host', isHost: joined.isHost }));

@@ -58,7 +58,7 @@ function seedTwoScenes(): WorldStore {
 
 /** 往 hub 里塞一个在场的小朋友。 */
 function joinKid(hub: WorldHub, playerId: string): void {
-  hub.join('w1', { clientId: `conn-${playerId}`, playerId, sceneId: DEFAULT_SCENE, send: () => {} });
+  hub.join('w1', { clientId: `conn-${playerId}`, playerId, sceneId: DEFAULT_SCENE, send: () => {}, sendText: () => {} });
 }
 
 test('选角(躲猫猫)：首个非仙子村民当鬼 + 在场小朋友演自己，玩家 actor id 即 playerId', () => {

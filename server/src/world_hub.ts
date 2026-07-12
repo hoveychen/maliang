@@ -9,7 +9,10 @@ export interface HubMember {
   playerId: string;
   /** 所在场景(模型 B: world 含多 scene)。world_info 置初值,enter_scene 走 portal 时经 setScene 更新。 */
   sceneId: string;
+  /** 单接收者便捷发送(自行 stringify)：用于 host 变更/hearts 这类低频定向消息。 */
   send(msg: Record<string, unknown>): void;
+  /** 发预序列化好的文本帧：广播「序列化一次、同串发全场」的快路径(见 #send)。 */
+  sendText(text: string): void;
 }
 
 export interface HubLeaveResult {
@@ -106,11 +109,14 @@ export class WorldHub {
   }
 
   #send(members: HubMember[], msg: Record<string, unknown>, exceptClientId?: string): number {
+    // 序列化一次:同一份 payload 广播给全场,别逐接收者 JSON.stringify(高频位置流 fanout 的 CPU 大头)。
+    let text: string | null = null;
     let n = 0;
     for (const m of members) {
       if (m.clientId === exceptClientId) continue;
       try {
-        m.send(msg);
+        if (text === null) text = JSON.stringify(msg);
+        m.sendText(text);
         n++;
       } catch {
         // 发送失败的连接留给它自己的 close 事件清理
