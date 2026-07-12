@@ -83,7 +83,7 @@ import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type Character, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
-import { CREATION_OPTIONS, findOption, iconPrompt } from './creation_options.ts';
+import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
@@ -532,6 +532,49 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       }
     }
     return { count: results.length, detected: results.filter((r) => r.source).length, results };
+  });
+
+  // 管理端点：存量角色体型「回填」。老角色 appearance.scale 恒 1.0（体型特性上线前造的），
+  // 这里用 LLM 从 visualDescription 判体型（small/medium/big）→ sizeToScale 写回 appearance.scale，
+  // 让存量角色也有高矮差异。跳过仙子（客户端仙子恒 FAIRY_HEIGHT，scale 无意义）。
+  // 默认只改「未标定」的（scale≈1.0）；?force=1 全量重标；?world=<id> 限单个世界。
+  // 客户端下次进场（scene_entered 带 appearance.scale）即生效。必须配 MALIANG_ADMIN_TOKEN。
+  app.post<{ Querystring: { world?: string; force?: string } }>('/admin/calibrate-size', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const worldFilter = req.query.world;
+    const force = req.query.force === '1';
+    const results: { id: string; name: string; size?: string; scale?: number; skipped?: string }[] = [];
+    for (const w of store.listWorlds().filter((x) => !worldFilter || x.id === worldFilter)) {
+      for (const c of store.listCharacters(w.id)) {
+        if (c.isFairy) { // 仙子客户端恒 FAIRY_HEIGHT，回填无意义
+          results.push({ id: c.id, name: c.name, skipped: 'fairy' });
+          continue;
+        }
+        const desc = c.appearance?.visualDescription;
+        if (!desc) {
+          results.push({ id: c.id, name: c.name, skipped: 'no description' });
+          continue;
+        }
+        // 已标定（scale 明显偏离 1.0）且非 force → 跳过，不覆盖手动/已回填的结果
+        if (!force && Math.abs((c.appearance.scale ?? 1.0) - 1.0) > 0.01) {
+          results.push({ id: c.id, name: c.name, skipped: 'already calibrated' });
+          continue;
+        }
+        const size = await adapters.llm.classifyCreatureSize(desc);
+        const scale = sizeToScale(size);
+        c.appearance.scale = scale;
+        store.saveCharacter(c);
+        results.push({ id: c.id, name: c.name, size, scale });
+      }
+    }
+    return {
+      count: results.length,
+      calibrated: results.filter((r) => r.size).length,
+      results,
+    };
   });
 
   // 管理端点：存量角色立绘「原地裁边」。把已存立绘裁到贴身盒（trimToContent）重新入库，

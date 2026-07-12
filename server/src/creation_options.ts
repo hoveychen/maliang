@@ -103,12 +103,19 @@ export function sizeToScale(size: string | null | undefined): number {
 }
 
 /**
- * 从自由文本（或引导式汇总描述）里推断体型，供 mock 确定性产出与真实 LLM 缺省兜底。
- * 「小/迷你/矮」→ small；「大/巨/庞/高」→ big；否则 medium。
+ * 从文本（中文意图 / 引导式汇总描述 / 英文 visualDescription）里推断体型，
+ * 供 mock 确定性产出、真实 LLM 缺省兜底、以及存量角色回填（英文外观描述）。
+ * 中文「小/迷你/矮」→ small、「大/巨/庞/高」→ big；英文 tiny/little/small → small、
+ * huge/giant/big/large/... → big；否则 medium。
  * 注：种类名可能自带「小」（如「小人」「小猫」），调用方（真实 LLM）有上下文消歧；
  * 本正则仅用于 mock 单测与最后兜底，不追求语义完美。
  */
 export function inferSizeFromText(text: string): CreatureSize {
+  const en = text.toLowerCase();
+  // 英文体型词（存量回填走这条；\b 挡住 "biggest sale"→big 之外的误伤足够）
+  if (/\b(huge|giant|gigantic|enormous|massive|towering|colossal|large|big)\b/.test(en)) return 'big';
+  if (/\b(tiny|teeny|miniature|mini|little|small)\b/.test(en)) return 'small';
+  // 中文体型词
   if (/(巨大|巨|庞大|超大|好大|很大|大大|大号|高大)/.test(text)) return 'big';
   if (/(迷你|好小|很小|小小|矮小|小号)/.test(text)) return 'small';
   if (/大/.test(text) && !/大家|大人|大概/.test(text)) return 'big';

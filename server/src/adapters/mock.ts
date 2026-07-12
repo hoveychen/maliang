@@ -14,6 +14,7 @@ import {
   type SessionCompactionContext,
 } from '../types.ts';
 import { CREATION_OPTIONS, optionsByCategory, sizeToScale, inferSizeFromText } from '../creation_options.ts';
+import type { CreatureSize } from '../creation_options.ts';
 import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
 
@@ -303,6 +304,10 @@ export function createMockAdapters(): ServiceAdapters {
       },
       async respond(prompt: string): Promise<string> {
         return `（mock 回应）你说的是「${prompt}」对吗？`;
+      },
+      async classifyCreatureSize(visualDescription: string): Promise<CreatureSize> {
+        // mock：确定性走中英正则（真实接 LLM 自由理解英文外观描述）
+        return inferSizeFromText(visualDescription);
       },
     },
     asr: {
