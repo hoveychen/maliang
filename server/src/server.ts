@@ -93,6 +93,7 @@ import { StageDirector, type StageStartOpts } from './stage_session.ts';
 import { buildDebut, DebutError } from './stage_debut.ts';
 import { SCREENPLAYS, type ScreenplayName } from './screenplays.ts';
 import type { StagePropMaker } from './stage_types.ts';
+import { POS_TAG_REPORT, decodeReport, encodeRelay } from './pos_codec.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -1033,12 +1034,27 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const connKey = randomUUID(); // 每连接一个限流 key
     const session = newVoiceSession(); // 边录边传：本连接的语音分片缓冲
     // 能力协商：客户端自带 TTS（edge-tts）时连接 URL 带 ?clientTts=1，本连接全程跳过服务端合成。
-    session.clientTts = (req.query as { clientTts?: string } | undefined)?.clientTts === '1';
+    const q = req.query as { clientTts?: string; posbin?: string } | undefined;
+    session.clientTts = q?.clientTts === '1';
+    // 位置流二进制：客户端 ?posbin=1 声明，服务端据此对本连接收发二进制位置流；回执经 world_state.posBin。
+    session.posBin = q?.posbin === '1';
     // 连接层设备信息（activity 快照的服务端半段）：muvee 是反代，真实 IP 在 x-forwarded-for。
     session.connIp = clientIp(req);
     const ua = req.headers['user-agent'];
     if (typeof ua === 'string' && ua) session.connUa = ua.slice(0, 512);
-    socket.on('message', (raw: Buffer) => {
+    socket.on('message', (raw: Buffer, isBinary?: boolean) => {
+      session.lastSeenMs = Date.now(); // 二进制帧也算活跃(不进 handleWsMessage 就不会刷新)
+      // 二进制帧 = 位置流(唯一二进制上行);其余全走 JSON 文本。首字节 tag 兜底校验。
+      if (isBinary && raw.length > 0 && raw[0] === POS_TAG_REPORT) {
+        try {
+          const d = decodeReport(raw);
+          // worldId 不在二进制帧里:位置流只发生在 world_info 入 hub 之后,由 hub 决定归属。
+          applyPositionsReport({ worldId: hub?.worldOf(connKey) ?? '', sceneId: d.sceneId, t: d.t, chars: d.chars, player: d.player }, socket, store, session, connKey, hub, stages);
+        } catch (e) {
+          app.log.warn(`[posbin] 解码位置流失败: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        return;
+      }
       void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session, hub, stages);
     });
     // 心跳空闲扫描：新客户端会发 ping 刷新 lastSeen；超时无任何消息即判半开连接，
@@ -1156,6 +1172,8 @@ export interface VoiceSession {
   creation: CreationState | null;
   /** 客户端自带 TTS（edge-tts 直连微软）：WS 连接 URL 带 ?clientTts=1 时置位，服务端全程跳过合成只发文本+voiceId。 */
   clientTts: boolean;
+  /** 位置流二进制帧：客户端连接 URL 带 ?posbin=1 时置位。收发高频位置流走二进制(见 pos_codec)，老客户端留 JSON。 */
+  posBin: boolean;
   /** 连接层设备信息（activity 快照的服务端半段）：握手时从 req 取，world_info 建 Visit 时并入。 */
   connIp?: string;
   connUa?: string;
@@ -1175,7 +1193,7 @@ export interface VoiceSession {
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null, creation: null, clientTts: false, currentScene: DEFAULT_SCENE, lastSeenMs: Date.now(), pingCapable: false };
+  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null, creation: null, clientTts: false, posBin: false, currentScene: DEFAULT_SCENE, lastSeenMs: Date.now(), pingCapable: false };
 }
 
 /** 心跳：多久没任何消息判半开连接（三个客户端 ping 周期）。 */
@@ -1790,6 +1808,59 @@ function tileEdgeItemIdAt(store: WorldStore, worldId: string, sceneId: string, x
   }
 }
 
+/**
+ * 处理位置上报(JSON positions_report 与二进制帧共用)。空间权威在客户端,服务端记最后 tile 供读回,
+ * 并把携 x,y 的条目按【同世界同场景】转发插值 + 喂 near 求值。下行 positions_relay 双格式编码一次:
+ * 二进制成员发 bin、其余发 JSON(序列化各一次)。sceneId 空串 = 不覆盖,沿用 session.currentScene(高频流不带)。
+ */
+export function applyPositionsReport(
+  input: { worldId: string; sceneId: string; t?: number; chars: unknown[]; player?: unknown },
+  socket: { send: (data: string) => void },
+  store: WorldStore,
+  session: VoiceSession,
+  connKey: string,
+  hub?: WorldHub,
+  stages?: StageDirector,
+): void {
+  const worldId = input.worldId;
+  // 明示 sceneId(非空)时以它为准并自愈 session/hub;高频流不带 sceneId → 沿用 session.currentScene。
+  if (input.sceneId && input.sceneId !== session.currentScene) {
+    session.currentScene = input.sceneId;
+    hub?.setScene(connKey, input.sceneId);
+  }
+  const sceneId = session.currentScene;
+  const entries = input.chars;
+  let applied = 0;
+  const relayChars: { id: string; x: number; y: number }[] = [];
+  for (const raw of entries) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const e = raw as { id?: unknown; tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
+    if (typeof e.id !== 'string' || !e.id) continue;
+    const tile: TilePos = { tileX: Number(e.tileX), tileY: Number(e.tileY) };
+    if (isValidTile(tile) && store.setCharacterTile(worldId, e.id, tile, sceneId)) applied++;
+    if (typeof e.x === 'number' && typeof e.y === 'number') relayChars.push({ id: e.id, x: e.x, y: e.y });
+  }
+  let relayPlayer: { id: string; x: number; y: number } | undefined;
+  if (typeof input.player === 'object' && input.player !== null && session.playerId) {
+    const p = input.player as { tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
+    const tile: TilePos = { tileX: Number(p.tileX), tileY: Number(p.tileY) };
+    if (isValidTile(tile)) store.setPlayerTile(worldId, sceneId, session.playerId, tile);
+    if (typeof p.x === 'number' && typeof p.y === 'number') relayPlayer = { id: session.playerId, x: p.x, y: p.y };
+  }
+  if (relayChars.length > 0 || relayPlayer) {
+    // 双格式编码各一次:JSON 给老客户端、二进制给 posBin 客户端,别逐接收者重复编。
+    const t = typeof input.t === 'number' ? input.t : 0;
+    const text = JSON.stringify({ type: 'positions_relay', sceneId, t, chars: relayChars, player: relayPlayer });
+    const bin = encodeRelay({ t, sceneId, chars: relayChars, player: relayPlayer });
+    hub?.broadcastSceneDual(worldId, sceneId, text, bin, connKey);
+    const all = relayPlayer ? [...relayChars, relayPlayer] : relayChars;
+    stages?.updatePositions(worldId, all);
+  }
+  if (entries.length > 0 && applied === 0) {
+    socket.send(JSON.stringify({ type: 'error', error: 'no character position applied' }));
+  }
+}
+
 export async function handleWsMessage(
   socket: { send: (data: string) => void },
   raw: string,
@@ -1935,6 +2006,9 @@ export async function handleWsMessage(
         sceneId: session.currentScene,
         send: (m) => socket.send(JSON.stringify(m)),
         sendText: (s) => socket.send(s),
+        posBin: session.posBin,
+        // socket 在本函数按 {send:(string)} 窄化(复用于测试 mock);真实 ws socket 收 Uint8Array 二进制帧,故此处收窄转发。
+        sendBin: (b) => (socket.send as (d: string | Uint8Array) => void)(b),
       });
       joined.departed?.newHost?.send({ type: 'world_host', isHost: true });
       socket.send(JSON.stringify({ type: 'world_host', isHost: joined.isHost }));
@@ -1943,6 +2017,8 @@ export async function handleWsMessage(
     }
     socket.send(JSON.stringify({
       type: 'world_state',
+      // 二进制位置流回执：客户端 ?posbin=1 且服务端支持时为 true，客户端据此才切二进制上行(防老服务端)。
+      posBin: session.posBin,
       wallet: store.getWallet(worldId, session.playerId),
       // 自己的稳定音色（playerId 哈希）：客户端喊话复述用——复述音=对端听到的音，孩子两端听感一致
       voiceId: session.playerId ? voiceForPlayer(session.playerId, store.getPlayer(session.playerId)?.gender) : '',
@@ -2447,53 +2523,10 @@ export async function handleWsMessage(
   // 角色/玩家坐标回报：空间权威在客户端，服务端只记最后位置供下次进世界读回。
   // 静止时客户端不发；每拍只带 tile 变化过的角色。越界 tile 静默丢弃（单个坏条目不连坐整批）。
   if (msg.type === 'positions_report') {
-    const worldId = msg.worldId ?? '';
-    // 场景单一真相 = session.currentScene（world_info/enter_scene 维护，与 hub 成员同源）。
-    // 高频流（send_positions_stream）不带 sceneId，若按 msg.sceneId?? 缺省会把森林里的位置
-    // 落回 village、并把位置流发错场景。客户端明示 sceneId 时以它为准并自愈 session/hub。
-    if (typeof msg.sceneId === 'string' && msg.sceneId && msg.sceneId !== session.currentScene) {
-      session.currentScene = msg.sceneId;
-      hub?.setScene(connKey, msg.sceneId);
-    }
-    const sceneId = session.currentScene;
-    const entries = Array.isArray(msg.chars) ? msg.chars : [];
-    let applied = 0;
-    // 世界坐标流条目（携 x,y 时）：转发给同世界其他连接插值渲染 + 喂服务端 near 求值。tile 仍照常持久化。
-    const relayChars: { id: string; x: number; y: number }[] = [];
-    for (const raw of entries) {
-      if (typeof raw !== 'object' || raw === null) continue;
-      const e = raw as { id?: unknown; tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
-      if (typeof e.id !== 'string' || !e.id) continue;
-      const tile: TilePos = { tileX: Number(e.tileX), tileY: Number(e.tileY) };
-      // tile 越界只是不持久化；世界坐标该转发还得转发（演出期间位置流不能因一个坏 tile 断掉）。
-      if (isValidTile(tile) && store.setCharacterTile(worldId, e.id, tile, sceneId)) applied++;
-      if (typeof e.x === 'number' && typeof e.y === 'number') relayChars.push({ id: e.id, x: e.x, y: e.y });
-    }
-    // 玩家自己的位置（Player 表；档案未建时静默跳过——首次进世界还没上报 profile）。
-    let relayPlayer: { id: string; x: number; y: number } | undefined;
-    if (typeof msg.player === 'object' && msg.player !== null && session.playerId) {
-      const p = msg.player as { tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
-      const tile: TilePos = { tileX: Number(p.tileX), tileY: Number(p.tileY) };
-      if (isValidTile(tile)) store.setPlayerTile(worldId, sceneId, session.playerId, tile);
-      // 玩家复制位置以 playerId 为 actor 键（剧本 cast 里玩家演员 id 约定即 playerId）。
-      if (typeof p.x === 'number' && typeof p.y === 'number') relayPlayer = { id: session.playerId, x: p.x, y: p.y };
-    }
-    // 复制位置分发：广播给同世界【同场景】其他成员（排除自己）+ 喂 near 求值（无演出则 no-op）。
-    // 场景定向：隔壁场景的人看不见你，收到位置流只会渲染出一个脚下走过的幽灵。
-    if (relayChars.length > 0 || relayPlayer) {
-      hub?.broadcastScene(
-        worldId,
-        sceneId,
-        { type: 'positions_relay', sceneId, t: msg.t, chars: relayChars, player: relayPlayer },
-        connKey,
-      );
-      const all = relayPlayer ? [...relayChars, relayPlayer] : relayChars;
-      stages?.updatePositions(worldId, all);
-    }
-    // 成功无回包（与 prop_place 一致）；整批一个角色都没落地才回 error，便于客户端察觉世界/角色 id 错配。
-    if (entries.length > 0 && applied === 0) {
-      socket.send(JSON.stringify({ type: 'error', error: 'no character position applied' }));
-    }
+    applyPositionsReport(
+      { worldId: msg.worldId ?? '', sceneId: typeof msg.sceneId === 'string' ? msg.sceneId : '', t: msg.t, chars: Array.isArray(msg.chars) ? msg.chars : [], player: msg.player },
+      socket, store, session, connKey, hub, stages,
+    );
     return;
   }
 

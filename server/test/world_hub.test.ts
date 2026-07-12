@@ -13,6 +13,7 @@ function member(clientId: string, inbox: Record<string, unknown>[], sceneId = DE
     clientId, playerId: `p-${clientId}`, sceneId,
     send: (m) => inbox.push(m),
     sendText: (s) => inbox.push(JSON.parse(s)),
+    posBin: false, sendBin: () => {},
   };
 }
 
@@ -84,6 +85,7 @@ test('死连接不拖累广播: send 抛错跳过继续发', () => {
     clientId: 'dead', playerId: 'p', sceneId: DEFAULT_SCENE,
     send: () => { throw new Error('closed'); },
     sendText: () => { throw new Error('closed'); },
+    posBin: false, sendBin: () => { throw new Error('closed'); },
   });
   hub.join('w1', member('cB', inbox));
   const n = hub.broadcast('w1', { type: 'ping' });
@@ -97,6 +99,7 @@ test('序列化一次: 广播只 stringify 一次, 同一份字符串发给全�
   const spy = (clientId: string): HubMember => ({
     clientId, playerId: `p-${clientId}`, sceneId: DEFAULT_SCENE,
     send: () => {}, sendText: (s) => raw.push(s),
+    posBin: false, sendBin: () => {},
   });
   hub.join('w1', spy('cA'));
   hub.join('w1', spy('cB'));

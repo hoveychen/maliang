@@ -127,10 +127,14 @@ func _step_heartbeat(delta: float, got_rx: bool) -> bool:
 		_send({ "type": "ping" })
 	return _since_rx > HEARTBEAT_TIMEOUT_S
 
-## 连接 URL 带 clientTts=1 能力声明：服务端全程跳过 TTS 合成只发文本+voiceId，
-## 客户端 edge-tts 本地合成；edge 不通时逐句 send_tts_request 降级（服务端仍保留全套 TTS）。
+## 连接 URL 带能力声明：clientTts=1 服务端跳过 TTS 合成只发文本+voiceId（edge-tts 本地合成，
+## 不通时 send_tts_request 降级）；posbin=1 声明支持位置流二进制帧（服务端回执 world_state.posBin
+## 确认后才切二进制上行，防老服务端；下行 posBin 成员直接收二进制）。
 func full_url() -> String:
-	return url + ("&" if url.contains("?") else "?") + "clientTts=1"
+	return url + ("&" if url.contains("?") else "?") + "clientTts=1&posbin=1"
+
+## 服务端是否确认二进制位置流(world_state.posBin 回执)。确认前上行仍走 JSON——防打到不懂二进制的老服务端。
+var _posbin_ok := false
 
 func send_voice(world_id: String, character_id: String, audio_b64: String, fmt := "audio/wav") -> void:
 	_send({ "type": "voice_input", "worldId": world_id, "characterId": character_id, "audio": audio_b64, "format": fmt })
@@ -248,6 +252,10 @@ func send_positions(world_id: String, chars: Array, player_tile := Vector2i(-1, 
 ## t 为服务端钟毫秒（本地钟 + 时间偏移），接收端据此对齐插值时间戳。
 ## 服务端把带 x,y 的条目转发给同世界其他连接，并喂 near 规则求值。
 func send_position_stream(world_id: String, chars: Array, player: Dictionary, t: int) -> void:
+	# 二进制上行(服务端已确认):高频流不带 sceneId(服务端用 session.currentScene),playerId 也由服务端会话取。
+	if _posbin_ok and _open:
+		_ws.send(PosCodec.encode_report("", t, chars, player))
+		return
 	var msg := { "type": "positions_report", "worldId": world_id, "chars": chars, "t": t }
 	if not player.is_empty():
 		msg["player"] = player
@@ -303,10 +311,16 @@ func _poll_ws(delta: float) -> void:
 		var got_rx := false
 		while _ws.get_available_packet_count() > 0:
 			got_rx = true
-			var raw := _ws.get_packet().get_string_from_utf8()
-			var data: Variant = JSON.parse_string(raw)
-			if typeof(data) == TYPE_DICTIONARY:
-				_dispatch(data)
+			var pkt := _ws.get_packet()
+			if _ws.was_string_packet():
+				var data: Variant = JSON.parse_string(pkt.get_string_from_utf8())
+				if typeof(data) == TYPE_DICTIONARY:
+					_dispatch(data)
+			else:
+				# 二进制帧 = 位置流(唯一二进制下行);解码失败(tag 不符)返回空,静默丢弃。
+				var relay := PosCodec.decode_relay(pkt)
+				if not relay.is_empty():
+					positions_relay.emit(relay)
 		if _step_heartbeat(delta, got_rx):
 			# 超时无回包：半开连接，强制关连；下一帧回落 CLOSED 触发自动重连。
 			_ws.close()
@@ -354,6 +368,7 @@ func _dispatch(data: Dictionary) -> void:
 		"creation_cancelled":
 			creation_cancelled.emit(data)
 		"world_state":
+			_posbin_ok = bool(data.get("posBin", false)) # 服务端确认二进制位置流,上行开始走二进制
 			world_state.emit(data)
 		"task_complete":
 			task_complete.emit(data)
