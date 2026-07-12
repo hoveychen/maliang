@@ -23,7 +23,7 @@ const SETTLE_FRAMES := 10          # 每个物品渲染前等的帧数（够 SDF
 const CAM_ELEV_DEG := 28.0         # 相机俯角（近似游戏内斜俯视）
 const CAM_AZIM_DEG := 35.0         # 相机方位角
 const FIT_MARGIN := 1.25           # AABB 初始取景留白系数（自动取景的起点）
-const FIT_PASSES := 4              # 自动取景迭代上限
+const FIT_PASSES := 6              # 自动取景迭代上限（含空帧拉远重试的余量）
 const FIT_TARGET := 0.6            # 目标：可见内容占视口边长比例（留足余量防偏心物出框，trim 会再裁紧）
 
 var _base := "http://127.0.0.1:8080"
@@ -138,6 +138,11 @@ func _render_item(def: Dictionary) -> Image:
 	if node == null:
 		return null
 	_stage.add_child(node)
+	# 先等几帧再算 AABB：add_child 同帧 global_transform 还没吸收 inst.scale、动画也没摆姿态，
+	# 立刻算 AABB 会拿到未缩放的裸模型包围盒——如宝塔 scale=0.0007 会算出 8605 单位的巨盒，
+	# 相机停到 1.3 万单位外、超出远裁面 → 整帧空白 → 被误判成渲染失败。等姿态/变换定了再取景。
+	for _i in range(SETTLE_FRAMES):
+		await process_frame
 	var framing := _frame_camera(node)
 	# 自动取景：SDF 的 shell mesh 基础 AABB 远大于着色器吸附后的可见面，node 模型
 	# 尺度也各异——纯按 AABB 摆相机会渲出极小或截断的图。改成「渲一帧→量实际填充像素
@@ -151,13 +156,17 @@ func _render_item(def: Dictionary) -> Image:
 		img = _vp.get_texture().get_image()
 		var used := img.get_used_rect()
 		if used.size == Vector2i.ZERO:
-			break  # 全透明（渲染失败），交给上层按原图处理
+			# 这一帧全空（相机太近钻进模型 / 太远出裁面）：拉远一档重试，别直接判空白
+			var back := (_cam.position - center).length() * 2.0
+			_cam.position = center + dir * back
+			_cam.look_at(center, Vector3.UP)
+			continue
 		var span := float(maxi(used.size.x, used.size.y))
 		var target := float(VP_SIZE) * FIT_TARGET
 		if pass_i == FIT_PASSES - 1 or absf(span - target) < VP_SIZE * 0.06:
 			break  # 已够贴合或用完次数
 		var dist := (_cam.position - center).length()
-		var new_dist := clampf(dist * span / target, 0.4, 200.0)
+		var new_dist := clampf(dist * span / target, 0.4, 200000.0)
 		_cam.position = center + dir * new_dist
 		_cam.look_at(center, Vector3.UP)
 	for c in _stage.get_children():
@@ -226,6 +235,7 @@ func _frame_camera(node: Node3D) -> Dictionary:
 	var azim := deg_to_rad(CAM_AZIM_DEG)
 	var dir := Vector3(cos(elev) * sin(azim), sin(elev), cos(elev) * cos(azim))
 	_cam.near = 0.01  # 自动取景会拉近，小近裁面防切进模型
+	_cam.far = 100000.0  # 大远裁面兜底：巨模型（宝塔等）初始取景距离极大也不至于落到裁面外
 	_cam.position = center + dir * dist
 	_cam.look_at(center, Vector3.UP)
 	return { "center": center, "dir": dir }
