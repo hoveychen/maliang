@@ -1734,7 +1734,11 @@ export async function handleWsMessage(
   // 回 world_state 同步贴纸背包与进行中委托（断线重连/重启后客户端补状态）。
   if (msg.type === 'world_info') {
     const worldId = msg.worldId ?? '';
-    // 玩家登记：world_info 带 playerId + profile 时 upsert（首见即建档，面向 MMO；无鉴权）
+    // 玩家登记：world_info 带 playerId + profile 时 upsert（首见即建档，面向 MMO；无鉴权）。
+    // 但只认「有真角色」的档案：name / spriteAsset 至少一个非空。客户端在小朋友还没建角色时
+    // 也会带 playerId + 全空字段的 profile 上报（upload_dict 恒返回对象），据此建档会在后台留下
+    // 一堆「无立绘」空玩家脏数据（见 test/player_registration.test.ts）——空档一律不 upsert、
+    // 也不覆盖已有真实档（断线重连时客户端档案若丢失，服务端记录不被抹掉）。
     if (typeof msg.playerId === 'string' && msg.playerId && msg.profile) {
       const p = msg.profile;
       const player: Player = {
@@ -1746,7 +1750,7 @@ export async function handleWsMessage(
         spriteAsset: String(p.spriteAsset ?? ''),
         createdAt: String(p.createdAt ?? ''),
       };
-      store.upsertPlayer(player);
+      if (player.name !== '' || player.spriteAsset !== '') store.upsertPlayer(player);
     }
     const names = (Array.isArray(msg.locations) ? msg.locations : [])
       .filter((n): n is string => typeof n === 'string' && n.trim().length > 0 && n.length <= 20)
