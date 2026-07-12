@@ -142,8 +142,8 @@ test('拒收：palette 截断 / 空项 / 重复项', () => {
 
 test('拒收：非法 tile 类型', () => {
   const buf = encodeTerrain(terrain());
-  buf[HEADER_BYTES + 5] = 8; // 8 不在合法集 {0,1,2,5,6,7}
-  assert.throws(() => decodeTerrain(buf), /tile type 8/);
+  buf[HEADER_BYTES + 5] = 99; // 99 不在合法集 {0,1,2,5..12}
+  assert.throws(() => decodeTerrain(buf), /tile type 99/);
 });
 
 test('拒收：3/4 是崖壁 B 码不作 tile 类型', () => {

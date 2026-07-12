@@ -192,6 +192,8 @@ static func _ring(c: Vector2i, r: int) -> Array:
 static func _deco_kind(scene_id: String, gt: Vector2i) -> int:
 	if scene_id == "forest":
 		return _deco_kind_forest(gt)
+	if scene_id == "seafloor":
+		return DECO_NONE  # 海底切片仅地形，无散布物品（themed-terrain P2）
 	return _deco_kind_village(gt)
 
 ## village 分区散布：从北往南——山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、

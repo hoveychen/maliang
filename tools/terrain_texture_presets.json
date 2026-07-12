@@ -34,5 +34,33 @@
     "struct_sigma": 3, "detail_keep": 0.18, "sat": 0.4, "contrast": 0.62,
     "levels": 6, "poster_mix": 0.45, "lift": 0.11, "tint": "226,216,192",
     "tint_amt": 0.2, "edge_pool": 0.16
+  },
+  "coarse_sand": {
+    "source": "coral_gravel",
+    "_note": "海底 P2 粗沙。有机基线, 略保细节显颗粒。",
+    "struct_sigma": 10, "detail_keep": 0.08, "sat": 0.5, "contrast": 0.58,
+    "levels": 5, "poster_mix": 0.55, "lift": 0.09, "tint": "203,178,138",
+    "tint_amt": 0.3, "edge_pool": 0.07
+  },
+  "coral_sand": {
+    "source": "coral_mud_01",
+    "_note": "海底 P2 珊瑚砂。浅粉带珊瑚碎。",
+    "struct_sigma": 10, "detail_keep": 0.07, "sat": 0.5, "contrast": 0.58,
+    "levels": 5, "poster_mix": 0.55, "lift": 0.09, "tint": "226,198,188",
+    "tint_amt": 0.3, "edge_pool": 0.07
+  },
+  "seagrass": {
+    "source": "aerial_grass_rock",
+    "_note": "海底 P2 海草地。青绿, sat 略高保绿。",
+    "struct_sigma": 10, "detail_keep": 0.05, "sat": 0.55, "contrast": 0.58,
+    "levels": 5, "poster_mix": 0.55, "lift": 0.09, "tint": "92,148,118",
+    "tint_amt": 0.42, "edge_pool": 0.07
+  },
+  "deep_bed": {
+    "source": "brown_mud_leaves_01",
+    "_note": "海底 P2 深水床。暗青, 压低 lift/contrast 显深。",
+    "struct_sigma": 10, "detail_keep": 0.05, "sat": 0.5, "contrast": 0.5,
+    "levels": 5, "poster_mix": 0.55, "lift": 0.05, "tint": "60,84,86",
+    "tint_amt": 0.46, "edge_pool": 0.07
   }
 }

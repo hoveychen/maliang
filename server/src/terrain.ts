@@ -51,12 +51,21 @@ export const DEFAULT_TILE_SIZE = 2.0;
 export const T_GRASS = 0;
 export const T_PATH = 1;
 export const T_WATER = 2;
-export const T_SAND = 5;   // 沙地（海底/沙滩；复用 dirt 细节贴图，暖 tint）
-export const T_SNOW = 6;   // 雪地（冰雪世界；复用 stone 细节贴图，冷白 tint）
-export const T_TILE = 7;   // 瓷砖地板（室内厨房/医院/玩具房间；stone 细节，中性灰 tint）
+export const T_SAND = 5;   // 沙地（海底：细沙 / 沙滩）
+export const T_SNOW = 6;   // 雪地（冰雪世界）
+export const T_TILE = 7;   // 瓷砖地板（室内厨房/医院/玩具房间）
+// 海底主题地表（themed-terrain P2），与客户端 TerrainMap.T_* 及层贴图一一对应。
+export const T_COARSE_SAND = 8;  // 粗沙
+export const T_CORAL_SAND = 9;   // 珊瑚砂
+export const T_REEF = 10;        // 礁岩（可抬高）
+export const T_SEAGRASS = 11;    // 海草地
+export const T_DEEP_BED = 12;    // 深水床（暗）
 
 /** 合法的存储 tile 类型集合（校验用；3/4 是客户端崖壁 B 码，不入此集）。 */
-export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE]);
+export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
+  T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
+  T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
+]);
 /** 可行走地表（非水）——新地形一律按草地行走规则；仅水阻挡。 */
 export function isWalkableTileType(t: number): boolean {
   return VALID_TILE_TYPES.has(t) && t !== T_WATER;

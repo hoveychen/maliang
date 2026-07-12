@@ -27,13 +27,21 @@ const T_PATH := 1
 const T_WATER := 2
 ## 扩展可行走地表（world-themes P1）：3/4 是 TerrainAtlas 崖唇/崖壁 B 码，不作 tile 类型，故从 5 起。
 ## 与 server terrain.ts T_SAND/SNOW/TILE 及 shader body-type ty 5/6/7 一一对应。
-const T_SAND := 5   ## 沙地
+const T_SAND := 5   ## 沙地（海底：细沙）
 const T_SNOW := 6   ## 雪地
 const T_TILE := 7   ## 瓷砖地板
+## 海底主题地表（themed-terrain P2）：与 server terrain.ts 及 TerrainTextures 层映射一一对应。
+const T_COARSE_SAND := 8  ## 粗沙
+const T_CORAL_SAND := 9   ## 珊瑚砂
+const T_REEF := 10        ## 礁岩（可抬高，礁岩侧壁）
+const T_SEAGRASS := 11    ## 海草地
+const T_DEEP_BED := 12    ## 深水床（暗）
 ## 合法存储 tile 类型（校验/autotile 分组用）。
-const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE]
+const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
+	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED]
 ## 「画在草底上的 body」类型（autotile 与邻居同类过渡）：路 + 新增地表；水另走整格湖床。
-const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE]
+const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE,
+	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED]
 const MAX_HEIGHT := 255   ## 数据上限（存储为 byte）；默认地形主峰只到 8 级
 const STEP_HEIGHT := 2.0  ## 每级台阶的世界高度（米）= 1 格（tile 边长）；相邻 tile 跳变可超 1 级（陡崖）
 const MAX_DEPTH := 2      ## 默认地形的最大水深级数（1=浅水 2=深水；湖床 = 高度 - 深度）

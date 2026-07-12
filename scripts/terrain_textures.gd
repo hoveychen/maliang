@@ -18,8 +18,13 @@ const LAYER_CLIFF_WALL := 4  ## 崖壁（默认岩壁；抬高 tile 无专属侧
 const LAYER_SAND := 5        ## 沙地（P0 审定水彩，tint 已烘入贴图）
 const LAYER_SNOW := 6        ## 雪地（P0）
 const LAYER_TILE := 7        ## 瓷砖地板（P0）
-const LAYER_CORAL := 8       ## 珊瑚/礁砂（P0；海底 P2 主用，P1 作侧壁差异验证层）
-const LAYER_COUNT := 9
+const LAYER_CORAL := 8       ## 礁岩（P0 coral.png；海底 P2 用作礁岩顶面/侧壁）
+# ── 海底 P2 新增层（成品水彩，tint 已烘入贴图，故 tint/mean 传白）────────────────
+const LAYER_COARSE_SAND := 9  ## 粗沙（coral_gravel 风格化）
+const LAYER_CORAL_SAND := 10  ## 珊瑚砂（coral_mud_01 风格化，浅粉带珊瑚碎）
+const LAYER_SEAGRASS := 11    ## 海草地（aerial_grass_rock 风格化，青绿）
+const LAYER_DEEP_BED := 12    ## 深水床（brown_mud_leaves_01 风格化，暗青）
+const LAYER_COUNT := 13
 
 ## shader 端 layer_tint[]/layer_mean[] 的固定数组长度（预留冗余，P3 加层不必改 shader）。
 const SHADER_ARRAY_SIZE := 16
@@ -34,7 +39,11 @@ const LAYER_TEX_PATHS: Array[String] = [
 	"res://assets/textures/terrain/sand.png",      # 5 SAND
 	"res://assets/textures/terrain/snow.png",      # 6 SNOW
 	"res://assets/textures/terrain/tile.png",      # 7 TILE
-	"res://assets/textures/terrain/coral.png",     # 8 CORAL
+	"res://assets/textures/terrain/coral.png",     # 8 CORAL (礁岩)
+	"res://assets/textures/terrain/coarse_sand.png", # 9 COARSE_SAND
+	"res://assets/textures/terrain/coral_sand.png",  # 10 CORAL_SAND
+	"res://assets/textures/terrain/seagrass.png",    # 11 SEAGRASS
+	"res://assets/textures/terrain/deep_bed.png",    # 12 DEEP_BED
 ]
 
 const _WHITE := Color(1.0, 1.0, 1.0)
@@ -53,6 +62,10 @@ static func layer_tints() -> PackedColorArray:
 	t[LAYER_SNOW] = _WHITE
 	t[LAYER_TILE] = _WHITE
 	t[LAYER_CORAL] = _WHITE
+	t[LAYER_COARSE_SAND] = _WHITE
+	t[LAYER_CORAL_SAND] = _WHITE
+	t[LAYER_SEAGRASS] = _WHITE
+	t[LAYER_DEEP_BED] = _WHITE
 	return t
 
 ## 层 → 全图均值（tex/mean 归一：把偏暗的水彩包除到均值 1，只留笔触，色由 tint 定）。
@@ -70,6 +83,10 @@ static func layer_means() -> PackedColorArray:
 	m[LAYER_SNOW] = _WHITE
 	m[LAYER_TILE] = _WHITE
 	m[LAYER_CORAL] = _WHITE
+	m[LAYER_COARSE_SAND] = _WHITE
+	m[LAYER_CORAL_SAND] = _WHITE
+	m[LAYER_SEAGRASS] = _WHITE
+	m[LAYER_DEEP_BED] = _WHITE
 	return m
 
 ## tile 类型（TerrainMap.T_*）→ 顶面贴图层索引。未知类型兜底草地。
@@ -81,6 +98,11 @@ static func top_layer(ttype: int) -> int:
 		TerrainMap.T_SAND: return LAYER_SAND
 		TerrainMap.T_SNOW: return LAYER_SNOW
 		TerrainMap.T_TILE: return LAYER_TILE
+		TerrainMap.T_COARSE_SAND: return LAYER_COARSE_SAND
+		TerrainMap.T_CORAL_SAND: return LAYER_CORAL_SAND
+		TerrainMap.T_REEF: return LAYER_CORAL
+		TerrainMap.T_SEAGRASS: return LAYER_SEAGRASS
+		TerrainMap.T_DEEP_BED: return LAYER_DEEP_BED
 	return LAYER_GRASS
 
 ## tile 类型 → 侧壁（崖壁）贴图层索引：该 tile 被抬高时其竖直立面所采的层。
@@ -90,6 +112,11 @@ static func side_layer(ttype: int) -> int:
 		TerrainMap.T_SAND: return LAYER_SAND
 		TerrainMap.T_SNOW: return LAYER_SNOW
 		TerrainMap.T_TILE: return LAYER_TILE
+		TerrainMap.T_COARSE_SAND: return LAYER_COARSE_SAND
+		TerrainMap.T_CORAL_SAND: return LAYER_CORAL_SAND
+		TerrainMap.T_REEF: return LAYER_CORAL
+		TerrainMap.T_SEAGRASS: return LAYER_SEAGRASS
+		TerrainMap.T_DEEP_BED: return LAYER_DEEP_BED
 	return LAYER_CLIFF_WALL
 
 ## PackedColorArray → shader vec3[] 用的线性 PackedVector3Array（补齐到 SHADER_ARRAY_SIZE）。

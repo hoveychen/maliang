@@ -61,8 +61,12 @@ CC BY 3.0 许可全文：https://creativecommons.org/licenses/by/3.0/
 |---|---|---|
 | 沙 sand | `coast_sand_02` | https://polyhaven.com/a/coast_sand_02 |
 | 雪 snow | `snow_03` | https://polyhaven.com/a/snow_03 |
-| 珊瑚 coral | `coral_ground_02` | https://polyhaven.com/a/coral_ground_02 |
+| 珊瑚/礁岩 coral/reef | `coral_ground_02` | https://polyhaven.com/a/coral_ground_02 |
 | 白瓷砖 tile | `long_white_tiles` | https://polyhaven.com/a/long_white_tiles |
+| 粗沙 coarse_sand（海底 P2）| `coral_gravel` | https://polyhaven.com/a/coral_gravel |
+| 珊瑚砂 coral_sand（海底 P2）| `coral_mud_01` | https://polyhaven.com/a/coral_mud_01 |
+| 海草地 seagrass（海底 P2）| `aerial_grass_rock` | https://polyhaven.com/a/aerial_grass_rock |
+| 深水床 deep_bed（海底 P2）| `brown_mud_leaves_01` | https://polyhaven.com/a/brown_mud_leaves_01 |
 
 > P1-P3 逐主题铺开时，新增的每个 Poly Haven / ambientCG 源都追加到本表。
 
