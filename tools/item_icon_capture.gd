@@ -19,9 +19,19 @@ extends SceneTree
 ## 只跑指定 id（逗号分隔）:  加环境变量 ITEM_ICON_ONLY=tree_puff_a,rock_a
 ##
 ## 可续跑（默认）：已有缩略图的物品自动跳过，只补缺口。单进程连续渲染约 30 件后 GPU
-## 资源累积会让后续渲染渐渐变空白（本地/生产都一样），所以一次跑不满是正常的——
+## 资源累积会让后续渲染渐渐变空白/停滞（本地/生产都一样），所以一次跑不满是正常的——
 ## 反复跑同一条命令即可，每次新进程专攻剩余缺口，几遍后收敛到全齐。全量重渲用 ITEM_ICON_FORCE=1。
 ##   until 循环示例：while :; do <上面的命令>; done  # 直到「完成」里渲染失败跳过=0 再 Ctrl-C
+##
+## ⚠️ GPU 停滞会产出「冻结帧」而非空白帧：连续渲染到某件后 SubViewport 不再刷新、冻结在上一张
+## 成功帧上。这帧非空白，光靠空白护栏（_render_item 里 area<64）拦不住，会被当成当前物品上传——
+## 一整批连号物品就全焊上同一张冻结图（生产曾 98/156 件中招，分 4 个连号簇）。两道防线：
+##   1) 停滞帧护栏：本进程内若一件的 PNG 与上一张已上传的 PNG 字节完全相同，判为冻结帧 → 跳过不传，
+##      留给下个新进程（GPU 干净）重渲。见 _run 里的 _last_png 比对。
+##   2) 每进程上限 ITEM_ICON_MAX_PER_RUN（默认 20，0=不限）：上传够 N 件就自动退出，趁 GPU 未累积到
+##      停滞阈值就换新进程，配合 until 循环收敛。这是治本：根本不让 GPU 撑到冻结。
+## 修历史坏数据：ITEM_ICON_REDO_HASHES=hash1,hash2,... 让「当前 iconHash 命中该列表」的物品无视
+##   已有图强制重渲（重渲出唯一新图后即脱离该列表，自然被后续进程跳过，配合上限+until 收敛）。
 
 const VP_SIZE := 320               # 缩略图边长（正方形，透明底）
 const SETTLE_FRAMES := 10          # 每个物品渲染前等的帧数（够 SDF 顶点吸附收敛）
@@ -35,6 +45,9 @@ var _base := "http://127.0.0.1:8080"
 var _token := ""
 var _only: PackedStringArray = []
 var _force := false  # 默认跳过已有缩略图的物品（可续跑）；ITEM_ICON_FORCE=1 全量重渲
+var _max_per_run := 20  # 每进程上传上限，够了就自退避免 GPU 累积到停滞（0=不限）
+var _redo_hashes: PackedStringArray = []  # 当前 iconHash 命中即强制重渲（修历史坏数据）
+var _last_png: PackedByteArray = PackedByteArray()  # 上一张已上传 PNG，用于停滞帧比对
 var _vp: SubViewport
 var _cam: Camera3D
 var _stage: Node3D
@@ -50,6 +63,13 @@ func _initialize() -> void:
 			_only.append(s.strip_edges())
 	var force_env := OS.get_environment("ITEM_ICON_FORCE")
 	_force = force_env == "1" or force_env.to_lower() == "true"
+	var max_env := OS.get_environment("ITEM_ICON_MAX_PER_RUN")
+	if not max_env.is_empty() and max_env.is_valid_int():
+		_max_per_run = maxi(int(max_env), 0)
+	var redo_env := OS.get_environment("ITEM_ICON_REDO_HASHES")
+	if not redo_env.is_empty():
+		for s in redo_env.split(",", false):
+			_redo_hashes.append(s.strip_edges())
 	_build_stage()
 	_run()
 
@@ -105,6 +125,8 @@ func _run() -> void:
 	var skip := 0
 	var fail := 0
 	var have := 0
+	var stale := 0
+	var capped := false
 	for d in defs:
 		var def := d as Dictionary
 		var id := String(def.get("id", ""))
@@ -112,10 +134,12 @@ func _run() -> void:
 			continue
 		if _only.size() > 0 and not (_only.has(id)):
 			continue
-		# 可续跑：已有缩略图的默认跳过（单进程渲染约 30 件后 GPU 累积会渐渐渲空白，
+		# 可续跑：已有缩略图的默认跳过（单进程渲染约 30 件后 GPU 累积会渐渐渲空白/停滞，
 		# 分多次跑才能补满——跳过已有让每次新进程都专攻缺口，多跑几遍自然收敛到全齐）。
-		# ITEM_ICON_FORCE=1 时无视已有、全量重渲。
-		if not _force and not String(def.get("iconHash", "")).is_empty():
+		# ITEM_ICON_FORCE=1 时无视已有、全量重渲；ITEM_ICON_REDO_HASHES 命中的坏图也强制重渲。
+		var ih := String(def.get("iconHash", ""))
+		var needs := ih.is_empty() or _redo_hashes.has(ih)
+		if not _force and not needs:
 			have += 1
 			continue
 		var img: Image = await _render_item(def)
@@ -124,17 +148,30 @@ func _run() -> void:
 			skip += 1
 			continue
 		var png := img.save_png_to_buffer()
+		# 停滞帧护栏：GPU 累积后 SubViewport 会冻结在上一张成功帧上。这帧非空白、骗过空白护栏，
+		# 但与上一张已上传的 PNG 字节完全相同——判为冻结帧，跳过不传，留给下个新进程重渲。
+		# （不同 3D 模型的正常渲染不会字节级相同，故此比对不会误伤真实物品。）
+		if not _last_png.is_empty() and png == _last_png:
+			print("[icon] stale %s（与上一张字节相同，疑 GPU 停滞冻结帧）→ 跳过留待新进程" % id)
+			stale += 1
+			continue
 		var res: Dictionary = await _post_icon(id, Marshalls.raw_to_base64(png))
 		if res.has("iconAsset"):
 			ok += 1
+			_last_png = png
 			print("[icon] ok   %s → %s" % [id, res["iconAsset"]])
+			# 每进程上限：够了就自退，趁 GPU 未累积到停滞阈值就换新进程（until 循环续补）。
+			if _max_per_run > 0 and ok >= _max_per_run:
+				capped = true
+				print("[icon] 已达本进程上限 %d，自动退出让 until 循环换新 GPU 进程续跑。" % _max_per_run)
+				break
 		else:
 			fail += 1
 			push_warning("[icon] fail %s 上传失败" % id)
 
-	print("[icon] 完成：上传 %d，渲染失败跳过 %d，已有跳过 %d，上传失败 %d" % [ok, skip, have, fail])
-	if not _force and skip > 0:
-		print("[icon] 提示：仍有 %d 件本轮渲空白（单进程 GPU 累积所致）。再跑一遍本命令即可续补缺口。" % skip)
+	print("[icon] 完成：上传 %d，渲染失败跳过 %d，停滞帧跳过 %d，已有跳过 %d，上传失败 %d" % [ok, skip, stale, have, fail])
+	if not _force and (skip > 0 or stale > 0 or capped):
+		print("[icon] 提示：本轮尚未收敛（GPU 累积/上限所致）。再跑一遍本命令即可续补缺口。")
 	quit(1 if fail > 0 else 0)
 
 ## 渲染一个物品 → 裁边后的 Image。贴纸直接取平面纹理（就是它的样子）；
