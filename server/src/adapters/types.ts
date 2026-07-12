@@ -10,6 +10,7 @@ import type {
   SessionCompactionContext,
 } from '../types.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
+import type { CreatureSize } from '../creation_options.ts';
 
 export interface ImageBlob {
   bytes: Uint8Array;
@@ -42,6 +43,8 @@ export interface LLMAdapter {
   compactSession(ctx: SessionCompactionContext): Promise<string>;
   /** onboarding 自我介绍：从小朋友的转写里提取名字与称呼（提取不到均返回空串）。 */
   extractProfile(transcript: string): Promise<{ name: string; nickname: string }>;
+  /** 存量角色体型回填：从英文 visualDescription 判定体型（small/medium/big），供 /admin/calibrate-size。 */
+  classifyCreatureSize(visualDescription: string): Promise<CreatureSize>;
   respond(prompt: string): Promise<string>;
 }
 
