@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { assetUrl, fmtTs, useApi } from '../api.ts';
 import { MEMORY_KIND_LABELS, type CharacterDetail, type MemoryItem } from '../types.ts';
-import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, ShortId, Sprite } from '../components.tsx';
+import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, ShortId, SizeBadge, Sprite } from '../components.tsx';
 
 function groupByKind(items: MemoryItem[]): [string, MemoryItem[]][] {
   const by = new Map<string, MemoryItem[]>();
@@ -52,7 +52,7 @@ export function CharacterDetailPage() {
               <dt>招呼风格</dt><dd>{c.greetingStyle || <span className="empty-cell">默认（按 id 哈希）</span>}</dd>
               <dt>能力</dt><dd>{c.abilities.map((a) => <span className="badge" style={{ marginRight: 4 }} key={a}>{a}</span>)}</dd>
               <dt>外观描述</dt><dd>{c.appearance.visualDescription || '—'}</dd>
-              <dt>缩放</dt><dd className="mono">{c.appearance.scale}</dd>
+              <dt>体型</dt><dd><SizeBadge scale={c.appearance.scale} /></dd>
               <dt>立绘资产</dt><dd className="mono">{c.appearance.spriteAsset || '—'}</dd>
               <dt>锚点</dt><dd className="mono">{c.appearance.anchors
                 ? `头(${c.appearance.anchors.headTop.x.toFixed(2)},${c.appearance.anchors.headTop.y.toFixed(2)}) 左手(${c.appearance.anchors.handL.x.toFixed(2)},${c.appearance.anchors.handL.y.toFixed(2)}) 右手(${c.appearance.anchors.handR.x.toFixed(2)},${c.appearance.anchors.handR.y.toFixed(2)}) · ${c.appearance.anchors.source}`
