@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { assetUrl, fmtTs, useApi } from '../api.ts';
 import { MEMORY_KIND_LABELS, type CharacterDetail, type MemoryItem } from '../types.ts';
-import { AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, ShortId, Sprite } from '../components.tsx';
+import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, ShortId, Sprite } from '../components.tsx';
 
 function groupByKind(items: MemoryItem[]): [string, MemoryItem[]][] {
   const by = new Map<string, MemoryItem[]>();
@@ -31,8 +31,9 @@ export function CharacterDetailPage() {
         <>
           <div className="panel panel-row">
             <div>
-              <Sprite hash={c.appearance.spriteAsset} large alt={c.name} />
+              <Sprite hash={c.appearance.spriteAsset} large alt={c.name} anchors={c.appearance.anchors} />
               <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <AnchorBadge anchors={c.appearance.anchors} />
                 <AnimStatusBadge status={data.spriteAnim.status} />
                 {data.spriteAnim.status === 'ready' && data.spriteAnim.animAsset && (
                   <a className="mono" href={assetUrl(data.spriteAnim.animAsset)} target="_blank" rel="noreferrer">
@@ -53,6 +54,9 @@ export function CharacterDetailPage() {
               <dt>外观描述</dt><dd>{c.appearance.visualDescription || '—'}</dd>
               <dt>缩放</dt><dd className="mono">{c.appearance.scale}</dd>
               <dt>立绘资产</dt><dd className="mono">{c.appearance.spriteAsset || '—'}</dd>
+              <dt>锚点</dt><dd className="mono">{c.appearance.anchors
+                ? `头(${c.appearance.anchors.headTop.x.toFixed(2)},${c.appearance.anchors.headTop.y.toFixed(2)}) 左手(${c.appearance.anchors.handL.x.toFixed(2)},${c.appearance.anchors.handL.y.toFixed(2)}) 右手(${c.appearance.anchors.handR.x.toFixed(2)},${c.appearance.anchors.handR.y.toFixed(2)}) · ${c.appearance.anchors.source}`
+                : '—'}</dd>
             </dl>
           </div>
 

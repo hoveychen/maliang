@@ -18,6 +18,15 @@ export interface Overview {
   recentVisits: Visit[];
 }
 
+// 贴纸锚点：归一化到 trim 后立绘（x,y ∈ [0,1]，原点左上），后端 debug API 整对象透出（见 debug_api.ts）。
+export interface AnchorPoint { x: number; y: number; }
+export interface CharacterAnchors {
+  headTop: AnchorPoint;
+  handL: AnchorPoint;
+  handR: AnchorPoint;
+  source: 'vision' | 'fallback';
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -26,6 +35,7 @@ export interface Player {
   color: string;
   spriteAsset: string;
   createdAt: string;
+  anchors?: CharacterAnchors; // 玩家形象的贴纸锚点（随 world_info 上报落 Player，见服务端 §5）
 }
 
 export interface PlayerRow extends Player {
@@ -222,7 +232,7 @@ export interface Character {
   personality: string;
   voiceId: string;
   greetingStyle?: string;
-  appearance: { visualDescription: string; spriteAsset: string; scale: number };
+  appearance: { visualDescription: string; spriteAsset: string; scale: number; anchors?: CharacterAnchors };
   state: string;
   behaviorScript: { commands: { type: string; params: Record<string, unknown> }[]; loop: boolean };
   position: { tileX: number; tileY: number };
