@@ -69,6 +69,7 @@ interface DeviceReport {
   app?: string;
 }
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
+import { detectCharacterAnchors } from './anchors.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
 import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
@@ -309,7 +310,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     }
     const hash = provided
       ? store.putAsset({ bytes: Uint8Array.from(Buffer.from(provided, 'base64')), mime: 'image/png' })
-      : await generateSprite(adapters, FAIRY_VISUAL_DESC, store);
+      : (await generateSprite(adapters, FAIRY_VISUAL_DESC, store)).hash; // 仙子用本地图集渲染，锚点不落
     fairy.appearance.spriteAsset = hash;
     fairy.appearance.visualDescription = FAIRY_VISUAL_DESC;
     store.saveCharacter(fairy);
@@ -333,10 +334,11 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       const desc = char.appearance.visualDescription.trim();
       if (desc.length === 0) return reply.code(400).send({ error: 'character has no visualDescription' });
       const prev = char.appearance.spriteAsset;
-      const hash = await generateSprite(adapters, desc, store);
-      char.appearance.spriteAsset = hash;
+      const gen = await generateSprite(adapters, desc, store);
+      char.appearance.spriteAsset = gen.hash;
+      if (gen.anchors) char.appearance.anchors = gen.anchors; // 新立绘=新坐标系，锚点必须一起换
       store.saveCharacter(char);
-      return { id: char.id, name: char.name, prev, spriteAsset: hash };
+      return { id: char.id, name: char.name, prev, spriteAsset: gen.hash };
     },
   );
 
@@ -482,6 +484,44 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return reply.send(Buffer.from(rec.bytes));
   });
 
+  // 管理端点：存量角色锚点回填（docs/character-anchors-design.md §2.3，retrim 先例）。
+  // 扫全库有 spriteAsset 的角色，缺 anchors（或 ?force=1 全量重算）的过一遍 vision 检测
+  // （失败走像素兜底，见 anchors.ts）并原地写回。vision 走钱但每角色只一次 flash 调用。
+  // ?world=<id> 限定单个世界。必须配 MALIANG_ADMIN_TOKEN。
+  app.post<{ Querystring: { world?: string; force?: string } }>('/admin/detect-anchors', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const worldFilter = req.query.world;
+    const force = req.query.force === '1';
+    const results: { id: string; name: string; source?: string; skipped?: string }[] = [];
+    for (const w of store.listWorlds().filter((x) => !worldFilter || x.id === worldFilter)) {
+      for (const c of store.listCharacters(w.id)) {
+        const hash = c.appearance?.spriteAsset;
+        if (!hash) continue; // 仙子等无立绘跳过
+        if (c.appearance.anchors && !force) {
+          results.push({ id: c.id, name: c.name, skipped: 'has anchors' });
+          continue;
+        }
+        const blob = store.getAsset(hash);
+        if (!blob) {
+          results.push({ id: c.id, name: c.name, skipped: 'asset missing' });
+          continue;
+        }
+        const anchors = await detectCharacterAnchors(adapters.anchors, blob);
+        if (!anchors) {
+          results.push({ id: c.id, name: c.name, skipped: 'decode failed' });
+          continue;
+        }
+        c.appearance.anchors = anchors;
+        store.saveCharacter(c);
+        results.push({ id: c.id, name: c.name, source: anchors.source });
+      }
+    }
+    return { count: results.length, detected: results.filter((r) => r.source).length, results };
+  });
+
   // 管理端点：存量角色立绘「原地裁边」。把已存立绘裁到贴身盒（trimToContent）重新入库，
   // 角色 spriteAsset 指向裁后新 hash，并重触发 idle 动画重生成（用新默认 cellH=256）。
   // 只裁透明边、不重新生图 → 不改小朋友认得的形象。裁后立绘更贴身 → Seedance idle 取景更好。
@@ -526,10 +566,24 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (desc.length === 0) return reply.code(400).send({ error: 'visualDescription required' });
     const check = await adapters.moderation.moderateText(desc);
     if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
-    const hash = await generateSprite(adapters, desc, store);
+    const gen = await generateSprite(adapters, desc, store);
     // 试点：玩家形象静态先返回，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
-    triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
-    return { spriteAsset: hash };
+    triggerIdleAnimation(adapters, store, gen.hash, toSpriteSheet);
+    // anchors 随返回体进设备档案（玩家档案在 user://profile.json，服务端够不着，见设计 §2.3）
+    return { spriteAsset: gen.hash, anchors: gen.anchors ?? undefined };
+  });
+
+  // 存量玩家档案补算锚点（设计 §2.3）：老档案只有 spriteAsset 没有 anchors，客户端发现缺失时
+  // 按 hash 现算一次并自行落档。开放路由（同 /assets 哲学：hash 内容寻址、只读不改状态、
+  // 每 hash 一次 vision 调用成本可忽略）。资产不存在 404。
+  app.post<{ Body: { spriteAsset?: string } | null }>('/player-sprite/anchors', async (req, reply) => {
+    const hash = (req.body?.spriteAsset ?? '').trim();
+    if (hash.length === 0) return reply.code(400).send({ error: 'spriteAsset required' });
+    const blob = store.getAsset(hash);
+    if (!blob) return reply.code(404).send({ error: 'asset not found' });
+    const anchors = await detectCharacterAnchors(adapters.anchors, blob);
+    if (!anchors) return reply.code(422).send({ error: 'asset not decodable' });
+    return { spriteAsset: hash, anchors };
   });
 
   // onboarding 自我介绍：转写（客户端直送或送 PCM 走服务端 ASR）→ LLM 提取名字/称呼
@@ -1603,6 +1657,7 @@ export async function handleWsMessage(
     intentText?: string;
     byFairy?: boolean;
     characterId?: string;
+    slot?: string; // character_attach：贴纸槽位（headTop/handL/handR）
     audio?: string; // base64
     format?: string;
     transcript?: string; // voice_transcript：端侧 ASR 已识别的文本
@@ -2133,6 +2188,59 @@ export async function handleWsMessage(
       bag: store.getBag(worldId, session.playerId),
       wallet: store.getWallet(worldId, session.playerId),
     }));
+    return;
+  }
+
+  // 贴角色贴纸：挂/摘（character-anchors §5）。贴上=背包扣一份，摘下=回背包，
+  // 同槽已有=旧的回背包换新（替换语义）。落库角色行，经 WorldHub 按角色所在场景
+  // 定向广播 character_attach——发起者也靠广播落地渲染（与 terrain_patch 同哲学）。
+  if (msg.type === 'character_attach') {
+    const worldId = msg.worldId ?? '';
+    const characterId = msg.characterId ?? '';
+    const slot = String(msg.slot ?? '');
+    const itemId = msg.itemId === undefined || msg.itemId === null || msg.itemId === '' ? null : String(msg.itemId);
+    if (slot !== 'headTop' && slot !== 'handL' && slot !== 'handR') {
+      socket.send(JSON.stringify({ type: 'error', error: 'bad slot' }));
+      return;
+    }
+    const char = store.getCharacter(worldId, characterId);
+    if (!char) {
+      socket.send(JSON.stringify({ type: 'error', error: 'character not found' }));
+      return;
+    }
+    const list = char.attachments ?? [];
+    const existing = list.find((a) => a.slot === slot);
+    if (itemId !== null) {
+      const def = getBuiltinItem(itemId);
+      if (!def || def.mount !== 'edge') {
+        socket.send(JSON.stringify({ type: 'error', error: 'not a sticker' }));
+        return;
+      }
+      if ((store.getBag(worldId, session.playerId)[itemId] ?? 0) < 1) {
+        socket.send(JSON.stringify({ type: 'error', error: 'item not in bag' }));
+        return;
+      }
+      store.bagTake(worldId, session.playerId, itemId);
+      if (existing) {
+        store.bagAdd(worldId, session.playerId, existing.itemId); // 换装：旧贴纸回背包
+        existing.itemId = itemId;
+        char.attachments = list;
+      } else {
+        char.attachments = [...list, { slot, itemId }];
+      }
+    } else {
+      if (!existing) {
+        socket.send(JSON.stringify({ type: 'error', error: 'slot empty' }));
+        return;
+      }
+      store.bagAdd(worldId, session.playerId, existing.itemId);
+      char.attachments = list.filter((a) => a.slot !== slot);
+    }
+    store.saveCharacter(char);
+    hub?.broadcastScene(worldId, char.sceneId ?? DEFAULT_SCENE, {
+      type: 'character_attach', worldId, sceneId: char.sceneId ?? DEFAULT_SCENE, characterId, slot, itemId,
+    });
+    socket.send(JSON.stringify({ type: 'bag_update', worldId, bag: store.getBag(worldId, session.playerId) }));
     return;
   }
 

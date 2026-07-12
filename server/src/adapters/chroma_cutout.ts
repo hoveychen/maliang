@@ -6,7 +6,7 @@ import type { CutoutAdapter, ImageBlob } from './types.ts';
 // "unrecognised content at end of stream"，解析前裁到此处。
 const IEND = Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
 
-interface Raster {
+export interface Raster {
   width: number;
   height: number;
   data: Uint8Array; // RGBA
@@ -18,7 +18,8 @@ function trimToPng(buf: Buffer): Buffer {
 }
 
 // 生图模型可能返回 PNG 或 JPEG，按 magic bytes 分派解码为 RGBA。
-function decode(bytes: Uint8Array): Raster {
+// 导出给 anchors.ts 复用（alpha 像素级合法性校验/兜底），IEND 尾巴处理只此一份。
+export function decode(bytes: Uint8Array): Raster {
   const buf = Buffer.from(bytes);
   if (buf[0] === 0x89 && buf[1] === 0x50) {
     const png = PNG.sync.read(trimToPng(buf));

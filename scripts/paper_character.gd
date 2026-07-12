@@ -104,6 +104,129 @@ func setup(tex: Texture2D, color: Color, cname: String) -> void:
 	_blob_radius = clampf(float(tex.get_width()) * pixel_size * 0.38, 0.4, 1.4)
 	BlobShadow.attach(self, _blob_radius)
 
+# ── 贴纸附着（character-anchors，docs/character-anchors-design.md §4）────────
+# 锚点=立绘归一化坐标(原点左上)，服务端 vision 检测下发；缺失时按 alpha 现算兜底。
+# 附着物是子节点，跟随面片倾斜/翻面(rotation.y=PI)。翻面后单片会转到角色面片背后
+# 被深度遮挡，故每个槽位是「前后三明治」双片(±STICKER_Z，背片预转 PI)——哪面朝相机
+# 哪面赢深度，背面看到镜像贴纸与角色本身镜像一致。
+
+const STICKER_Z := 0.02          ## 贴纸离角色面片的前后距离（米），防 z-fight
+const STICKER_W_RATIO := 0.22    ## 贴纸世界宽 ≈ 角色可见高的比例
+## 兜底比例（与服务端 anchors.ts 同参）：手部所在身高比例/由身体边缘内收比例
+const FALLBACK_HAND_Y := 0.55
+const FALLBACK_HAND_INSET := 0.05
+
+## 归一化锚点 { "headTop": {x,y}, "handL": {...}, "handR": {...} }；空 = 未下发（走兜底）。
+var _anchors: Dictionary = {}
+## 槽位 → 附着 holder 节点（Node3D，含前后两片）。
+var _stickers: Dictionary = {}
+
+## world.gd 在 spawn/换装时灌入服务端下发的 appearance.anchors（缺省空字典）。
+func set_anchors(anchors: Dictionary) -> void:
+	_anchors = anchors if anchors != null else {}
+	for slot in _stickers:
+		_position_sticker(slot) # 锚点后到（如老档案补算）时重摆已挂贴纸
+
+## 挂贴纸到槽位（headTop/handL/handR）。同槽重复挂 = 换贴图。tex 为贴纸图（含白描边）。
+func attach_sticker(slot: String, tex: Texture2D) -> void:
+	detach_sticker(slot)
+	var holder := Node3D.new()
+	holder.name = "sticker_" + slot
+	var h := visible_height()
+	var w := h * STICKER_W_RATIO
+	var sh := w * float(tex.get_height()) / float(tex.get_width())
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	mat.albedo_texture = tex
+	var q := QuadMesh.new()
+	q.size = Vector2(w, sh)
+	q.material = mat
+	for side in [1.0, -1.0]:
+		var mi := MeshInstance3D.new()
+		mi.mesh = q
+		mi.position = Vector3(0.0, 0.0, STICKER_Z * side)
+		if side < 0.0:
+			mi.rotation.y = PI # 背片朝后：翻面时顶上，镜像与角色镜像一致
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		holder.add_child(mi)
+	holder.set_meta("sticker_h", sh)
+	add_child(holder)
+	_stickers[slot] = holder
+	_position_sticker(slot)
+
+func detach_sticker(slot: String) -> void:
+	var old: Node3D = _stickers.get(slot)
+	if old != null:
+		old.name = old.name + "_dying" # 让出槽位名：同帧重挂时新 holder 才不被自动改名（@Node3D@N）
+		old.queue_free()
+	_stickers.erase(slot)
+
+## 锚点 → 面片局部坐标：quad 局部 y∈[0,h]（脚底原点）、x∈[-w/2,w/2]；
+## 归一化 (ax,ay) 原点左上 → x=(ax-0.5)*w、y=(1-ay)*h。
+## 头顶槽贴纸「底边」对齐锚点（帽子坐在头上），手槽「中心」对齐。
+func _position_sticker(slot: String) -> void:
+	var holder: Node3D = _stickers.get(slot)
+	if holder == null or texture == null:
+		return
+	var a := _anchor_for(slot)
+	var tw := float(texture.get_width())
+	var th := float(texture.get_height())
+	if not _sheet.is_empty():
+		tw = float(_sheet.get("cellW", tw))
+		th = float(_sheet.get("cellH", th))
+	var w := tw * pixel_size
+	var h := th * pixel_size
+	var y := (1.0 - float(a.y)) * h
+	if slot == "headTop":
+		y += float(holder.get_meta("sticker_h", 0.0)) * 0.5
+	holder.position = Vector3((float(a.x) - 0.5) * w, y, 0.0)
+
+## 槽位锚点：优先服务端下发；缺失按贴图 alpha 现算（与服务端 anchors.ts 兜底同规则）并缓存。
+func _anchor_for(slot: String) -> Dictionary:
+	var a: Variant = _anchors.get(slot)
+	if typeof(a) == TYPE_DICTIONARY and (a as Dictionary).has("x"):
+		return a
+	var fb := _fallback_anchor(slot)
+	_anchors[slot] = fb
+	return fb
+
+## alpha 兜底：headTop=最顶不透明行中心；hand=身高 55% 行身体边缘内收 5%。
+## 图集模式/取不到 Image 时用固定比例。
+func _fallback_anchor(slot: String) -> Dictionary:
+	var img: Image = texture.get_image() if texture != null and _sheet.is_empty() else null
+	if img == null:
+		match slot:
+			"headTop": return { "x": 0.5, "y": 0.02 }
+			"handL": return { "x": 0.25, "y": FALLBACK_HAND_Y }
+			_: return { "x": 0.75, "y": FALLBACK_HAND_Y }
+	var w := img.get_width()
+	var h := img.get_height()
+	if slot == "headTop":
+		for y in range(h):
+			var sum := 0.0
+			var n := 0
+			for x in range(w):
+				if img.get_pixel(x, y).a > 0.03:
+					sum += float(x)
+					n += 1
+			if n > 0:
+				return { "x": sum / float(n) / float(w - 1), "y": float(y) / float(h - 1) }
+		return { "x": 0.5, "y": 0.02 }
+	var row := int(FALLBACK_HAND_Y * float(h - 1))
+	var min_x := -1
+	var max_x := -1
+	for x in range(w):
+		if img.get_pixel(x, row).a > 0.03:
+			if min_x < 0:
+				min_x = x
+			max_x = x
+	if min_x < 0:
+		return { "x": 0.25 if slot == "handL" else 0.75, "y": FALLBACK_HAND_Y }
+	var inset := float(w) * FALLBACK_HAND_INSET
+	var px := float(min_x) + inset if slot == "handL" else float(max_x) - inset
+	return { "x": clampf(px / float(w - 1), 0.0, 1.0), "y": FALLBACK_HAND_Y }
+
 ## 演出参数量化步长（米）：4mm 对 45mm 的慢呼吸卷曲肉眼不可辨，
 ## 却把待机时的 uniform 上传从每帧降到 ~1/5——旧版每角色每帧 4 次 set_shader_parameter。
 const PM_STEP := 0.004

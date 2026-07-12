@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { ImageBlob, ServiceAdapters } from './adapters/types.ts';
 import { flipHorizontal, addStickerBorder, trimToContent } from './adapters/chroma_cutout.ts';
+import { detectCharacterAnchors } from './anchors.ts';
 import type { WorldStore } from './persistence.ts';
 import { DEFAULT_SCENE, WORLD_CENTER_TILE } from './types.ts';
-import type { Character, CharacterSpec, CreateCharacterInput, GenStage } from './types.ts';
+import type { Character, CharacterAnchors, CharacterSpec, CreateCharacterInput, GenStage } from './types.ts';
 
 /** 内容审核拦截（文字环节）。 */
 export class ModerationError extends Error {
@@ -21,6 +22,7 @@ function buildCharacter(
   spec: CharacterSpec,
   input: CreateCharacterInput,
   assetHash: string,
+  anchors: CharacterAnchors | null,
 ): Character {
   return {
     id: randomUUID(),
@@ -29,7 +31,12 @@ function buildCharacter(
     name: spec.name,
     personality: spec.personality,
     voiceId: spec.voiceId,
-    appearance: { visualDescription: spec.visualDescription, spriteAsset: assetHash, scale: spec.scale },
+    appearance: {
+      visualDescription: spec.visualDescription,
+      spriteAsset: assetHash,
+      scale: spec.scale,
+      ...(anchors ? { anchors } : {}),
+    },
     memory: [],
     chatHistory: [],
     state: 'idle',
@@ -76,18 +83,22 @@ async function ensureFacingRight(
 }
 
 /**
- * 为已存在角色（如小神仙）生成一张 sprite：image → cutout → 朝向兜底 → 存储，返回 assetHash。
- * 与 createCharacter 的造角色管线不同——这里不新建角色、不跑文字审核（描述是固定的）。
+ * 为已存在角色（如小神仙）/玩家形象生成一张 sprite：image → cutout → 朝向兜底 → 存储。
+ * 返回 assetHash + 锚点（吃 trim 后最终立绘，与 createCharacter 同坐标系；检测失败 anchors=null）。
+ * 与 createCharacter 的造角色管线不同——这里不新建角色、不跑文字审核（描述是固定的/调用方已审）。
  */
 export async function generateSprite(
   adapters: ServiceAdapters,
   visualDescription: string,
   store: WorldStore,
-): Promise<string> {
+): Promise<{ hash: string; anchors: CharacterAnchors | null }> {
   const cut = await generateCut(adapters, visualDescription);
   const upright = await ensureFacingRight(adapters, visualDescription, cut);
   // 裁到贴身盒：生图是大画布、角色周围大片透明，裁掉后角色占满显示框（见 trimToContent）
-  return store.putAsset(trimToContent(upright));
+  const finalSprite = trimToContent(upright);
+  const hash = store.putAsset(finalSprite);
+  const anchors = await detectCharacterAnchors(adapters.anchors, finalSprite);
+  return { hash, anchors };
 }
 
 /**
@@ -137,8 +148,12 @@ export async function createCharacter(
   // 图片不再单独审核：生图模型自带安全门（见 docs）。文字审核仍保留。
   onProgress('persist');
   // 裁到贴身盒：生图是大画布、角色周围大片透明，裁掉后角色占满显示框（见 trimToContent）
-  const assetHash = store.putAsset(trimToContent(upright));
-  const character = buildCharacter(spec, input, assetHash);
+  const finalSprite = trimToContent(upright);
+  const assetHash = store.putAsset(finalSprite);
+  // 锚点检测必须吃 flip/trim 后的最终立绘（坐标系与客户端贴图逐像素对应，见 anchors.ts）；
+  // vision 失败走像素兜底、解码失败返回 null——都不阻塞造角色。
+  const anchors = await detectCharacterAnchors(adapters.anchors, finalSprite);
+  const character = buildCharacter(spec, input, assetHash, anchors);
   store.addCharacter(character);
   return character;
 }

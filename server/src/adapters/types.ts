@@ -78,6 +78,22 @@ export interface OrientationAdapter {
   detectFacing(image: ImageBlob): Promise<SpriteFacing>;
 }
 
+/** vision LLM 检出的原始锚点（归一化 0-1，未过合法性校验）。 */
+export interface RawAnchorPoints {
+  headTop: { x: number; y: number };
+  handL: { x: number; y: number };
+  handR: { x: number; y: number };
+}
+
+/**
+ * 锚点指点检测（docs/character-anchors-design.md §2）：立绘 → 头顶/双手归一化点位。
+ * 检测失败/解析不出返回 null（不 throw）——调用方（anchors.ts）走固定比例兜底，不阻塞主管线。
+ * PoC 实证（2026-07-12，12/12）：gemini flash 对非人形（四足/鸟/龙）也能"指哪算哪"。
+ */
+export interface AnchorAdapter {
+  detectAnchors(image: ImageBlob): Promise<RawAnchorPoints | null>;
+}
+
 /** 语音识别：音频 → 中文文字。真实实现走 sherpa-onnx（LocalASRAdapter）。 */
 /** 流式识别会话：录音中持续 feed 分片（实时喂本地 sherpa 识别器），finish 收尾并返回最终转写。 */
 export interface ASRStream {
@@ -119,6 +135,7 @@ export interface ServiceAdapters {
   cutout: CutoutAdapter;
   video: VideoAdapter;
   orientation: OrientationAdapter;
+  anchors: AnchorAdapter;
   asr: ASRAdapter;
   tts: TTSAdapter;
   moderation: ModerationAdapter;

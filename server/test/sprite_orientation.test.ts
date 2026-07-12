@@ -118,7 +118,7 @@ function adaptersWithFacing(facings: SpriteFacing[], onImageCall?: () => void) {
 
 test('管线：检测到朝左 → 存盘的是水平翻转后的图', async () => {
   const store = new WorldStore();
-  const hash = await generateSprite(adaptersWithFacing(['left']), 'a cat', store);
+  const { hash } = await generateSprite(adaptersWithFacing(['left']), 'a cat', store);
   const asset = store.getAsset(hash)!;
   assert.deepEqual(leftPixel(asset), [0, 0, 255], '朝左立绘应被镜像成朝右（左像素变蓝）');
 });
@@ -127,7 +127,7 @@ test('管线：朝右/unknown 原样放行，只生图一次', async () => {
   for (const f of ['right', 'unknown'] as SpriteFacing[]) {
     let calls = 0;
     const store = new WorldStore();
-    const hash = await generateSprite(adaptersWithFacing([f], () => calls++), 'a cat', store);
+    const { hash } = await generateSprite(adaptersWithFacing([f], () => calls++), 'a cat', store);
     assert.deepEqual(leftPixel(store.getAsset(hash)!), [255, 0, 0], `${f} 不应翻转`);
     assert.equal(calls, 1, `${f} 不应重试生图`);
   }
@@ -136,7 +136,7 @@ test('管线：朝右/unknown 原样放行，只生图一次', async () => {
 test('管线：正面 → 重试一次生图；第二张朝左则翻转后采用', async () => {
   let calls = 0;
   const store = new WorldStore();
-  const hash = await generateSprite(adaptersWithFacing(['front', 'left'], () => calls++), 'a cat', store);
+  const { hash } = await generateSprite(adaptersWithFacing(['front', 'left'], () => calls++), 'a cat', store);
   assert.equal(calls, 2, '正面应触发一次重试');
   assert.deepEqual(leftPixel(store.getAsset(hash)!), [0, 0, 255], '重试图朝左应翻转');
 });
@@ -144,7 +144,7 @@ test('管线：正面 → 重试一次生图；第二张朝左则翻转后采用
 test('管线：正面重试仍正面 → 放行不再重试', async () => {
   let calls = 0;
   const store = new WorldStore();
-  const hash = await generateSprite(adaptersWithFacing(['front', 'front'], () => calls++), 'a cat', store);
+  const { hash } = await generateSprite(adaptersWithFacing(['front', 'front'], () => calls++), 'a cat', store);
   assert.equal(calls, 2, '只重试一次');
   assert.ok(store.getAsset(hash), '仍应产出资产');
 });
@@ -152,7 +152,7 @@ test('管线：正面重试仍正面 → 放行不再重试', async () => {
 test('管线：bad（三视图/残图）→ 重试一次；重试合格则采用', async () => {
   let calls = 0;
   const store = new WorldStore();
-  const hash = await generateSprite(adaptersWithFacing(['bad', 'right'], () => calls++), 'a cat', store);
+  const { hash } = await generateSprite(adaptersWithFacing(['bad', 'right'], () => calls++), 'a cat', store);
   assert.equal(calls, 2, 'bad 应触发一次重试');
   assert.deepEqual(leftPixel(store.getAsset(hash)!), [255, 0, 0], '重试图合格原样采用');
 });
@@ -160,7 +160,7 @@ test('管线：bad（三视图/残图）→ 重试一次；重试合格则采用
 test('管线：bad 重试仍 front → 优先没被判 bad 的重试图', async () => {
   let calls = 0;
   const store = new WorldStore();
-  const hash = await generateSprite(adaptersWithFacing(['bad', 'front'], () => calls++), 'a cat', store);
+  const { hash } = await generateSprite(adaptersWithFacing(['bad', 'front'], () => calls++), 'a cat', store);
   assert.equal(calls, 2, '只重试一次');
   assert.ok(store.getAsset(hash), '仍应产出资产');
 });
