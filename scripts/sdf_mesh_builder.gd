@@ -180,8 +180,9 @@ static func _append_tube(
 		var b0: int = ring_base[(i + 1) % m]
 		for j in range(TUBE_RADIAL):
 			var j1 := (j + 1) % TUBE_RADIAL
-			idx.append(a0 + j); idx.append(b0 + j); idx.append(a0 + j1)
-			idx.append(a0 + j1); idx.append(b0 + j); idx.append(b0 + j1)
+			# 缠绕：正面朝外（与 Godot PrimitiveMesh 约定一致），描边 cull_front 才只留轮廓
+			idx.append(a0 + j); idx.append(a0 + j1); idx.append(b0 + j)
+			idx.append(a0 + j1); idx.append(b0 + j1); idx.append(b0 + j)
 	# 开管两端 fan-cap 补盖成水密壳
 	if not closed:
 		_cap_end(pts[0], radii[0], ring_base[0], true, prim_index, verts, norms, uvs, uv2s, idx)
@@ -208,9 +209,9 @@ static func _cap_end(
 	for j in range(TUBE_RADIAL):
 		var j1 := (j + 1) % TUBE_RADIAL
 		if is_start:
-			idx.append(c); idx.append(ring0 + j1); idx.append(ring0 + j)
-		else:
 			idx.append(c); idx.append(ring0 + j); idx.append(ring0 + j1)
+		else:
+			idx.append(c); idx.append(ring0 + j1); idx.append(ring0 + j)
 
 ## 胶囊壳 → 圆头锥壳：按高度把 xz 半径从 r1 插到 r2，端帽的 y 也压到各自半径。
 ## 只是给吸附一个近似初始面，不追求与 SdfMath._round_cone 严格一致。

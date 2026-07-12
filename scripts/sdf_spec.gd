@@ -15,6 +15,8 @@ const SHAPE_NAMES := {
 	"capsule": SdfMath.SHAPE_CAPSULE,
 	"cone": SdfMath.SHAPE_CONE,
 	"box": SdfMath.SHAPE_BOX,
+	"torus": SdfMath.SHAPE_TORUS,
+	"bezier": SdfMath.SHAPE_BEZIER,
 }
 const LOCO_TYPES := ["none", "walker", "hopper", "flyer"]
 
@@ -43,6 +45,7 @@ static func parse(spec: Dictionary) -> Dictionary:
 		var shape: int = SHAPE_NAMES[shape_name]
 		var pos := _vec3(rp.get("pos", [0, 0, 0]))
 		var params := Vector3.ZERO
+		var curve := Vector4.ZERO  # 仅 bezier：B.xy, C.xy（局部，A 在原点）
 		match shape:
 			SdfMath.SHAPE_SPHERE:
 				params = Vector3(_f(rp.get("r", 0.2)), 0.0, 0.0)
@@ -52,6 +55,15 @@ static func parse(spec: Dictionary) -> Dictionary:
 				params = Vector3(_f(rp.get("r1", 0.3)), _f(rp.get("r2", 0.1)), _f(rp.get("h", 0.4)) * 0.5)
 			SdfMath.SHAPE_BOX:
 				params = _vec3(rp.get("size", [0.4, 0.4, 0.4])) * 0.5
+			SdfMath.SHAPE_TORUS:
+				# x=大半径R, y=管半径r, z=弧半角(度,180满环)
+				params = Vector3(_f(rp.get("R", 0.4)), _f(rp.get("r", 0.12)), clampf(_f(rp.get("arc", 180.0)), 1.0, 180.0))
+			SdfMath.SHAPE_BEZIER:
+				# x=起点管半径r0, y=终点管半径r1, z=fork(端口挖口,0=无)；b/c 局部控制点
+				params = Vector3(_f(rp.get("r0", 0.12)), _f(rp.get("r1", 0.08)), maxf(_f(rp.get("fork", 0.0)), 0.0))
+				var bb := _vec2(rp.get("b", [0.3, 0.3]))
+				var cc := _vec2(rp.get("c", [0.6, 0.0]))
+				curve = Vector4(bb.x, bb.y, cc.x, cc.y)
 		if params.x <= 0.0:
 			return _err("%s 尺寸必须为正" % shape_name)
 		var ci := int(rp.get("color", 0))
@@ -78,6 +90,7 @@ static func parse(spec: Dictionary) -> Dictionary:
 			"pos": pos,
 			"rot": Basis.from_euler(rot_deg * (PI / 180.0)),
 			"params": params,
+			"curve": curve,
 			"color": palette[ci],
 			"blend": _f(rp.get("blend", -1.0)),  # <0 表示用全局 blend
 			"group": str(rp.get("group", "body")),
@@ -153,7 +166,15 @@ static func _apply_scale(config: Dictionary) -> void:
 	config.outline *= s
 	for part in config.parts:
 		part.pos *= s
-		part.params *= s
+		match part.shape:
+			SdfMath.SHAPE_TORUS:
+				# 只缩 R、r（长度）；arc（角度）不缩
+				part.params = Vector3(part.params.x * s, part.params.y * s, part.params.z)
+			SdfMath.SHAPE_BEZIER:
+				part.params *= s   # r0,r1,fork 都是长度
+				part.curve *= s    # B/C 控制点是局部长度
+			_:
+				part.params *= s
 		if part.spin.has("pivot"):
 			part.spin.pivot *= s
 	var loco: Dictionary = config.locomotion
@@ -192,6 +213,7 @@ static func build_rig(config: Dictionary) -> Dictionary:
 		var pr := SdfMath.Prim.new()
 		pr.shape = part.shape
 		pr.params = part.params
+		pr.curve = part.get("curve", Vector4.ZERO)
 		pr.color = part.color
 		pr.blend = part.blend if part.blend >= 0.0 else global_blend
 		pr.xform = Transform3D(part.rot, part.pos)
