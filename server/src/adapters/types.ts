@@ -7,6 +7,8 @@ import type {
   IntentResult,
   MemoryExtractionContext,
   ModerationResult,
+  ScreenplayDraft,
+  ScreenplayGenContext,
   SessionCompactionContext,
 } from '../types.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
@@ -41,6 +43,12 @@ export interface LLMAdapter {
   guideSticker(state: CreationState, childInput: string): Promise<GuideCreationResult>;
   /** 按贴纸的中文描述给出贴纸中文名 + 英文扁平贴纸生图 prompt（喂 generateIconAsset 管线）。 */
   designSticker(intentText: string): Promise<{ name: string; prompt: string }>;
+  /**
+   * 剧本生成（realtime-primitives P5）：把「我们来踢球吧」这类口语生成一段【真 TS】剧本。
+   * 硬 codegen 任务——真实实现用【强模型】+ 对着 stage_sdk.d.ts 过 typecheck，失败带错回喂重生成 1-2 次；
+   * 全部尝试都过不了 typecheck 返回 null（调用方走口头兜底，不开演）。防腐纪律见 docs/realtime-game-primitives-design §3。
+   */
+  generateScreenplay(ctx: ScreenplayGenContext): Promise<ScreenplayDraft | null>;
   /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条，各带分类 kind；去重、归属玩家由 voice 落地）。 */
   extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]>;
   /** session 超长压缩：把较旧轮次（并入上次摘要）压成一段中文摘要，session 内继续对话时注入。 */

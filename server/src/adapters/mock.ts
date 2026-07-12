@@ -11,6 +11,8 @@ import {
   type IntentContext,
   type IntentResult,
   type MemoryExtractionContext,
+  type ScreenplayDraft,
+  type ScreenplayGenContext,
   type SessionCompactionContext,
 } from '../types.ts';
 import { CREATION_OPTIONS, optionsByCategory, sizeToScale, inferSizeFromText } from '../creation_options.ts';
@@ -75,6 +77,35 @@ function videoStub(): VideoBlob {
   // 极小的占位视频（mock idle 动画）。真实由 Seedance 产出 mp4。
   return { bytes: Uint8Array.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]), mime: 'video/mp4' };
 }
+
+// mock generateScreenplay 用的两段最小剧本源码（已知对着 stage_sdk.d.ts 过 typecheck；
+// screenplay_gen.test.ts 会断言它们通过 checkScreenplay，回归时不会静默变坏）。
+// cast 都为空——只用球/区域/玩家，不依赖村民数量，测试确定性最高。
+const MOCK_SOCCER_SCREENPLAY = `const center = (stage.params.center as Spot | undefined) ?? { x: 75, y: 75 };
+const goal = stage.region((stage.params.goal as { x: number; y: number; r: number } | undefined) ?? { x: 20, y: 75, r: 6 });
+const ball = await stage.spawnBall(center);
+const board = stage.hud.score('进球');
+await stage.narrate('我们来踢球啦！把球踢进门就得分哦，靠近球就能踢！');
+const timer = stage.hud.countdown(Number(stage.params.gameSec ?? 60));
+await new Promise<void>((resolve) => {
+  let over = false;
+  timer.onDone(() => { if (!over) { over = true; resolve(); } });
+  stage.on('enter', ball, goal, () => {
+    if (over) return;
+    board.add(1);
+    stage.hud.toast('进球啦！');
+    void ball.reset(center);
+  });
+});
+timer.cancel();
+stage.end({ winner: '大家', praise: '踢得真棒，下次再来玩！' });`;
+
+const MOCK_CHASE_SCREENPLAY = `await stage.narrate('我们来玩个游戏吧！');
+if (stage.player) {
+  await stage.player.say('我准备好啦！');
+}
+await stage.sleep(Number(stage.params.gameSec ?? 3));
+stage.end({ winner: '大家', praise: '玩得真开心，下次再玩！' });`;
 
 /** mock 适配器：不调用任何外部服务，跑通整条编排闭环。 */
 export function createMockAdapters(): ServiceAdapters {
@@ -151,6 +182,19 @@ export function createMockAdapters(): ServiceAdapters {
             replyText: '好呀，我们来做贴纸！',
             behaviorScript: {
               commands: [{ type: 'create_sticker', params: { description: transcript } }],
+              loop: false,
+            },
+            emotion: 'happy',
+          };
+        }
+        // 玩游戏意图（仅拥有 play_game 能力的角色，如小神仙）：想玩多人小游戏。
+        // 放在 create_prop 前：「做个游戏」的「做个」也会命中造物，游戏关键词优先归 play_game。
+        if (ctx.abilities.includes('play_game') && /(踢球|玩球|老鹰抓小鸡|捉迷藏|丢手绢|一起玩|玩游戏|做游戏|玩个游戏|做个游戏|来玩)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好呀，我们来玩！',
+            behaviorScript: {
+              commands: [{ type: 'play_game', params: { game: transcript } }],
               loop: false,
             },
             emotion: 'happy',
@@ -336,6 +380,13 @@ export function createMockAdapters(): ServiceAdapters {
         const kindPrompt = kindOpt ? stickerIconPrompt(kindOpt.id) : 'a cute flat sticker';
         const prompt = colorOpt ? `${colorOpt.id} colored ${kindPrompt}` : kindPrompt;
         return { name, prompt };
+      },
+      async generateScreenplay(ctx: ScreenplayGenContext): Promise<ScreenplayDraft | null> {
+        // mock：按关键词确定性返回一段【已知过 typecheck】的最小剧本（真实实现走强模型 + typecheck 重试环）。
+        // 两个变体 cast 都为空（只用球/区域/玩家），buildStageOptsFromDraft 不依赖村民数量，测试稳定。
+        const wantsBall = /(球|踢)/.test(ctx.gameDesc);
+        const code = wantsBall ? MOCK_SOCCER_SCREENPLAY : MOCK_CHASE_SCREENPLAY;
+        return { code, cast: [] };
       },
       async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
         // mock：确定性地扫整段会话的每轮「我叫X」「我喜欢X」抽要点并分类，去重后返回（真实接 LLM 自由判断）

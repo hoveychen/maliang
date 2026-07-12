@@ -6,6 +6,8 @@ export type TTSProvider = VoiceProvider | 'minimax';
 export interface Config {
   openrouterApiKey: string | undefined;
   llmModel: string;
+  /** 剧本生成（P5）专用强模型：硬 codegen 任务，不用常态便宜的对话模型。见 loadConfig 注释。 */
+  screenplayModel: string;
   imageModel: string;
   /** idle 动画视频模型（Seedance）。透明立绘→绿幕 idle 循环 mp4。 */
   videoModel: string;
@@ -35,6 +37,11 @@ export function loadConfig(): Config {
     // 默认对话/意图模型：qwen3.6-flash（实测 ~1.3s 稳，中文童趣最足、自带安全意识）。
     // 旧默认 kimi-k2.6 实测 ~8s 且飘（默认开 reasoning），是语音延迟的主要变数。
     llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'qwen/qwen3.6-flash',
+    // 剧本生成（P5）：这是对着 typed SDK 的硬 codegen——弱模型会吐出过不了 typecheck / 误用原语 / 违反
+    // 防腐纪律的脚本（老板明确要求「考虑模型的智能」）。故与对话模型分离，默认选强的 Claude Sonnet 5
+    // （codegen 最稳）。它不在对话闭环里、不影响语音延迟；过不了 typecheck 会带错回喂重生成、仍不过则口头兜底。
+    // OPENROUTER_SCREENPLAY_MODEL 可覆盖。⚠️默认 id 未对 live OpenRouter 实测，部署前需一次真调验证（无 key 时降级兜底不炸）。
+    screenplayModel: process.env.OPENROUTER_SCREENPLAY_MODEL ?? 'anthropic/claude-sonnet-5',
     // 立绘生图：gemini-3.1-flash-lite-image（Nano Banana 2 Lite）为 2026-07-11 实测选型——
     // 对比 gemini-3.1-flash-image（旧默认）：$0.034 vs $0.068/张、3.1s vs 9.2s、风格遵循 7.7/8 vs 7.2/8，
     // 出图质量相当。两者出图尺寸行为一致（都主要吐 1408×768）。评测见 wiki maliang/image-model-eval。

@@ -167,7 +167,7 @@ export class WorldStore {
       this.#migrateLegacyPlayerPositions();
       this.#migrateLegacyEntityScenes();
       this.#migrateVisitsDevice();
-      this.#migrateFairyStickerAbility(); // fairy-stickers：存量仙子补 create_sticker 能力
+      this.#migrateFairyAbilities(); // 存量仙子补新增能力（create_sticker / play_game）
       this.#loadAssets();
       this.#loadSpriteAnims();
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
@@ -187,11 +187,12 @@ export class WorldStore {
   }
 
   /**
-   * fairy-stickers：给存量世界的仙子补 create_sticker 能力。
-   * seedFairy 只在建世界时贑（新世界自带），老库里的仙子从 DB 读能力、缺这条就不认「做个贴纸」意图。
-   * 幂等：已有该能力/非仙子的跳过；只 UPDATE 真改到的行（getCharacter 直读 DB，无内存 Map 需刷新）。
+   * 给存量世界的仙子补【后续新增】的能力（create_sticker=fairy-stickers、play_game=realtime-primitives P5）。
+   * seedFairy 只在建世界时跑（新世界自带），老库里的仙子从 DB 读能力、缺哪条就不认对应意图（「做个贴纸」「我们来踢球」）。
+   * 幂等：把缺的能力补齐，非仙子/已齐全的跳过；只 UPDATE 真改到的行（getCharacter 直读 DB，无内存 Map 需刷新）。
    */
-  #migrateFairyStickerAbility(): void {
+  #migrateFairyAbilities(): void {
+    const REQUIRED = ['create_sticker', 'play_game'];
     const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
     const upd = this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?');
     for (const r of rows) {
@@ -203,8 +204,9 @@ export class WorldStore {
       }
       if (!c.isFairy) continue;
       const abilities = Array.isArray(c.abilities) ? c.abilities : [];
-      if (abilities.includes('create_sticker')) continue;
-      c.abilities = [...abilities, 'create_sticker'];
+      const missing = REQUIRED.filter((a) => !abilities.includes(a));
+      if (missing.length === 0) continue;
+      c.abilities = [...abilities, ...missing];
       upd.run(JSON.stringify(c), r.id);
     }
   }

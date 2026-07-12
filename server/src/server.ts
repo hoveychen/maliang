@@ -92,6 +92,7 @@ import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts'
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
 import { buildDebut, DebutError } from './stage_debut.ts';
+import { buildStageOptsFromDraft } from './screenplay_gen.ts';
 import { SCREENPLAYS, type ScreenplayName } from './screenplays.ts';
 import type { StagePropMaker } from './stage_types.ts';
 import { POS_TAG_REPORT, decodeReport, encodeRelay } from './pos_codec.ts';
@@ -132,7 +133,7 @@ export function seedFairy(worldId: string): Character {
     behaviorScript: { commands: [{ type: 'wait', params: { duration: 1 } }], loop: true },
     position: WORLD_CENTER_TILE,
     sceneId: DEFAULT_SCENE,
-    abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop', 'create_sticker'],
+    abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop', 'create_sticker', 'play_game'],
     relationships: {},
   };
 }
@@ -1361,6 +1362,57 @@ async function openCreationSession(
   await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn, spawn);
 }
 
+/**
+ * play_game 异步落地（realtime-primitives P5）：口语游戏 → 小仙子先出声应下 → LLM 生成【真 TS】剧本
+ * → 过 typecheck（失败带错回喂重生成）→ buildStageOptsFromDraft 映射真实村民 → StageDirector.startStage 开演。
+ * 与造物/造角色不同：游戏【不扣小红花】（自由玩）。生成慢（强模型 codegen + 可能重试），故先出声让孩子知道在准备。
+ * 生成失败 / 人不够 / 已在演出 / 并发上限 → 一句温柔口头兜底，不开演、不炸。
+ */
+export async function startGameAsync(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  fairyId: string,
+  gameDesc: string,
+  leadIn: string, // routeIntent 生成的仙子应答句（如「好呀，我们来玩！」）
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  hub?: WorldHub,
+  stages?: StageDirector,
+): Promise<void> {
+  const fairy = store.getCharacter(worldId, fairyId);
+  const voiceId = fairy?.voiceId ?? '';
+  const say = (text: string) => pushLineTts(socket, adapters, store, text, voiceId, session.clientTts);
+  if (!hub || !stages || !store.getWorld(worldId)) return;
+  // 先应下：孩子立刻听到「好呀，我们来玩！」，别在强模型 codegen 的几秒里干等。
+  await say(leadIn || '好呀，我们来玩！');
+  // 已在演出 / 全局并发上限：温柔口头兜底，不开第二场（一世界至多一场）。
+  if (stages.activeIn(worldId)) { await say('我们正在玩一个游戏呢，玩完这个再玩别的好不好？'); return; }
+  if (stages.atCapacity()) { await say('现在好多小朋友都在玩游戏，稍等一会儿再来玩好不好？'); return; }
+
+  const sceneId = session.currentScene;
+  const villagerNames = store.listCharacters(worldId, sceneId).filter((c) => !c.isFairy).map((c) => c.name);
+  const hasPlayer = !!session.playerId && hub.membersIn(worldId).some((m) => m.playerId === session.playerId);
+
+  let draft;
+  try {
+    draft = await adapters.llm.generateScreenplay({ gameDesc, villagerNames, hasPlayer });
+  } catch (err) {
+    console.warn(`[play_game] 生成剧本异常：${String(err)}`);
+    await say('这个游戏我还没学会呢，我们先玩点别的好不好？');
+    return;
+  }
+  if (!draft) { await say('这个游戏有点难，我还没学会呢，我们先玩点别的好不好？'); return; }
+
+  const built = buildStageOptsFromDraft(draft, store, hub, worldId, session.playerId, sceneId);
+  if (!built.ok) { await say(`${built.reason}，我们下次再玩这个好不好？`); return; }
+
+  const run = stages.startStage(worldId, built.opts);
+  if (!run) { await say('我们正在玩一个游戏呢，玩完这个再玩别的好不好？'); return; }
+  // 不 await 终局：演出要演几分钟，stage_begin 已广播给全场，这里只管把它跑起来。
+  void run.catch(() => {});
+}
+
 async function pushLineTts(
   socket: { send: (data: string) => void },
   adapters: ServiceAdapters,
@@ -2243,6 +2295,11 @@ export async function handleWsMessage(
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.stickerRequest, adapters, store, response.replyText, 'sticker', spawnCtx());
         return;
       }
+      // 玩游戏入口：生成剧本→过 typecheck→开演（stage_begin 广播全场），不发普通回应。
+      if (response.gameRequest) {
+        await startGameAsync(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.gameRequest, response.replyText, adapters, store, hub, stages);
+        return;
+      }
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -2301,6 +2358,11 @@ export async function handleWsMessage(
       }
       if (response.stickerRequest) {
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.stickerRequest, adapters, store, response.replyText, 'sticker', spawnCtx());
+        return;
+      }
+      // 玩游戏入口：生成剧本→过 typecheck→开演（stage_begin 广播全场），不发普通回应。
+      if (response.gameRequest) {
+        await startGameAsync(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.gameRequest, response.replyText, adapters, store, hub, stages);
         return;
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
@@ -2432,6 +2494,11 @@ export async function handleWsMessage(
       }
       if (response.stickerRequest) {
         await openCreationSession(socket, session, worldId, characterId, response.stickerRequest, adapters, store, response.replyText, 'sticker', spawnCtx());
+        return;
+      }
+      // 玩游戏入口：生成剧本→过 typecheck→开演（stage_begin 广播全场），不发普通回应。
+      if (response.gameRequest) {
+        await startGameAsync(socket, session, worldId, characterId, response.gameRequest, response.replyText, adapters, store, hub, stages);
         return;
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
