@@ -1365,8 +1365,10 @@ async function openCreationSession(
 /**
  * play_game 异步落地（realtime-primitives P5）：口语游戏 → 小仙子先出声应下 → LLM 生成【真 TS】剧本
  * → 过 typecheck（失败带错回喂重生成）→ buildStageOptsFromDraft 映射真实村民 → StageDirector.startStage 开演。
- * 与造物/造角色不同：游戏【不扣小红花】（自由玩）。生成慢（强模型 codegen + 可能重试），故先出声让孩子知道在准备。
- * 生成失败 / 人不够 / 已在演出 / 并发上限 → 一句温柔口头兜底，不开演、不炸。
+ * 与造物/造角色不同：游戏【不扣小红花】（自由玩）。
+ * 兜底顺序讲究：先判「能不能开」（世界在否/已在演出/并发满）再出声应下——避免先说「好呀我们来玩」又紧跟
+ * 「其实正在玩呢」自相矛盾；确定能开才应下（应答句先行，别在强模型 codegen 的几秒里干等）。
+ * 生成失败 / 人不够 / 生成期间被别人抢先 → 一句温柔口头兜底，不开演、不炸。
  */
 export async function startGameAsync(
   socket: { send: (data: string) => void },
@@ -1383,12 +1385,17 @@ export async function startGameAsync(
   const fairy = store.getCharacter(worldId, fairyId);
   const voiceId = fairy?.voiceId ?? '';
   const say = (text: string) => pushLineTts(socket, adapters, store, text, voiceId, session.clientTts);
-  if (!hub || !stages || !store.getWorld(worldId)) return;
-  // 先应下：孩子立刻听到「好呀，我们来玩！」，别在强模型 codegen 的几秒里干等。
-  await say(leadIn || '好呀，我们来玩！');
-  // 已在演出 / 全局并发上限：温柔口头兜底，不开第二场（一世界至多一场）。
-  if (stages.activeIn(worldId)) { await say('我们正在玩一个游戏呢，玩完这个再玩别的好不好？'); return; }
+  const BUSY_LINE = '我们正在玩一个游戏呢，玩完这个再玩别的好不好？';
+  if (!hub || !stages) return; // 编程错误（3 条 voice 路径都传了 hub/stages）；prod 不会到这
+  if (!store.getWorld(worldId)) { await say('咦，这个世界好像不见啦，我们待会儿再玩好不好？'); return; }
+
+  // 先判「能不能开」再应下——别先说「好呀我们来玩」又紧跟「其实正在玩呢」自相矛盾。
+  // 已在演出 / 全局并发上限：只说兜底句，不发那句应答。
+  if (stages.activeIn(worldId)) { await say(BUSY_LINE); return; }
   if (stages.atCapacity()) { await say('现在好多小朋友都在玩游戏，稍等一会儿再来玩好不好？'); return; }
+
+  // 能开了才应下：孩子立刻听到「好呀，我们来玩！」，别在强模型 codegen 的几秒里干等。
+  await say(leadIn || '好呀，我们来玩！');
 
   const sceneId = session.currentScene;
   const villagerNames = store.listCharacters(worldId, sceneId).filter((c) => !c.isFairy).map((c) => c.name);
@@ -1407,8 +1414,10 @@ export async function startGameAsync(
   const built = buildStageOptsFromDraft(draft, store, hub, worldId, session.playerId, sceneId);
   if (!built.ok) { await say(`${built.reason}，我们下次再玩这个好不好？`); return; }
 
+  // 生成期间（几秒）可能有别人先开了一场（activeIn 之后、startStage 之前的窗口）：startStage 返回 null，
+  // 此时才「先应下又落空」，但这是真「刚好被别人抢先」，说 BUSY_LINE 合理。
   const run = stages.startStage(worldId, built.opts);
-  if (!run) { await say('我们正在玩一个游戏呢，玩完这个再玩别的好不好？'); return; }
+  if (!run) { await say(BUSY_LINE); return; }
   // 不 await 终局：演出要演几分钟，stage_begin 已广播给全场，这里只管把它跑起来。
   void run.catch(() => {});
 }
