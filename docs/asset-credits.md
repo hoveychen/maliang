@@ -67,6 +67,10 @@ CC BY 3.0 许可全文：https://creativecommons.org/licenses/by/3.0/
 | 珊瑚砂 coral_sand（海底 P2）| `coral_mud_01` | https://polyhaven.com/a/coral_mud_01 |
 | 海草地 seagrass（海底 P2）| `aerial_grass_rock` | https://polyhaven.com/a/aerial_grass_rock |
 | 深水床 deep_bed（海底 P2）| `brown_mud_leaves_01` | https://polyhaven.com/a/brown_mud_leaves_01 |
+| 压实雪 packed_snow（冰雪 P3）| `snow_03` | https://polyhaven.com/a/snow_03 |
+| 冰面 ice（冰雪 P3）| `snow_02` | https://polyhaven.com/a/snow_02 |
+| 雪泥 slush（冰雪 P3）| `snow_03` | https://polyhaven.com/a/snow_03 |
+| 裸岩积雪 rock_snow（冰雪 P3）| `rocks_ground_04` | https://polyhaven.com/a/rocks_ground_04 |
 
 > P1-P3 逐主题铺开时，新增的每个 Poly Haven / ambientCG 源都追加到本表。
 
