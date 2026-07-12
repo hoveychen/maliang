@@ -1888,6 +1888,13 @@ export async function handleWsMessage(
     // positions_report：客户端批量上报 tile（chars 只含本轮变化过的角色，player 可缺省）
     chars?: unknown;
     player?: unknown;
+    balls?: unknown; // C 档球位置流：[{id,x,y,vx,vy}]，转发给同场景他端 + 喂 enter 判定（不持久化）
+    // C 档球所有权广播（ball_kick / ball_settle，见 realtime-game-primitives §5）
+    ballId?: string;
+    x?: number;
+    y?: number;
+    vx?: number;
+    vy?: number;
     /** 玩家当前所在场景（缺省 village；老客户端不带）。 */
     sceneId?: string;
     // positions_report 流式版（演出/多人）：条目带世界坐标 x,y + 服务端钟时戳 t，供转发插值与 near 求值
@@ -2549,16 +2556,29 @@ export async function handleWsMessage(
       // 玩家复制位置以 playerId 为 actor 键（剧本 cast 里玩家演员 id 约定即 playerId）。
       if (typeof p.x === 'number' && typeof p.y === 'number') relayPlayer = { id: session.playerId, x: p.x, y: p.y };
     }
-    // 复制位置分发：广播给同世界【同场景】其他成员（排除自己）+ 喂 near 求值（无演出则 no-op）。
+    // C 档球（realtime-game-primitives §5）：球位置也进复制流（供他端插值/外推 + 服务端 enter 判定）。
+    // 球【不】持久化为角色（无 setCharacterTile）——它是演出道具，收场即散。
+    const relayBalls: { id: string; x: number; y: number; vx: number; vy: number }[] = [];
+    if (Array.isArray(msg.balls)) {
+      for (const raw of msg.balls) {
+        if (typeof raw !== 'object' || raw === null) continue;
+        const e = raw as { id?: unknown; x?: unknown; y?: unknown; vx?: unknown; vy?: unknown };
+        if (typeof e.id !== 'string' || !e.id) continue;
+        if (typeof e.x !== 'number' || typeof e.y !== 'number') continue;
+        relayBalls.push({ id: e.id, x: e.x, y: e.y, vx: Number(e.vx) || 0, vy: Number(e.vy) || 0 });
+      }
+    }
+    // 复制位置分发：广播给同世界【同场景】其他成员（排除自己）+ 喂 near/enter 求值（无演出则 no-op）。
     // 场景定向：隔壁场景的人看不见你，收到位置流只会渲染出一个脚下走过的幽灵。
-    if (relayChars.length > 0 || relayPlayer) {
+    if (relayChars.length > 0 || relayPlayer || relayBalls.length > 0) {
       hub?.broadcastScene(
         worldId,
         sceneId,
-        { type: 'positions_relay', sceneId, t: msg.t, chars: relayChars, player: relayPlayer },
+        { type: 'positions_relay', sceneId, t: msg.t, chars: relayChars, player: relayPlayer, balls: relayBalls },
         connKey,
       );
-      const all = relayPlayer ? [...relayChars, relayPlayer] : relayChars;
+      const all = relayPlayer ? [...relayChars, relayPlayer] : [...relayChars];
+      for (const b of relayBalls) all.push({ id: b.id, x: b.x, y: b.y });
       stages?.updatePositions(worldId, all);
     }
     // 成功无回包（与 prop_place 一致）；整批一个角色都没落地才回 error，便于客户端察觉世界/角色 id 错配。
@@ -2613,6 +2633,29 @@ export async function handleWsMessage(
       // 音色由服务端盖章（而非收端查 presence）：收端在 actor_join 之前收到喊话也能出对的声。
       voiceId: voiceForPlayer(session.playerId, store.getPlayer(session.playerId)?.gender),
     }, connKey);
+    return;
+  }
+
+  // C 档球所有权广播（realtime-game-primitives §5）：无状态、按【同世界同场景】定向转发（排除自己），不落库。
+  // ball_kick=踢者转所有权给自己 + 携速度供他端外推；ball_settle=滚停交回 host 中立。
+  if (msg.type === 'ball_kick' || msg.type === 'ball_settle') {
+    if (!hub || !session.playerId) return; // 无多人基座/无身份：没有可送达的对象
+    const ballId = typeof msg.ballId === 'string' ? msg.ballId : '';
+    if (!ballId) return;
+    const relay: Record<string, unknown> = {
+      type: msg.type,
+      sceneId: session.currentScene,
+      ballId,
+      x: Number(msg.x) || 0,
+      y: Number(msg.y) || 0,
+      t: msg.t,
+    };
+    if (msg.type === 'ball_kick') {
+      relay.playerId = session.playerId; // 服务端盖章踢者身份（各端据此转所有权）
+      relay.vx = Number(msg.vx) || 0;
+      relay.vy = Number(msg.vy) || 0;
+    }
+    hub.broadcastScene(msg.worldId ?? '', session.currentScene, relay, connKey);
     return;
   }
 

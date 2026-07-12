@@ -1712,9 +1712,22 @@ func _step_position_stream(delta: float) -> void:
 		var pt := WorldGrid.to_tile(pl)
 		player_msg = { "x": pl.x, "y": pl.y, "tileX": pt.x, "tileY": pt.y }
 
-	if chars.is_empty() and player_msg.is_empty():
+	# C 档球（realtime-game-primitives §5）：只广播【我此刻模拟的】球（中立态由 host、被踢期间由踢者），
+	# 携速度供他端外推。球不持久化（服务端不落 tile），故不带 tileX/tileY。
+	var balls: Array = []
+	if not _stage_balls.is_empty():
+		var my_id := backend.player_id
+		var host := _owns_npcs()
+		for bid in _stage_balls:
+			var b: StageBall = _stage_balls[bid]
+			if not is_instance_valid(b) or not b.own.simulates(my_id, host):
+				continue
+			var bl: Vector2 = b.body.logical
+			balls.append({ "id": bid, "x": bl.x, "y": bl.y, "vx": b.body.velocity.x, "vy": b.body.velocity.y })
+
+	if chars.is_empty() and player_msg.is_empty() and balls.is_empty():
 		return
-	backend.send_position_stream(world_id, chars, player_msg, Time.get_ticks_msec() + _stage_offset())
+	backend.send_position_stream(world_id, chars, player_msg, Time.get_ticks_msec() + _stage_offset(), balls)
 
 ## 服务端时间偏移（serverMs - 本地钟）；无 stage 大脑时按 0（离线不复制）。
 func _stage_offset() -> int:
@@ -1732,6 +1745,23 @@ func _on_positions_relay(data: Dictionary) -> void:
 	if p is Dictionary and not (p as Dictionary).is_empty():
 		var pd: Dictionary = p
 		_apply_replicated(String(pd.get("id", "")), Vector2(float(pd.get("x", 0.0)), float(pd.get("y", 0.0))), t, now_local, true)
+	# C 档球：喂对应球的复制缓冲（非模拟者端据此插值/外推渲染）。
+	for e in data.get("balls", []):
+		var b: Dictionary = e
+		_apply_ball_replicated(String(b.get("id", "")),
+			Vector2(float(b.get("x", 0.0)), float(b.get("y", 0.0))),
+			Vector2(float(b.get("vx", 0.0)), float(b.get("vy", 0.0))), t, now_local)
+
+## 把一条复制球位置喂进对应球的缓冲。我若是该球模拟者（权威）则忽略（不吃自己的回声）。
+func _apply_ball_replicated(id: String, pos: Vector2, vel: Vector2, t: int, now_local: int) -> void:
+	if id.is_empty():
+		return
+	var ball: StageBall = _stage_balls.get(id)
+	if ball == null or not is_instance_valid(ball):
+		return # 本端还没 spawn 到这颗球（spawn_ball 广播随后会补齐）
+	if ball.own.simulates(backend.player_id, _owns_npcs()):
+		return
+	ball.buf.push(t, pos, vel, now_local)
 
 ## 把一条复制位置喂进对应缓冲。is_player=远端玩家 avatar（渲染副本）；否则=NPC（非 host 端驱动本地节点）。
 func _apply_replicated(id: String, pos: Vector2, t: int, now_local: int, is_player: bool) -> void:
@@ -3198,6 +3228,8 @@ func _setup_backend() -> void:
 	backend.world_host.connect(_on_world_host_changed) # 升任 host：立即接管 NPC 模拟（不等复制缓冲陈旧）
 	backend.time_sync.connect(_stage.on_time_sync)
 	backend.positions_relay.connect(_on_positions_relay) # 多人位置复制：远端 actor 插值渲染
+	backend.ball_kick.connect(_on_ball_kick)             # C 档球：他端踢球→转所有权+播种缓冲
+	backend.ball_settle.connect(_on_ball_settle)         # C 档球：他端滚停→交回 host 中立
 	backend.actor_leave.connect(_on_actor_leave)         # 玩家离场：即时清掉其远端副本
 	backend.actors_snapshot.connect(_on_actors_snapshot) # 在场名单：静止的小朋友也立起来
 	backend.actor_join.connect(_on_actor_join)           # 玩家进场：带真实立绘立副本
@@ -5972,20 +6004,76 @@ func _step_stage(_delta: float) -> void:
 	if not _stage_balls.is_empty():
 		_step_balls(_delta)
 
-## C 档球逐帧：host（_owns_npcs）本地推进滚动物理；全端都把球逻辑坐标渲染到弯曲地面。
-## 非 owner 端此处只渲染不模拟——真正的复制/客户端预测/和解见 P2c（球尚未纳入位置流）。
+## C 档球逐帧（P2c）：逐球按所有权状态机分谁模拟——
+## · 模拟者（中立态 host / 被踢期间踢者本人）：本地推进滚动物理；临时所有者滚停即交回中立并广播。
+## · 非模拟者：不跑物理，从复制缓冲 sample（插值/外推）+ reconcile（平滑纠偏）出渲染位置。
+## 全端都把最终逻辑坐标渲染到弯曲地面（照 _tap_marker）。
 func _step_balls(delta: float) -> void:
-	var owns := _owns_npcs()
+	var my_id := backend.player_id if backend != null else ""
+	var host := _owns_npcs()
+	var render_ms := Time.get_ticks_msec() + _stage_offset()
 	for id in _stage_balls:
 		var ball: StageBall = _stage_balls[id]
 		if not is_instance_valid(ball):
 			continue
-		if owns:
+		var lg: Vector2
+		if ball.own.simulates(my_id, host):
 			ball.step(delta)
-		var lg: Vector2 = ball.body.logical
+			lg = ball.body.logical
+			ball.render_logical = lg # 同步渲染坐标，日后交出所有权时从此处平滑衔接
+			# 临时所有者（非中立）滚停 → 交回 host 中立，广播让各端达成所有权共识
+			if not ball.own.is_neutral() and not ball.body.is_rolling():
+				if ball.own.settle() and online and backend != null and backend.is_online():
+					backend.send_ball_settle(world_id, id, lg, render_ms)
+		else:
+			var target := ball.buf.sample(render_ms, ball.body.logical)
+			ball.render_logical = ball.buf.reconcile(ball.render_logical, target, delta)
+			lg = ball.render_logical
+			ball.body.logical = lg # body 逻辑坐标跟随渲染，交回本端模拟时无跳变
 		var d := WorldGrid.shortest_delta(focus_logical, lg)
 		var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(lg))) * TerrainMap.STEP_HEIGHT
 		_place_on_bent_ground(ball, Vector3(d.x, ty + StageBall.RADIUS, d.y))
+
+## 踢球（C 档，客户端玩家动作触发；实际手势接线＝P3）：本地立即赋速 + 把临时所有权转给自己
+## （客户端预测，零延迟），再广播 ball_kick 让同场景他端同步所有权并从此刻接收我的球位置流。
+## id 无效 / 无该球 / 零向量 / 非正 power 则忽略。空 player_id（离线未注册）保持中立由 host 模拟。
+func stage_ball_kick(id: String, dir: Vector2, power: float) -> void:
+	var ball: StageBall = _stage_balls.get(id)
+	if ball == null or not is_instance_valid(ball) or dir.is_zero_approx() or power <= 0.0:
+		return
+	var pid := backend.player_id if backend != null else ""
+	ball.own.kick(pid)         # 空 pid → kick 内部不转移，保持中立
+	ball.body.kick(dir, power) # 本地预测：立即动
+	if online and backend != null and backend.is_online() and not pid.is_empty():
+		backend.send_ball_kick(world_id, id, pid, ball.body.logical, ball.body.velocity,
+			Time.get_ticks_msec() + _stage_offset())
+
+## 收到他端踢球：只在本端记录所有权转移 + 播种复制缓冲（外推立即起步），不本地跑物理——
+## 真正模拟由踢者本人做并广播球位置。发起者自己已本地应用（服务端广播排除自己，pid 判等双保险）。
+func _on_ball_kick(data: Dictionary) -> void:
+	var id := String(data.get("ballId", ""))
+	var pid := String(data.get("playerId", ""))
+	if pid.is_empty() or (backend != null and pid == backend.player_id):
+		return
+	var ball: StageBall = _stage_balls.get(id)
+	if ball == null or not is_instance_valid(ball):
+		return
+	ball.own.kick(pid)
+	var pos := Vector2(float(data.get("x", 0.0)), float(data.get("y", 0.0)))
+	var vel := Vector2(float(data.get("vx", 0.0)), float(data.get("vy", 0.0)))
+	var t := int(data.get("t", Time.get_ticks_msec() + _stage_offset()))
+	ball.buf.push(t, pos, vel, Time.get_ticks_msec())
+
+## 收到他端球滚停：所有权交回 host 中立；最终静止位置播种缓冲让静止收敛。
+func _on_ball_settle(data: Dictionary) -> void:
+	var id := String(data.get("ballId", ""))
+	var ball: StageBall = _stage_balls.get(id)
+	if ball == null or not is_instance_valid(ball):
+		return
+	ball.own.settle()
+	var pos := Vector2(float(data.get("x", 0.0)), float(data.get("y", 0.0)))
+	var t := int(data.get("t", Time.get_ticks_msec() + _stage_offset()))
+	ball.buf.push(t, pos, Vector2.ZERO, Time.get_ticks_msec())
 
 ## 连上 WS 后上报世界地点名清单（POI 规范名），让意图 LLM 把「去某地」归一到真实地名。
 func _send_world_info() -> void:

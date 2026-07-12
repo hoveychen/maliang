@@ -280,3 +280,128 @@ test('positions_report：角色 id 属于别的世界 → 不跨世界写入', a
   assert.equal(sent[0]?.type, 'error');
   assert.deepEqual(store.getCharacter('w1', 'c1')?.position, WORLD_CENTER_TILE);
 });
+
+// ── C 档球位置流 / 所有权广播（realtime-game-primitives §5）───────────────────
+test('positions_report 流式：球位置(balls)转发给同场景他端(排除自己)，球不持久化为角色', async () => {
+  const { store, conn } = relayHarness();
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb' });
+  a.sent.length = 0;
+  b.sent.length = 0;
+
+  await a.say({
+    type: 'positions_report', worldId: 'w1', playerId: 'pa', t: 42,
+    chars: [], balls: [{ id: 'ball1', x: 12.5, y: 34.5, vx: 6.0, vy: -1.5 }],
+  });
+
+  assert.equal(a.ofType('positions_relay').length, 0, '发送者不收自己的球流');
+  const relay = b.ofType('positions_relay');
+  assert.equal(relay.length, 1, '球流也要按场景转发（哪怕没有 chars/player 在动）');
+  assert.equal(relay[0].t, 42);
+  assert.deepEqual(relay[0].balls, [{ id: 'ball1', x: 12.5, y: 34.5, vx: 6.0, vy: -1.5 }]);
+  // 球不是角色：不该被当角色持久化（getCharacter 查无）
+  assert.equal(store.getCharacter('w1', 'ball1'), undefined, '球不持久化为角色');
+});
+
+test('positions_report 流式：坏球条目(缺 x/y 或缺 id)静默丢弃，不连坐整批', async () => {
+  const { store, conn } = relayHarness();
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb' });
+  b.sent.length = 0;
+
+  await a.say({
+    type: 'positions_report', worldId: 'w1', playerId: 'pa', t: 1,
+    chars: [], balls: [
+      { id: '', x: 1, y: 1 },          // 空 id
+      { id: 'good', x: 5, y: 6 },      // 合法（缺速度默认 0）
+      { id: 'nox', y: 6 },             // 缺 x
+    ],
+  });
+
+  const relay = b.ofType('positions_relay');
+  assert.equal(relay.length, 1);
+  assert.deepEqual(relay[0].balls, [{ id: 'good', x: 5, y: 6, vx: 0, vy: 0 }], '只留合法球，速度缺省 0');
+});
+
+test('positions_report 流式：跨场景收不到球流（幽灵球）', async () => {
+  const { store, conn } = relayHarness();
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa', sceneId: 'village' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb', sceneId: 'forest' });
+  b.sent.length = 0;
+
+  await a.say({
+    type: 'positions_report', worldId: 'w1', sceneId: 'village', playerId: 'pa', t: 1,
+    chars: [], balls: [{ id: 'ball1', x: 1, y: 1, vx: 0, vy: 0 }],
+  });
+
+  assert.equal(b.ofType('positions_relay').length, 0, '隔壁场景不该收到球流');
+});
+
+test('ball_kick：转发给同场景他端(排除自己)，服务端盖章踢者身份 + 携速度', async () => {
+  const { store, conn } = relayHarness();
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb' });
+  a.sent.length = 0;
+  b.sent.length = 0;
+
+  // 踢者身份由服务端从 session.playerId 盖章（而非收端查 presence），与喊话 voiceId 盖章同源。
+  await a.say({ type: 'ball_kick', worldId: 'w1', ballId: 'ball1', playerId: 'pa', x: 10, y: 20, vx: 6, vy: 0, t: 99 });
+
+  assert.equal(a.ofType('ball_kick').length, 0, '踢者自己不收回自己的广播（本地已预测）');
+  const k = b.ofType('ball_kick');
+  assert.equal(k.length, 1);
+  assert.equal(k[0].ballId, 'ball1');
+  assert.equal(k[0].playerId, 'pa', '踢者身份由服务端盖章为 session.playerId');
+  assert.equal(k[0].x, 10);
+  assert.equal(k[0].vx, 6);
+  assert.equal(k[0].t, 99);
+});
+
+test('ball_settle：转发给同场景他端(排除自己)，不带 playerId/速度', async () => {
+  const { store, conn } = relayHarness();
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb' });
+  a.sent.length = 0;
+  b.sent.length = 0;
+
+  await a.say({ type: 'ball_settle', worldId: 'w1', ballId: 'ball1', x: 15, y: 25, t: 7 });
+
+  assert.equal(a.ofType('ball_settle').length, 0);
+  const s = b.ofType('ball_settle');
+  assert.equal(s.length, 1);
+  assert.equal(s[0].ballId, 'ball1');
+  assert.equal(s[0].x, 15);
+  assert.equal(s[0].t, 7);
+  assert.equal(s[0].playerId, undefined, 'settle 不转所有权给某人，只交回中立');
+  assert.equal(s[0].vx, undefined);
+});
+
+test('ball_kick：空 ballId 忽略；跨场景收不到', async () => {
+  const { store, conn } = relayHarness();
+  seedPlayer(store, 'pa');
+  const a = conn('cA');
+  const b = conn('cB');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'pa', sceneId: 'village' });
+  await b.say({ type: 'world_info', worldId: 'w1', playerId: 'pb', sceneId: 'forest' });
+  b.sent.length = 0;
+
+  await a.say({ type: 'ball_kick', worldId: 'w1', ballId: '', x: 1, y: 1, vx: 1, vy: 0 }); // 空 id
+  await a.say({ type: 'ball_kick', worldId: 'w1', ballId: 'ball1', x: 1, y: 1, vx: 1, vy: 0 }); // 跨场景
+
+  assert.equal(b.ofType('ball_kick').length, 0, '空 id 被忽略、跨场景不达');
+});

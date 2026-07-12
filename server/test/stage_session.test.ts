@@ -358,6 +358,29 @@ test('球命令面: spawnBall 广播 spawn_ball → ack 后 on(enter, ball, regi
   assert.deepEqual(a.ofType('stage_end')[0]?.result, { goal: true });
 });
 
+test('球位置流(positions_report.balls) 喂入服务端 enter 判定：球进门线触发（C 档全链路）', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const done = stages.startStage('w1', {
+    code: `const ball = await stage.spawnBall([0, 0]); const goal = stage.region({ x: 50, y: 0, r: 5 }); stage.once('enter', ball, goal).then(() => stage.end({ goal: true })); stage.hud.score('ready','');`,
+    actors: ACTORS,
+    timeoutMs: 5000,
+  });
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'spawn_ball'));
+  const spawn = a.ofType('stage_cmd').find((m) => m.op === 'spawn_ball')!;
+  await a.say({ type: 'stage_event', kind: 'ack', cmdId: spawn.cmdId });
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'hud_score'));
+  // 关键：球位置经【真实 positions_report.balls】上报（不是直接 updatePositions），验证服务端把
+  // 球位置流路由进 enter 判定。球不持久化为角色，但照样喂求值。
+  await a.say({ type: 'positions_report', worldId: 'w1', chars: [], balls: [{ id: 'ball1', x: 0, y: 0, vx: 0, vy: 0 }] });
+  assert.equal(stages.activeIn('w1'), true, '门外不触发');
+  await a.say({ type: 'positions_report', worldId: 'w1', chars: [], balls: [{ id: 'ball1', x: 51, y: 0, vx: 10, vy: 0 }] });
+  const r = await done!;
+  assert.equal(r.status, 'done');
+  assert.deepEqual(a.ofType('stage_end')[0]?.result, { goal: true });
+});
+
 test('规则订阅: countdown.onDone → 广播 watch(ev=timer) → timer 事件归零触发 → end', async () => {
   const { stages, conn } = rig();
   const a = conn('cA');

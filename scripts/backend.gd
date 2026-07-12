@@ -40,7 +40,9 @@ signal stage_end(data: Dictionary)     ## 正常收场：{stageId, result?}
 signal stage_abort(data: Dictionary)   ## 异常终止：{stageId, reason}
 signal world_host(is_host: bool)       ## 多人所有权：本连接是否为 host（首位进入者，负责 NPC 模拟）
 signal time_sync(data: Dictionary)     ## 时间握手回执：{t0, serverMs}（倒计时/插值时间戳用）
-signal positions_relay(data: Dictionary) ## 其他端复制位置：{t, chars:[{id,x,y}], player?:{id,x,y}}（远端演员插值渲染）
+signal positions_relay(data: Dictionary) ## 其他端复制位置：{t, chars:[{id,x,y}], player?:{id,x,y}, balls?:[{id,x,y,vx,vy}]}（远端演员/球插值渲染）
+signal ball_kick(data: Dictionary)     ## 他端踢球（C 档）：{ballId, playerId, x, y, vx, vy, t}——转所有权给踢者 + 播种复制缓冲
+signal ball_settle(data: Dictionary)   ## 他端球滚停（C 档）：{ballId, x, y, t}——所有权交回 host 中立
 signal actor_leave(player_id: String)  ## 某玩家离场：即时清掉其远端副本（不等插值缓冲陈旧）
 ## 在场玩家名单（进世界/换场景时一次性下发）：{ sceneId, actors:[{playerId,name,spriteAsset,tile?}] }。
 ## 位置流只在人动起来时才发，光靠它静止的玩家在本端根本不存在——presence 让进场即可见。
@@ -247,11 +249,23 @@ func send_positions(world_id: String, chars: Array, player_tile := Vector2i(-1, 
 ## chars 形如 [{id, x, y, tileX, tileY}]；player 形如 {x, y, tileX, tileY} 或空。
 ## t 为服务端钟毫秒（本地钟 + 时间偏移），接收端据此对齐插值时间戳。
 ## 服务端把带 x,y 的条目转发给同世界其他连接，并喂 near 规则求值。
-func send_position_stream(world_id: String, chars: Array, player: Dictionary, t: int) -> void:
+## balls 形如 [{id, x, y, vx, vy}]（C 档球位置流，服务端转发给同场景他端 + 喂 enter 判定，不持久化）。
+func send_position_stream(world_id: String, chars: Array, player: Dictionary, t: int, balls := []) -> void:
 	var msg := { "type": "positions_report", "worldId": world_id, "chars": chars, "t": t }
 	if not player.is_empty():
 		msg["player"] = player
+	if not balls.is_empty():
+		msg["balls"] = balls
 	_send(msg)
+
+## 踢球广播（C 档）：转所有权给踢者 + 让同场景他端从此刻起接收该球位置流。服务端按场景定向转发。
+func send_ball_kick(world_id: String, ball_id: String, player_id: String, pos: Vector2, vel: Vector2, t: int) -> void:
+	_send({ "type": "ball_kick", "worldId": world_id, "ballId": ball_id, "playerId": player_id,
+		"x": pos.x, "y": pos.y, "vx": vel.x, "vy": vel.y, "t": t })
+
+## 球滚停广播（C 档）：所有权交回 host 中立，最终静止位置随附供他端收敛。
+func send_ball_settle(world_id: String, ball_id: String, pos: Vector2, t: int) -> void:
+	_send({ "type": "ball_settle", "worldId": world_id, "ballId": ball_id, "x": pos.x, "y": pos.y, "t": t })
 
 ## 摆放：背包一份实体摆到指定 tile。服务端校验（占地/背包）→ tile 编辑 → terrain_patch 广播
 ## + bag_update 回包；失败回 error 不动账。渲染统一等广播回来落地（万物皆物品）。
@@ -397,6 +411,10 @@ func _dispatch(data: Dictionary) -> void:
 			time_sync.emit(data)
 		"positions_relay":
 			positions_relay.emit(data)
+		"ball_kick":
+			ball_kick.emit(data)
+		"ball_settle":
+			ball_settle.emit(data)
 		"actor_leave":
 			actor_leave.emit(String(data.get("playerId", "")))
 		"actors_snapshot":
