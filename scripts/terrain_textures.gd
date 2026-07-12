@@ -65,7 +65,9 @@ const LAYER_METAL_PLATE := 40  ## 金属板（metal_plate 风格化，冷银）
 const LAYER_GRATING := 41      ## 格栅（metal_grate_rusty 风格化，暗金属）
 const LAYER_GLOW_TILE := 42    ## 发光地砖（程序化青蓝发光格）
 const LAYER_HAZARD := 43       ## 警戒条纹（程序化黄黑斜条）
-const LAYER_COUNT := 44
+# ── 室内房间墙面 P3（老板拍板「配专属墙面贴图搭房间」；toy_room 首个）────────────────
+const LAYER_TOY_WALL := 44    ## 玩具房间墙面（程序化奶油底+柔彩圆点，托儿所壁纸；顶面+侧壁共用）
+const LAYER_COUNT := 45
 
 ## shader 端 layer_tint[]/layer_mean[] 的固定数组长度（预留冗余，P3 加层不必改 shader）。
 ## P3（12 主题全铺）预计 40-50 层，故 16→64（老板 2026-07-12 定：最小改动，
@@ -119,6 +121,7 @@ const LAYER_TEX_PATHS: Array[String] = [
 	"res://assets/textures/terrain/grating.png",     # 41 GRATING
 	"res://assets/textures/terrain/glow_tile.png",   # 42 GLOW_TILE
 	"res://assets/textures/terrain/hazard.png",      # 43 HAZARD
+	"res://assets/textures/terrain/toy_wall.png",    # 44 TOY_WALL
 ]
 
 const _WHITE := Color(1.0, 1.0, 1.0)
@@ -172,6 +175,7 @@ static func layer_tints() -> PackedColorArray:
 	t[LAYER_GRATING] = _WHITE
 	t[LAYER_GLOW_TILE] = _WHITE
 	t[LAYER_HAZARD] = _WHITE
+	t[LAYER_TOY_WALL] = _WHITE
 	return t
 
 ## 层 → 全图均值（tex/mean 归一：把偏暗的水彩包除到均值 1，只留笔触，色由 tint 定）。
@@ -224,6 +228,7 @@ static func layer_means() -> PackedColorArray:
 	m[LAYER_GRATING] = _WHITE
 	m[LAYER_GLOW_TILE] = _WHITE
 	m[LAYER_HAZARD] = _WHITE
+	m[LAYER_TOY_WALL] = _WHITE
 	return m
 
 ## tile 类型（TerrainMap.T_*）→ 顶面贴图层索引。未知类型兜底草地。
@@ -271,6 +276,7 @@ static func top_layer(ttype: int) -> int:
 		TerrainMap.T_GRATING: return LAYER_GRATING
 		TerrainMap.T_GLOW_TILE: return LAYER_GLOW_TILE
 		TerrainMap.T_HAZARD: return LAYER_HAZARD
+		TerrainMap.T_TOY_WALL: return LAYER_TOY_WALL
 	return LAYER_GRASS
 
 ## tile 类型 → 侧壁（崖壁）贴图层索引：该 tile 被抬高时其竖直立面所采的层。
@@ -316,6 +322,7 @@ static func side_layer(ttype: int) -> int:
 		TerrainMap.T_GRATING: return LAYER_GRATING
 		TerrainMap.T_GLOW_TILE: return LAYER_GLOW_TILE
 		TerrainMap.T_HAZARD: return LAYER_HAZARD
+		TerrainMap.T_TOY_WALL: return LAYER_TOY_WALL
 	return LAYER_CLIFF_WALL
 
 ## 层 → 崖壁纵向明暗浮雕强度（shader wall_relief[]，只作用于崖壁 role）。

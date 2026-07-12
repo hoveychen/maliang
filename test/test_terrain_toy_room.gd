@@ -31,8 +31,15 @@ func _test_seed_scene_coverage() -> void:
 		for x in range(n):
 			seen[TerrainMap.tile_type(Vector2i(x, z))] = true
 	for t in [TerrainMap.T_WOOD_FLOOR, TerrainMap.T_CARPET_RED, TerrainMap.T_CARPET_BLUE,
-			TerrainMap.T_PUZZLE_MAT, TerrainMap.T_TILE]:
+			TerrainMap.T_PUZZLE_MAT, TerrainMap.T_TILE, TerrainMap.T_TOY_WALL]:
 		_check("种子场景出现 tile 类型 %d" % t, seen.has(t), true)
+	# 房间四壁：存在被抬高（h≥2）的 T_TOY_WALL 墙 tile
+	var wall_raised := false
+	for z in range(n):
+		for x in range(n):
+			if TerrainMap.tile_type(Vector2i(x, z)) == TerrainMap.T_TOY_WALL and TerrainMap.tile_height(Vector2i(x, z)) >= 2:
+				wall_raised = true
+	_check("房间墙面 tile 抬高成墙(h≥2)", wall_raised, true)
 	for t in seen.keys():
 		_check("tile 类型 %d 在 VALID_TYPES" % t, t in TerrainMap.VALID_TYPES, true)
 	TerrainMap.reset()
@@ -45,6 +52,8 @@ func _test_layer_mappings() -> void:
 	_check("top T_WOOD_FLOOR", TT.top_layer(TerrainMap.T_WOOD_FLOOR), TT.LAYER_WOOD_FLOOR)
 	_check("side T_WOOD_FLOOR = 木层", TT.side_layer(TerrainMap.T_WOOD_FLOOR), TT.LAYER_WOOD_FLOOR)
 	_check("side T_TILE = 瓷砖层", TT.side_layer(TerrainMap.T_TILE), TT.LAYER_TILE)
+	_check("top T_TOY_WALL = 墙面层", TT.top_layer(TerrainMap.T_TOY_WALL), TT.LAYER_TOY_WALL)
+	_check("side T_TOY_WALL = 墙面层", TT.side_layer(TerrainMap.T_TOY_WALL), TT.LAYER_TOY_WALL)
 	_check("LAYER_TEX_PATHS 数 = LAYER_COUNT", TT.LAYER_TEX_PATHS.size(), TT.LAYER_COUNT)
 
 func _test_type_aware_walls() -> void:

@@ -110,6 +110,24 @@ def main():
         out = np.clip(out + glow * fg[None, None, :] * 0.5, 0, 1)
         out += paper_grain(rng, n, 0.01)
 
+    elif a.kind == "wall_toy":
+        # 玩具房间墙面：暖奶油底 + 柔和四色圆点（粉/蓝/黄/绿循环），托儿所壁纸感，
+        # 无缝可平铺（点周期整除 size）、低对比契合卡通光滑画风。
+        base = hx(a.base or "f4ece0")
+        out[:] = base
+        cols = [hx("f2b6c4"), hx("b8d4f0"), hx("f6df9e"), hx("bde2c2")]
+        cell = n // a.period
+        r = cell * 0.28
+        px = (xx % cell) - cell / 2.0
+        pz = (yy % cell) - cell / 2.0
+        dist = np.sqrt(px * px + pz * pz)
+        dot = dist < r
+        idx = ((xx // cell) + (yy // cell)) % 4
+        for k in range(4):
+            out[dot & (idx == k)] = cols[k]
+        out += paper_grain(rng, n, 0.015)
+        out = soften(out, 1.5)
+
     elif a.kind == "hazard":
         base = hx(a.base or "e6c02a"); fg = hx(a.fg or "26241f")  # 黄底 + 黑斜条
         out[:] = base

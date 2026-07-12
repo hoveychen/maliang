@@ -13,6 +13,7 @@ const T_CARPET_RED := 33     # 地毯红
 const T_CARPET_BLUE := 34    # 地毯蓝
 const T_PUZZLE_MAT := 35     # 拼图垫
 const T_TILE := 7            # 瓷砖（可抬高）
+const T_TOY_WALL := 44       # 玩具房间墙面（围墙，抬高成四壁）
 
 func _init() -> void:
 	var out_path := _arg("--out", "toy_room.mltr")
@@ -52,9 +53,9 @@ func _init() -> void:
 ## 玩具房间 POI：积木台 / 地毯 / 拼图角。
 static func build_poi_json() -> Array:
 	return [
-		{ "tile": [50, 28], "radius": 6.0, "trigger": "poi_blocktable", "name": "积木台", "aliases": ["积木台", "台子", "木台"] },
-		{ "tile": [20, 20], "radius": 6.0, "trigger": "poi_rug", "name": "地毯", "aliases": ["地毯", "毯子", "红毯"] },
-		{ "tile": [24, 52], "radius": 6.0, "trigger": "poi_puzzle", "name": "拼图角", "aliases": ["拼图", "拼图垫", "垫子"] },
+		{ "tile": [37, 37], "radius": 6.0, "trigger": "poi_blocktable", "name": "积木台", "aliases": ["积木台", "台子", "木台"] },
+		{ "tile": [28, 28], "radius": 6.0, "trigger": "poi_rug", "name": "地毯", "aliases": ["地毯", "毯子", "红毯"] },
+		{ "tile": [28, 46], "radius": 6.0, "trigger": "poi_puzzle", "name": "拼图角", "aliases": ["拼图", "拼图垫", "垫子"] },
 	]
 
 static func build_portal_json() -> Array:
@@ -75,21 +76,21 @@ static func build_terrain_bytes() -> PackedByteArray:
 	for i in range(count):
 		types[i] = T_WOOD_FLOOR
 
-	# ── 地表分区（顶面语义）──
-	_ellipse_type(types, n, 20.5, 20.5, 11.0, 10.0, T_CARPET_RED)   # 西北 红地毯
-	_ellipse_type(types, n, 56.5, 56.5, 9.0, 8.0, T_CARPET_BLUE)    # 东南 蓝地毯
-	_ellipse_type(types, n, 24.5, 52.5, 9.0, 8.0, T_PUZZLE_MAT)     # 西南 拼图角
-	_rect_type(types, n, 40, 44, 52, 56, T_TILE)                    # 东南一角 瓷砖
-
-	# ── 木地板 mound（玩具台）：footprint 涂木地板，再同心抬高（逐级露木崖壁）──
-	_ellipse_type(types, n, 50.5, 28.5, 6.5, 6.0, T_WOOD_FLOOR)
-	_ellipse_h(heights, n, 50.5, 28.5, 6.5, 6.0, 1)
-	_ellipse_h(heights, n, 50.5, 28.5, 4.2, 3.8, 2)
-
-	# ── 瓷砖 dune（浴垫台）：footprint 涂瓷砖，再抬高——侧壁应为「瓷砖壁」而非木壁（验证 type-aware）──
-	_ellipse_type(types, n, 46.5, 50.5, 4.0, 3.6, T_TILE)
-	_ellipse_h(heights, n, 46.5, 50.5, 4.0, 3.6, 1)
-	_ellipse_h(heights, n, 46.5, 50.5, 2.2, 2.0, 2)
+	# ── 房间：玩具房间墙面 tile 围一圈抬高成四壁（老板拍板「tile 当墙搭带墙的房间」）。
+	# 内部 [X0..X1]×[Z0..Z1] 铺地面装饰，四周 2 格厚墙环抬高 WALL_H 级成围墙。
+	# 墙用 T_TOY_WALL（专属托儿所壁纸墙面，type-aware 侧壁），不倒角（室内墙保持利落直角）。
+	var X0 := 20; var X1 := 54; var Z0 := 20; var Z1 := 54
+	var WALL_H := 3
+	# 地面装饰（限房间内部）：红毯 NW / 蓝毯 SE / 拼图角 SW / 瓷砖区 NE
+	_ellipse_type(types, n, 28.5, 28.5, 6.5, 6.0, T_CARPET_RED)
+	_ellipse_type(types, n, 46.5, 46.5, 6.5, 6.0, T_CARPET_BLUE)
+	_ellipse_type(types, n, 28.5, 46.5, 5.5, 5.0, T_PUZZLE_MAT)
+	_rect_type(types, n, 44, 24, 51, 31, T_TILE)
+	# 中央矮玩具台（1 级木平台，木壁 type-aware）
+	_ellipse_type(types, n, 37.5, 37.5, 3.5, 3.2, T_WOOD_FLOOR)
+	_ellipse_h(heights, n, 37.5, 37.5, 3.5, 3.2, 1)
+	# 四壁：房间边界 2 格厚墙环（内缘 X0/Z0..X1/Z1，外扩 2 格），抬高 WALL_H
+	_wall_ring(types, heights, n, X0, Z0, X1, Z1, 2, T_TOY_WALL, WALL_H)
 
 	# ── 组装物品层（玩具房间切片无散布物品）+ 灌回 TerrainMap 自产自销校验 ──
 	var v1 := PackedByteArray()
@@ -134,6 +135,17 @@ static func _rect_type(arr: PackedByteArray, n: int, x0: int, z0: int, x1: int, 
 	for z in range(z0, z1 + 1):
 		for x in range(x0, x1 + 1):
 			arr[_idx(n, x, z)] = t
+
+## 房间四壁：内部矩形 [x0..x1]×[z0..z1] 外扩 thick 格的环形边框设为墙 tile 类型 t + 抬高 h。
+## 内部保持地面不动；外扩环 = 墙 footprint（抬高后成四面围墙，type-aware 侧壁 = 墙贴图）。
+static func _wall_ring(types: PackedByteArray, heights: PackedByteArray, n: int, x0: int, z0: int, x1: int, z1: int, thick: int, t: int, h: int) -> void:
+	for z in range(z0 - thick, z1 + thick + 1):
+		for x in range(x0 - thick, x1 + thick + 1):
+			if x >= x0 and x <= x1 and z >= z0 and z <= z1:
+				continue  # 内部地面不动
+			var i := _idx(n, x, z)
+			types[i] = t
+			heights[i] = h
 
 static func _arg(name: String, fallback: String) -> String:
 	var args := OS.get_cmdline_user_args()
