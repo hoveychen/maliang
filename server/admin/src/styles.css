@@ -150,6 +150,7 @@ pre.code {
 
 .toolbar { display: flex; gap: 10px; align-items: center; margin: 0 0 16px; }
 .toolbar .spacer { flex: 1; }
+.text-input { font: 13px var(--mono); padding: 5px 10px; border: 1px solid var(--hairline); background: var(--paper-raise); color: var(--ink); }
 button.plain {
   appearance: none; font: 13px var(--sans); cursor: pointer;
   border: 1px solid var(--hairline); background: var(--paper-raise); color: var(--ink);

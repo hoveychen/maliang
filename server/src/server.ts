@@ -852,6 +852,35 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { ...result, icons: store.listCreationIcons() };
   });
 
+  // 物品实体外观缩略图：GET 看当前映射；POST 由客户端上传单张 PNG。物品在服务端没有图片
+  //（全靠客户端按 renderRef 现场渲染 glTF/SDF/贴纸），所以 debug 后台看物品长什么样，得让
+  // 客户端把每个 ItemDef 渲染成 PNG 再传上来 → putAsset（内容寻址）→ setItemIcon 绑到 id。
+  // 与 /admin/creation-icons（服务端生图）互补，这是客户端→服务端的反向通路，同一 debugAuthed
+  // 门禁（本地无 token 开放、生产带 token）。id 必须是已知实体（内置或某世界造物），防落孤儿图标。
+  app.get('/admin/item-icons', async (req, reply) => {
+    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    return { icons: store.listItemIcons() };
+  });
+  app.post<{
+    Params: { id: string };
+    Body: { pngBase64?: string } | null;
+  }>('/admin/item-icon/:id', { bodyLimit: 8 * 1024 * 1024 }, async (req, reply) => {
+    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    const itemId = req.params.id;
+    // id 合法性：内置常量，或任一世界的造物行
+    const known =
+      !!getBuiltinItem(itemId) ||
+      store.listWorlds().some((w) => store.listWorldItems(w.id).some((d) => d.id === itemId));
+    if (!known) return reply.code(404).send({ error: 'unknown item id' });
+    const b64 = req.body?.pngBase64;
+    if (!b64) return reply.code(400).send({ error: 'pngBase64 required' });
+    const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
+    if (bytes.length === 0) return reply.code(400).send({ error: 'empty image' });
+    const iconAsset = store.putAsset({ bytes, mime: sniffImageMime(bytes) });
+    store.setItemIcon(itemId, iconAsset);
+    return { itemId, iconAsset };
+  });
+
   // 森林村民种入（forest-inhabitants P3）：按 FOREST_CHARACTER_SEEDS 走生图管线落库
   // sceneId=forest。幂等（同名跳过）；?only=名字,名字 限定只种指定角色。生图烧钱，admin token 门禁。
   app.post<{ Params: { id: string }; Querystring: { only?: string } }>(

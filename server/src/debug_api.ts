@@ -3,9 +3,10 @@
 // 门禁与 /debug 同一套 admin token（authed 由 server.ts 注入）。
 import type { FastifyInstance } from 'fastify';
 import type { WorldStore } from './persistence.ts';
-import type { Character } from './types.ts';
+import type { Character, ItemDef } from './types.ts';
 import { DEFAULT_SCENE } from './types.ts';
 import { decodeTerrain } from './terrain.ts';
+import { BUILTIN_ITEMS } from './items.ts';
 
 type AuthedFn = (req: { headers: Record<string, unknown>; query: unknown }) => boolean;
 
@@ -78,6 +79,7 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
       items,
       visits: { total: visits.length, active: visits.filter((v) => v.endedAt === null).length },
       creationIcons: Object.keys(store.listCreationIcons()).length,
+      itemIcons: Object.keys(store.listItemIcons()).length,
       recentVisits: [...visits].sort((a, b) => b.startedAt - a.startedAt).slice(0, 20),
     };
   });
@@ -104,6 +106,49 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
         durationMs: v.endedAt !== null ? v.endedAt - v.startedAt : null,
         device: v.device ?? null,
       })),
+    };
+  });
+
+  // 物品实体全景（顶层「物品」页）：内置定义（items.ts 代码常量，worldId=null）+ 所有世界的
+  // 语音造物，各带客户端上传的外观缩略图 hash 与「被多少场景引用」的粗略用量。内置 def 在别处
+  // 都看不到，这页是唯一入口。用量 = palette 里出现过该 id 的场景数（矩阵 v2 palette 只收被引用
+  // 的实体，够用作 debug 指标；精确到 tile 数不值这个解码成本）。
+  app.get('/debug/api/items', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    const icons = store.listItemIcons();
+    // 用量：扫所有世界所有场景的 palette，统计每个 item id 出现的场景数
+    const sceneRefs = new Map<string, number>();
+    for (const w of store.listWorlds()) {
+      for (const sc of store.listScenes(w.id)) {
+        const rec = store.getSceneTerrain(w.id, sc.sceneId);
+        if (!rec) continue;
+        let palette: string[];
+        try {
+          palette = decodeTerrain(rec.bytes).palette;
+        } catch {
+          continue; // 坏矩阵不该拖垮整页
+        }
+        for (const id of new Set(palette)) sceneRefs.set(id, (sceneRefs.get(id) ?? 0) + 1);
+      }
+    }
+    const decorate = (def: ItemDef) => ({
+      ...def,
+      iconHash: icons[def.id] ?? '',
+      sceneRefs: sceneRefs.get(def.id) ?? 0,
+    });
+    const builtin = BUILTIN_ITEMS.map(decorate);
+    const creations: ReturnType<typeof decorate>[] = [];
+    for (const w of store.listWorlds()) {
+      for (const def of store.listWorldItems(w.id)) creations.push(decorate(def));
+    }
+    return {
+      builtin,
+      creations,
+      counts: {
+        builtin: builtin.length,
+        creations: creations.length,
+        withIcon: [...builtin, ...creations].filter((i) => i.iconHash).length,
+      },
     };
   });
 
