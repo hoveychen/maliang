@@ -6,6 +6,7 @@ import { createMockAdapters } from '../src/adapters/mock.ts';
 import { ANON_PLAYER } from '../src/types.ts';
 import type { Character, ItemDef } from '../src/types.ts';
 import { emptyTerrain, encodeTerrain, REQUIRED_GRID } from '../src/terrain.ts';
+import { BUILTIN_ITEMS } from '../src/items.ts';
 
 function makeCharacter(id: string, worldId: string, name: string, isFairy = false): Character {
   return {
@@ -266,6 +267,110 @@ test('GET /debug/api/worlds/:id/scenes/:sid/terrain-grid：解码矩阵 + palett
     assert.equal(missing.statusCode, 404);
   } finally {
     delete process.env.MALIANG_ADMIN_TOKEN;
+    await app.close();
+  }
+});
+
+test('GET /debug/api/items：内置 def + 各世界造物聚合，带 iconHash / sceneRefs', async () => {
+  const store = new WorldStore();
+  seed(store); // w1 有造物 item1；无 terrain
+  // 给 village 铺一张引用内置 tree_puff_a 的矩阵 → 该 id 的 sceneRefs 应为 1
+  const t = emptyTerrain();
+  t.palette = ['tree_puff_a'];
+  t.itemRef[10 * REQUIRED_GRID + 10] = 1;
+  store.setSceneTerrain('w1', 'village', encodeTerrain(t), 1);
+  const app = await buildServer({ adapters: createMockAdapters(), store });
+  try {
+    const res = await app.inject({ method: 'GET', url: '/debug/api/items' });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as {
+      builtin: { id: string; worldId: null; iconHash: string; sceneRefs: number }[];
+      creations: { id: string; worldId: string; iconHash: string; sceneRefs: number }[];
+      counts: { builtin: number; creations: number; withIcon: number };
+    };
+    assert.equal(body.builtin.length, BUILTIN_ITEMS.length, '内置 def 全部透出');
+    assert.equal(body.counts.builtin, BUILTIN_ITEMS.length);
+    const tree = body.builtin.find((i) => i.id === 'tree_puff_a');
+    assert.ok(tree, '内置 tree_puff_a 在列表里');
+    assert.equal(tree!.worldId, null, '内置 def worldId 为 null');
+    assert.equal(tree!.sceneRefs, 1, '被 village 矩阵引用 → sceneRefs=1');
+    assert.equal(tree!.iconHash, '', '未上传缩略图 → iconHash 空');
+    // 造物 item1（w1）在 creations 里
+    assert.equal(body.creations.length, 1);
+    assert.equal(body.creations[0]!.id, 'item1');
+    assert.equal(body.creations[0]!.worldId, 'w1');
+    assert.equal(body.counts.creations, 1);
+    assert.equal(body.counts.withIcon, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test('POST /admin/item-icon/:id：客户端上传缩略图 → 入库 + 绑定 + /debug/api/items 可见', async () => {
+  const store = new WorldStore();
+  seed(store);
+  const app = await buildServer({ adapters: createMockAdapters(), store });
+  // 最小合法 PNG 签名字节（sniffImageMime 认前两字节 0x89 0x50）
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const pngBase64 = Buffer.from(png).toString('base64');
+  try {
+    // 内置 id 上传
+    const up = await app.inject({
+      method: 'POST', url: '/admin/item-icon/tree_puff_a',
+      payload: { pngBase64 },
+    });
+    assert.equal(up.statusCode, 200);
+    const { itemId, iconAsset } = up.json() as { itemId: string; iconAsset: string };
+    assert.equal(itemId, 'tree_puff_a');
+    assert.ok(iconAsset.length > 0, '返回内容寻址 hash');
+
+    // 资产可取回，字节一致
+    const asset = await app.inject({ method: 'GET', url: `/assets/${iconAsset}` });
+    assert.equal(asset.statusCode, 200);
+    assert.deepEqual(new Uint8Array(asset.rawPayload), png);
+
+    // /debug/api/items 里该 id 的 iconHash 已回填
+    const items = await app.inject({ method: 'GET', url: '/debug/api/items' });
+    const body = items.json() as { builtin: { id: string; iconHash: string }[]; counts: { withIcon: number } };
+    const tree = body.builtin.find((i) => i.id === 'tree_puff_a');
+    assert.equal(tree!.iconHash, iconAsset, 'iconHash 指向刚上传的资产');
+    assert.equal(body.counts.withIcon, 1);
+
+    // 造物 id 也可上传
+    const upc = await app.inject({ method: 'POST', url: '/admin/item-icon/item1', payload: { pngBase64 } });
+    assert.equal(upc.statusCode, 200);
+
+    // 未知 id → 404
+    const unknown = await app.inject({ method: 'POST', url: '/admin/item-icon/nope-xyz', payload: { pngBase64 } });
+    assert.equal(unknown.statusCode, 404);
+
+    // 缺 pngBase64 → 400
+    const empty = await app.inject({ method: 'POST', url: '/admin/item-icon/tree_puff_a', payload: {} });
+    assert.equal(empty.statusCode, 400);
+  } finally {
+    await app.close();
+  }
+});
+
+test('POST /admin/item-icon/:id：配置 token 后无 token 拒绝、带 token 放行', async () => {
+  const prev = process.env.MALIANG_ADMIN_TOKEN;
+  process.env.MALIANG_ADMIN_TOKEN = 'sesame';
+  const store = new WorldStore();
+  seed(store);
+  const app = await buildServer({ adapters: createMockAdapters(), store });
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const pngBase64 = Buffer.from(png).toString('base64');
+  try {
+    const denied = await app.inject({ method: 'POST', url: '/admin/item-icon/tree_puff_a', payload: { pngBase64 } });
+    assert.equal(denied.statusCode, 403, 'admin token 门禁');
+    const ok = await app.inject({
+      method: 'POST', url: '/admin/item-icon/tree_puff_a',
+      headers: { 'x-admin-token': 'sesame' }, payload: { pngBase64 },
+    });
+    assert.equal(ok.statusCode, 200);
+  } finally {
+    if (prev === undefined) delete process.env.MALIANG_ADMIN_TOKEN;
+    else process.env.MALIANG_ADMIN_TOKEN = prev;
     await app.close();
   }
 });

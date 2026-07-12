@@ -312,6 +312,13 @@ export class WorldStore {
         option_id TEXT PRIMARY KEY,
         asset_hash TEXT NOT NULL
       );
+      -- 物品实体外观缩略图：物品在服务端没有图片，全靠客户端按 renderRef 现场渲染。
+      -- debug 后台要看物品长什么样，就让客户端把每个 ItemDef 渲染成一张 PNG 上传（内容
+      -- 寻址存进 assets），这里按 item id 记它的 hash。内置 def 与语音造物共用一张表。
+      CREATE TABLE IF NOT EXISTS item_icons (
+        item_id TEXT PRIMARY KEY,
+        asset_hash TEXT NOT NULL
+      );
       -- 设备画质档众包（见 device_profile.ts）：按 GPU 分桶，一台设备一行——
       -- 同一台机器重测会覆盖自己那行，不会往众包里重复灌票。
       CREATE TABLE IF NOT EXISTS device_samples (
@@ -414,6 +421,30 @@ export class WorldStore {
       { option_id: string; asset_hash: string }[];
     const out: Record<string, string> = {};
     for (const r of rows) out[r.option_id] = r.asset_hash;
+    return out;
+  }
+
+  /** 物品实体外观缩略图：某 item id 的资产 hash（客户端未上传返回空串）。 */
+  getItemIcon(itemId: string): string {
+    const row = this.#db.prepare('SELECT asset_hash FROM item_icons WHERE item_id = ?').get(itemId) as
+      | { asset_hash: string }
+      | undefined;
+    return row?.asset_hash ?? '';
+  }
+
+  /** 记录/更新某物品实体的外观缩略图资产 hash（客户端渲染上传）。 */
+  setItemIcon(itemId: string, assetHash: string): void {
+    this.#db
+      .prepare('INSERT INTO item_icons (item_id, asset_hash) VALUES (?, ?) ON CONFLICT(item_id) DO UPDATE SET asset_hash = excluded.asset_hash')
+      .run(itemId, assetHash);
+  }
+
+  /** 全部已上传的物品缩略图映射（item id → asset hash）。 */
+  listItemIcons(): Record<string, string> {
+    const rows = this.#db.prepare('SELECT item_id, asset_hash FROM item_icons').all() as
+      { item_id: string; asset_hash: string }[];
+    const out: Record<string, string> = {};
+    for (const r of rows) out[r.item_id] = r.asset_hash;
     return out;
   }
 
