@@ -52,7 +52,7 @@ func _run(scene: Node) -> void:
 						cols_ok = false
 					icon_total += g.get_child_count()
 	_check(cols_ok, "每页网格 columns=3 (3x3)")
-	_check(icon_total == 4, "图标总数 = 已实装 app 数 4（home/flowers/items/settings）")
+	_check(icon_total == 5, "图标总数 = 已实装 app 数 5（home/flowers/items/dress/settings）")
 
 	var cover: Control = pui.get("_screen_cover")
 	_check(cover != null and cover.visible, "停靠常驻=熄屏黑屏")
