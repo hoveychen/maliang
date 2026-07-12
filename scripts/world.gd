@@ -2063,8 +2063,11 @@ static func action_pose(action: String, t: float, dur: float) -> Dictionary:
 			rot.y = PI * _hold_env(k, 0.25, 0.75)
 		"peek": # 侧身隐身：转到 90° 侧立成一条纸边，停一拍闪回
 			rot.y = (PI / 2.0) * _hold_env(k, 0.2, 0.8)
-		"lie_down": # 躺平：绕脚底后仰 90° 脸朝天躺一拍，再弹起
-			rot.x = -(PI / 2.0) * _hold_env(k, 0.2, 0.85)
+		"lie_down": # 躺平：绕脚底后仰脸朝天躺一拍，再弹起。80°+抬升——90° 纯平会整张
+			# 陷进弯曲地表（world-bending 地面随距离上翘，带窗实录里角色完全消失）
+			var lie := _hold_env(k, 0.2, 0.85)
+			rot.x = -deg_to_rad(80.0) * lie
+			y = 0.6 * lie
 		"faceplant": # 扑街：快速前扑趴平（脸着地），慢慢爬起
 			rot.x = (PI / 2.0) * _hold_env(k, 0.12, 0.72)
 		# —— 纸形变（shader curl/flutter）——
