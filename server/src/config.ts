@@ -38,10 +38,12 @@ export function loadConfig(): Config {
     // 旧默认 kimi-k2.6 实测 ~8s 且飘（默认开 reasoning），是语音延迟的主要变数。
     llmModel: process.env.OPENROUTER_LLM_MODEL ?? 'qwen/qwen3.6-flash',
     // 剧本生成（P5）：这是对着 typed SDK 的硬 codegen——弱模型会吐出过不了 typecheck / 误用原语 / 违反
-    // 防腐纪律的脚本（老板明确要求「考虑模型的智能」）。故与对话模型分离，默认选强的 Claude Sonnet 5
-    // （codegen 最稳）。它不在对话闭环里、不影响语音延迟；过不了 typecheck 会带错回喂重生成、仍不过则口头兜底。
-    // OPENROUTER_SCREENPLAY_MODEL 可覆盖。⚠️默认 id 未对 live OpenRouter 实测，部署前需一次真调验证（无 key 时降级兜底不炸）。
-    screenplayModel: process.env.OPENROUTER_SCREENPLAY_MODEL ?? 'anthropic/claude-sonnet-5',
+    // 防腐纪律的脚本（老板明确要求「考虑模型的智能」）。故与对话模型（qwen3.6-flash）分离，选强的。
+    // 2026-07-12 实测选型：首选 anthropic/claude-sonnet-5 但港区 403「not available in your region」不可用；
+    // 改 moonshotai/kimi-k2.6（仓库已在用、港区可用的强 MoE），实测「踢球」「老鹰抓小鸡」两局均【一次过 typecheck、
+    // 零诊断、复用现有原语无防腐违规、~3-5s】。它不在对话闭环、不影响语音延迟；过不了 typecheck 带错回喂重生成、
+    // 仍不过口头兜底。OPENROUTER_SCREENPLAY_MODEL 可覆盖（如自建代理走 sonnet-5）。
+    screenplayModel: process.env.OPENROUTER_SCREENPLAY_MODEL ?? 'moonshotai/kimi-k2.6',
     // 立绘生图：gemini-3.1-flash-lite-image（Nano Banana 2 Lite）为 2026-07-11 实测选型——
     // 对比 gemini-3.1-flash-image（旧默认）：$0.034 vs $0.068/张、3.1s vs 9.2s、风格遵循 7.7/8 vs 7.2/8，
     // 出图质量相当。两者出图尺寸行为一致（都主要吐 1408×768）。评测见 wiki maliang/image-model-eval。
