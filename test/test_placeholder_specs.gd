@@ -8,6 +8,7 @@ var fails := 0
 func _init() -> void:
 	_check_spec("传送门", PlaceholderSpecs.PORTAL)
 	_check_spec("魔法熔炉", PlaceholderSpecs.FORGE)
+	_check_spec("魔法画板", PlaceholderSpecs.EASEL)
 	if fails == 0:
 		print("placeholder_specs tests PASS")
 	else:

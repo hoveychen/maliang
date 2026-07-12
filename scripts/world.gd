@@ -3179,6 +3179,8 @@ func _setup_backend() -> void:
 	backend.prop_pending.connect(_on_prop_pending)
 	backend.item_created.connect(_on_item_created)
 	backend.prop_failed.connect(_on_prop_failed)
+	backend.sticker_pending.connect(_on_sticker_pending)
+	backend.sticker_failed.connect(_on_sticker_failed)
 	backend.prop_denied.connect(_on_reward_denied)
 	backend.bag_update.connect(_on_bag_update)
 	backend.sticker_bought.connect(_on_sticker_bought)
@@ -4127,6 +4129,7 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 # 魔法熔炉=新物件要造出来了。孩子可以绕着它跑，成品从占位符所在的位置出现。
 const PLACEHOLDER_PORTAL_ID := "__casting_portal"
 const PLACEHOLDER_FORGE_ID := "__casting_forge"
+const PLACEHOLDER_EASEL_ID := "__casting_easel" # 造贴纸占位符（魔法画板，sticker-ux）
 var _placeholders := {} ## 占位符 id → 落位 tile（Vector2i）
 
 ## 立起占位符。anchor 缺省玩家身旁（施法态）；引导期锚仙子（见 _raise_creation_placeholder）。
@@ -4157,13 +4160,12 @@ func _clear_placeholder(id: String) -> Vector2i:
 			node.queue_free()
 	return tile
 
-## 引导一开始（首个 creation_prompt）就在仙子身旁立起占位符：造角色=降生蛋，造物=魔法熔炉。
+## 引导一开始（首个 creation_prompt）就在仙子身旁立起占位符：造角色=降生蛋，造物=魔法熔炉，造贴纸=魔法画板。
 ## 孩子的每个回答会被「扔」进它（见 _throw_answer_into_placeholder），一眼看懂答案有用。
 ## 幂等：每轮 prompt 都会调，已立起的直接返回。放不下就不立——后续路径都容忍占位符缺席。
 func _raise_creation_placeholder() -> void:
-	var is_prop := _creation_goal == "prop"
-	var id := PLACEHOLDER_FORGE_ID if is_prop else PLACEHOLDER_PORTAL_ID
-	var spec: Dictionary = PlaceholderSpecs.FORGE if is_prop else PlaceholderSpecs.PORTAL
+	var id := _creation_placeholder_id()
+	var spec: Dictionary = _creation_placeholder_spec()
 	# 锚在仙子身旁（不是玩家）：创造视图是仙子特写，蛋/炉要与她同框，答案才「看得见飞进去」
 	var anchor := Vector2.INF
 	if _locked != null and is_instance_valid(_locked):
@@ -4179,6 +4181,7 @@ func _raise_creation_placeholder() -> void:
 func _clear_creation_placeholder() -> void:
 	_clear_placeholder(PLACEHOLDER_PORTAL_ID)
 	_clear_placeholder(PLACEHOLDER_FORGE_ID)
+	_clear_placeholder(PLACEHOLDER_EASEL_ID)
 
 ## 造角色开工：引导会话已结束，服务端开造。退出对话，立起传送门。
 func _on_gen_progress(_stage: String) -> void:
@@ -4223,6 +4226,18 @@ func _on_prop_pending(data: Dictionary) -> void:
 	banner.text = "魔法熔炉烧起来啦！"
 	banner.visible = true
 
+## 造贴纸开工（已扣花）：退出对话、就地立起魔法画板占位符，孩子看得见「正在做贴纸」。
+func _on_sticker_pending(data: Dictionary) -> void:
+	_apply_wallet(data.get("wallet")) # 花在开造那一刻就扣掉
+	_in_creation = false
+	_hide_creation_cards()
+	if selected != null:
+		_exit_interaction()
+	thinking_label.visible = false
+	_spawn_placeholder(PLACEHOLDER_EASEL_ID, PlaceholderSpecs.EASEL)
+	banner.text = "魔法画板刷刷刷！"
+	banner.visible = true
+
 ## 语音造物完成（万物皆物品）：实体定义入目录 + 背包一份到手；在熔炉/玩家旁本地找位
 ## 发 item_place，渲染统一等 terrain_patch 广播回来落地。找不到位/离线就留在背包
 ## （物品页可再摆），成品绝不凭空消失。
@@ -4256,8 +4271,20 @@ func _on_item_created(data: Dictionary) -> void:
 	ItemCatalog.set_defs([item]) # 新实体先入目录（patch 回来才认得 renderRef/spec）
 	_prewarm_sticker_assets([item]) # 造贴纸:预热网络贴图(打包贴纸/造物无 @ 前缀,跳过)
 	thinking_label.visible = false
-	# 先收熔炉腾出格子，成品就落在那儿；熔炉没立成就退回玩家身旁
+	# 先收占位符腾出格子，成品就落在那儿；占位符没立成就退回玩家身旁。
+	# 造物立熔炉、造贴纸立画板——哪个在就收哪个（另一个 no-op 返回负值）。
 	var tile := _clear_placeholder(PLACEHOLDER_FORGE_ID)
+	if tile.x < 0:
+		tile = _clear_placeholder(PLACEHOLDER_EASEL_ID)
+	# 造贴纸(mount edge)：不自动落地——贴纸靠孩子用放置模式贴到 tile 边缘/角色身上。
+	# 只收进背包 + 放个大大的 wow 庆祝，再引导「去手机里贴上」。
+	var is_sticker := String(item.get("renderRef", "")).begins_with("sticker:@") \
+		or String(item.get("mount", "")) == "edge"
+	if is_sticker:
+		_celebrate_sticker()
+		banner.text = "新贴纸做好啦！去手机里贴上吧"
+		banner.visible = true
+		return
 	var want := tile
 	if want.x < 0:
 		var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
@@ -4319,6 +4346,14 @@ func _on_prop_failed(_reason: String) -> void:
 	thinking_label.visible = false
 	_clear_placeholder(PLACEHOLDER_FORGE_ID) # 造砸了：熔炉收起来，别让它烧到天荒地老
 	banner.text = "没变出来，再说一次试试"
+	banner.visible = true
+
+## 造贴纸失败（审核/异常，服务端已退花）：收起画板 + oops 提示。
+func _on_sticker_failed(_reason: String) -> void:
+	thinking_label.visible = false
+	_clear_placeholder(PLACEHOLDER_EASEL_ID) # 做砸了：画板收起来
+	game_audio.play_sfx("oops")
+	banner.text = "没做出来，再说一次试试"
 	banner.visible = true
 
 ## 小红花不足被拦（造物/造角色）：同步钱包 + 横幅引导 + 播服务端带来的仙子引导语。
@@ -4923,7 +4958,7 @@ func _on_creation_prompt(data: Dictionary) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
 	thinking_label.visible = false
-	_creation_goal = String(data.get("goal", "character")) # 造角色→降生蛋，造物→魔法熔炉
+	_creation_goal = String(data.get("goal", "character")) # 造角色→降生蛋，造物→魔法熔炉，造贴纸→魔法画板
 	_enter_creation_view() # 首轮：退出普通对话构图、相机推近仙子特写、点亮创造视图
 	_raise_creation_placeholder() # 引导一开始就立起蛋/炉：孩子的回答一会儿要扔进去
 	# 问题只给家长看的字幕（幼儿不识字，靠 TTS 念）
@@ -4983,6 +5018,9 @@ func _build_creation_cards(options: Array) -> void:
 			_apply_card_icon(card, icon_asset) # 图标就绪：异步贴图（不阻塞卡片弹出）
 		card.pressed.connect(_on_creation_card.bind(oid, card)) # 带上卡片自己：点了要把它扔进蛋/炉
 		_creation_cards.add_child(card)
+	# 选项卡摆上桌：一记轻「翻纸」声（发牌感），配合仙子随后念问题。空选项（快捷路径）不响。
+	if _creation_cards.get_child_count() > 0 and game_audio != null:
+		game_audio.play_sfx("page")
 
 ## 选项卡图标（生成后 iconAsset 才非空）：异步拉图贴到按钮，失败保留文字兜底。
 func _apply_card_icon(card: Button, asset: String) -> void:
@@ -5009,9 +5047,19 @@ func _on_creation_card(option_id: String, card: Button = null) -> void:
 # 3 岁孩子不识字、也不懂「服务端在攒属性」。她只需要看见：我选的那张卡（或我说的那句话）
 # 飞进了那颗蛋/那座炉——我的回答被用上了。点选与语音两条路都走这里，视觉一致。
 
-## 本次引导立的占位符 id（造角色=降生蛋，造物=魔法熔炉）。
+## 本次引导立的占位符 id（造物=魔法熔炉，造贴纸=魔法画板，造角色=降生蛋）。
 func _creation_placeholder_id() -> String:
-	return PLACEHOLDER_FORGE_ID if _creation_goal == "prop" else PLACEHOLDER_PORTAL_ID
+	match _creation_goal:
+		"prop": return PLACEHOLDER_FORGE_ID
+		"sticker": return PLACEHOLDER_EASEL_ID
+		_: return PLACEHOLDER_PORTAL_ID
+
+## 本次引导立的占位符 spec（与 _creation_placeholder_id 同分派）。
+func _creation_placeholder_spec() -> Dictionary:
+	match _creation_goal:
+		"prop": return PlaceholderSpecs.FORGE
+		"sticker": return PlaceholderSpecs.EASEL
+		_: return PlaceholderSpecs.PORTAL
 
 ## 占位符在屏幕上的落点（略高于底座，落在蛋身/炉口上）。没立成/不在视野内返回 INF。
 func _placeholder_screen_pos() -> Vector2:
@@ -5059,8 +5107,73 @@ func _throw_into_placeholder(from: Vector2, size: Vector2, icon: Texture2D, text
 	tw.chain().tween_callback(func() -> void:
 		fx.queue_free()
 		_bump_placeholder()
+		if _creation_goal == "sticker":
+			_paint_splat_at(target) # 造贴纸：答案落到画板上溅一团颜料，「泼颜料」的动感
 		if game_audio != null:
 			game_audio.play_sfx("pop"))
+
+## 造贴纸落成的 wow 庆祝：屏幕中央撒一把彩纸 + 奖励音效 + 集邮册（手机）按钮脉冲，
+## 告诉孩子「做出来啦，收在手机里了」。贴纸不自动落地，庆祝完孩子自己去放置模式贴。
+func _celebrate_sticker() -> void:
+	if game_audio != null:
+		game_audio.play_sfx("fanfare")
+		game_audio.play_sfx("bell")
+	_pulse_album_button() # 手机按钮脉冲：新贴纸在这儿
+	var vp := get_viewport().get_visible_rect().size
+	_confetti_burst(Vector2(vp.x * 0.5, vp.y * 0.42))
+
+## 从一点撒出一把彩纸：一圈小色块朝四周飞散 + 边下落边旋转边淡出。纯 HUD 视觉，自清理。
+func _confetti_burst(center: Vector2) -> void:
+	if _hud_layer == null:
+		return
+	var colors := [Color("#ff5b7f"), Color("#48c0e8"), Color("#ffc63a"), Color("#7ad06a"), Color("#b49bff"), Color("#ff9a3d")]
+	var n := 16
+	for i in range(n):
+		var piece := ColorRect.new()
+		piece.name = "Confetti" # headless 凭这个名字确认撒了彩纸
+		piece.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var sz := Vector2(14.0, 10.0)
+		piece.size = sz
+		piece.pivot_offset = sz * 0.5
+		piece.color = colors[i % colors.size()]
+		piece.global_position = center - sz * 0.5
+		piece.rotation = randf() * TAU
+		_hud_layer.add_child(piece)
+		var ang := TAU * float(i) / float(n) + randf() * 0.4
+		var dist := 140.0 + randf() * 120.0
+		var dest := center + Vector2(cos(ang), sin(ang)) * dist + Vector2(0.0, 160.0) # 飞散后再落一截
+		var tw := piece.create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(piece, "global_position", dest - sz * 0.5, 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(piece, "rotation", piece.rotation + (randf() - 0.5) * 8.0, 0.9)
+		tw.tween_property(piece, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.5).set_delay(0.4)
+		tw.chain().tween_callback(piece.queue_free)
+
+## 造贴纸答案落到魔法画板：在落点溅一团亮色颜料（缩放弹出 + 淡出），给「泼颜料」的动感。
+## 颜色按答题步数轮换，每轮换一种，画板越答越花。占位符没立成（target 为 INF）时静默跳过。
+func _paint_splat_at(screen_pos: Vector2) -> void:
+	if _hud_layer == null or screen_pos == Vector2.INF:
+		return
+	var colors := [Color("#ff5b7f"), Color("#48c0e8"), Color("#ffc63a"), Color("#7ad06a"), Color("#b49bff")]
+	var c: Color = colors[_creation_step % colors.size()]
+	var sz := Vector2(90.0, 90.0)
+	var splat := Panel.new()
+	splat.name = "PaintSplat" # headless 凭这个名字确认颜料确实溅了
+	splat.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	splat.size = sz
+	splat.pivot_offset = sz * 0.5
+	splat.global_position = screen_pos - sz * 0.5
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = c
+	sb.set_corner_radius_all(45) # 圆到底=颜料团
+	splat.add_theme_stylebox_override("panel", sb)
+	splat.scale = Vector2.ONE * 0.2
+	_hud_layer.add_child(splat)
+	var tw := splat.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(splat, "scale", Vector2.ONE * 1.1, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(splat, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.35).set_delay(0.12)
+	tw.chain().tween_callback(splat.queue_free)
 
 ## 答案落进去时占位符弹一下（吸收的手感）。区块重刷会换节点，故现取现用。
 func _bump_placeholder() -> void:

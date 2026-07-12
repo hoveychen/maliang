@@ -67,3 +67,28 @@ const FORGE := {
 	"locomotion": {"type": "none"},
 	"ropes": [],
 }
+
+## 魔法画板（造贴纸占位符）：木色底座横木（贴地）+ 后竖支腿 + 奶油画布立面 + 画布正面两团
+## 粉/蓝颜料 + 两颗金光点绕画布公转。画架+颜料 = 一眼「这儿在画/做一张贴纸」。
+## 颜料团中心 z=0.14 > 画布正面 z=0.08，露在画布外；光点轨道半径 0.60 > 画布半宽 0.43，绕在板外。
+## P2 会在此基础上加「答案泼颜料」的动感（每轮答案化作一团颜料飞上画布）。
+const EASEL := {
+	"name": "magic_easel",
+	"palette": ["#c9a06a", "#fff8ec", "#ff5b7f", "#48c0e8", "#ffc63a"],
+	"blend": 0.12,
+	"outline": 0.04,
+	"color_k": 0.08,
+	"parts": [
+		{"shape": "box", "pos": [0.0, 0.07, 0.0], "size": [0.9, 0.14, 0.34], "color": 0, "blend": 0.06},
+		{"shape": "box", "pos": [0.0, 0.62, -0.14], "size": [0.14, 1.1, 0.12], "color": 0, "blend": 0.05},
+		{"shape": "box", "pos": [0.0, 0.82, 0.02], "size": [0.86, 0.92, 0.12], "color": 1, "blend": 0.05},
+		{"shape": "sphere", "pos": [0.22, 0.95, 0.14], "r": 0.12, "color": 2, "blend": 0.05},
+		{"shape": "sphere", "pos": [-0.20, 0.68, 0.14], "r": 0.10, "color": 3, "blend": 0.05},
+		{"shape": "sphere", "pos": [0.60, 0.95, 0.02], "r": 0.06, "color": 4, "blend": 0.03,
+			"spin": {"pivot": [0.0, 0.95, 0.02], "axis": [0, 1, 0], "rate": 0.7}},
+		{"shape": "sphere", "pos": [-0.60, 0.70, 0.02], "r": 0.06, "color": 4, "blend": 0.03,
+			"spin": {"pivot": [0.0, 0.70, 0.02], "axis": [0, 1, 0], "rate": 0.7}},
+	],
+	"locomotion": {"type": "none"},
+	"ropes": [],
+}
