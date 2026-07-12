@@ -1081,6 +1081,19 @@ export class WorldStore {
   }
 
   /**
+   * 删掉「无立绘」空玩家档：name 与 spriteAsset 均为空的行。历史上客户端在小朋友还没建
+   * 角色时也会带全空 profile 上报 world_info，服务端旧逻辑据此建了一批空档（见 server.ts
+   * world_info handler 与 test/player_registration.test.ts）。返回被删的 playerId 列表。
+   * 只删 players 行本身——visits 等按 playerId 的关联记录留着（会话史/设备快照仍可追溯）。
+   */
+  deleteEmptyPlayers(): string[] {
+    const empty = this.listPlayers().filter((p) => (p.name ?? '') === '' && (p.spriteAsset ?? '') === '');
+    const del = this.#db.prepare('DELETE FROM players WHERE id = ?');
+    for (const p of empty) del.run(p.id);
+    return empty.map((p) => p.id);
+  }
+
+  /**
    * 某个资产存不存在——只查清单，不读字节（O(1)，不碰磁盘）。
    * 体检要扫全库的引用，用 getAsset 会把每张图都读进来，纯浪费。
    */
