@@ -65,12 +65,19 @@ export const T_PACKED_SNOW = 13; // 压实雪
 export const T_ICE = 14;         // 冰面（结冰水共用）
 export const T_SLUSH = 15;       // 雪泥/融雪
 export const T_ROCK_SNOW = 16;   // 裸岩积雪（可抬高）
+// 侏罗纪主题地表（themed-terrain P3），与客户端 TerrainMap.T_* 及层贴图一一对应。
+export const T_CRACKED_EARTH = 17; // 干裂土（中国夯土/罗马斗兽场沙土共用）
+export const T_VOLCANIC = 18;      // 火山岩（可抬高）
+export const T_MUD_BOG = 19;       // 泥沼
+export const T_FERN = 20;          // 蕨类草地
+export const T_RUBBLE = 21;        // 碎石（罗马碎石共用）
 
 /** 合法的存储 tile 类型集合（校验用；3/4 是客户端崖壁 B 码，不入此集）。 */
 export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
   T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
   T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
   T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW,
+  T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE,
 ]);
 /** 可行走地表（非水）——新地形一律按草地行走规则；仅水阻挡。 */
 export function isWalkableTileType(t: number): boolean {

@@ -41,14 +41,22 @@ const T_PACKED_SNOW := 13 ## 压实雪
 const T_ICE := 14         ## 冰面（结冰水共用此面）
 const T_SLUSH := 15       ## 雪泥/融雪
 const T_ROCK_SNOW := 16   ## 裸岩积雪（可抬高，岩壁）
+## 侏罗纪主题地表（themed-terrain P3）：与 server terrain.ts 及 TerrainTextures 层映射一一对应。
+const T_CRACKED_EARTH := 17 ## 干裂土（中国夯土/罗马斗兽场沙土共用）
+const T_VOLCANIC := 18      ## 火山岩（可抬高）
+const T_MUD_BOG := 19       ## 泥沼
+const T_FERN := 20          ## 蕨类草地
+const T_RUBBLE := 21        ## 碎石（罗马碎石共用）
 ## 合法存储 tile 类型（校验/autotile 分组用）。
 const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
 	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
-	T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW]
+	T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW,
+	T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE]
 ## 「画在草底上的 body」类型（autotile 与邻居同类过渡）：路 + 新增地表；水另走整格湖床。
 const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE,
 	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
-	T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW]
+	T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW,
+	T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE]
 const MAX_HEIGHT := 255   ## 数据上限（存储为 byte）；默认地形主峰只到 8 级
 const STEP_HEIGHT := 2.0  ## 每级台阶的世界高度（米）= 1 格（tile 边长）；相邻 tile 跳变可超 1 级（陡崖）
 const MAX_DEPTH := 2      ## 默认地形的最大水深级数（1=浅水 2=深水；湖床 = 高度 - 深度）

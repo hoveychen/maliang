@@ -69,6 +69,7 @@ UNIT_TESTS=(
   test_terrain_layers
   test_terrain_seafloor
   test_terrain_icesnow
+  test_terrain_jurassic
   test_sticker_edges
   test_forest_scene
   test_forest_reach

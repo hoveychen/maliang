@@ -29,7 +29,13 @@ const LAYER_PACKED_SNOW := 13 ## 压实雪（snow_03 风格化，冷灰白）
 const LAYER_ICE := 14         ## 冰面（snow_02 风格化，浅青釉；结冰水共用）
 const LAYER_SLUSH := 15       ## 雪泥/融雪（snow_03 风格化，脏灰）
 const LAYER_ROCK_SNOW := 16   ## 裸岩积雪（rocks_ground_04 风格化，冷灰岩）
-const LAYER_COUNT := 17
+# ── 侏罗纪 P3 新增层（成品水彩，tint 已烘入贴图，故 tint/mean 传白）────────────────
+const LAYER_CRACKED_EARTH := 17 ## 干裂土（brown_mud_dry 风格化，干黄棕；中国夯土/罗马斗兽场沙土共用）
+const LAYER_VOLCANIC := 18      ## 火山岩（burned_ground_01 风格化，暗炭灰）
+const LAYER_MUD_BOG := 19       ## 泥沼（brown_mud_02 风格化，暗褐）
+const LAYER_FERN := 20          ## 蕨类草地（forrest_ground_03 风格化，苔绿）
+const LAYER_RUBBLE := 21        ## 碎石（bicolour_gravel 风格化，灰砾；罗马碎石共用）
+const LAYER_COUNT := 22
 
 ## shader 端 layer_tint[]/layer_mean[] 的固定数组长度（预留冗余，P3 加层不必改 shader）。
 ## P3（12 主题全铺）预计 40-50 层，故 16→64（老板 2026-07-12 定：最小改动，
@@ -56,6 +62,11 @@ const LAYER_TEX_PATHS: Array[String] = [
 	"res://assets/textures/terrain/ice.png",         # 14 ICE
 	"res://assets/textures/terrain/slush.png",       # 15 SLUSH
 	"res://assets/textures/terrain/rock_snow.png",   # 16 ROCK_SNOW
+	"res://assets/textures/terrain/cracked_earth.png", # 17 CRACKED_EARTH
+	"res://assets/textures/terrain/volcanic.png",    # 18 VOLCANIC
+	"res://assets/textures/terrain/mud_bog.png",     # 19 MUD_BOG
+	"res://assets/textures/terrain/fern.png",        # 20 FERN
+	"res://assets/textures/terrain/rubble.png",      # 21 RUBBLE
 ]
 
 const _WHITE := Color(1.0, 1.0, 1.0)
@@ -82,6 +93,11 @@ static func layer_tints() -> PackedColorArray:
 	t[LAYER_ICE] = _WHITE
 	t[LAYER_SLUSH] = _WHITE
 	t[LAYER_ROCK_SNOW] = _WHITE
+	t[LAYER_CRACKED_EARTH] = _WHITE
+	t[LAYER_VOLCANIC] = _WHITE
+	t[LAYER_MUD_BOG] = _WHITE
+	t[LAYER_FERN] = _WHITE
+	t[LAYER_RUBBLE] = _WHITE
 	return t
 
 ## 层 → 全图均值（tex/mean 归一：把偏暗的水彩包除到均值 1，只留笔触，色由 tint 定）。
@@ -107,6 +123,11 @@ static func layer_means() -> PackedColorArray:
 	m[LAYER_ICE] = _WHITE
 	m[LAYER_SLUSH] = _WHITE
 	m[LAYER_ROCK_SNOW] = _WHITE
+	m[LAYER_CRACKED_EARTH] = _WHITE
+	m[LAYER_VOLCANIC] = _WHITE
+	m[LAYER_MUD_BOG] = _WHITE
+	m[LAYER_FERN] = _WHITE
+	m[LAYER_RUBBLE] = _WHITE
 	return m
 
 ## tile 类型（TerrainMap.T_*）→ 顶面贴图层索引。未知类型兜底草地。
@@ -127,6 +148,11 @@ static func top_layer(ttype: int) -> int:
 		TerrainMap.T_ICE: return LAYER_ICE
 		TerrainMap.T_SLUSH: return LAYER_SLUSH
 		TerrainMap.T_ROCK_SNOW: return LAYER_ROCK_SNOW
+		TerrainMap.T_CRACKED_EARTH: return LAYER_CRACKED_EARTH
+		TerrainMap.T_VOLCANIC: return LAYER_VOLCANIC
+		TerrainMap.T_MUD_BOG: return LAYER_MUD_BOG
+		TerrainMap.T_FERN: return LAYER_FERN
+		TerrainMap.T_RUBBLE: return LAYER_RUBBLE
 	return LAYER_GRASS
 
 ## tile 类型 → 侧壁（崖壁）贴图层索引：该 tile 被抬高时其竖直立面所采的层。
@@ -145,6 +171,11 @@ static func side_layer(ttype: int) -> int:
 		TerrainMap.T_ICE: return LAYER_ICE
 		TerrainMap.T_SLUSH: return LAYER_SLUSH
 		TerrainMap.T_ROCK_SNOW: return LAYER_ROCK_SNOW
+		TerrainMap.T_CRACKED_EARTH: return LAYER_CRACKED_EARTH
+		TerrainMap.T_VOLCANIC: return LAYER_VOLCANIC
+		TerrainMap.T_MUD_BOG: return LAYER_MUD_BOG
+		TerrainMap.T_FERN: return LAYER_FERN
+		TerrainMap.T_RUBBLE: return LAYER_RUBBLE
 	return LAYER_CLIFF_WALL
 
 ## PackedColorArray → shader vec3[] 用的线性 PackedVector3Array（补齐到 SHADER_ARRAY_SIZE）。

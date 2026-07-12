@@ -71,6 +71,11 @@ CC BY 3.0 许可全文：https://creativecommons.org/licenses/by/3.0/
 | 冰面 ice（冰雪 P3）| `snow_02` | https://polyhaven.com/a/snow_02 |
 | 雪泥 slush（冰雪 P3）| `snow_03` | https://polyhaven.com/a/snow_03 |
 | 裸岩积雪 rock_snow（冰雪 P3）| `rocks_ground_04` | https://polyhaven.com/a/rocks_ground_04 |
+| 干裂土 cracked_earth（侏罗 P3）| `brown_mud_dry` | https://polyhaven.com/a/brown_mud_dry |
+| 火山岩 volcanic（侏罗 P3）| `burned_ground_01` | https://polyhaven.com/a/burned_ground_01 |
+| 泥沼 mud_bog（侏罗 P3）| `brown_mud_02` | https://polyhaven.com/a/brown_mud_02 |
+| 蕨类草地 fern（侏罗 P3）| `forrest_ground_03` | https://polyhaven.com/a/forrest_ground_03 |
+| 碎石 rubble（侏罗/罗马 P3）| `bicolour_gravel` | https://polyhaven.com/a/bicolour_gravel |
 
 > P1-P3 逐主题铺开时，新增的每个 Poly Haven / ambientCG 源都追加到本表。
 
