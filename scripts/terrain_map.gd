@@ -66,6 +66,17 @@ const T_LAWN_GRID := 32     ## 草坪格
 const T_CARPET_RED := 33    ## 地毯红
 const T_CARPET_BLUE := 34   ## 地毯蓝
 const T_PUZZLE_MAT := 35    ## 拼图垫
+## 厨房主题地表（themed-terrain P3）：白瓷砖/木地板复用现有类型。
+const T_CHECKER_TILE := 36  ## 格纹地砖
+const T_ANTISLIP := 37      ## 防滑垫（医院防滑走廊共用）
+## 医院主题地表（themed-terrain P3）：白瓷砖复用 T_TILE、手术室地复用 T_CONCRETE、防滑走廊复用 T_ANTISLIP。
+const T_MED_VINYL_GREEN := 38 ## 医用地胶浅绿
+const T_MED_VINYL_BLUE := 39  ## 医用地胶浅蓝
+## 未来机器人主题地表（themed-terrain P3）：混凝土复用 T_CONCRETE。
+const T_METAL_PLATE := 40   ## 金属板（可抬高）
+const T_GRATING := 41       ## 格栅
+const T_GLOW_TILE := 42     ## 发光地砖
+const T_HAZARD := 43        ## 警戒条纹地
 ## 合法存储 tile 类型（校验/autotile 分组用）。
 const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
 	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
@@ -73,7 +84,9 @@ const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
 	T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE,
 	T_COBBLE, T_STONE_SLAB, T_FARM_FURROW, T_MARBLE, T_MOSAIC, T_WOOD_FLOOR,
 	T_ASPHALT, T_PAVER_BRICK, T_CROSSWALK, T_CONCRETE, T_LAWN_GRID,
-	T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT]
+	T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT,
+	T_CHECKER_TILE, T_ANTISLIP, T_MED_VINYL_GREEN, T_MED_VINYL_BLUE,
+	T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD]
 ## 「画在草底上的 body」类型（autotile 与邻居同类过渡）：路 + 新增地表；水另走整格湖床。
 const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE,
 	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
@@ -81,7 +94,9 @@ const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE,
 	T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE,
 	T_COBBLE, T_STONE_SLAB, T_FARM_FURROW, T_MARBLE, T_MOSAIC, T_WOOD_FLOOR,
 	T_ASPHALT, T_PAVER_BRICK, T_CROSSWALK, T_CONCRETE, T_LAWN_GRID,
-	T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT]
+	T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT,
+	T_CHECKER_TILE, T_ANTISLIP, T_MED_VINYL_GREEN, T_MED_VINYL_BLUE,
+	T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD]
 const MAX_HEIGHT := 255   ## 数据上限（存储为 byte）；默认地形主峰只到 8 级
 const STEP_HEIGHT := 2.0  ## 每级台阶的世界高度（米）= 1 格（tile 边长）；相邻 tile 跳变可超 1 级（陡崖）
 const MAX_DEPTH := 2      ## 默认地形的最大水深级数（1=浅水 2=深水；湖床 = 高度 - 深度）

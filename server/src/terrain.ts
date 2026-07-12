@@ -90,6 +90,17 @@ export const T_LAWN_GRID = 32;     // 草坪格
 export const T_CARPET_RED = 33;    // 地毯红
 export const T_CARPET_BLUE = 34;   // 地毯蓝
 export const T_PUZZLE_MAT = 35;    // 拼图垫
+// 厨房主题地表（themed-terrain P3）：白瓷砖/木地板复用现有类型。
+export const T_CHECKER_TILE = 36;  // 格纹地砖
+export const T_ANTISLIP = 37;      // 防滑垫（医院防滑走廊共用）
+// 医院主题地表（themed-terrain P3）：白瓷砖复用 T_TILE、手术室地复用 T_CONCRETE、防滑走廊复用 T_ANTISLIP。
+export const T_MED_VINYL_GREEN = 38; // 医用地胶浅绿
+export const T_MED_VINYL_BLUE = 39;  // 医用地胶浅蓝
+// 未来机器人主题地表（themed-terrain P3）：混凝土复用 T_CONCRETE。
+export const T_METAL_PLATE = 40;   // 金属板（可抬高）
+export const T_GRATING = 41;       // 格栅
+export const T_GLOW_TILE = 42;     // 发光地砖
+export const T_HAZARD = 43;        // 警戒条纹地
 
 /** 合法的存储 tile 类型集合（校验用；3/4 是客户端崖壁 B 码，不入此集）。 */
 export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
@@ -100,6 +111,8 @@ export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
   T_COBBLE, T_STONE_SLAB, T_FARM_FURROW, T_MARBLE, T_MOSAIC, T_WOOD_FLOOR,
   T_ASPHALT, T_PAVER_BRICK, T_CROSSWALK, T_CONCRETE, T_LAWN_GRID,
   T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT,
+  T_CHECKER_TILE, T_ANTISLIP, T_MED_VINYL_GREEN, T_MED_VINYL_BLUE,
+  T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD,
 ]);
 /** 可行走地表（非水）——新地形一律按草地行走规则；仅水阻挡。 */
 export function isWalkableTileType(t: number): boolean {

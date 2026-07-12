@@ -86,6 +86,9 @@ CC BY 3.0 许可全文：https://creativecommons.org/licenses/by/3.0/
 | 人行道砖 paver_brick（现代 P3）| `brick_pavement_02` | https://polyhaven.com/a/brick_pavement_02 |
 | 水泥 concrete（现代/未来/医院 P3）| `concrete_floor_01` | https://polyhaven.com/a/concrete_floor_01 |
 | 草坪格 lawn_grid（现代 P3）| `grass_concrete_pavement` | https://polyhaven.com/a/grass_concrete_pavement |
+| 防滑垫 antislip（厨房/医院 P3）| `anti_slip_concrete` | https://polyhaven.com/a/anti_slip_concrete |
+| 金属板 metal_plate（未来 P3）| `metal_plate` | https://polyhaven.com/a/metal_plate |
+| 格栅 grating（未来 P3）| `metal_grate_rusty` | https://polyhaven.com/a/metal_grate_rusty |
 
 > 斑马线/地毯/拼图垫/棋盘格/医用地胶/发光格/警戒条纹等无 CC0 干净图案的 tile，由
 > `tools/gen_pattern_tex.py` 程序化平色图案生成（非 CC0 素材，纯几何，无需署名）。

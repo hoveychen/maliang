@@ -208,6 +208,12 @@ static func _deco_kind(scene_id: String, gt: Vector2i) -> int:
 		return DECO_NONE  # 现代城市切片仅地形，无散布物品（themed-terrain P3）
 	if scene_id == "toy_room":
 		return DECO_NONE  # 玩具房间切片仅地形，无散布物品（themed-terrain P3）
+	if scene_id == "kitchen":
+		return DECO_NONE  # 厨房切片仅地形，无散布物品（themed-terrain P3）
+	if scene_id == "hospital":
+		return DECO_NONE  # 医院切片仅地形，无散布物品（themed-terrain P3）
+	if scene_id == "future_robot":
+		return DECO_NONE  # 未来机器人切片仅地形，无散布物品（themed-terrain P3）
 	return _deco_kind_village(gt)
 
 ## village 分区散布：从北往南——山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、

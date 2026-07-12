@@ -423,5 +423,78 @@
     "_note": "玩具 P3 拼图垫。gen_pattern_tex puzzle --period 4。",
     "kind": "puzzle",
     "period": 4
+  },
+  "checker_tile": {
+    "source": "PROC",
+    "_note": "厨房 P3 格纹地砖。gen_pattern_tex checker --period 8 --base #e8e4da --fg #3b3b40。",
+    "kind": "checker",
+    "period": 8
+  },
+  "antislip": {
+    "source": "anti_slip_concrete",
+    "_note": "厨房 P3 防滑垫。结构化保防滑纹,中灰。医院防滑走廊共用。",
+    "struct_sigma": 3,
+    "detail_keep": 0.18,
+    "sat": 0.4,
+    "contrast": 0.62,
+    "levels": 6,
+    "poster_mix": 0.45,
+    "lift": 0.11,
+    "tint": "150,152,150",
+    "tint_amt": 0.25,
+    "edge_pool": 0.16
+  },
+  "med_vinyl_green": {
+    "source": "PROC",
+    "_note": "医院 P3 医用地胶浅绿。gen_pattern_tex vinyl --base #cfe7d8。",
+    "kind": "vinyl",
+    "base": "#cfe7d8"
+  },
+  "med_vinyl_blue": {
+    "source": "PROC",
+    "_note": "医院 P3 医用地胶浅蓝。gen_pattern_tex vinyl --base #cfe0ee --seed 11。",
+    "kind": "vinyl",
+    "base": "#cfe0ee",
+    "seed": 11
+  },
+  "metal_plate": {
+    "source": "metal_plate",
+    "_note": "未来 P3 金属板。结构化保菱纹,冷银。",
+    "struct_sigma": 3,
+    "detail_keep": 0.18,
+    "sat": 0.4,
+    "contrast": 0.62,
+    "levels": 6,
+    "poster_mix": 0.45,
+    "lift": 0.11,
+    "tint": "150,156,164",
+    "tint_amt": 0.3,
+    "edge_pool": 0.16
+  },
+  "grating": {
+    "source": "metal_grate_rusty",
+    "_note": "未来 P3 格栅。结构化,暗金属。",
+    "struct_sigma": 3,
+    "detail_keep": 0.18,
+    "sat": 0.4,
+    "contrast": 0.62,
+    "levels": 6,
+    "poster_mix": 0.45,
+    "lift": 0.11,
+    "tint": "96,102,110",
+    "tint_amt": 0.35,
+    "edge_pool": 0.16
+  },
+  "glow_tile": {
+    "source": "PROC",
+    "_note": "未来 P3 发光地砖。gen_pattern_tex glow --period 8 --base #10202a --fg #3fd8e6。",
+    "kind": "glow",
+    "period": 8
+  },
+  "hazard": {
+    "source": "PROC",
+    "_note": "未来 P3 警戒条纹。gen_pattern_tex hazard --period 12 --base #e6c02a --fg #26241f。",
+    "kind": "hazard",
+    "period": 12
   }
 }
