@@ -247,6 +247,11 @@ export interface Character {
   sceneId?: string;
   abilities: string[];
   relationships: Record<string, string>;
+  /**
+   * 身上贴的贴纸（character-anchors §5）：槽位 → 贴纸实体 id（内置贴纸，mount:'edge' 两用）。
+   * 贴上=玩家背包扣一份，摘下=回背包；随角色整对象下发（scene_entered/character_spawned）。
+   */
+  attachments?: Array<{ slot: 'headTop' | 'handL' | 'handR'; itemId: string }>;
 }
 
 /** 造角色编排的阶段，顺序固定，用于进度推送。 */

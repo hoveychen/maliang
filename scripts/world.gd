@@ -1015,6 +1015,9 @@ func _setup_hud() -> void:
 	# 玩家喊话态的底部表情盘（player-interaction P3）：进喊话态亮起，点一格双端一起演。
 	_build_talk_view(layer)
 
+	# NPC 对话态的贴纸盘（character-anchors P4）：背包有贴纸时亮起，选贴纸→选槽位贴上。
+	_build_sticker_view(layer)
+
 	# 收听 HUD：近身对话期间浮在横幅上方——AIGC 生成的奶油圆角边框贴图（hud_listen，
 	# 麦克风+音波+星饰烤进边框），一排珊瑚色声波柱嵌在边框空心内板、随音量跳动，
 	# 给不识字的小朋友一个又大又清楚的「现在在听你说话」提示。
@@ -2603,6 +2606,8 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 	_vc.open() # 进近身即聆听（VoiceCapture 起麦+建 VAD）
 	_reset_empty_streak() # 新一场对话不继承上一场的空识别退避
 	_greet_on_enter(d) # 对方先开口打招呼（播放期间 should_capture 自动闭麦，说完再放开）
+	_sticker_pick = ""
+	_refresh_sticker_view() # 背包有贴纸就亮贴纸盘（character-anchors P4）
 
 ## 进「玩家喊话」态：站桩构图面对对方副本。对方端无感知（无会话锁）——他继续玩他的；
 ## 走远/离场/换场景由 _step_remote_actors 的维持判定自动退出。P3 在此态叠表情盘，P5 叠开放麦喊话。
@@ -2673,6 +2678,121 @@ func _build_talk_view(host: CanvasLayer) -> void:
 		card.expand_icon = true
 		card.pressed.connect(_on_talk_emote_card.bind(String(action)))
 		row.add_child(card)
+
+# ── NPC 贴纸盘（character-anchors P4）────────────────────────────────────────
+# 对话态底部两段式：第一段列背包贴纸（点选进第二段），第二段列三个槽位（头顶/左手/右手）。
+# 贴上/摘下都是发 character_attach 等广播落地（服务端权威扣还背包）。
+
+var _sticker_view: Control          ## 贴纸盘容器（NPC 对话态显示）
+var _sticker_row: HBoxContainer     ## 动态格子行
+var _sticker_pick := ""             ## 已选中的贴纸实体 id（空=贴纸选择段）
+const STICKER_SLOTS := [["headTop", "头顶"], ["handL", "左手"], ["handR", "右手"]]
+
+func _build_sticker_view(host: CanvasLayer) -> void:
+	_sticker_view = Control.new()
+	_sticker_view.name = "StickerView"
+	_sticker_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_sticker_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sticker_view.visible = false
+	host.add_child(_sticker_view)
+	_sticker_row = HBoxContainer.new()
+	_sticker_row.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_sticker_row.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_sticker_row.offset_top = -170.0
+	_sticker_row.offset_bottom = -34.0
+	_sticker_row.add_theme_constant_override("separation", 22)
+	_sticker_view.add_child(_sticker_row)
+
+## 重建贴纸盘（进对话/背包变化/选中切段时调）。对话目标无真立绘或背包无贴纸 → 整盘隐藏。
+func _refresh_sticker_view() -> void:
+	if _sticker_view == null:
+		return
+	for c in _sticker_row.get_children():
+		c.queue_free()
+	var target := selected
+	if target == null or not online or _in_creation:
+		_sticker_view.visible = false
+		return
+	var ids: Array = []
+	for item_id in bag:
+		if int(bag[item_id]) > 0 and _sticker_tex(String(item_id)) != null:
+			ids.append(String(item_id))
+	ids.sort()
+	if ids.is_empty() and _sticker_pick.is_empty():
+		_sticker_view.visible = false
+		return
+	_sticker_view.visible = true
+	if _sticker_pick.is_empty():
+		for item_id in ids.slice(0, 6): # 一排最多 6 格（3 岁大点击区放不下更多）
+			var card := Button.new()
+			card.custom_minimum_size = Vector2(120.0, 120.0)
+			UiAssets.style_card_button(card, 20.0)
+			card.icon = _sticker_tex(String(item_id))
+			card.expand_icon = true
+			card.pressed.connect(func() -> void:
+				_sticker_pick = String(item_id)
+				game_audio.play_sfx("bell")
+				_refresh_sticker_view())
+			_sticker_row.add_child(card)
+	else:
+		for pair in STICKER_SLOTS:
+			var slot_btn := Button.new()
+			slot_btn.custom_minimum_size = Vector2(150.0, 120.0)
+			UiAssets.style_card_button(slot_btn, 20.0)
+			slot_btn.text = String(pair[1])
+			slot_btn.pressed.connect(_on_sticker_slot.bind(String(pair[0])))
+			_sticker_row.add_child(slot_btn)
+		var back := Button.new()
+		back.custom_minimum_size = Vector2(120.0, 120.0)
+		UiAssets.style_card_button(back, 20.0)
+		back.text = "↩"
+		back.pressed.connect(func() -> void:
+			_sticker_pick = ""
+			_refresh_sticker_view())
+		_sticker_row.add_child(back)
+
+## 选了槽位：发 attach（服务端扣包+广播，本端等广播落地渲染），回到贴纸选择段。
+func _on_sticker_slot(slot: String) -> void:
+	var d := _find_npc_dict(selected) if selected != null else {}
+	var cid := String(d.get("id", ""))
+	if cid.is_empty() or _sticker_pick.is_empty():
+		return
+	backend.send_character_attach(world_id, cid, slot, _sticker_pick)
+	game_audio.play_sfx("pop")
+	_sticker_pick = ""
+	_refresh_sticker_view()
+
+## 贴纸实体 → 贴图（renderRef sticker:<name> 经 PackRegistry）；非贴纸/未注册 → null。
+func _sticker_tex(item_id: String) -> Texture2D:
+	var rref := String(ItemCatalog.get_def(item_id).get("renderRef", ""))
+	if not rref.begins_with("sticker:"):
+		return null
+	return PackRegistry.load_resource(rref.get_slice(":", 1)) as Texture2D
+
+## character_attach 广播落地：按 id 现查角色副本（勿持引用），挂/摘贴纸。
+func _on_character_attach(data: Dictionary) -> void:
+	if String(data.get("sceneId", "village")) != _scene_id:
+		return
+	var npc := _find_npc_by_id(String(data.get("characterId", "")))
+	if npc == null:
+		return
+	var slot := String(data.get("slot", ""))
+	var item_v: Variant = data.get("itemId")
+	if item_v == null or String(item_v).is_empty():
+		npc.detach_sticker(slot)
+		return
+	var tex := _sticker_tex(String(item_v))
+	if tex != null:
+		npc.attach_sticker(slot, tex)
+
+## 角色降生时应用已有贴纸（attachments 随角色整对象下发）。
+func _apply_attachments(npc: PaperCharacter, c: Dictionary) -> void:
+	for a in c.get("attachments", []):
+		if typeof(a) != TYPE_DICTIONARY:
+			continue
+		var tex := _sticker_tex(String((a as Dictionary).get("itemId", "")))
+		if tex != null:
+			npc.attach_sticker(String((a as Dictionary).get("slot", "")), tex)
 
 ## 点了表情盘某格：本端立即演 + 发给服务端转发（对端在我的副本上演同款）。
 func _on_talk_emote_card(action: String) -> void:
@@ -2766,6 +2886,9 @@ func _exit_interaction() -> void:
 			backend.send_creation_cancel()
 	_vc.close() # 关麦（录音中则先静默取消，不留半开会话）
 	selected = null
+	if _sticker_view != null:
+		_sticker_view.visible = false # 退对话收贴纸盘
+	_sticker_pick = ""
 	_reset_empty_streak()
 	# 中途退出时清掉未完成的小跳（保留当前位置，不瞬移回落点）
 	if not player.is_empty():
@@ -2810,6 +2933,7 @@ func _setup_backend() -> void:
 	backend.prop_denied.connect(_on_reward_denied)
 	backend.bag_update.connect(_on_bag_update)
 	backend.sticker_bought.connect(_on_sticker_bought)
+	backend.character_attach.connect(_on_character_attach)
 	backend.sticker_denied.connect(_on_sticker_denied)
 	backend.gen_denied.connect(_on_reward_denied)
 	backend.failed.connect(_on_failed)
@@ -3697,6 +3821,7 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 	npc.setup(tex, color, String(c.get("name", "")))
 	if real: # 立绘锚点（贴纸附着位，character-anchors）：只有真立绘的坐标系有意义
 		npc.set_anchors(appearance.get("anchors", {}))
+		_apply_attachments(npc, c) # 身上已贴的贴纸随角色下发，降生即穿戴
 	var is_fairy := bool(c.get("isFairy", false))
 	if is_fairy:
 		BlobShadow.detach(npc) # 悬浮飞行不落地，脚下暗斑穿帮
@@ -3900,6 +4025,8 @@ func _apply_bag(b: Variant) -> void:
 		bag = b
 	if phone_ui != null:
 		phone_ui.refresh_items()
+	if _sticker_view != null and _sticker_view.visible:
+		_refresh_sticker_view() # 贴上/买入后格子数变了，贴纸盘跟着刷
 
 func _on_prop_failed(_reason: String) -> void:
 	thinking_label.visible = false

@@ -1657,6 +1657,7 @@ export async function handleWsMessage(
     intentText?: string;
     byFairy?: boolean;
     characterId?: string;
+    slot?: string; // character_attach：贴纸槽位（headTop/handL/handR）
     audio?: string; // base64
     format?: string;
     transcript?: string; // voice_transcript：端侧 ASR 已识别的文本
@@ -2187,6 +2188,59 @@ export async function handleWsMessage(
       bag: store.getBag(worldId, session.playerId),
       wallet: store.getWallet(worldId, session.playerId),
     }));
+    return;
+  }
+
+  // 贴角色贴纸：挂/摘（character-anchors §5）。贴上=背包扣一份，摘下=回背包，
+  // 同槽已有=旧的回背包换新（替换语义）。落库角色行，经 WorldHub 按角色所在场景
+  // 定向广播 character_attach——发起者也靠广播落地渲染（与 terrain_patch 同哲学）。
+  if (msg.type === 'character_attach') {
+    const worldId = msg.worldId ?? '';
+    const characterId = msg.characterId ?? '';
+    const slot = String(msg.slot ?? '');
+    const itemId = msg.itemId === undefined || msg.itemId === null || msg.itemId === '' ? null : String(msg.itemId);
+    if (slot !== 'headTop' && slot !== 'handL' && slot !== 'handR') {
+      socket.send(JSON.stringify({ type: 'error', error: 'bad slot' }));
+      return;
+    }
+    const char = store.getCharacter(worldId, characterId);
+    if (!char) {
+      socket.send(JSON.stringify({ type: 'error', error: 'character not found' }));
+      return;
+    }
+    const list = char.attachments ?? [];
+    const existing = list.find((a) => a.slot === slot);
+    if (itemId !== null) {
+      const def = getBuiltinItem(itemId);
+      if (!def || def.mount !== 'edge') {
+        socket.send(JSON.stringify({ type: 'error', error: 'not a sticker' }));
+        return;
+      }
+      if ((store.getBag(worldId, session.playerId)[itemId] ?? 0) < 1) {
+        socket.send(JSON.stringify({ type: 'error', error: 'item not in bag' }));
+        return;
+      }
+      store.bagTake(worldId, session.playerId, itemId);
+      if (existing) {
+        store.bagAdd(worldId, session.playerId, existing.itemId); // 换装：旧贴纸回背包
+        existing.itemId = itemId;
+        char.attachments = list;
+      } else {
+        char.attachments = [...list, { slot, itemId }];
+      }
+    } else {
+      if (!existing) {
+        socket.send(JSON.stringify({ type: 'error', error: 'slot empty' }));
+        return;
+      }
+      store.bagAdd(worldId, session.playerId, existing.itemId);
+      char.attachments = list.filter((a) => a.slot !== slot);
+    }
+    store.saveCharacter(char);
+    hub?.broadcastScene(worldId, char.sceneId ?? DEFAULT_SCENE, {
+      type: 'character_attach', worldId, sceneId: char.sceneId ?? DEFAULT_SCENE, characterId, slot, itemId,
+    });
+    socket.send(JSON.stringify({ type: 'bag_update', worldId, bag: store.getBag(worldId, session.playerId) }));
     return;
   }
 

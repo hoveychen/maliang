@@ -169,6 +169,59 @@ test('POST /admin/detect-anchors：缺的补、有的跳过、force 重算；tok
   }
 });
 
+// ── P4 character_attach：挂/摘/换 + 背包扣还 ───────────────────────────────
+
+import { handleWsMessage, newVoiceSession } from '../src/server.ts';
+import { RateLimiter } from '../src/ratelimit.ts';
+import { ANON_PLAYER } from '../src/types.ts';
+
+async function ws(store: WorldStore, msg: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+  const sent: Array<Record<string, unknown>> = [];
+  await handleWsMessage(
+    { send: (d: string) => sent.push(JSON.parse(d)) }, JSON.stringify(msg),
+    createMockAdapters(), store, new RateLimiter(100, 100), 'test', newVoiceSession(),
+  );
+  return sent;
+}
+
+test('character_attach：贴上扣包/同槽换装旧的回包/摘下回包；错误路径不动账', async () => {
+  const store = new WorldStore();
+  store.createWorld('default');
+  const c = await createCharacter({ worldId: 'default', intentText: '造一只小狗', byFairy: false }, createMockAdapters(), store);
+  store.bagAdd('default', ANON_PLAYER, 'sticker_sun');
+  store.bagAdd('default', ANON_PLAYER, 'sticker_star');
+
+  // 贴上：扣包 + attachments 落库
+  const r1 = await ws(store, { type: 'character_attach', worldId: 'default', characterId: c.id, slot: 'headTop', itemId: 'sticker_sun' });
+  assert.equal(r1[0]!.type, 'bag_update');
+  assert.deepEqual(store.getCharacter('default', c.id)!.attachments, [{ slot: 'headTop', itemId: 'sticker_sun' }]);
+  assert.deepEqual(store.getBag('default', ANON_PLAYER), { sticker_star: 1 });
+
+  // 同槽换装：星星贴上、太阳回背包
+  await ws(store, { type: 'character_attach', worldId: 'default', characterId: c.id, slot: 'headTop', itemId: 'sticker_star' });
+  assert.deepEqual(store.getCharacter('default', c.id)!.attachments, [{ slot: 'headTop', itemId: 'sticker_star' }]);
+  assert.deepEqual(store.getBag('default', ANON_PLAYER), { sticker_sun: 1 });
+
+  // 摘下：回背包，槽位清空
+  await ws(store, { type: 'character_attach', worldId: 'default', characterId: c.id, slot: 'headTop', itemId: null });
+  assert.deepEqual(store.getCharacter('default', c.id)!.attachments, []);
+  assert.deepEqual(store.getBag('default', ANON_PLAYER), { sticker_sun: 1, sticker_star: 1 });
+
+  // 错误路径：坏槽位/非贴纸/背包没有/摘空槽——全部 error 且不动账
+  for (const bad of [
+    { slot: 'hat', itemId: 'sticker_sun' },
+    { slot: 'headTop', itemId: 'tree_puff_a' },
+    { slot: 'headTop', itemId: 'sticker_moon' },
+    { slot: 'handL', itemId: null },
+  ]) {
+    const r = await ws(store, { type: 'character_attach', worldId: 'default', characterId: c.id, ...bad });
+    assert.equal(r[0]!.type, 'error', JSON.stringify(bad));
+  }
+  assert.deepEqual(store.getBag('default', ANON_PLAYER), { sticker_sun: 1, sticker_star: 1 }, '错误不动账');
+  const unknown = await ws(store, { type: 'character_attach', worldId: 'default', characterId: 'nope', slot: 'headTop', itemId: 'sticker_sun' });
+  assert.equal(unknown[0]!.error, 'character not found');
+});
+
 test('createCharacter（mock 全链路）：appearance.anchors 落库且确定性', async () => {
   const store = new WorldStore();
   store.createWorld('default');
