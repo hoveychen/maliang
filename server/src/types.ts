@@ -379,6 +379,9 @@ export interface Player {
   color: string; // 喜欢的颜色名
   spriteAsset: string; // 形象资产 hash（内容寻址，服务端已有）
   createdAt: string; // ISO 时间；由前端 profile 带上，服务端不取墙上时钟
+  // 贴纸锚点：玩家 anchors 算在设备档案里（服务端够不着），随 world_info.profile 上报存这儿，
+  // 再经 presence 转发给同场景其他人——「别人看到的我」的贴纸位（design §5 actors 流转发）。老档缺省。
+  anchors?: CharacterAnchors;
 }
 // 注：玩家位置不在这里——它按 (world, scene, player) 存 player_positions 表。
 // 只按 playerId 存位置在多场景下毫无意义（同一 tile 在不同场景是不同地方）。
