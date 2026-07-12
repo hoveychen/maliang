@@ -60,8 +60,14 @@ static func build_poi_json() -> Array:
 	]
 
 ## 冰雪切片暂无传送点（独立展示地图）。
+## 传送点（scene-portal-graph）：侏罗/海底/中国 各一对双向 portal。落点选边缘干地，
+## 避开开阔水(14,30) 与 mound(50,28)/(28,50)/(60,58)。与对向场景 build_portal_json() 互指。
 static func build_portal_json() -> Array:
-	return []
+	return [
+		{ "tile": [12, 12], "radius": 3.0, "toScene": "jurassic", "toTile": [37, 12] },
+		{ "tile": [37, 12], "radius": 3.0, "toScene": "seafloor", "toTile": [37, 12] },
+		{ "tile": [65, 12], "radius": 3.0, "toScene": "ancient_china", "toTile": [12, 65] },
+	]
 
 ## 构建 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_icesnow.gd）。
 static func build_terrain_bytes() -> PackedByteArray:

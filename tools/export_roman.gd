@@ -59,8 +59,14 @@ static func build_poi_json() -> Array:
 		{ "tile": [37, 40], "radius": 4.0, "trigger": "poi_fountain", "name": "喷泉", "aliases": ["喷泉", "水池", "水"] },
 	]
 
+## 传送点（scene-portal-graph）：中世纪/中国/现代城市 各一对双向 portal。落点选边缘干地，
+## 避开喷泉水(37,40) 与 mound(50,28)/(60,58)。与对向场景 build_portal_json() 互指。
 static func build_portal_json() -> Array:
-	return []
+	return [
+		{ "tile": [12, 12], "radius": 3.0, "toScene": "medieval", "toTile": [37, 12] },
+		{ "tile": [37, 12], "radius": 3.0, "toScene": "ancient_china", "toTile": [65, 12] },
+		{ "tile": [65, 12], "radius": 3.0, "toScene": "modern_city", "toTile": [37, 12] },
+	]
 
 ## 构建 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_roman.gd）。
 static func build_terrain_bytes() -> PackedByteArray:

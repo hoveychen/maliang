@@ -58,8 +58,14 @@ static func build_poi_json() -> Array:
 		{ "tile": [18, 18], "radius": 7.0, "trigger": "poi_fernwood", "name": "蕨林", "aliases": ["蕨林", "蕨类", "草丛"] },
 	]
 
+## 传送点（scene-portal-graph）：森林/冰雪/海底 各一对双向 portal。落点选边缘干地，
+## 避开水潭(37,40) 与 mound(50,28)/(28,50)/(60,58)。与对向场景 build_portal_json() 互指。
 static func build_portal_json() -> Array:
-	return []
+	return [
+		{ "tile": [12, 12], "radius": 3.0, "toScene": "forest", "toTile": [65, 40] },
+		{ "tile": [37, 12], "radius": 3.0, "toScene": "icesnow", "toTile": [12, 12] },
+		{ "tile": [65, 12], "radius": 3.0, "toScene": "seafloor", "toTile": [65, 12] },
+	]
 
 ## 构建 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_jurassic.gd）。
 static func build_terrain_bytes() -> PackedByteArray:

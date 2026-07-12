@@ -58,8 +58,15 @@ static func build_poi_json() -> Array:
 		{ "tile": [37, 37], "radius": 5.0, "trigger": "poi_crossing", "name": "十字路口", "aliases": ["路口", "斑马线", "过街"] },
 	]
 
+## 传送点（scene-portal-graph）：村庄/罗马/未来/医院 各一对双向 portal（度 4，室内簇门户）。
+## 落点选边缘干地，避开景观水池(18,55) 与 mound(50,28)/(60,58)。与对向场景互指。
 static func build_portal_json() -> Array:
-	return []
+	return [
+		{ "tile": [12, 12], "radius": 3.0, "toScene": "village", "toTile": [65, 40] },
+		{ "tile": [37, 12], "radius": 3.0, "toScene": "roman", "toTile": [65, 12] },
+		{ "tile": [65, 12], "radius": 3.0, "toScene": "future_robot", "toTile": [24, 24] },
+		{ "tile": [12, 37], "radius": 3.0, "toScene": "hospital", "toTile": [24, 24] },
+	]
 
 ## 构建 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_modern_city.gd）。
 static func build_terrain_bytes() -> PackedByteArray:
