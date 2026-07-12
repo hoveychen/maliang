@@ -20,8 +20,15 @@ func _cover() -> void:
 	for z in range(n):
 		for x in range(n):
 			seen[TerrainMap.tile_type(Vector2i(x, z))] = true
-	for t in [TerrainMap.T_TILE, TerrainMap.T_CHECKER_TILE, TerrainMap.T_WOOD_FLOOR, TerrainMap.T_ANTISLIP]:
+	for t in [TerrainMap.T_TILE, TerrainMap.T_CHECKER_TILE, TerrainMap.T_WOOD_FLOOR, TerrainMap.T_ANTISLIP, TerrainMap.T_KITCHEN_WALL]:
 		_check("出现 tile 类型 %d" % t, seen.has(t), true)
+	# 房间四壁：存在被抬高（h≥2）的 T_KITCHEN_WALL 墙 tile
+	var wall_raised := false
+	for z in range(n):
+		for x in range(n):
+			if TerrainMap.tile_type(Vector2i(x, z)) == TerrainMap.T_KITCHEN_WALL and TerrainMap.tile_height(Vector2i(x, z)) >= 2:
+				wall_raised = true
+	_check("厨房墙面 tile 抬高成墙(h≥2)", wall_raised, true)
 	for t in seen.keys():
 		_check("类型 %d 在 VALID_TYPES" % t, t in TerrainMap.VALID_TYPES, true)
 	TerrainMap.reset()
@@ -32,6 +39,8 @@ func _maps() -> void:
 	_check("top T_ANTISLIP", TT.top_layer(TerrainMap.T_ANTISLIP), TT.LAYER_ANTISLIP)
 	_check("side T_TILE = 瓷砖层", TT.side_layer(TerrainMap.T_TILE), TT.LAYER_TILE)
 	_check("side T_WOOD_FLOOR = 木层", TT.side_layer(TerrainMap.T_WOOD_FLOOR), TT.LAYER_WOOD_FLOOR)
+	_check("top T_KITCHEN_WALL = 墙面层", TT.top_layer(TerrainMap.T_KITCHEN_WALL), TT.LAYER_KITCHEN_WALL)
+	_check("side T_KITCHEN_WALL = 墙面层", TT.side_layer(TerrainMap.T_KITCHEN_WALL), TT.LAYER_KITCHEN_WALL)
 	_check("LAYER_TEX_PATHS 数 = LAYER_COUNT", TT.LAYER_TEX_PATHS.size(), TT.LAYER_COUNT)
 
 func _walls() -> void:

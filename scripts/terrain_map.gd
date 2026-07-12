@@ -78,6 +78,9 @@ const T_GRATING := 41       ## 格栅
 const T_GLOW_TILE := 42     ## 发光地砖
 const T_HAZARD := 43        ## 警戒条纹地
 const T_TOY_WALL := 44      ## 玩具房间墙面（室内房间围墙，抬高成四壁）
+const T_KITCHEN_WALL := 45  ## 厨房墙面（室内房间围墙，抬高成四壁）
+const T_HOSPITAL_WALL := 46 ## 医院墙面（室内房间围墙，抬高成四壁）
+const T_FUTURE_WALL := 47   ## 未来舱壁墙面（室内房间围墙，抬高成四壁）
 ## 合法存储 tile 类型（校验/autotile 分组用）。
 const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
 	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
@@ -87,7 +90,8 @@ const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
 	T_ASPHALT, T_PAVER_BRICK, T_CROSSWALK, T_CONCRETE, T_LAWN_GRID,
 	T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT,
 	T_CHECKER_TILE, T_ANTISLIP, T_MED_VINYL_GREEN, T_MED_VINYL_BLUE,
-	T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD, T_TOY_WALL]
+	T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD, T_TOY_WALL,
+	T_KITCHEN_WALL, T_HOSPITAL_WALL, T_FUTURE_WALL]
 ## 「画在草底上的 body」类型（autotile 与邻居同类过渡）：路 + 新增地表；水另走整格湖床。
 const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE,
 	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
@@ -97,7 +101,8 @@ const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE,
 	T_ASPHALT, T_PAVER_BRICK, T_CROSSWALK, T_CONCRETE, T_LAWN_GRID,
 	T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT,
 	T_CHECKER_TILE, T_ANTISLIP, T_MED_VINYL_GREEN, T_MED_VINYL_BLUE,
-	T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD, T_TOY_WALL]
+	T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD, T_TOY_WALL,
+	T_KITCHEN_WALL, T_HOSPITAL_WALL, T_FUTURE_WALL]
 const MAX_HEIGHT := 255   ## 数据上限（存储为 byte）；默认地形主峰只到 8 级
 const STEP_HEIGHT := 2.0  ## 每级台阶的世界高度（米）= 1 格（tile 边长）；相邻 tile 跳变可超 1 级（陡崖）
 const MAX_DEPTH := 2      ## 默认地形的最大水深级数（1=浅水 2=深水；湖床 = 高度 - 深度）

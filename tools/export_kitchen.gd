@@ -1,7 +1,7 @@
 extends SceneTree
-## 程序化生成厨房主题地图并导出 .mltr v2（themed-terrain P3）。
-## 白瓷砖底 + 4 种地表（白瓷砖/格纹地砖/木地板/防滑垫）+「瓷砖 mound（灶台）」与
-## 「木地板 dune（料理岛）」两种不同类型抬高块——复用 P1 类型化侧壁（瓷砖壁 vs 木壁）。室内无水。
+## 程序化生成厨房主题地图并导出 .mltr v2（themed-terrain P3，室内带墙房间）。
+## 白瓷砖地板底 + 白瓷砖墙围四壁（T_KITCHEN_WALL，抬高成围墙）+ 内部地面装饰
+## （格纹地砖 / 防滑垫 / 木地板料理岛）+ 中央矮灶台（瓷砖平台，type-aware 侧壁）。室内无水。
 ## 用法：godot --headless --path . --script res://tools/export_kitchen.gd -- --out kitchen.mltr
 
 const COMPOSE := preload("res://tools/scene_compose.gd")
@@ -10,6 +10,7 @@ const T_TILE := 7            # 白瓷砖（底，可抬高）
 const T_CHECKER_TILE := 36   # 格纹地砖
 const T_WOOD_FLOOR := 27     # 木地板（可抬高）
 const T_ANTISLIP := 37       # 防滑垫
+const T_KITCHEN_WALL := 45   # 厨房墙面（围墙，抬高成四壁）
 
 func _init() -> void:
 	var out_path := _arg("--out", "kitchen.mltr")
@@ -24,11 +25,12 @@ func _init() -> void:
 	_dump(_arg("--portal-out", out_path.get_basename() + ".portals.json"), build_portal_json())
 	quit(0)
 
+## 厨房 POI：灶台 / 料理岛 / 花砖区（均落在房间内部）。
 static func build_poi_json() -> Array:
 	return [
-		{ "tile": [50, 28], "radius": 6.0, "trigger": "poi_stove", "name": "灶台", "aliases": ["灶台", "炉子", "瓷砖台"] },
-		{ "tile": [28, 50], "radius": 5.0, "trigger": "poi_island", "name": "料理岛", "aliases": ["料理岛", "木台", "案板"] },
-		{ "tile": [20, 20], "radius": 6.0, "trigger": "poi_checkerfloor", "name": "花砖区", "aliases": ["花砖", "格纹", "格子"] },
+		{ "tile": [37, 37], "radius": 6.0, "trigger": "poi_stove", "name": "灶台", "aliases": ["灶台", "炉子", "瓷砖台"] },
+		{ "tile": [28, 46], "radius": 5.0, "trigger": "poi_island", "name": "料理岛", "aliases": ["料理岛", "木台", "案板"] },
+		{ "tile": [28, 28], "radius": 6.0, "trigger": "poi_checkerfloor", "name": "花砖区", "aliases": ["花砖", "格纹", "格子"] },
 	]
 
 static func build_portal_json() -> Array:
@@ -41,22 +43,24 @@ static func build_terrain_bytes() -> PackedByteArray:
 	var heights := PackedByteArray(); heights.resize(count)
 	var depths := PackedByteArray(); depths.resize(count)
 
+	# ── 底：全图白瓷砖（模态地表 → base_layer = 瓷砖）──
 	for i in range(count):
-		types[i] = T_TILE  # 底：白瓷砖（模态 → base_layer = 瓷砖）
+		types[i] = T_TILE
 
-	_ellipse_type(types, n, 20.5, 20.5, 11.0, 10.0, T_CHECKER_TILE)  # 西北 花砖区
-	_ellipse_type(types, n, 55.5, 55.5, 9.0, 8.0, T_CHECKER_TILE)    # 东南 花砖区
-	_ellipse_type(types, n, 20.5, 55.5, 8.0, 7.0, T_ANTISLIP)        # 西南 防滑垫（水槽区）
-	_rect_type(types, n, 44, 44, 56, 56, T_WOOD_FLOOR)              # 东南一角 木地板
-
-	# 瓷砖 mound（灶台）
-	_ellipse_type(types, n, 50.5, 28.5, 6.0, 5.5, T_TILE)
-	_ellipse_h(heights, n, 50.5, 28.5, 6.0, 5.5, 1)
-	_ellipse_h(heights, n, 50.5, 28.5, 3.8, 3.4, 2)
-	# 木地板 dune（料理岛）——侧壁应为木壁（验证 type-aware）
-	_ellipse_type(types, n, 28.5, 50.5, 4.0, 3.6, T_WOOD_FLOOR)
-	_ellipse_h(heights, n, 28.5, 50.5, 4.0, 3.6, 1)
-	_ellipse_h(heights, n, 28.5, 50.5, 2.2, 2.0, 2)
+	# ── 房间内部 [X0..X1]×[Z0..Z1] 铺地面装饰，四周 2 格厚墙环抬高成围墙 ──
+	var X0 := 20; var X1 := 54; var Z0 := 20; var Z1 := 54
+	var WALL_H := 3
+	# 地面装饰（限房间内部）：格纹区 NW / 防滑垫 NE(水槽) / 木料理岛地 SW
+	_ellipse_type(types, n, 28.5, 28.5, 6.5, 6.0, T_CHECKER_TILE)
+	_rect_type(types, n, 43, 24, 50, 31, T_ANTISLIP)
+	_ellipse_type(types, n, 28.5, 46.5, 5.5, 5.0, T_WOOD_FLOOR)
+	# 木料理岛（1 级木平台，木壁 type-aware）
+	_ellipse_h(heights, n, 28.5, 46.5, 4.0, 3.6, 1)
+	# 中央矮灶台（1 级瓷砖平台，瓷砖壁 type-aware）
+	_ellipse_type(types, n, 37.5, 37.5, 3.5, 3.2, T_TILE)
+	_ellipse_h(heights, n, 37.5, 37.5, 3.5, 3.2, 1)
+	# 四壁：房间边界 2 格厚墙环，抬高 WALL_H（白瓷砖墙 type-aware，不倒角）
+	_wall_ring(types, heights, n, X0, Z0, X1, Z1, 2, T_KITCHEN_WALL, WALL_H)
 
 	return _assemble(types, heights, depths, "kitchen")
 
@@ -106,6 +110,17 @@ static func _rect_type(arr: PackedByteArray, n: int, x0: int, z0: int, x1: int, 
 	for z in range(z0, z1 + 1):
 		for x in range(x0, x1 + 1):
 			arr[_idx(n, x, z)] = t
+
+## 房间四壁：内部矩形 [x0..x1]×[z0..z1] 外扩 thick 格的环形边框设为墙 tile 类型 t + 抬高 h。
+## 内部地面不动；外扩环 = 墙 footprint（抬高后成四面围墙，type-aware 侧壁 = 墙贴图）。
+static func _wall_ring(types: PackedByteArray, heights: PackedByteArray, n: int, x0: int, z0: int, x1: int, z1: int, thick: int, t: int, h: int) -> void:
+	for z in range(z0 - thick, z1 + thick + 1):
+		for x in range(x0 - thick, x1 + thick + 1):
+			if x >= x0 and x <= x1 and z >= z0 and z <= z1:
+				continue
+			var i := _idx(n, x, z)
+			types[i] = t
+			heights[i] = h
 
 static func _arg(name: String, fallback: String) -> String:
 	var args := OS.get_cmdline_user_args()

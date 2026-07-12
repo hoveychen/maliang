@@ -1,7 +1,7 @@
 extends SceneTree
-## 程序化生成医院主题地图并导出 .mltr v2（themed-terrain P3）。
-## 医用地胶浅绿底 + 5 种地表（医用地胶浅绿/白瓷砖/防滑走廊/手术室地/医用地胶浅蓝）
-## +「瓷砖 mound（诊台）」与「混凝土 dune（设备台）」两种不同类型抬高块——复用 P1 类型化侧壁。室内无水。
+## 程序化生成医院主题地图并导出 .mltr v2（themed-terrain P3，室内带墙房间）。
+## 医用地胶浅绿地板底 + 浅色医院墙围四壁（T_HOSPITAL_WALL，抬高成围墙）+ 内部地面装饰
+## （浅蓝病房地 / 防滑走廊 / 白瓷砖诊区）+ 中央矮诊台（瓷砖平台，type-aware 侧壁）。室内无水。
 ## 用法：godot --headless --path . --script res://tools/export_hospital.gd -- --out hospital.mltr
 
 const COMPOSE := preload("res://tools/scene_compose.gd")
@@ -11,6 +11,7 @@ const T_TILE := 7              # 白瓷砖（可抬高）
 const T_ANTISLIP := 37         # 防滑走廊
 const T_CONCRETE := 31         # 手术室地（可抬高）
 const T_MED_VINYL_BLUE := 39   # 医用地胶浅蓝
+const T_HOSPITAL_WALL := 46    # 医院墙面（围墙，抬高成四壁）
 
 func _init() -> void:
 	var out_path := _arg("--out", "hospital.mltr")
@@ -25,11 +26,12 @@ func _init() -> void:
 	_dump(_arg("--portal-out", out_path.get_basename() + ".portals.json"), build_portal_json())
 	quit(0)
 
+## 医院 POI：诊台 / 手术室 / 病房（均落在房间内部）。
 static func build_poi_json() -> Array:
 	return [
-		{ "tile": [50, 28], "radius": 6.0, "trigger": "poi_clinic", "name": "诊台", "aliases": ["诊台", "看诊", "瓷砖台"] },
-		{ "tile": [28, 50], "radius": 5.0, "trigger": "poi_or", "name": "手术室", "aliases": ["手术室", "手术台", "设备台"] },
-		{ "tile": [20, 20], "radius": 6.0, "trigger": "poi_ward", "name": "病房", "aliases": ["病房", "浅蓝区", "蓝地胶"] },
+		{ "tile": [37, 37], "radius": 6.0, "trigger": "poi_clinic", "name": "诊台", "aliases": ["诊台", "看诊", "瓷砖台"] },
+		{ "tile": [28, 46], "radius": 5.0, "trigger": "poi_or", "name": "手术室", "aliases": ["手术室", "手术台", "设备台"] },
+		{ "tile": [28, 28], "radius": 6.0, "trigger": "poi_ward", "name": "病房", "aliases": ["病房", "浅蓝区", "蓝地胶"] },
 	]
 
 static func build_portal_json() -> Array:
@@ -42,22 +44,24 @@ static func build_terrain_bytes() -> PackedByteArray:
 	var heights := PackedByteArray(); heights.resize(count)
 	var depths := PackedByteArray(); depths.resize(count)
 
+	# ── 底：全图浅绿地胶（模态地表 → base_layer = 浅绿地胶）──
 	for i in range(count):
-		types[i] = T_MED_VINYL_GREEN  # 底：浅绿地胶（模态 → base_layer = 浅绿地胶）
+		types[i] = T_MED_VINYL_GREEN
 
-	_ellipse_type(types, n, 20.5, 20.5, 11.0, 10.0, T_MED_VINYL_BLUE)  # 西北 浅蓝病房
-	_ellipse_type(types, n, 55.5, 55.5, 9.0, 8.0, T_MED_VINYL_BLUE)    # 东南 浅蓝病房
-	_rect_type(types, n, 30, 8, 33, 66, T_ANTISLIP)                   # 竖向防滑走廊
-	_rect_type(types, n, 8, 36, 66, 39, T_ANTISLIP)                   # 横向防滑走廊
-
-	# 瓷砖 mound（诊台）
-	_ellipse_type(types, n, 50.5, 28.5, 6.0, 5.5, T_TILE)
-	_ellipse_h(heights, n, 50.5, 28.5, 6.0, 5.5, 1)
-	_ellipse_h(heights, n, 50.5, 28.5, 3.8, 3.4, 2)
-	# 混凝土 dune（手术室设备台）——侧壁应为混凝土壁（验证 type-aware）
-	_ellipse_type(types, n, 28.5, 50.5, 4.5, 4.0, T_CONCRETE)
-	_ellipse_h(heights, n, 28.5, 50.5, 4.5, 4.0, 1)
-	_ellipse_h(heights, n, 28.5, 50.5, 2.4, 2.2, 2)
+	# ── 房间内部铺地面装饰，四周 2 格厚墙环抬高成围墙 ──
+	var X0 := 20; var X1 := 54; var Z0 := 20; var Z1 := 54
+	var WALL_H := 3
+	# 地面装饰（限房间内部）：浅蓝病房 NW / 防滑走廊 NE / 手术室地 SW
+	_ellipse_type(types, n, 28.5, 28.5, 6.5, 6.0, T_MED_VINYL_BLUE)
+	_rect_type(types, n, 43, 24, 50, 31, T_ANTISLIP)
+	_ellipse_type(types, n, 28.5, 46.5, 5.5, 5.0, T_CONCRETE)
+	# 手术室设备台（1 级混凝土平台，混凝土壁 type-aware）
+	_ellipse_h(heights, n, 28.5, 46.5, 4.0, 3.6, 1)
+	# 中央矮诊台（1 级瓷砖平台，瓷砖壁 type-aware）
+	_ellipse_type(types, n, 37.5, 37.5, 3.5, 3.2, T_TILE)
+	_ellipse_h(heights, n, 37.5, 37.5, 3.5, 3.2, 1)
+	# 四壁：房间边界 2 格厚墙环，抬高 WALL_H（浅色医院墙 type-aware，不倒角）
+	_wall_ring(types, heights, n, X0, Z0, X1, Z1, 2, T_HOSPITAL_WALL, WALL_H)
 
 	return _assemble(types, heights, depths, "hospital")
 
@@ -107,6 +111,16 @@ static func _rect_type(arr: PackedByteArray, n: int, x0: int, z0: int, x1: int, 
 	for z in range(z0, z1 + 1):
 		for x in range(x0, x1 + 1):
 			arr[_idx(n, x, z)] = t
+
+## 房间四壁：内部矩形 [x0..x1]×[z0..z1] 外扩 thick 格的环形边框设为墙 tile 类型 t + 抬高 h。
+static func _wall_ring(types: PackedByteArray, heights: PackedByteArray, n: int, x0: int, z0: int, x1: int, z1: int, thick: int, t: int, h: int) -> void:
+	for z in range(z0 - thick, z1 + thick + 1):
+		for x in range(x0 - thick, x1 + thick + 1):
+			if x >= x0 and x <= x1 and z >= z0 and z <= z1:
+				continue
+			var i := _idx(n, x, z)
+			types[i] = t
+			heights[i] = h
 
 static func _arg(name: String, fallback: String) -> String:
 	var args := OS.get_cmdline_user_args()

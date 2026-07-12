@@ -1,5 +1,5 @@
 extends SceneTree
-## 未来机器人垂直切片验收（themed-terrain P3）：覆盖(含水)+层映射+类型化侧壁(金属板/混凝土)+模态基底(金属板)。
+## 未来机器人垂直切片验收（themed-terrain P3，室内带墙房间）：覆盖(含墙)+层映射+类型化侧壁(金属板/混凝土)+模态基底(金属板)。室内无水。
 ## 运行: godot --headless --script res://test/test_terrain_future_robot.gd
 
 const FUTURE := preload("res://tools/export_future_robot.gd")
@@ -21,8 +21,15 @@ func _cover() -> void:
 		for x in range(n):
 			seen[TerrainMap.tile_type(Vector2i(x, z))] = true
 	for t in [TerrainMap.T_METAL_PLATE, TerrainMap.T_GRATING, TerrainMap.T_GLOW_TILE,
-			TerrainMap.T_HAZARD, TerrainMap.T_CONCRETE, TerrainMap.T_WATER]:
+			TerrainMap.T_HAZARD, TerrainMap.T_CONCRETE, TerrainMap.T_FUTURE_WALL]:
 		_check("出现 tile 类型 %d" % t, seen.has(t), true)
+	# 房间四壁：存在被抬高（h≥2）的 T_FUTURE_WALL 墙 tile
+	var wall_raised := false
+	for z in range(n):
+		for x in range(n):
+			if TerrainMap.tile_type(Vector2i(x, z)) == TerrainMap.T_FUTURE_WALL and TerrainMap.tile_height(Vector2i(x, z)) >= 2:
+				wall_raised = true
+	_check("未来舱壁 tile 抬高成墙(h≥2)", wall_raised, true)
 	for t in seen.keys():
 		_check("类型 %d 在 VALID_TYPES" % t, t in TerrainMap.VALID_TYPES, true)
 	TerrainMap.reset()
@@ -35,6 +42,8 @@ func _maps() -> void:
 	_check("top T_HAZARD", TT.top_layer(TerrainMap.T_HAZARD), TT.LAYER_HAZARD)
 	_check("side T_METAL_PLATE = 金属板层", TT.side_layer(TerrainMap.T_METAL_PLATE), TT.LAYER_METAL_PLATE)
 	_check("side T_CONCRETE = 混凝土层", TT.side_layer(TerrainMap.T_CONCRETE), TT.LAYER_CONCRETE)
+	_check("top T_FUTURE_WALL = 墙面层", TT.top_layer(TerrainMap.T_FUTURE_WALL), TT.LAYER_FUTURE_WALL)
+	_check("side T_FUTURE_WALL = 墙面层", TT.side_layer(TerrainMap.T_FUTURE_WALL), TT.LAYER_FUTURE_WALL)
 	_check("LAYER_TEX_PATHS 数 = LAYER_COUNT", TT.LAYER_TEX_PATHS.size(), TT.LAYER_COUNT)
 
 func _walls() -> void:
