@@ -1979,29 +1979,120 @@ func _update_paper_motion(n: Dictionary, node: PaperCharacter, lean: float, delt
 	_update_action_anim(n, node, delta)
 
 ## 指令动作演出（do_action 契约键 paper_action，见 BehaviorExecutor.ACTION_DUR）：
-## 挥手=左右摇纸 / 跳=双跳 / 转圈=绕竖轴一整圈（中途侧身纸边）/ 点头=前后倾。
-## 叠加在正常姿态之上，sin(k*PI) 包络起收平滑，结束自动清键。
+## 动作数学在纯函数 action_pose（可单测），这里只负责应用与生命周期（推进 t/清键/scale 复位）。
+## 旋转/位移叠加在正常姿态之上（姿态每帧重算，加性安全）；scale 无人复位，动作层自管：
+## 动作期间写绝对值，结束硬复位 ONE，动作被外部清除（交互叫停等）时弹性回正兜底。
 func _update_action_anim(n: Dictionary, node: PaperCharacter, delta: float) -> void:
 	var action := String(n.get("paper_action", ""))
 	if action.is_empty():
+		if node.scale != Vector3.ONE: # 动作中途被外部清键：scale 弹性回正
+			node.scale = node.scale.lerp(Vector3.ONE, minf(1.0, 12.0 * delta))
+			if node.scale.is_equal_approx(Vector3.ONE):
+				node.scale = Vector3.ONE
 		return
 	var t := float(n.get("paper_action_t", 0.0)) + delta
 	var dur := float(BehaviorExecutor.ACTION_DUR.get(action, 1.2))
 	if t >= dur:
 		n.erase("paper_action")
 		n.erase("paper_action_t")
+		node.scale = Vector3.ONE
 		return
 	n["paper_action_t"] = t
-	var k := t / dur
+	var p := action_pose(action, t, dur)
+	node.rotation += p["rot"] as Vector3
+	node.position.y += float(p["y"])
+	var sc := p["scale"] as Vector3
+	if sc != Vector3.ONE:
+		node.scale = sc
+	elif node.scale != Vector3.ONE: # 本动作不用 scale 但残留了旧值（动作被新动作顶替）
+		node.scale = Vector3.ONE
+	if p.has("motion"): # 覆盖本帧呼吸/走路的 shader 参数（下一帧姿态层自动恢复）
+		var m := p["motion"] as Vector2
+		node.set_paper_motion(m.x, m.y)
+
+## 「起-保持-收」包络：[0,up] 平滑升到 1，保持，[down,1] 平滑落回 0。翻面/躺平类动作用。
+static func _hold_env(k: float, up: float, down: float) -> float:
+	return smoothstep(0.0, up, k) * (1.0 - smoothstep(down, 1.0, k))
+
+## 纯函数（可单测）：动作在 t 时刻的演出偏移。20 种纸片动作的动画数学单一来源。
+## 返回 { "rot": Vector3 加性欧拉角, "y": float 加性抬升, "scale": Vector3 绝对值（ONE=不动）,
+## "motion": Vector2(flutter, curl) 仅在覆盖 shader 纸形变时存在 }。
+## 朝向约定：相机在 +Z；rotation.x 正=顶朝相机倒（扑街脸着地），负=后仰（躺平脸朝天）。
+static func action_pose(action: String, t: float, dur: float) -> Dictionary:
+	var k := clampf(t / dur, 0.0, 1.0)
+	var e := sin(k * PI) # 通用起收包络
+	var rot := Vector3.ZERO
+	var y := 0.0
+	var sc := Vector3.ONE
+	var motion := Vector2.INF # INF = 不覆盖
 	match action:
+		# —— 基础 4 种（与旧版一致）——
 		"wave":
-			node.rotation.z += deg_to_rad(16.0) * sin(t * TAU * 2.2) * sin(k * PI)
+			rot.z = deg_to_rad(16.0) * sin(t * TAU * 2.2) * e
 		"jump":
-			node.position.y += absf(sin(k * PI * 2.0)) * 1.4 # 两小跳
+			y = absf(sin(k * PI * 2.0)) * 1.4 # 两小跳
 		"spin":
-			node.rotation.y += TAU * smoothstep(0.0, 1.0, k) # 一整圈，中途露纸边
+			rot.y = TAU * smoothstep(0.0, 1.0, k) # 一整圈，中途露纸边
 		"nod":
-			node.rotation.x += deg_to_rad(12.0) * sin(t * TAU * 1.6) * sin(k * PI)
+			rot.x = deg_to_rad(12.0) * sin(t * TAU * 1.6) * e
+		# —— 翻滚旋转 ——
+		"flip": # 前滚翻：绕 X 一整圈 + 抛物线小跳
+			rot.x = TAU * smoothstep(0.0, 1.0, k)
+			y = e * 1.3
+		"backflip": # 后空翻：反向整圈 + 跳更高
+			rot.x = -TAU * smoothstep(0.0, 1.0, k)
+			y = e * 1.8
+		"cartwheel": # 侧手翻：绕 Z 滚一整圈
+			rot.z = TAU * smoothstep(0.0, 1.0, k)
+			y = e * 0.8
+		"twirl": # 芭蕾旋：快转两圈 + 微微踮起
+			rot.y = 2.0 * TAU * smoothstep(0.0, 1.0, k)
+			y = e * 0.5
+		"helicopter": # 直升机：匀速狂转，边升空边飘落
+			rot.y = 3.0 * TAU * k
+			y = e * 2.4
+			motion = Vector2(0.12 * e, 0.0) # 轻飘动强化"被风带起"
+		# —— 纸片专属梗 ——
+		"paperflip": # 翻面：转 180° 停一拍露镜像背面再转回
+			rot.y = PI * _hold_env(k, 0.25, 0.75)
+		"peek": # 侧身隐身：转到 90° 侧立成一条纸边，停一拍闪回
+			rot.y = (PI / 2.0) * _hold_env(k, 0.2, 0.8)
+		"lie_down": # 躺平：绕脚底后仰 90° 脸朝天躺一拍，再弹起
+			rot.x = -(PI / 2.0) * _hold_env(k, 0.2, 0.85)
+		"faceplant": # 扑街：快速前扑趴平（脸着地），慢慢爬起
+			rot.x = (PI / 2.0) * _hold_env(k, 0.12, 0.72)
+		# —— 纸形变（shader curl/flutter）——
+		"curl_up": # 卷纸筒：curl 拉满卷起，整体转一圈再展开
+			motion = Vector2(0.0, 1.1 * e)
+			rot.y = TAU * smoothstep(0.0, 1.0, k)
+		"shiver": # 瑟瑟发抖：flutter 高频爆发 + 微缩 + 小幅高频摆
+			motion = Vector2(0.3 * e, 0.15 * e)
+			rot.z = deg_to_rad(2.5) * sin(t * 50.0) * e
+			sc = Vector3.ONE * (1.0 - 0.06 * e)
+		"wiggle": # 扭扭舞：大幅慢波 S 形扭动 + 左右摆
+			motion = Vector2(0.45 * e, 0.0)
+			rot.z = deg_to_rad(10.0) * sin(t * TAU * 1.5) * e
+		"puff": # 挺胸鼓气：反向 curl 朝相机鼓起 + 微胀
+			motion = Vector2(0.0, -0.55 * e)
+			sc = Vector3.ONE * (1.0 + 0.06 * e)
+		# —— squash & stretch ——
+		"bounce": # 弹弹球三连跳：落地压扁、腾空拉长（首末淡入淡出防起收突跳）
+			var s := absf(sin(k * PI * 3.0))
+			var ramp := clampf(sin(k * PI) * 3.0, 0.0, 1.0)
+			y = s * 1.1
+			var sy := 1.0 + (lerpf(0.75, 1.15, s) - 1.0) * ramp
+			sc = Vector3(1.0 + (1.0 - sy) * 0.6, sy, 1.0)
+		"squish": # 拍扁：压到 30% 高摊宽，再 Q 弹回
+			var env := _hold_env(k, 0.25, 0.6)
+			sc = Vector3(1.0 + 0.55 * env, 1.0 - 0.7 * env, 1.0)
+		"stretch": # 长高高：拉到 140% 高变窄，微微晃
+			var env2 := _hold_env(k, 0.3, 0.7)
+			sc = Vector3(1.0 - 0.22 * env2, 1.0 + 0.4 * env2, 1.0)
+			rot.z = deg_to_rad(6.0) * sin(t * TAU * 1.2) * env2
+	var p := { "rot": rot, "y": y, "scale": sc }
+	if motion != Vector2.INF:
+		p["motion"] = motion
+	return p
 
 ## 纯判定（可单测）：近身空闲村民本帧是否该打招呼。busy=选中/聊天/叫停/正在做动作。
 static func notice_ready(dist: float, walk: float, busy: bool, cd: float) -> bool:
@@ -4735,6 +4826,9 @@ func _update_speak_anim(delta: float) -> void:
 	var settled := speaking.is_empty()
 	for n in npcs:
 		var node := n["node"] as PaperCharacter
+		if not String(n.get("paper_action", "")).is_empty():
+			settled = false # 动作层（squish/bounce 等）正在管 scale：说话呼吸让位，别拔河
+			continue
 		_apply_speak_scale(node, speaking.has(node), s, delta)
 		if node.scale != Vector3.ONE:
 			settled = false
