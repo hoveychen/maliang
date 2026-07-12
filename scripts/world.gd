@@ -5095,8 +5095,36 @@ func _throw_into_placeholder(from: Vector2, size: Vector2, icon: Texture2D, text
 	tw.chain().tween_callback(func() -> void:
 		fx.queue_free()
 		_bump_placeholder()
+		if _creation_goal == "sticker":
+			_paint_splat_at(target) # 造贴纸：答案落到画板上溅一团颜料，「泼颜料」的动感
 		if game_audio != null:
 			game_audio.play_sfx("pop"))
+
+## 造贴纸答案落到魔法画板：在落点溅一团亮色颜料（缩放弹出 + 淡出），给「泼颜料」的动感。
+## 颜色按答题步数轮换，每轮换一种，画板越答越花。占位符没立成（target 为 INF）时静默跳过。
+func _paint_splat_at(screen_pos: Vector2) -> void:
+	if _hud_layer == null or screen_pos == Vector2.INF:
+		return
+	var colors := [Color("#ff5b7f"), Color("#48c0e8"), Color("#ffc63a"), Color("#7ad06a"), Color("#b49bff")]
+	var c: Color = colors[_creation_step % colors.size()]
+	var sz := Vector2(90.0, 90.0)
+	var splat := Panel.new()
+	splat.name = "PaintSplat" # headless 凭这个名字确认颜料确实溅了
+	splat.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	splat.size = sz
+	splat.pivot_offset = sz * 0.5
+	splat.global_position = screen_pos - sz * 0.5
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = c
+	sb.set_corner_radius_all(45) # 圆到底=颜料团
+	splat.add_theme_stylebox_override("panel", sb)
+	splat.scale = Vector2.ONE * 0.2
+	_hud_layer.add_child(splat)
+	var tw := splat.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(splat, "scale", Vector2.ONE * 1.1, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(splat, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.35).set_delay(0.12)
+	tw.chain().tween_callback(splat.queue_free)
 
 ## 答案落进去时占位符弹一下（吸收的手感）。区块重刷会换节点，故现取现用。
 func _bump_placeholder() -> void:
