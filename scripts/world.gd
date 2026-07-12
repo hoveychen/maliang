@@ -4276,6 +4276,15 @@ func _on_item_created(data: Dictionary) -> void:
 	var tile := _clear_placeholder(PLACEHOLDER_FORGE_ID)
 	if tile.x < 0:
 		tile = _clear_placeholder(PLACEHOLDER_EASEL_ID)
+	# 造贴纸(mount edge)：不自动落地——贴纸靠孩子用放置模式贴到 tile 边缘/角色身上。
+	# 只收进背包 + 放个大大的 wow 庆祝，再引导「去手机里贴上」。
+	var is_sticker := String(item.get("renderRef", "")).begins_with("sticker:@") \
+		or String(item.get("mount", "")) == "edge"
+	if is_sticker:
+		_celebrate_sticker()
+		banner.text = "新贴纸做好啦！去手机里贴上吧"
+		banner.visible = true
+		return
 	var want := tile
 	if want.x < 0:
 		var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
@@ -5099,6 +5108,43 @@ func _throw_into_placeholder(from: Vector2, size: Vector2, icon: Texture2D, text
 			_paint_splat_at(target) # 造贴纸：答案落到画板上溅一团颜料，「泼颜料」的动感
 		if game_audio != null:
 			game_audio.play_sfx("pop"))
+
+## 造贴纸落成的 wow 庆祝：屏幕中央撒一把彩纸 + 奖励音效 + 集邮册（手机）按钮脉冲，
+## 告诉孩子「做出来啦，收在手机里了」。贴纸不自动落地，庆祝完孩子自己去放置模式贴。
+func _celebrate_sticker() -> void:
+	if game_audio != null:
+		game_audio.play_sfx("fanfare")
+		game_audio.play_sfx("bell")
+	_pulse_album_button() # 手机按钮脉冲：新贴纸在这儿
+	var vp := get_viewport().get_visible_rect().size
+	_confetti_burst(Vector2(vp.x * 0.5, vp.y * 0.42))
+
+## 从一点撒出一把彩纸：一圈小色块朝四周飞散 + 边下落边旋转边淡出。纯 HUD 视觉，自清理。
+func _confetti_burst(center: Vector2) -> void:
+	if _hud_layer == null:
+		return
+	var colors := [Color("#ff5b7f"), Color("#48c0e8"), Color("#ffc63a"), Color("#7ad06a"), Color("#b49bff"), Color("#ff9a3d")]
+	var n := 16
+	for i in range(n):
+		var piece := ColorRect.new()
+		piece.name = "Confetti" # headless 凭这个名字确认撒了彩纸
+		piece.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var sz := Vector2(14.0, 10.0)
+		piece.size = sz
+		piece.pivot_offset = sz * 0.5
+		piece.color = colors[i % colors.size()]
+		piece.global_position = center - sz * 0.5
+		piece.rotation = randf() * TAU
+		_hud_layer.add_child(piece)
+		var ang := TAU * float(i) / float(n) + randf() * 0.4
+		var dist := 140.0 + randf() * 120.0
+		var dest := center + Vector2(cos(ang), sin(ang)) * dist + Vector2(0.0, 160.0) # 飞散后再落一截
+		var tw := piece.create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(piece, "global_position", dest - sz * 0.5, 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(piece, "rotation", piece.rotation + (randf() - 0.5) * 8.0, 0.9)
+		tw.tween_property(piece, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.5).set_delay(0.4)
+		tw.chain().tween_callback(piece.queue_free)
 
 ## 造贴纸答案落到魔法画板：在落点溅一团亮色颜料（缩放弹出 + 淡出），给「泼颜料」的动感。
 ## 颜色按答题步数轮换，每轮换一种，画板越答越花。占位符没立成（target 为 INF）时静默跳过。
