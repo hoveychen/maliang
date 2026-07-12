@@ -15,7 +15,7 @@ import {
   type MemoryKind,
 } from '../types.ts';
 import { describeTask } from '../tasks.ts';
-import { findOption, optionsByCategory } from '../creation_options.ts';
+import { findOption, optionsByCategory, sizeToScale, inferSizeFromText } from '../creation_options.ts';
 import { findPropOption, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
 import { OpenRouterClient, type ChatMessage } from './openrouter_client.ts';
 import { fallbackSdfPropSpec, validateSdfPropSpec, type SdfPropSpec } from '../sdf_prop.ts';
@@ -23,9 +23,10 @@ import { isKnownVoice, fallbackVoice, voicePromptLines } from '../voice_catalog.
 
 const DESIGNER_SYSTEM = `你是幼儿园游戏「maliang」的角色设计师。根据小朋友的口头想法，设计一个可爱、儿童友好的角色。
 严格只输出 JSON，无 markdown 代码块、无多余文字，格式：
-{"name": "中文名字", "personality": "1-2句中文个性描述", "visualDescription": "ENGLISH image prompt", "voiceId": "音色id"}
+{"name": "中文名字", "personality": "1-2句中文个性描述", "visualDescription": "ENGLISH image prompt", "voiceId": "音色id", "size": "small|medium|big"}
 规则：
 - name、personality 用中文，温暖童趣。
+- size 按小朋友描述的体型判断：明显偏小/迷你→"small"，明显偏大/巨大→"big"，没提或普通→"medium"。它决定角色在世界里的显示高矮。
 - visualDescription 用英文，只描述角色主体外观（种类、配色、服饰、表情等），不要写画风/构图/背景——服务端会统一追加画风与绿幕背景。
 - **visualDescription 里绝不出现任何角色名、作品名、品牌名**（不写 Pikachu / Pokemon / Elsa / Frozen / Mario / Hello Kitty…），哪怕小朋友就是点名要那个角色。
   改成把这个角色**拆成纯粹的外观特征**来写：体型、配色、五官、标志性部位、服饰。
@@ -103,6 +104,7 @@ interface RawSpec {
   personality?: unknown;
   visualDescription?: unknown;
   voiceId?: unknown;
+  size?: unknown;
 }
 
 function str(v: unknown, fallback: string): string {
@@ -137,7 +139,8 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
       visualDescription: str(raw.visualDescription, FALLBACK_VISUAL),
       // LLM 按性格从音色目录选；非法/缺失按名字稳定哈希落主力池（同名同声）
       voiceId: isKnownVoice(str(raw.voiceId, '')) ? str(raw.voiceId, '') : fallbackVoice(str(raw.name, '新朋友')),
-      scale: 1.0,
+      // 体型→高度倍率：优先用 LLM 判定的 size，缺失/非法则从意图文本兜底推断（与 mock 同 sizeToScale）
+      scale: sizeToScale(typeof raw.size === 'string' && raw.size.trim() ? raw.size : inferSizeFromText(intentText)),
       abilities: [...BASE_ABILITIES], // 系统预设能力，固定（不取 LLM 的flavor）
     };
   }

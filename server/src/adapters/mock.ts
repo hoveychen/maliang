@@ -13,7 +13,7 @@ import {
   type MemoryExtractionContext,
   type SessionCompactionContext,
 } from '../types.ts';
-import { CREATION_OPTIONS, optionsByCategory } from '../creation_options.ts';
+import { CREATION_OPTIONS, optionsByCategory, sizeToScale, inferSizeFromText } from '../creation_options.ts';
 import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
 
@@ -85,7 +85,8 @@ export function createMockAdapters(): ServiceAdapters {
           personality: `一个友好、好奇的${name}，喜欢和小朋友玩。`,
           visualDescription: `可爱的${name}，圆润、色彩明亮、儿童友好`,
           voiceId: fallbackVoice(name), // 确定性落主力池（同名同声），与真实路径同兜底
-          scale: 1.0,
+          // 体型：从意图文本确定性推断（大→1.4 / 小→0.7 / 其它→1.0），与真实 LLM 路径同 sizeToScale
+          scale: sizeToScale(inferSizeFromText(intentText)),
           abilities: [...BASE_ABILITIES],
         };
       },

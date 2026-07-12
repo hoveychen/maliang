@@ -84,6 +84,38 @@ export function iconPrompt(id: string): string {
   return ICON_PROMPTS[id] ?? `a cute ${id}`;
 }
 
+/**
+ * 角色体型 → 世界高度倍率（见 docs/character-size-design.md）。
+ * 6.0 是中号基准；明显档：小 0.7×(4.2) / 中 1.0×(6.0) / 大 1.4×(8.4)。
+ * 客户端 spawn 时用 base × scale 代替硬编码 6.0。缺失/非法一律回落 1.0（=中号），
+ * 保证存量角色（appearance.scale 恒 1.0）与旧行为一致、不跳变。
+ */
+export type CreatureSize = 'small' | 'medium' | 'big';
+export const SIZE_TO_SCALE: Record<CreatureSize, number> = { small: 0.7, medium: 1.0, big: 1.4 };
+
+/** 把体型（英文枚举 small/medium/big 或中文标签 小/中/大）归一为高度倍率；非法/缺失→1.0。 */
+export function sizeToScale(size: string | null | undefined): number {
+  if (typeof size !== 'string') return 1.0;
+  const s = size.trim().toLowerCase();
+  if (s === 'small' || s === '小' || s === '迷你') return SIZE_TO_SCALE.small;
+  if (s === 'big' || s === 'large' || s === '大' || s === '巨大') return SIZE_TO_SCALE.big;
+  return SIZE_TO_SCALE.medium; // medium/中/正常/其它 一律中号
+}
+
+/**
+ * 从自由文本（或引导式汇总描述）里推断体型，供 mock 确定性产出与真实 LLM 缺省兜底。
+ * 「小/迷你/矮」→ small；「大/巨/庞/高」→ big；否则 medium。
+ * 注：种类名可能自带「小」（如「小人」「小猫」），调用方（真实 LLM）有上下文消歧；
+ * 本正则仅用于 mock 单测与最后兜底，不追求语义完美。
+ */
+export function inferSizeFromText(text: string): CreatureSize {
+  if (/(巨大|巨|庞大|超大|好大|很大|大大|大号|高大)/.test(text)) return 'big';
+  if (/(迷你|好小|很小|小小|矮小|小号)/.test(text)) return 'small';
+  if (/大/.test(text) && !/大家|大人|大概/.test(text)) return 'big';
+  if (/小/.test(text) && !/小朋友|小心|小声/.test(text)) return 'small';
+  return 'medium';
+}
+
 const BY_ID = new Map(CREATION_OPTIONS.map((o) => [o.id, o]));
 const BY_LABEL = new Map(CREATION_OPTIONS.map((o) => [o.label, o]));
 
