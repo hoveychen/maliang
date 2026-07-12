@@ -96,6 +96,29 @@ func _init() -> void:
 	var none := SdfProp.from_spec({"palette": ["#fff"], "parts": []})
 	fails += _check("from_spec rejects", none == null, true)
 
+	# ---- 体型档整体缩放（prop-size）：scale 乘几何量，rate/speed 不动 ----
+	var base_spec := {
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "box", "pos": [0, 1.0, 0], "size": [1.0, 1.0, 1.0], "color": 0}],
+		"locomotion": {"type": "hopper", "hop_h": 0.5, "rate": 1.4},
+		"ropes": [],
+	}
+	var c1 := SdfSpec.parse(base_spec.duplicate(true))
+	var scaled_spec := base_spec.duplicate(true)
+	scaled_spec["scale"] = 1.4
+	var c1_4 := SdfSpec.parse(scaled_spec)
+	fails += _check("scale 缺省 1.0", is_equal_approx(float(c1.scale), 1.0), true)
+	fails += _check("scale 读取 1.4", is_equal_approx(float(c1_4.scale), 1.4), true)
+	# box size 半展 params：1.0×1.4×0.5=0.7 vs 0.5
+	fails += _check("part.params ×scale", is_equal_approx(c1_4.parts[0].params.x, 0.7), true)
+	fails += _check("part.pos ×scale", is_equal_approx(c1_4.parts[0].pos.y, 1.4), true)
+	fails += _check("hop_h 振幅 ×scale", is_equal_approx(float(c1_4.locomotion.hop_h), 0.7), true)
+	fails += _check("rate 频率不缩放", is_equal_approx(float(c1_4.locomotion.rate), 1.4), true)
+	# AABB 随 scale 变大（1.4× 的包围盒明显大于 1.0×）
+	var aabb1 := SdfMath.rest_aabb(SdfSpec.build_rig(c1).prims)
+	var aabb14 := SdfMath.rest_aabb(SdfSpec.build_rig(c1_4).prims)
+	fails += _check("AABB 随 scale 变大", aabb14.size.y > aabb1.size.y + 0.1, true)
+
 	if fails == 0:
 		print("sdf_prop tests PASS")
 	else:
