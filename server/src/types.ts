@@ -1,5 +1,6 @@
 // maliang 后端核心类型与造角色协议。客户端是 GDScript，不共享代码，
 // 但 WS/REST 协议字段以本文件为准（见 docs/tech-design.md §5.1、§6）。
+import type { CreatureSize } from './creation_options.ts';
 
 export interface ChatTurn {
   role: 'child' | 'npc';
@@ -232,7 +233,7 @@ export interface Character {
   voiceId: string;
   /** 进对话时的招呼风格（warm|shy|playful|gentle）；缺省按 id 稳定哈希落到一种，见 greetings.ts。 */
   greetingStyle?: string;
-  appearance: { visualDescription: string; spriteAsset: string; scale: number; anchors?: CharacterAnchors };
+  appearance: { visualDescription: string; spriteAsset: string; scale: number; size?: CreatureSize; anchors?: CharacterAnchors };
   memory: string[];
   chatHistory: ChatTurn[];
   state: string;
