@@ -49,6 +49,33 @@ func _init() -> void:
 	# 台词用的是角色自己的音色（服务端随 stage_begin 下发的 voiceId）
 	fails += _eq("小剧场: 天鹅用自己的音色", String(play.last("say").get("voice", "")), "zh-CN-XiaoyiNeural")
 
+	# --- 踢球：C 档球 spawn_ball/ball_reset + 进球门计分（客户端认得球命令流）---
+	var soccer := _replay("soccer", golden)
+	fails += _fails
+	fails += _eq("踢球: 生成球一次", soccer.count("spawn_ball"), 1)
+	fails += _eq("踢球: 红蓝两块计分板", soccer.count("hud_score"), 2)
+	fails += _eq("踢球: 两粒进球各计一分", soccer.count("hud_score_add"), 2)
+	fails += _eq("踢球: 两次进球 toast", soccer.count("hud_toast"), 2)
+	fails += _eq("踢球: 非获胜球复位一次", soccer.count("ball_reset"), 1)
+	fails += _eq("踢球: 倒计时建一次", soccer.count("hud_countdown"), 1)
+	fails += _eq("踢球: 收场撤倒计时", soccer.count("hud_cancel"), 1)
+	fails += _eq("踢球: 一段旁白", soccer.count("narrate"), 1)
+	# 进球门(enter)服务端求值不下发客户端探测器；只有 timer 需客户端布置
+	fails += _eq("踢球: enter 不下发客户端探测器", _count_watch(golden["soccer"], "enter"), 0)
+	fails += _eq("踢球: timer 下发一个探测器", _count_watch(golden["soccer"], "timer"), 1)
+
+	# --- 老鹰抓小鸡：链式 follow + near 抓捕（纯复用现有原语，无球命令）---
+	var eagle := _replay("eagle_and_chicks", golden)
+	fails += _fails
+	fails += _eq("老鹰: 链式 4 条 + 重定向 1 条 = 5 次 follow", eagle.count("follow"), 5)
+	fails += _eq("老鹰: 每抓一只鹰停+鸡停 = 4 次 stop", eagle.count("stop"), 4)
+	fails += _eq("老鹰: 抓到两只各计一分", eagle.count("hud_score_add"), 2)
+	fails += _eq("老鹰: 两次抓到 toast", eagle.count("hud_toast"), 2)
+	fails += _eq("老鹰: 一段旁白", eagle.count("narrate"), 1)
+	fails += _eq("老鹰: 纯追逐无球命令", eagle.count("spawn_ball"), 0)
+	# near 抓捕服务端求值，不下发客户端探测器
+	fails += _eq("老鹰: near 不下发客户端探测器", _count_watch(golden["eagle_and_chicks"], "near"), 0)
+
 	if fails == 0:
 		print("screenplay_replay tests PASS")
 	else:
@@ -122,6 +149,9 @@ func _complete(host: FakeHost, op: String, args: Dictionary) -> void:
 		"prop_spawn":
 			if host.last_prop_done.is_valid():
 				host.last_prop_done.call(true, { "id": String(args.get("id", "")) })
+		"spawn_ball", "ball_reset":
+			if host.last_ball_done.is_valid():
+				host.last_ball_done.call(true, { "id": String(args.get("id", "")) })
 
 func _on_event(kind: String, cmd_id: int, result: Dictionary, error: String, sub_id := "", payload := {}) -> void:
 	_events.append({ "kind": kind, "cmdId": cmd_id, "result": result, "error": error, "subId": sub_id, "payload": payload })
