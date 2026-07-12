@@ -112,9 +112,12 @@ func _add_credit_line(text: String, top: float, bottom: float) -> void:
 	credit.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(credit)
 
-## 入口分流：有档案直接进世界，没档案先走童话书 onboarding。
+## 入口分流：建过真角色才直接进世界，否则先走童话书 onboarding。
+## 用 has_character() 而非 exists()：profile.json 是共享袋子（device_id/graphics/play_budget 等
+## 也写在里面），文件存在 ≠ 建过角色。历史上用 exists() 导致画质档/设备档一落盘就永久跳过创建，
+## 小朋友被无档丢进世界、后台留一堆「无立绘」空玩家（见 test/test_menu_gate.gd）。
 static func target_scene() -> String:
-	return "res://main.tscn" if PlayerProfile.exists() else "res://onboarding.tscn"
+	return "res://main.tscn" if PlayerProfile.has_character() else "res://onboarding.tscn"
 
 func _process(delta: float) -> void:
 	# 小仙子轻轻上下飘

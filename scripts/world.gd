@@ -5572,7 +5572,11 @@ func _send_world_info() -> void:
 	var names: Array = []
 	for poi in pois:
 		names.append(String(poi.get("name", "")))
-	backend.send_world_info(world_id, names, PlayerProfile.upload_dict(), _scene_id) # 带档案供服务端首见建玩家；_scene_id 让服务端回读本场景 playerPos
+	# 只有建过真角色才带 profile 上报（供服务端首见建玩家档）。没角色时（引导/造角色途中进世界）
+	# 传空档 → send_world_info 不带 profile，服务端不会建「无立绘」空玩家（与服务端 world_info
+	# handler 的空档拦截同款语义，双端各堵一道）。_scene_id 让服务端回读本场景 playerPos。
+	var profile: Dictionary = PlayerProfile.upload_dict() if PlayerProfile.has_character() else {}
+	backend.send_world_info(world_id, names, profile, _scene_id)
 
 # ── 奖赏系统：委托状态 / 提示 chip / 完成判定 ──────────────────────────────
 

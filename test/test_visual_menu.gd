@@ -1,7 +1,8 @@
 extends SceneTree
 ## 主菜单验证：全屏任点单入口——渲染出标题+脉动提示箭头+全屏透明按钮（永远只有 1 个），
-## 点击后按档案分流：无档案 → onboarding（根名 "Onboarding"），有档案 → 世界（根名 "World"）。
-## 期望值按测试机当下 PlayerProfile.exists() 动态计算，不动真实档案文件。
+## 点击后按档案分流：没建过真角色 → onboarding（根名 "Onboarding"），建过 → 世界（根名 "World"）。
+## 期望值按测试机当下 PlayerProfile.has_character() 动态计算，不动真实档案文件——必须与
+## menu.target_scene() 同款判据（profile.json 存在≠建过角色，见 test/test_menu_gate.gd）。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --write-movie screenshots/menu/f.png \
 ##       --fixed-fps 10 --quit-after 50 --script res://test/test_visual_menu.gd
 
@@ -11,7 +12,7 @@ var menu: Node
 var expect_root := ""
 
 func _initialize() -> void:
-	expect_root = "World" if PlayerProfile.exists() else "Onboarding"
+	expect_root = "World" if PlayerProfile.has_character() else "Onboarding"
 	menu = load("res://menu.tscn").instantiate()
 	root.add_child(menu)
 	process_frame.connect(_tick)

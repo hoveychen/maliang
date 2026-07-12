@@ -51,6 +51,7 @@ UNIT_TESTS=(
   test_sdf_static_baker
   test_paper_idle
   test_player_profile
+  test_menu_gate
   test_graphics_settings
   test_frame_sampler
   test_backend_player_id
