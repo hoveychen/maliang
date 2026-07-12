@@ -4958,7 +4958,7 @@ func _on_creation_prompt(data: Dictionary) -> void:
 	if _think_timer != null:
 		_think_timer.stop()
 	thinking_label.visible = false
-	_creation_goal = String(data.get("goal", "character")) # 造角色→降生蛋，造物→魔法熔炉
+	_creation_goal = String(data.get("goal", "character")) # 造角色→降生蛋，造物→魔法熔炉，造贴纸→魔法画板
 	_enter_creation_view() # 首轮：退出普通对话构图、相机推近仙子特写、点亮创造视图
 	_raise_creation_placeholder() # 引导一开始就立起蛋/炉：孩子的回答一会儿要扔进去
 	# 问题只给家长看的字幕（幼儿不识字，靠 TTS 念）
@@ -5018,6 +5018,9 @@ func _build_creation_cards(options: Array) -> void:
 			_apply_card_icon(card, icon_asset) # 图标就绪：异步贴图（不阻塞卡片弹出）
 		card.pressed.connect(_on_creation_card.bind(oid, card)) # 带上卡片自己：点了要把它扔进蛋/炉
 		_creation_cards.add_child(card)
+	# 选项卡摆上桌：一记轻「翻纸」声（发牌感），配合仙子随后念问题。空选项（快捷路径）不响。
+	if _creation_cards.get_child_count() > 0 and game_audio != null:
+		game_audio.play_sfx("page")
 
 ## 选项卡图标（生成后 iconAsset 才非空）：异步拉图贴到按钮，失败保留文字兜底。
 func _apply_card_icon(card: Button, asset: String) -> void:
