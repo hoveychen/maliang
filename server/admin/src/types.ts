@@ -147,6 +147,23 @@ export interface AdminItemDef {
   wander: number;
 }
 
+/** 物品实体 + 外观缩略图 hash + 用量（/debug/api/items 每行；内置 def 与造物共用）。 */
+export interface ItemDefWithIcon extends AdminItemDef {
+  themes?: string[];
+  mount?: 'tile' | 'edge';
+  /** 客户端渲染上传的缩略图资产 hash（空串 = 尚未渲染）。 */
+  iconHash: string;
+  /** 被多少场景的矩阵 palette 引用（粗略用量指标）。 */
+  sceneRefs: number;
+}
+
+/** 物品全景（/debug/api/items）：内置 def + 各世界造物，带缩略图与计数。 */
+export interface ItemsResponse {
+  builtin: ItemDefWithIcon[];
+  creations: ItemDefWithIcon[];
+  counts: { builtin: number; creations: number; withIcon: number };
+}
+
 /** 背包计数行（与 server listBags 对齐；playerId='' 为匿名）。 */
 export interface BagEntry {
   playerId: string;

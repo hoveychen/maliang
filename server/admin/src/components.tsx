@@ -124,11 +124,11 @@ function SpriteLightbox(props: { hash: string; alt: string; onClose: () => void 
   );
 }
 
-/** 立绘缩略图：无资产给占位格；有资产可点击放大（含 idle 动画预览）。 */
-export function Sprite(props: { hash: string; large?: boolean; alt?: string }) {
+/** 立绘/物品缩略图：无资产给占位格；有资产可点击放大（含 idle 动画预览）。 */
+export function Sprite(props: { hash: string; large?: boolean; alt?: string; placeholder?: string }) {
   const [open, setOpen] = useState(false);
   const cls = props.large ? 'sprite-lg' : 'sprite-thumb';
-  if (!props.hash) return <div className={`${cls} sprite-ph`}>无立绘</div>;
+  if (!props.hash) return <div className={`${cls} sprite-ph`}>{props.placeholder ?? '无立绘'}</div>;
   return (
     <>
       <img

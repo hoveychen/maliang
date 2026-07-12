@@ -5,6 +5,7 @@ import { PlayersPage } from './pages/Players.tsx';
 import { PlayerDetailPage } from './pages/PlayerDetail.tsx';
 import { WorldsPage } from './pages/Worlds.tsx';
 import { WorldDetailPage } from './pages/WorldDetail.tsx';
+import { ItemsPage } from './pages/Items.tsx';
 import { CharacterDetailPage } from './pages/CharacterDetail.tsx';
 import { DataPage } from './pages/Data.tsx';
 import { ActivityPage } from './pages/Activity.tsx';
@@ -13,6 +14,7 @@ const NAV = [
   { to: '/', zh: '总览', en: 'overview', end: true },
   { to: '/players', zh: '玩家', en: 'players', end: false },
   { to: '/worlds', zh: '世界', en: 'worlds', end: false },
+  { to: '/items', zh: '物品', en: 'items', end: false },
   { to: '/activity', zh: '活动', en: 'activity', end: false },
   { to: '/data', zh: '数据', en: 'backup', end: false },
 ];
@@ -50,6 +52,7 @@ export function App() {
             <Route path="/worlds" element={<WorldsPage />} />
             <Route path="/worlds/:id" element={<WorldDetailPage />} />
             <Route path="/worlds/:id/characters/:cid" element={<CharacterDetailPage />} />
+            <Route path="/items" element={<ItemsPage />} />
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/data" element={<DataPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
