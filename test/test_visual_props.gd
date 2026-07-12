@@ -77,11 +77,15 @@ func _tick() -> void:
 			_check("横幅提示收进册子", (scene.get("banner") as Label).text.contains("收进"), true)
 		11:
 			_check("物品页上架背包物品", ((scene.get("phone_ui") as PhoneUi).get("_items_grid") as GridContainer).get_child_count(), 1)
-			# 物品页点击再摆出（克隆语义：同实体反复引用）
-			scene.call("_place_bag_item", "i1")
+			# 物品页点击再摆出（克隆语义：同实体反复引用）：现在点物品进放置模式，
+			# 幽灵停在默认合法位，按「放这里」= _confirm_placement 才发 item_place（placement-p1）。
+			scene.call("_begin_placement", "i1")
+			_check("进入放置模式", scene.get("_placing"), true)
+			second_tile = scene.get("_place_tile")
+			scene.call("_confirm_placement")
 			var pl := _last_of("item_place")
-			second_tile = Vector2i(int(pl.get("tileX", -1)), int(pl.get("tileY", -1)))
 			_check("再摆请求已发出", String(pl.get("itemId", "")), "i1")
+			_check("再摆落点=幽灵所在", Vector2i(int(pl.get("tileX", -1)), int(pl.get("tileY", -1))), second_tile)
 			_check("再摆落点合法", second_tile.x >= 0, true)
 		13:
 			# 模拟服务端确认：第二次摆放落地（palette 已有 i1，不再扩）
