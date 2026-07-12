@@ -66,6 +66,18 @@ interface Prop {
   readonly id: string;
 }
 
+/**
+ * 判定区域：世界坐标里的一个圆（圆心 + 半径）。用 `stage.region(...)` 造，喂给 `on/once('enter')`。
+ * P1 只支持显式坐标——生成层（Plan 2）按世界 POI 注入 `x/y/r`（同 params 套路，坐标不写死在剧本里）。
+ * 按地点名解析 POI（`region('goal')`）需要服务端 POI 表，是后续工作。
+ */
+interface Region {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly r: number;
+}
+
 /** 收场结果，客户端拿去做奖励结算/夸奖。 */
 interface StageResult {
   winner?: string;
@@ -95,6 +107,9 @@ interface Stage {
   /** 收场。可在事件回调里调用；调用后脚本立即终止。 */
   end(result?: StageResult): void;
 
+  /** 定义一个判定区域（世界坐标圆）。喂给 `on/once('enter')` 做「进入区域」判定，如球门、安全区。 */
+  region(area: { x: number; y: number; r: number }): Region;
+
   readonly prop: {
     /** 现场造一个道具（服务端造物管线出规格），落位后 resolve。 */
     create(desc: string, near: Actor | Spot): Promise<Prop>;
@@ -121,6 +136,8 @@ interface Stage {
 
   /** a、b 靠近到 dist 以内触发（服务端对复制位置求值；远→近边沿一次，分开后可再触发）。 */
   on(ev: 'near', a: Actor, b: Actor, dist: number, fn: (payload: { dist: number }) => void): Unsub;
+  /** obj 进入 region 触发（服务端对复制位置求值；外→内边沿一次，离开后可再触发）。 */
+  on(ev: 'enter', obj: Actor, region: Region, fn: (payload: { dist: number }) => void): Unsub;
   /** 小朋友点到某个角色时触发（客户端探测）。 */
   on(ev: 'tap', a: Actor, fn: (payload: { actorId: string }) => void): Unsub;
 
@@ -132,6 +149,7 @@ interface Stage {
    *   await caught;
    */
   once(ev: 'near', a: Actor, b: Actor, dist: number): Promise<{ dist: number }>;
+  once(ev: 'enter', obj: Actor, region: Region): Promise<{ dist: number }>;
   once(ev: 'tap', a: Actor): Promise<{ actorId: string }>;
 }
 
