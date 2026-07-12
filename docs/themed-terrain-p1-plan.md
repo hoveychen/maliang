@@ -105,3 +105,35 @@ repeat_disable"三重规避，只在"整 cell 恒定"时安全，无法在单 ce
 - 老 Mali GPU 性能（memory「平板卡顿排查」）：sampler2DArray 采样成本 ≈ 单 sampler2D，层数不增
   每像素采样次数（仍是顶面 1 次 + 崖壁 1 次），比现在的 tint+detail 双采样可能更省。仍需真机验。
 - P0 tint 已烘入纹理——shader 去 tint，避免双重上色（见步骤 3 ⚠️）。
+
+## P1 实现记录（已落地，headless 全绿；对蓝图的两处简化）
+
+已合入 `prd/themed-terrain`，本节记录与上文蓝图的偏差，供 P2 直接接手。
+
+- **单数组，非双数组**：蓝图设想 `top_array` + `side_array` 两个 Texture2DArray。实测发现
+  「每 quad 只需一个层索引」——顶面 quad 写 tile 顶面层、崖壁 quad 写被抬高 tile 的侧壁层——
+  故合并为**一个** `top_array`（含 grass/path/bed/lip/wall/sand/snow/tile/coral 共 9 层），
+  层索引写进 mesh 顶点 **COLOR.r**（`layer/255`，`flat` varying 解）。侧壁只是「取哪个层」不同，
+  不需要独立数组。加主题 = `TerrainTextures.LAYER_TEX_PATHS` 追加一层 + 建表加一行。
+- **逐层 tint/mean 数组桥接，非彻底去 tint**：旧 grass/dirt/stone 是未烘 tint 的水彩包，
+  P0 审定的 sand/snow/coral/tile 已烘 tint。为「绿保持」不改旧观感，shader 保留
+  `uniform vec3 layer_tint[16] / layer_mean[16]`（`TerrainTextures.layer_tints/means`，手动
+  sRGB→线性传入）：旧层用原调色板 tint+实测 mean 复现，P0 审定层用**白 tint + 白 mean**
+  （= 贴图原样过 shader，不二次上色）。**P2/P3 若把旧层也烘成成品贴图，可把对应 tint/mean 改白，
+  最终收敛到「纯贴图无 tint」**。
+- **atlas 收敛 29→21 行**：sand/snow/tile 各自 4 行删除，合并为一组 `CELL_BODY`（无描边 body，
+  4 行 17–20）。B 通道从「地形类型」改为「渲染角色」`ROLE_*`（仅 shader 在描边区选 rim 色用）。
+  `uv_rect` 第一参数改为 cell 种类 `CELL_*`（`CELL_GRASS/PATH/WATER/CLIFF_RIM/CLIFF_WALL/BODY`；
+  `CLIFF_RIM/CLIFF_WALL` 留了旧名别名）。
+- **崖壁修偷懒**：`_emit_walls` 加 `ttype` 参数，侧壁层 = `TerrainTextures.side_layer(ttype)`
+  （沙/雪/瓷砖有专属侧壁，草/路/水走默认岩壁），不再写死 `CLIFF_WALL`。
+- **资产入库**：P0 四张审定贴图从 `docs/terrain-style-samples/` 复制到 `assets/textures/terrain/`
+  作运行期层来源（docs 版留作审定证据）。
+- **验收**：`test_terrain_layers.gd`（新增）构造「草地里立一块抬高 sand tile + 一块平瓷砖」，
+  断言顶面按类型取层、崖壁按被抬高 tile 取侧壁层；`test_terrain_atlas` 改断言渲染角色语义；
+  `test_visual_water` 改检 `top_array`。全套 `scripts/test-headless.sh` 全绿（exit 0）。
+- **未验**：shader 仅 headless 语法级通过（dummy renderer 不做 GPU 编译）；真机水彩观感 + 老 Mali
+  `sampler2DArray`/`flat int` varying/动态数组下标性能**未在真机验证**——留 P2 真机 + 老板过目。
+- **P2 起点**：填「哪种海底 tile → 哪个层」只动 `TerrainTextures`（加层 + top/side_layer 映射）
+  与两端类型白名单（`terrain_map.gd` `VALID_TYPES/BODY_TYPES` + `server terrain.ts`），
+  atlas / mesh / shader **零改动**。

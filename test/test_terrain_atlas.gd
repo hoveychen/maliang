@@ -23,10 +23,10 @@ func _init() -> void:
 	fails += _check("grass parity shade", 1 if gb.a < ga.a else 0, 1)
 
 	var p := _probe(img, TerrainMap.T_PATH, Autotile.C_NW, Autotile.V_FULL, 16.0, 16.0)
-	fails += _check("path body (R=1,B=1/8)", 1 if (p.r > 0.95 and _btype(p) == TerrainMap.T_PATH) else 0, 1)
+	fails += _check("path body (R=1,role=PATH)", 1 if (p.r > 0.95 and _btype(p) == TerrainAtlas.ROLE_PATH) else 0, 1)
 
 	var w := _probe(img, TerrainMap.T_WATER, Autotile.C_NW, Autotile.V_FULL, 16.0, 16.0)
-	fails += _check("bed body (R=1,B=2/8)", 1 if (w.r > 0.95 and _btype(w) == TerrainMap.T_WATER) else 0, 1)
+	fails += _check("bed body (R=1,role=WATER)", 1 if (w.r > 0.95 and _btype(w) == TerrainAtlas.ROLE_WATER) else 0, 1)
 	fails += _check("full water no foam", 1 if w.g < 0.05 else 0, 1)
 	# 水 cell 的 R/B/A 全 cell 都是湖床主体；G 只在贴岸带出泡沫（水面 mesh 采样用）
 	var wedge := _probe(img, TerrainMap.T_WATER, Autotile.C_NW, Autotile.V_EDGE_H, 16.0, TerrainAtlas.MARGIN + 1.5)
@@ -49,32 +49,32 @@ func _init() -> void:
 
 	# 悬崖边草皮：外缘是崖唇主体（B=3/8），内里是草（R=0 但 B 仍恒 3/8——线性过滤安全）
 	var lip := _probe(img, TerrainAtlas.CLIFF_RIM, Autotile.C_NW, Autotile.V_EDGE_H, 16.0, 1.0)
-	fails += _check("cliff lip body", 1 if (lip.r > 0.95 and _btype(lip) == TerrainAtlas.CLIFF_RIM) else 0, 1)
+	fails += _check("cliff lip body", 1 if (lip.r > 0.95 and _btype(lip) == TerrainAtlas.ROLE_CLIFF_RIM) else 0, 1)
 	var top := _probe(img, TerrainAtlas.CLIFF_RIM, Autotile.C_NW, Autotile.V_EDGE_H, 16.0, 24.0)
-	fails += _check("cliff top grass", 1 if (top.r < 0.05 and _btype(top) == TerrainAtlas.CLIFF_RIM) else 0, 1)
+	fails += _check("cliff top grass", 1 if (top.r < 0.05 and _btype(top) == TerrainAtlas.ROLE_CLIFF_RIM) else 0, 1)
 	var wallc := _probe(img, TerrainAtlas.CLIFF_WALL, Autotile.C_NW, Autotile.V_FULL, 16.0, 16.0)
-	fails += _check("wall body", 1 if (wallc.r > 0.95 and _btype(wallc) == TerrainAtlas.CLIFF_WALL) else 0, 1)
+	fails += _check("wall body", 1 if (wallc.r > 0.95 and _btype(wallc) == TerrainAtlas.ROLE_CLIFF_WALL) else 0, 1)
 	# 墙格无邻墙侧（EDGE_V 外缘）是凹缝暗边，明暗比主体明显更低
 	var crev := _probe(img, TerrainAtlas.CLIFF_WALL, Autotile.C_NW, Autotile.V_EDGE_V, 1.0, 16.0)
 	fails += _check("wall crevice dark", 1 if crev.a < wallc.a * 0.85 else 0, 1)
 
-	# 新增可行走地表（world-themes P1）：整格 V_FULL 铺满 body（R=1, B=type/8），无描边（G=0），
-	# OUTER 角外缘是草——验证 _body_fn + uv_rect BODY_ROWS 路由 + B 通道对齐 shader ty。
-	for nt in [TerrainMap.T_SAND, TerrainMap.T_SNOW, TerrainMap.T_TILE]:
-		var full := _probe(img, nt, Autotile.C_NW, Autotile.V_FULL, 16.0, 16.0)
-		fails += _check("body full R=1 (ty=%d)" % nt, 1 if full.r > 0.95 else 0, 1)
-		fails += _check("body full B=ty (ty=%d)" % nt, _btype(full), nt)
-		fails += _check("body full no rim (ty=%d)" % nt, 1 if full.g < 0.05 else 0, 1)
-		var out_g := _probe(img, nt, Autotile.C_NW, Autotile.V_OUTER, 1.0, 1.0)
-		fails += _check("body outer grass (ty=%d)" % nt, 1 if out_g.r < 0.05 else 0, 1)
-		var out_i := _probe(img, nt, Autotile.C_NW, Autotile.V_OUTER, 28.0, 28.0)
-		fails += _check("body outer inner=body (ty=%d)" % nt, 1 if (out_i.r > 0.95 and _btype(out_i) == nt) else 0, 1)
+	# 收敛 body cell（themed-terrain P1）：沙/雪/瓷砖/所有主题地表共用 CELL_BODY 一组几何，
+	# 整格 V_FULL 铺满（R=1）、无描边（G=0）、B=ROLE_BODY；OUTER 角外缘是草。
+	# 「哪种地表贴图」不再进 atlas，全由 mesh 顶点 COLOR 层索引承载（见 test_terrain_layers）。
+	var full := _probe(img, TerrainAtlas.CELL_BODY, Autotile.C_NW, Autotile.V_FULL, 16.0, 16.0)
+	fails += _check("body full R=1", 1 if full.r > 0.95 else 0, 1)
+	fails += _check("body full role=BODY", _btype(full), TerrainAtlas.ROLE_BODY)
+	fails += _check("body full no rim", 1 if full.g < 0.05 else 0, 1)
+	var out_g := _probe(img, TerrainAtlas.CELL_BODY, Autotile.C_NW, Autotile.V_OUTER, 1.0, 1.0)
+	fails += _check("body outer grass", 1 if out_g.r < 0.05 else 0, 1)
+	var out_i := _probe(img, TerrainAtlas.CELL_BODY, Autotile.C_NW, Autotile.V_OUTER, 28.0, 28.0)
+	fails += _check("body outer inner role=BODY", 1 if (out_i.r > 0.95 and _btype(out_i) == TerrainAtlas.ROLE_BODY) else 0, 1)
 
 	# uv_rect 都在 [0,1] 且互不重叠（抽查全组合的中心点唯一性）
 	var centers := {}
 	var overlap := 0
-	for ty in [TerrainMap.T_PATH, TerrainMap.T_WATER, TerrainAtlas.CLIFF_RIM, TerrainAtlas.CLIFF_WALL,
-			TerrainMap.T_SAND, TerrainMap.T_SNOW, TerrainMap.T_TILE]:
+	for ty in [TerrainAtlas.CELL_PATH, TerrainAtlas.CELL_WATER, TerrainAtlas.CELL_CLIFF_RIM,
+			TerrainAtlas.CELL_CLIFF_WALL, TerrainAtlas.CELL_BODY]:
 		for c in range(4):
 			for v in range(Autotile.VARIANT_COUNT):
 				var r := TerrainAtlas.uv_rect(ty, c, v, 0)
