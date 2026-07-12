@@ -1613,7 +1613,9 @@ var _talk_view: Control            ## 喊话态底部表情盘容器（进态显
 var _emote_cd_until: Dictionary = {}
 var _emote_press_cd := 0.0         ## 表情盘按键节流（动作播完前不重发）
 var _my_voice_id := ""             ## 自己的稳定音色（world_state 下发）：喊话复述用，与对端听到的同声
-const EMOTE_PANEL_ACTIONS := ["wave", "jump", "spin", "nod", "heart"] ## 表情盘五格（❤=送爱心）
+## 表情盘八格（❤=送爱心；flip/squish/paper_plane 是纸片动作精选）。加格子注意
+## 卡片宽×格数+间距别超 1280 设计宽（_build_talk_view 的尺寸参数配套调）。
+const EMOTE_PANEL_ACTIONS := ["wave", "jump", "spin", "nod", "heart", "flip", "squish", "paper_plane"]
 const EMOTE_CD_MS := 8000
 
 ## 自动回礼判定（纯函数，headless 可测）：对我做的动作 + 不在冷却期才回。
@@ -2860,11 +2862,12 @@ func _build_talk_view(host: CanvasLayer) -> void:
 	row.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	row.offset_top = -190.0
 	row.offset_bottom = -34.0
-	row.add_theme_constant_override("separation", 26)
+	row.add_theme_constant_override("separation", 16)
 	_talk_view.add_child(row)
 	for action in EMOTE_PANEL_ACTIONS:
 		var card := Button.new()
-		card.custom_minimum_size = Vector2(156.0, 156.0) # 3 岁友好大点击区
+		# 128px：八格 8×128+7×16=1136 < 1280 设计宽（五格时代 156 会溢出）；仍够 3 岁点击
+		card.custom_minimum_size = Vector2(128.0, 128.0)
 		UiAssets.style_card_button(card, 24.0) # 奶油圆角卡片，与造角色选项卡同调
 		card.icon = UiAssets.emotion_tex(action)
 		card.expand_icon = true

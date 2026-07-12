@@ -415,6 +415,24 @@
       "kind": "sticker",
       "targetSize": 256,
       "prompt": "a round warm yellow loving face with rosy cheeks hugging a big glossy pink heart"
+    },
+    {
+      "id": "em_flip",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round warm yellow playful face doing a forward somersault tumble, shown upside down with a big circular motion arrow around it"
+    },
+    {
+      "id": "em_squish",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a round warm yellow silly face squashed completely flat and wide like a pancake, with two tiny stars popping above"
+    },
+    {
+      "id": "em_paper_plane",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute folded white paper airplane with a round warm yellow happy face on its side, flying with a short dashed swoosh trail"
     }
   ]
 }

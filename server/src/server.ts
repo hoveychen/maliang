@@ -1629,8 +1629,9 @@ export interface SpawnCtx {
   connKey?: string;
 }
 
-/** 玩家 emote 动作白名单：客户端 behavior_executor 的动作集 + heart（送爱心，见设计 P2）。 */
-const EMOTE_ACTIONS = new Set(['wave', 'jump', 'spin', 'nod', 'heart']);
+/** 玩家 emote 动作白名单：表情盘八格 = 基础四动作 + heart（送爱心）+ 纸片动作精选三格。
+ * 与客户端 EMOTE_PANEL_ACTIONS 同步；旧客户端收到不认识的动作会静默忽略（EMOTION_ICONS 门）。 */
+const EMOTE_ACTIONS = new Set(['wave', 'jump', 'spin', 'nod', 'heart', 'flip', 'squish', 'paper_plane']);
 
 export interface ActorPresence {
   playerId: string;
