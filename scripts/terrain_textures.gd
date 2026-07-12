@@ -337,7 +337,7 @@ static func layer_wall_reliefs() -> PackedFloat32Array:
 ## 再对崖顶棱线做真几何倒角(45° chamfer)把硬直角切软。逐 tile 类型开关(非全主题一刀切)：
 ## 雪族崖壁倒角出雪盖圆润感，室外岩壁/室内光滑墙/现代路缘等默认 0=保持利落直角(零回归)。
 ## 地形网格无碰撞体(角色高度走逻辑格 tile_height×STEP)，倒角纯视觉、不影响行走/寻路。
-const BEVEL_SNOW := 0.4
+const BEVEL_SNOW := 0.22
 static func tile_bevel(ttype: int) -> float:
 	match ttype:
 		TerrainMap.T_SNOW, TerrainMap.T_PACKED_SNOW, \

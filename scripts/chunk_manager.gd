@@ -603,6 +603,45 @@ func _emit_facet(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 	uv2s.append(loff + Vector2(p3.x, p3.z))
 	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
 
+## 同 _emit_facet 但逐顶点法线（倒角圆润用）：顶缘顶点法线=向上、底缘=墙面水平，
+## 插值后光照从顶面平滑扫到墙面 = 圆润棱观感（非单一平法线的「切一刀」硬斜面）；
+## 且顶缘与顶面(UP)、底缘与墙面(水平)法线一致 → 顶面→倒角→墙面无光照接缝。
+func _emit_facet4n(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, n0: Vector3, n1: Vector3, n2: Vector3, n3: Vector3, layer: int, r: Rect2, loff: Vector2) -> void:
+	var b := verts.size()
+	verts.append(p0); verts.append(p1); verts.append(p2); verts.append(p3)
+	norms.append(n0); norms.append(n1); norms.append(n2); norms.append(n3)
+	var lcol := Color(float(layer) / 255.0, 0.0, 0.0, 1.0)
+	for k in range(4):
+		cols.append(lcol)
+	uvs.append(r.position)
+	uvs.append(Vector2(r.end.x, r.position.y))
+	uvs.append(r.end)
+	uvs.append(Vector2(r.position.x, r.end.y))
+	uv2s.append(loff + Vector2(p0.x, p0.z))
+	uv2s.append(loff + Vector2(p1.x, p1.z))
+	uv2s.append(loff + Vector2(p2.x, p2.z))
+	uv2s.append(loff + Vector2(p3.x, p3.z))
+	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
+
+## 崖顶圆润倒角（fillet）：沿一条临崖边发 BEVEL_SEGS 段弧面，从顶面(法线 UP)绕 90° 圆弧
+## 平滑过渡到墙面(法线 h 水平)——顶点法线取弧的径向，位置沿 1/4 圆弧外凸（非单一平斜面「切一刀」）。
+## Ca/Cb = 弧心在边两端的世界点（= 内缩顶缘正下方 bevel 处）；up=Vector3.UP；h=向外水平单位向量。
+const BEVEL_SEGS := 3
+func _emit_fillet(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, ca: Vector3, cb: Vector3, up: Vector3, h: Vector3, bevel: float, layer: int, r: Rect2, loff: Vector2) -> void:
+	var prev_a := ca + up * bevel
+	var prev_b := cb + up * bevel
+	var prev_n := up
+	for s in range(1, BEVEL_SEGS + 1):
+		var ang := (float(s) / float(BEVEL_SEGS)) * (PI * 0.5)
+		var dir := (up * cos(ang) + h * sin(ang)).normalized()
+		var cur_a := ca + dir * bevel
+		var cur_b := cb + dir * bevel
+		_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
+			prev_a, prev_b, cur_b, cur_a, prev_n, prev_n, dir, dir, layer, r, loff)
+		prev_a = cur_a
+		prev_b = cur_b
+		prev_n = dir
+
 ## 顶面 4 角 quad。非 beveled tile 走原 _emit_quad 平铺（零回归）。
 ## beveled tile（TerrainTextures.tile_bevel>0 且有临崖边）：把每个角 quad 临崖的外缘内缩 bevel，
 ## 并沿临崖边发一道 45° chamfer 斜面（内缩顶缘 y → 崖壁顶 boundary,y-bevel），外凸角补 miter，
@@ -643,39 +682,40 @@ func _emit_top_face(verts: PackedVector3Array, norms: PackedVector3Array, uvs: P
 		_emit_facet(verts, norms, uvs, uv2s, cols, idx,
 			Vector3(qx0, y, qz0), Vector3(qx1, y, qz0), Vector3(qx1, y, qz1), Vector3(qx0, y, qz1),
 			Vector3.UP, layer, r, loff)
+		var NX := Vector3(-1, 0, 0)
+		var PX := Vector3(1, 0, 0)
+		var NZ := Vector3(0, 0, -1)
+		var PZ := Vector3(0, 0, 1)
+		# 圆润倒角 fillet（1/4 圆弧外凸 + 径向平滑法线），四边各一道
 		if ins_nx:
-			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
-				Vector3(qx0, y, qz0), Vector3(qx0, y, qz1), Vector3(cx, yb, qz1), Vector3(cx, yb, qz0),
-				Vector3(-1, 1, 0).normalized(), top_lyr, body_r, loff)
+			_emit_fillet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, yb, qz0), Vector3(qx0, yb, qz1), Vector3.UP, NX, bevel, top_lyr, body_r, loff)
 		if ins_px:
-			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
-				Vector3(qx1, y, qz1), Vector3(qx1, y, qz0), Vector3(cx + half_tile, yb, qz0), Vector3(cx + half_tile, yb, qz1),
-				Vector3(1, 1, 0).normalized(), top_lyr, body_r, loff)
+			_emit_fillet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, yb, qz1), Vector3(qx1, yb, qz0), Vector3.UP, PX, bevel, top_lyr, body_r, loff)
 		if ins_nz:
-			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
-				Vector3(qx1, y, qz0), Vector3(qx0, y, qz0), Vector3(qx0, yb, cz), Vector3(qx1, yb, cz),
-				Vector3(0, 1, -1).normalized(), top_lyr, body_r, loff)
+			_emit_fillet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, yb, qz0), Vector3(qx0, yb, qz0), Vector3.UP, NZ, bevel, top_lyr, body_r, loff)
 		if ins_pz:
-			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
-				Vector3(qx0, y, qz1), Vector3(qx1, y, qz1), Vector3(qx1, yb, cz + half_tile), Vector3(qx0, yb, cz + half_tile),
-				Vector3(0, 1, 1).normalized(), top_lyr, body_r, loff)
-		# 外凸角 miter：两邻边都临崖 → 补角上斜面（否则外角留缺口）
+			_emit_fillet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, yb, qz1), Vector3(qx1, yb, qz1), Vector3.UP, PZ, bevel, top_lyr, body_r, loff)
+		# 外凸角 miter：两邻边都临崖 → 补角圆润斜面（顶=UP、底=两墙法线对角），否则外角留缺口
 		if ins_nx and ins_nz:
-			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+			_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
 				Vector3(qx0, y, qz0), Vector3(cx, yb, qz0), Vector3(cx, yb, cz), Vector3(qx0, yb, cz),
-				Vector3(-1, 1, -1).normalized(), top_lyr, body_r, loff)
+				Vector3.UP, NX, (NX + NZ).normalized(), NZ, top_lyr, body_r, loff)
 		if ins_px and ins_nz:
-			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+			_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
 				Vector3(qx1, y, qz0), Vector3(qx1, yb, cz), Vector3(cx + half_tile, yb, cz), Vector3(cx + half_tile, yb, qz0),
-				Vector3(1, 1, -1).normalized(), top_lyr, body_r, loff)
+				Vector3.UP, NZ, (PX + NZ).normalized(), PX, top_lyr, body_r, loff)
 		if ins_nx and ins_pz:
-			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+			_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
 				Vector3(qx0, y, qz1), Vector3(qx0, yb, cz + half_tile), Vector3(cx, yb, cz + half_tile), Vector3(cx, yb, qz1),
-				Vector3(-1, 1, 1).normalized(), top_lyr, body_r, loff)
+				Vector3.UP, PZ, (NX + PZ).normalized(), NX, top_lyr, body_r, loff)
 		if ins_px and ins_pz:
-			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+			_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
 				Vector3(qx1, y, qz1), Vector3(cx + half_tile, yb, qz1), Vector3(cx + half_tile, yb, cz + half_tile), Vector3(qx1, yb, cz + half_tile),
-				Vector3(1, 1, 1).normalized(), top_lyr, body_r, loff)
+				Vector3.UP, PX, (PX + PZ).normalized(), PZ, top_lyr, body_r, loff)
 
 ## tile 四边中「邻居有效级更低」的边发竖直崖壁/水下岸壁。每级 = 一个 2m×2m 墙格，
 ## 墙格对同一墙面的 8 邻墙格（沿墙走向左右 × 层级上下 × 对角）做 corner autotile：
