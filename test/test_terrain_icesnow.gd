@@ -17,6 +17,7 @@ var fails := 0
 func _init() -> void:
 	_test_seed_scene_coverage()
 	_test_layer_mappings()
+	_test_bevel_gating()
 	_test_type_aware_walls()
 	_test_base_layer_modal()
 	print("test_terrain_icesnow: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
@@ -54,6 +55,15 @@ func _test_layer_mappings() -> void:
 	_check("side T_ROCK_SNOW ≠ 兜底岩壁", TT.side_layer(TerrainMap.T_ROCK_SNOW) != TT.LAYER_CLIFF_WALL, true)
 	_check("LAYER_TEX_PATHS 数 = LAYER_COUNT", TT.LAYER_TEX_PATHS.size(), TT.LAYER_COUNT)
 
+## ②b 崖壁倒角逐 tile 类型开关（老板要「每 tile 自己的、非全主题一刀切」）：
+## 雪族返回 >0 倒角量，非雪族（草/瓷砖/大理石）恒 0=直角不倒角。
+func _test_bevel_gating() -> void:
+	var TT := TerrainTextures
+	for t in [TerrainMap.T_SNOW, TerrainMap.T_PACKED_SNOW, TerrainMap.T_SLUSH, TerrainMap.T_ROCK_SNOW, TerrainMap.T_ICE]:
+		_check("雪族 tile %d 倒角 >0" % t, TT.tile_bevel(t) > 0.0, true)
+	for t in [TerrainMap.T_GRASS, TerrainMap.T_TILE, TerrainMap.T_MARBLE, TerrainMap.T_PATH]:
+		_check("非雪族 tile %d 不倒角(0)" % t, TT.tile_bevel(t), 0.0)
+
 ## ③ 受控地形：裸岩(5,5) 抬高、压实雪(10,10) 抬高，各自崖壁层不同
 func _test_type_aware_walls() -> void:
 	TerrainMap.reset()
@@ -70,12 +80,17 @@ func _test_type_aware_walls() -> void:
 	var cols: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
 
 	var wall_layers := {}   # 法线水平的崖壁层集合
+	var chamfer := 0        # 45° 倒角斜面（法线 y 介于水平与竖直之间）
 	for i in range(verts.size()):
 		if absf(norms[i].y) < 0.01:
 			wall_layers[int(round(cols[i].r * 255.0))] = true
+		elif norms[i].y > 0.3 and norms[i].y < 0.95:
+			chamfer += 1
 	_check("崖壁含裸岩侧壁层", wall_layers.has(TerrainTextures.LAYER_ROCK_SNOW), true)
 	_check("崖壁含压实雪侧壁层", wall_layers.has(TerrainTextures.LAYER_PACKED_SNOW), true)
 	_check("崖壁侧壁层 ≥ 2 种", wall_layers.size() >= 2, true)
+	# 雪族抬高块四周应发倒角斜面（chamfer）——破直角盒，法线倾斜非纯水平/纯竖直
+	_check("beveled 雪 tile 有倒角斜面", chamfer > 0, true)
 
 	cm.free()
 	TerrainMap.reset()

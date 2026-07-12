@@ -332,6 +332,21 @@ static func layer_wall_reliefs() -> PackedFloat32Array:
 	r[LAYER_ICE] = 0.85
 	return r
 
+## tile 类型 → 崖壁顶缘几何倒角量（米，0 = 直角盒不倒角）。
+## 老板 GPU 反馈：冰雪崖壁要「边缘圆润平滑」——明暗浮雕(layer_wall_reliefs)近似受光后，
+## 再对崖顶棱线做真几何倒角(45° chamfer)把硬直角切软。逐 tile 类型开关(非全主题一刀切)：
+## 雪族崖壁倒角出雪盖圆润感，室外岩壁/室内光滑墙/现代路缘等默认 0=保持利落直角(零回归)。
+## 地形网格无碰撞体(角色高度走逻辑格 tile_height×STEP)，倒角纯视觉、不影响行走/寻路。
+const BEVEL_SNOW := 0.4
+static func tile_bevel(ttype: int) -> float:
+	match ttype:
+		TerrainMap.T_SNOW, TerrainMap.T_PACKED_SNOW, \
+		TerrainMap.T_SLUSH, TerrainMap.T_ROCK_SNOW:
+			return BEVEL_SNOW
+		TerrainMap.T_ICE:
+			return BEVEL_SNOW * 0.6  ## 冰面积雪少，倒角轻一点
+	return 0.0
+
 ## PackedColorArray → shader vec3[] 用的线性 PackedVector3Array（补齐到 SHADER_ARRAY_SIZE）。
 ## 手动 sRGB→线性：shader 侧 uniform 不带 source_color（数组 uniform 的 source_color 支持
 ## 各版本不一），与 source_color 采样的贴图在线性空间一致（复现旧 : source_color 语义）。

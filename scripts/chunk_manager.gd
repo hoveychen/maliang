@@ -466,16 +466,10 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 					cell_kind = TerrainAtlas.CELL_CLIFF_RIM
 					layer = TerrainTextures.LAYER_CLIFF_LIP  # body 部分 = 崖唇土色
 					corners = Autotile.corners_from_mask(mask)
-			var lcol := Color(float(layer) / 255.0, 0.0, 0.0, 1.0)
 			var x0 := -half + float(i) * WorldGrid.TILE_SIZE
 			var z0 := -half + float(j) * WorldGrid.TILE_SIZE
-			for c in range(4):
-				var cx := x0 + (half_tile if (c == Autotile.C_NE or c == Autotile.C_SE) else 0.0)
-				var cz := z0 + (half_tile if (c == Autotile.C_SW or c == Autotile.C_SE) else 0.0)
-				var r := TerrainAtlas.uv_rect(cell_kind, c, corners[c], parity)
-				_emit_quad(verts, norms, uvs, uv2s, idx, cx, cz, y, half_tile, r, loff)
-				for _k in range(4):
-					cols.append(lcol)
+			# 顶面 4 角 quad（beveled tile 的临崖外缘内缩 + 发 chamfer 斜面倒角）
+			_emit_top_face(verts, norms, uvs, uv2s, cols, idx, t, ttype, fl, cell_kind, corners, layer, parity, x0, z0, y, loff)
 			# L3 侧壁：邻居有效级更低的边逐级发墙 quad；侧壁贴图层按被抬高 tile（本 tile）类型取
 			_emit_walls(verts, norms, uvs, uv2s, cols, idx, t, ttype, fl, x0, z0, loff)
 	var arrays := []
@@ -589,6 +583,100 @@ func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Packe
 	uv2s.append(lu + Vector2(0.0, size))
 	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
 
+## 通用 4 顶点 facet（顶面倒角/斜面用）：p0..p3 世界顶点（正面绕序 p0→p1→p2→p3），
+## 单一法线 nrm，贴图层 layer（写 COLOR.r），atlas 控制 uv 矩形 r，UV2 = 逻辑世界 xz（loff+xz）。
+## 与 _emit_quad 同绕序/同 UV 角点顺序，故可直接替代顶面平铺 quad（beveled tile 用）。
+func _emit_facet(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, nrm: Vector3, layer: int, r: Rect2, loff: Vector2) -> void:
+	var b := verts.size()
+	verts.append(p0); verts.append(p1); verts.append(p2); verts.append(p3)
+	var lcol := Color(float(layer) / 255.0, 0.0, 0.0, 1.0)
+	for k in range(4):
+		norms.append(nrm)
+		cols.append(lcol)
+	uvs.append(r.position)
+	uvs.append(Vector2(r.end.x, r.position.y))
+	uvs.append(r.end)
+	uvs.append(Vector2(r.position.x, r.end.y))
+	uv2s.append(loff + Vector2(p0.x, p0.z))
+	uv2s.append(loff + Vector2(p1.x, p1.z))
+	uv2s.append(loff + Vector2(p2.x, p2.z))
+	uv2s.append(loff + Vector2(p3.x, p3.z))
+	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
+
+## 顶面 4 角 quad。非 beveled tile 走原 _emit_quad 平铺（零回归）。
+## beveled tile（TerrainTextures.tile_bevel>0 且有临崖边）：把每个角 quad 临崖的外缘内缩 bevel，
+## 并沿临崖边发一道 45° chamfer 斜面（内缩顶缘 y → 崖壁顶 boundary,y-bevel），外凸角补 miter，
+## 把「白方糖」的硬直角切成圆润雪盖棱。chamfer 用顶面雪贴图（雪盖滚过棱）+ body 控制 cell（无描边/无墙浮雕）。
+## 崖壁顶缘对应下降 bevel 由 _emit_walls 处理（两者在 boundary,y-bevel 处对齐）。
+func _emit_top_face(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, t: Vector2i, ttype: int, fl: int, cell_kind: int, corners: PackedInt32Array, layer: int, parity: int, x0: float, z0: float, y: float, loff: Vector2) -> void:
+	var half_tile := WorldGrid.TILE_SIZE * 0.5
+	var bevel := TerrainTextures.tile_bevel(ttype)
+	var cl_nx := TerrainMap.tile_floor_level(t + Vector2i(-1, 0)) < fl
+	var cl_px := TerrainMap.tile_floor_level(t + Vector2i(1, 0)) < fl
+	var cl_nz := TerrainMap.tile_floor_level(t + Vector2i(0, -1)) < fl
+	var cl_pz := TerrainMap.tile_floor_level(t + Vector2i(0, 1)) < fl
+	var beveled := bevel > 0.0 and (cl_nx or cl_px or cl_nz or cl_pz)
+	var top_lyr := TerrainTextures.top_layer(ttype)  # chamfer 用顶面贴图（雪盖）
+	var body_r := TerrainAtlas.uv_rect(TerrainAtlas.CELL_BODY, Autotile.C_NW, Autotile.V_FULL, parity)
+	var lcol := Color(float(layer) / 255.0, 0.0, 0.0, 1.0)
+	var yb := y - bevel
+	for c in range(4):
+		var right := c == Autotile.C_NE or c == Autotile.C_SE
+		var down := c == Autotile.C_SW or c == Autotile.C_SE
+		var cx := x0 + (half_tile if right else 0.0)
+		var cz := z0 + (half_tile if down else 0.0)
+		var r := TerrainAtlas.uv_rect(cell_kind, c, corners[c], parity)
+		if not beveled:
+			_emit_quad(verts, norms, uvs, uv2s, idx, cx, cz, y, half_tile, r, loff)
+			for _k in range(4):
+				cols.append(lcol)
+			continue
+		# 本角 quad 的两条外缘（-x/+x 取决 right，-z/+z 取决 down）临崖则内缩
+		var ins_nx := (not right) and cl_nx
+		var ins_px := right and cl_px
+		var ins_nz := (not down) and cl_nz
+		var ins_pz := down and cl_pz
+		var qx0 := cx + (bevel if ins_nx else 0.0)
+		var qx1 := cx + half_tile - (bevel if ins_px else 0.0)
+		var qz0 := cz + (bevel if ins_nz else 0.0)
+		var qz1 := cz + half_tile - (bevel if ins_pz else 0.0)
+		_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+			Vector3(qx0, y, qz0), Vector3(qx1, y, qz0), Vector3(qx1, y, qz1), Vector3(qx0, y, qz1),
+			Vector3.UP, layer, r, loff)
+		if ins_nx:
+			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, y, qz0), Vector3(qx0, y, qz1), Vector3(cx, yb, qz1), Vector3(cx, yb, qz0),
+				Vector3(-1, 1, 0).normalized(), top_lyr, body_r, loff)
+		if ins_px:
+			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, y, qz1), Vector3(qx1, y, qz0), Vector3(cx + half_tile, yb, qz0), Vector3(cx + half_tile, yb, qz1),
+				Vector3(1, 1, 0).normalized(), top_lyr, body_r, loff)
+		if ins_nz:
+			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, y, qz0), Vector3(qx0, y, qz0), Vector3(qx0, yb, cz), Vector3(qx1, yb, cz),
+				Vector3(0, 1, -1).normalized(), top_lyr, body_r, loff)
+		if ins_pz:
+			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, y, qz1), Vector3(qx1, y, qz1), Vector3(qx1, yb, cz + half_tile), Vector3(qx0, yb, cz + half_tile),
+				Vector3(0, 1, 1).normalized(), top_lyr, body_r, loff)
+		# 外凸角 miter：两邻边都临崖 → 补角上斜面（否则外角留缺口）
+		if ins_nx and ins_nz:
+			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, y, qz0), Vector3(cx, yb, qz0), Vector3(cx, yb, cz), Vector3(qx0, yb, cz),
+				Vector3(-1, 1, -1).normalized(), top_lyr, body_r, loff)
+		if ins_px and ins_nz:
+			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, y, qz0), Vector3(qx1, yb, cz), Vector3(cx + half_tile, yb, cz), Vector3(cx + half_tile, yb, qz0),
+				Vector3(1, 1, -1).normalized(), top_lyr, body_r, loff)
+		if ins_nx and ins_pz:
+			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, y, qz1), Vector3(qx0, yb, cz + half_tile), Vector3(cx, yb, cz + half_tile), Vector3(cx, yb, qz1),
+				Vector3(-1, 1, 1).normalized(), top_lyr, body_r, loff)
+		if ins_px and ins_pz:
+			_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, y, qz1), Vector3(cx + half_tile, yb, qz1), Vector3(cx + half_tile, yb, cz + half_tile), Vector3(qx1, yb, cz + half_tile),
+				Vector3(1, 1, 1).normalized(), top_lyr, body_r, loff)
+
 ## tile 四边中「邻居有效级更低」的边发竖直崖壁/水下岸壁。每级 = 一个 2m×2m 墙格，
 ## 墙格对同一墙面的 8 邻墙格（沿墙走向左右 × 层级上下 × 对角）做 corner autotile：
 ## 有邻墙 = 相连，无邻墙侧出凹缝暗边 + 亮棱线。墙格再切 4 个 1m 角 quad 按变体取 UV。
@@ -598,6 +686,8 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 	var ts := WorldGrid.TILE_SIZE
 	# 侧壁贴图层 = 被抬高 tile（本 tile）类型对应的侧壁层（修 CLIFF_WALL 写死的偷懒）
 	var side_lcol := Color(float(TerrainTextures.side_layer(ttype)) / 255.0, 0.0, 0.0, 1.0)
+	# beveled tile：最顶一级墙面顶缘下降 bevel，给顶面 chamfer 斜面让位（在 boundary,y-bevel 处对齐）
+	var bevel := TerrainTextures.tile_bevel(ttype)
 	var x1 := x0 + ts
 	var z1 := z0 + ts
 	# 每边：邻居偏移 n / 墙面法线 / 上边两端点 a→b（从法线侧看去 a 在屏幕左）/
@@ -618,6 +708,8 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 				return _wall_exists(t + tang * q.x, n_off, lvl - q.y)
 			var corners := Autotile.corners_from_mask(Autotile.mask_of(Vector2i.ZERO, pred))
 			var y_top := float(lvl + 1) * TerrainMap.STEP_HEIGHT
+			if lvl == fl - 1:
+				y_top -= bevel  # 顶级让位给 chamfer（非 beveled tile bevel=0，无变化）
 			var y_mid := (float(lvl) + 0.5) * TerrainMap.STEP_HEIGHT
 			var y_bot := float(lvl) * TerrainMap.STEP_HEIGHT
 			var a: Vector3 = s["a"]
