@@ -342,5 +342,67 @@
     "tint_amt": 0.32,
     "edge_pool": 0.09,
     "_post": "furrow rows overlay (numpy, period=1024/16)"
+  },
+  "asphalt": {
+    "source": "asphalt_02",
+    "_note": "现代 P3 沥青。有机基线,深灰。",
+    "struct_sigma": 10,
+    "detail_keep": 0.05,
+    "sat": 0.5,
+    "contrast": 0.58,
+    "levels": 5,
+    "poster_mix": 0.55,
+    "lift": 0.09,
+    "tint": "70,70,74",
+    "tint_amt": 0.4,
+    "edge_pool": 0.07
+  },
+  "paver_brick": {
+    "source": "brick_pavement_02",
+    "_note": "现代 P3 人行道砖。低平滑高保砖缝,砖红。",
+    "struct_sigma": 2,
+    "detail_keep": 0.3,
+    "sat": 0.5,
+    "contrast": 0.66,
+    "levels": 7,
+    "poster_mix": 0.4,
+    "lift": 0.1,
+    "tint": "178,116,92",
+    "tint_amt": 0.22,
+    "edge_pool": 0.2
+  },
+  "concrete": {
+    "source": "concrete_floor_01",
+    "_note": "现代 P3 水泥。结构化,浅灰。未来混凝土/医院手术室共用。",
+    "struct_sigma": 3,
+    "detail_keep": 0.18,
+    "sat": 0.4,
+    "contrast": 0.62,
+    "levels": 6,
+    "poster_mix": 0.45,
+    "lift": 0.11,
+    "tint": "178,178,182",
+    "tint_amt": 0.28,
+    "edge_pool": 0.16
+  },
+  "lawn_grid": {
+    "source": "grass_concrete_pavement",
+    "_note": "现代 P3 草坪格。结构化保格,草绿。",
+    "struct_sigma": 3,
+    "detail_keep": 0.18,
+    "sat": 0.4,
+    "contrast": 0.62,
+    "levels": 6,
+    "poster_mix": 0.45,
+    "lift": 0.11,
+    "tint": "120,148,86",
+    "tint_amt": 0.28,
+    "edge_pool": 0.16
+  },
+  "crosswalk": {
+    "source": "PROC",
+    "_note": "现代 P3 斑马线。gen_pattern_tex.py crosswalk --period 6。",
+    "kind": "crosswalk",
+    "period": 6
   }
 }

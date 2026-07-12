@@ -44,7 +44,13 @@ const LAYER_MARBLE := 25       ## 大理石（marble_01 风格化，米白）
 const LAYER_MOSAIC := 26       ## 马赛克地（marble_mosaic_tiles 风格化，暖陶格）
 # ── 中国古代 P3 新增层（结构化，成品水彩，tint 已烘入→传白）──────────────────────
 const LAYER_WOOD_FLOOR := 27   ## 木地板（wood_floor 风格化，暖木；玩具/厨房共用）
-const LAYER_COUNT := 28
+# ── 现代城市 P3 新增层（成品水彩/程序化，tint 已烘入→传白）────────────────────────
+const LAYER_ASPHALT := 28      ## 沥青（asphalt_02 风格化，深灰）
+const LAYER_PAVER_BRICK := 29  ## 人行道砖（brick_pavement_02 风格化，砖红）
+const LAYER_CROSSWALK := 30    ## 斑马线（程序化，深灰底+白条）
+const LAYER_CONCRETE := 31     ## 水泥（concrete_floor_01 风格化，浅灰；未来混凝土/医院手术室共用）
+const LAYER_LAWN_GRID := 32    ## 草坪格（grass_concrete_pavement 风格化，草绿+格）
+const LAYER_COUNT := 33
 
 ## shader 端 layer_tint[]/layer_mean[] 的固定数组长度（预留冗余，P3 加层不必改 shader）。
 ## P3（12 主题全铺）预计 40-50 层，故 16→64（老板 2026-07-12 定：最小改动，
@@ -82,6 +88,11 @@ const LAYER_TEX_PATHS: Array[String] = [
 	"res://assets/textures/terrain/marble.png",      # 25 MARBLE
 	"res://assets/textures/terrain/mosaic.png",      # 26 MOSAIC
 	"res://assets/textures/terrain/wood_floor.png",  # 27 WOOD_FLOOR
+	"res://assets/textures/terrain/asphalt.png",     # 28 ASPHALT
+	"res://assets/textures/terrain/paver_brick.png", # 29 PAVER_BRICK
+	"res://assets/textures/terrain/crosswalk.png",   # 30 CROSSWALK
+	"res://assets/textures/terrain/concrete.png",    # 31 CONCRETE
+	"res://assets/textures/terrain/lawn_grid.png",   # 32 LAWN_GRID
 ]
 
 const _WHITE := Color(1.0, 1.0, 1.0)
@@ -119,6 +130,11 @@ static func layer_tints() -> PackedColorArray:
 	t[LAYER_MARBLE] = _WHITE
 	t[LAYER_MOSAIC] = _WHITE
 	t[LAYER_WOOD_FLOOR] = _WHITE
+	t[LAYER_ASPHALT] = _WHITE
+	t[LAYER_PAVER_BRICK] = _WHITE
+	t[LAYER_CROSSWALK] = _WHITE
+	t[LAYER_CONCRETE] = _WHITE
+	t[LAYER_LAWN_GRID] = _WHITE
 	return t
 
 ## 层 → 全图均值（tex/mean 归一：把偏暗的水彩包除到均值 1，只留笔触，色由 tint 定）。
@@ -155,6 +171,11 @@ static func layer_means() -> PackedColorArray:
 	m[LAYER_MARBLE] = _WHITE
 	m[LAYER_MOSAIC] = _WHITE
 	m[LAYER_WOOD_FLOOR] = _WHITE
+	m[LAYER_ASPHALT] = _WHITE
+	m[LAYER_PAVER_BRICK] = _WHITE
+	m[LAYER_CROSSWALK] = _WHITE
+	m[LAYER_CONCRETE] = _WHITE
+	m[LAYER_LAWN_GRID] = _WHITE
 	return m
 
 ## tile 类型（TerrainMap.T_*）→ 顶面贴图层索引。未知类型兜底草地。
@@ -186,6 +207,11 @@ static func top_layer(ttype: int) -> int:
 		TerrainMap.T_MARBLE: return LAYER_MARBLE
 		TerrainMap.T_MOSAIC: return LAYER_MOSAIC
 		TerrainMap.T_WOOD_FLOOR: return LAYER_WOOD_FLOOR
+		TerrainMap.T_ASPHALT: return LAYER_ASPHALT
+		TerrainMap.T_PAVER_BRICK: return LAYER_PAVER_BRICK
+		TerrainMap.T_CROSSWALK: return LAYER_CROSSWALK
+		TerrainMap.T_CONCRETE: return LAYER_CONCRETE
+		TerrainMap.T_LAWN_GRID: return LAYER_LAWN_GRID
 	return LAYER_GRASS
 
 ## tile 类型 → 侧壁（崖壁）贴图层索引：该 tile 被抬高时其竖直立面所采的层。
@@ -215,6 +241,11 @@ static func side_layer(ttype: int) -> int:
 		TerrainMap.T_MARBLE: return LAYER_MARBLE
 		TerrainMap.T_MOSAIC: return LAYER_MOSAIC
 		TerrainMap.T_WOOD_FLOOR: return LAYER_WOOD_FLOOR
+		TerrainMap.T_ASPHALT: return LAYER_ASPHALT
+		TerrainMap.T_PAVER_BRICK: return LAYER_PAVER_BRICK
+		TerrainMap.T_CROSSWALK: return LAYER_CROSSWALK
+		TerrainMap.T_CONCRETE: return LAYER_CONCRETE
+		TerrainMap.T_LAWN_GRID: return LAYER_LAWN_GRID
 	return LAYER_CLIFF_WALL
 
 ## PackedColorArray → shader vec3[] 用的线性 PackedVector3Array（补齐到 SHADER_ARRAY_SIZE）。

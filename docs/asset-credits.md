@@ -82,7 +82,14 @@ CC BY 3.0 许可全文：https://creativecommons.org/licenses/by/3.0/
 | 大理石 marble（罗马 P3）| `marble_01` | https://polyhaven.com/a/marble_01 |
 | 马赛克 mosaic（罗马 P3）| `marble_mosaic_tiles` | https://polyhaven.com/a/marble_mosaic_tiles |
 | 木地板 wood_floor（中国/玩具/厨房 P3）| `wood_floor` | https://polyhaven.com/a/wood_floor |
+| 沥青 asphalt（现代 P3）| `asphalt_02` | https://polyhaven.com/a/asphalt_02 |
+| 人行道砖 paver_brick（现代 P3）| `brick_pavement_02` | https://polyhaven.com/a/brick_pavement_02 |
+| 水泥 concrete（现代/未来/医院 P3）| `concrete_floor_01` | https://polyhaven.com/a/concrete_floor_01 |
+| 草坪格 lawn_grid（现代 P3）| `grass_concrete_pavement` | https://polyhaven.com/a/grass_concrete_pavement |
 
+> 斑马线/地毯/拼图垫/棋盘格/医用地胶/发光格/警戒条纹等无 CC0 干净图案的 tile，由
+> `tools/gen_pattern_tex.py` 程序化平色图案生成（非 CC0 素材，纯几何，无需署名）。
+>
 > P1-P3 逐主题铺开时，新增的每个 Poly Haven / ambientCG 源都追加到本表。
 
 ---
