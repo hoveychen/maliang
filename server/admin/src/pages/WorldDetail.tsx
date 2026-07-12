@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { apiPost, fmtTs, useApi } from '../api.ts';
 import { MAX_FLOWERS, STAMP_GLYPHS, STAMPS_PER_FLOWER, TASK_TYPE_LABELS, type AdminItemDef, type CharacterSummary, type Scene, type TerrainGrid, type WorldDetail } from '../types.ts';
-import { AnimStatusBadge, Fallback, PageHead, RowLink, ShortId, Sprite, Stats } from '../components.tsx';
+import { AnimStatusBadge, Fallback, PageHead, RowLink, ShortId, SizeBadge, Sprite, Stats } from '../components.tsx';
 import { playerLabel } from './Worlds.tsx';
 
 const TABS = [
@@ -352,13 +352,14 @@ export function WorldDetailPage() {
             data.characters.length === 0 ? <div className="empty">没有角色</div> : (
               <table className="grid">
                 <thead>
-                  <tr><th>立绘</th><th>名字</th><th>动画</th><th>状态</th><th>位置</th><th>性格</th><th>记忆</th><th>对话</th><th>音色</th><th>id</th></tr>
+                  <tr><th>立绘</th><th>名字</th><th>体型</th><th>动画</th><th>状态</th><th>位置</th><th>性格</th><th>记忆</th><th>对话</th><th>音色</th><th>id</th></tr>
                 </thead>
                 <tbody>
                   {data.characters.map((c) => (
                     <RowLink to={`/worlds/${id}/characters/${c.id}`} key={c.id}>
                       <td><Sprite hash={c.spriteAsset} alt={c.name} /></td>
                       <td><b>{c.name}</b>{c.isFairy && <span className="badge seal" style={{ marginLeft: 6 }}>仙</span>}</td>
+                      <td>{c.isFairy ? <span className="empty-cell">—</span> : <SizeBadge scale={c.scale} />}</td>
                       <td><AnimStatusBadge status={c.spriteAnimStatus} /></td>
                       <td><span className="badge">{c.state}</span></td>
                       <td className="mono">({c.position.tileX},{c.position.tileY})</td>
@@ -442,13 +443,14 @@ export function WorldDetailPage() {
               <h2 className="sect" style={{ marginTop: 4 }}>造物实体（items 表；摆着的引用在场景矩阵里）</h2>
               {data.items.length === 0 ? <div className="empty">没有造物</div> : (
                 <table className="grid">
-                  <thead><tr><th>名字</th><th>渲染</th><th>占地</th><th>阻挡</th><th>游走</th><th>id</th><th>spec</th></tr></thead>
+                  <thead><tr><th>名字</th><th>渲染</th><th>占地</th><th>体型</th><th>阻挡</th><th>游走</th><th>id</th><th>spec</th></tr></thead>
                   <tbody>
                     {data.items.map((it) => (
                       <tr key={it.id}>
                         <td><b>{it.name}</b></td>
                         <td className="mono">{it.renderRef}</td>
                         <td className="mono">{it.footprintW}×{it.footprintH}</td>
+                        <td><SizeBadge scale={it.spec?.scale as number | undefined} /></td>
                         <td>{it.blocking ? <span className="badge">占位</span> : <span className="badge pine">可穿行</span>}</td>
                         <td className="num-cell">{it.wander || '—'}</td>
                         <td><ShortId id={it.id} /></td>

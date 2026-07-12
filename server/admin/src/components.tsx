@@ -193,6 +193,21 @@ export function AnimStatusBadge(props: { status: string }) {
   return <span className="badge">无动画</span>;
 }
 
+/** 体型档：从 scale 反推 小/中/大（明显档，与服务端 scaleToSize 同阈值 ≤0.85 小 / ≥1.2 大）。 */
+export function sizeLabel(scale: number | null | undefined): string {
+  if (typeof scale !== 'number' || !isFinite(scale)) return '';
+  if (scale <= 0.85) return '小';
+  if (scale >= 1.2) return '大';
+  return '中';
+}
+
+/** 体型档徽标：小/中/大 + ×倍率。scale 缺失（如无 spec 的内置物品）显示 —。 */
+export function SizeBadge(props: { scale: number | null | undefined }) {
+  const s = props.scale;
+  if (typeof s !== 'number' || !isFinite(s)) return <span className="empty-cell">—</span>;
+  return <span className="badge">{sizeLabel(s)} ×{s}</span>;
+}
+
 /**
  * 补动画按钮：调 POST /admin/sprite-anim/:hash/generate 线上生成（已 ready 走 force 且先确认——烧钱）。
  * pending 期间禁用并每 5s 自动 onChanged 轮询刷新，直到 ready/failed。

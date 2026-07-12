@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApi } from '../api.ts';
 import type { ItemDefWithIcon, ItemsResponse } from '../types.ts';
-import { Fallback, PageHead, ShortId, Sprite, Stats } from '../components.tsx';
+import { Fallback, PageHead, ShortId, SizeBadge, Sprite, Stats } from '../components.tsx';
 
 /** 一张物品表：缩略图 + 字段。creations 段多一列来源世界。 */
 function ItemTable(props: { rows: ItemDefWithIcon[]; showWorld?: boolean }) {
@@ -10,7 +10,7 @@ function ItemTable(props: { rows: ItemDefWithIcon[]; showWorld?: boolean }) {
     <table className="grid">
       <thead>
         <tr>
-          <th>外观</th><th>名字</th><th>渲染</th><th>占地</th><th>阻挡</th>
+          <th>外观</th><th>名字</th><th>渲染</th><th>占地</th><th>体型</th><th>阻挡</th>
           <th>游走</th><th>主题</th>{props.showWorld && <th>来源世界</th>}
           <th>被引用</th><th>id</th><th>spec</th>
         </tr>
@@ -22,6 +22,7 @@ function ItemTable(props: { rows: ItemDefWithIcon[]; showWorld?: boolean }) {
             <td><b>{it.name}</b></td>
             <td className="mono">{it.renderRef}{it.mount === 'edge' && <span className="badge"> 贴纸</span>}</td>
             <td className="mono">{it.footprintW}×{it.footprintH}</td>
+            <td><SizeBadge scale={it.spec?.scale as number | undefined} /></td>
             <td>{it.blocking ? <span className="badge">占位</span> : <span className="badge pine">可穿行</span>}</td>
             <td className="num-cell">{it.wander || '—'}</td>
             <td className="mono">{it.themes?.length ? it.themes.join('、') : <span className="empty-cell">—</span>}</td>
