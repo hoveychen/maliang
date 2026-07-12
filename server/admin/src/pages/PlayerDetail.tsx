@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { fmtTs, useApi } from '../api.ts';
 import { MEMORY_KIND_LABELS, type PlayerDetail } from '../types.ts';
-import { AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, Sprite } from '../components.tsx';
+import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, Sprite } from '../components.tsx';
 
 export function PlayerDetailPage() {
   const { id = '' } = useParams();
@@ -18,9 +18,10 @@ export function PlayerDetailPage() {
         <>
           <div className="panel panel-row">
             <div>
-              <Sprite hash={data.player.spriteAsset} large alt={data.player.name} />
+              <Sprite hash={data.player.spriteAsset} large alt={data.player.name} anchors={data.player.anchors} />
               {data.player.spriteAsset && (
                 <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <AnchorBadge anchors={data.player.anchors} />
                   <AnimStatusBadge status={data.spriteAnim.status} />
                   <AnimGenerateButton spriteHash={data.player.spriteAsset} status={data.spriteAnim.status} onChanged={reload} />
                 </div>
@@ -34,6 +35,9 @@ export function PlayerDetailPage() {
               <dt>喜欢的颜色</dt><dd>{data.player.color || '—'}</dd>
               <dt>建档时间</dt><dd className="mono">{data.player.createdAt || '—'}</dd>
               <dt>形象资产</dt><dd className="mono">{data.player.spriteAsset || '—'}</dd>
+              <dt>锚点</dt><dd className="mono">{data.player.anchors
+                ? `头(${data.player.anchors.headTop.x.toFixed(2)},${data.player.anchors.headTop.y.toFixed(2)}) 左手(${data.player.anchors.handL.x.toFixed(2)},${data.player.anchors.handL.y.toFixed(2)}) 右手(${data.player.anchors.handR.x.toFixed(2)},${data.player.anchors.handR.y.toFixed(2)}) · ${data.player.anchors.source}`
+                : '—'}</dd>
             </dl>
           </div>
 

@@ -112,6 +112,20 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--paper-rai
 }
 .sprite-ph { display: grid; place-items: center; color: var(--ink-soft); font-size: 11px; }
 
+/* 带锚点的立绘：按自然宽高比渲染（无信箱边），锚点点位百分比才与像素对齐 */
+.sprite-wrap { position: relative; display: inline-block; line-height: 0; }
+.sprite-anchored {
+  max-width: 200px; max-height: 280px; width: auto; height: auto; display: block;
+  background: repeating-conic-gradient(var(--paper-dim) 0% 25%, var(--paper-raise) 0% 50%) 0 0 / 20px 20px;
+  border: 1px solid var(--hairline);
+}
+.anchor-dots { position: absolute; inset: 0; pointer-events: none; }
+.anchor-dot {
+  position: absolute; width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid #fff; transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
 /* Tab 页签：底线式，不做圆角胶囊 */
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--hairline); margin: 18px 0 14px; }
 .tabs button {

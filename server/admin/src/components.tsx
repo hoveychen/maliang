@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError, apiPost, assetUrl, getToken, setToken } from './api.ts';
-import type { SpriteAnimMeta, SpriteAnimRecord } from './types.ts';
+import type { AnchorPoint, CharacterAnchors, SpriteAnimMeta, SpriteAnimRecord } from './types.ts';
 
 /** 页头：面包屑 + 宋体大标题 + 计数 + 说明。 */
 export function PageHead(props: { crumbs?: ReactNode; title: ReactNode; count?: number; desc?: string; right?: ReactNode }) {
@@ -125,10 +125,23 @@ function SpriteLightbox(props: { hash: string; alt: string; onClose: () => void 
 }
 
 /** 立绘/物品缩略图：无资产给占位格；有资产可点击放大（含 idle 动画预览）。 */
-export function Sprite(props: { hash: string; large?: boolean; alt?: string; placeholder?: string }) {
+export function Sprite(props: { hash: string; large?: boolean; alt?: string; placeholder?: string; anchors?: CharacterAnchors }) {
   const [open, setOpen] = useState(false);
   const cls = props.large ? 'sprite-lg' : 'sprite-thumb';
   if (!props.hash) return <div className={`${cls} sprite-ph`}>{props.placeholder ?? '无立绘'}</div>;
+  // 带锚点：按自然宽高比渲染（不塞进固定方框——object-fit:contain 的信箱边会让归一化点位错位），
+  // 三个锚点按归一化坐标(原点左上)直接叠在立绘像素上。
+  if (props.anchors) {
+    return (
+      <>
+        <span className="sprite-wrap sprite-click" title="点击放大" onClick={(e) => { e.stopPropagation(); setOpen(true); }}>
+          <img className="sprite-anchored" src={assetUrl(props.hash)} alt={props.alt ?? ''} loading="lazy" />
+          <AnchorDots anchors={props.anchors} />
+        </span>
+        {open && <SpriteLightbox hash={props.hash} alt={props.alt ?? ''} onClose={() => setOpen(false)} />}
+      </>
+    );
+  }
   return (
     <>
       <img
@@ -142,6 +155,34 @@ export function Sprite(props: { hash: string; large?: boolean; alt?: string; pla
       {open && <SpriteLightbox hash={props.hash} alt={props.alt ?? ''} onClose={() => setOpen(false)} />}
     </>
   );
+}
+
+/** 立绘上叠三个贴纸锚点（头顶/左手/右手），归一化坐标 → 百分比定位；hover 看坐标。pointer-events:none 不挡点击放大。 */
+function AnchorDots({ anchors }: { anchors: CharacterAnchors }) {
+  const dots: { label: string; p: AnchorPoint; color: string }[] = [
+    { label: '头顶', p: anchors.headTop, color: '#e8590c' },
+    { label: '左手', p: anchors.handL, color: '#1c7ed6' },
+    { label: '右手', p: anchors.handR, color: '#2f9e44' },
+  ];
+  return (
+    <span className="anchor-dots">
+      {dots.map((d) => (
+        <span
+          key={d.label}
+          className="anchor-dot"
+          style={{ left: `${d.p.x * 100}%`, top: `${d.p.y * 100}%`, background: d.color }}
+          title={`${d.label} (${d.p.x.toFixed(3)}, ${d.p.y.toFixed(3)})`}
+        />
+      ))}
+    </span>
+  );
+}
+
+/** 锚点来源徽章（vision=真检测/兜底=alpha 现算/无=走客户端兜底），详情页立绘旁一眼看出成色。 */
+export function AnchorBadge(props: { anchors?: CharacterAnchors }) {
+  if (!props.anchors) return <span className="badge">无锚点（走客户端兜底）</span>;
+  if (props.anchors.source === 'vision') return <span className="badge pine">锚点·vision</span>;
+  return <span className="badge">锚点·兜底</span>;
 }
 
 /** 动画状态徽章（none/pending/ready/failed 统一样式，角色表/详情页共用）。 */
