@@ -1041,8 +1041,18 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     socket.on('message', (raw: Buffer) => {
       void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session, hub, stages);
     });
+    // 心跳空闲扫描：新客户端会发 ping 刷新 lastSeen；超时无任何消息即判半开连接，
+    // terminate 触发下面的 close 处理清 hub 幽灵（含 host 重选）+ 释限流位。老客户端永不误杀（见 isConnectionDead）。
+    const heartbeatSweep = setInterval(() => {
+      if (isConnectionDead(session, Date.now())) {
+        app.log.info(`[hb] 连接 ${connKey.slice(0, 8)} 心跳超时，断开`);
+        socket.terminate();
+      }
+    }, HEARTBEAT_SWEEP_MS);
+    heartbeatSweep.unref?.(); // 不因这个定时器阻止进程优雅退出
     // 连接断开时释放可能仍持有的限流名额（录到一半断线），并 flush 会话记忆兜底（前端没发 leave_world 就掉线）
     socket.on('close', () => {
+      clearInterval(heartbeatSweep);
       if (session.gate) { session.gate.release(); session.gate = null; }
       session.active = false;
       notifyHubLeave(hub, connKey, stages, session.playerId);
@@ -1154,10 +1164,32 @@ export interface VoiceSession {
    * getLocations/委托候选/角色物件下发都按它过滤（消化「委托指向别场景」的边界）。
    */
   currentScene: string;
+  /** 心跳：上次收到本连接任意消息的时刻（ms）。空闲扫描据此判半开连接。 */
+  lastSeenMs: number;
+  /**
+   * 本连接是否证明过会发 app 层 ping（新客户端）。
+   * 只对 pingCapable 的连接做「超时即断」——老客户端不发 ping、静止时零流量，
+   * 绝不能被误判为死连接踢掉（它们也没自动重连兜底）。
+   */
+  pingCapable: boolean;
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null, creation: null, clientTts: false, currentScene: DEFAULT_SCENE };
+  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null, creation: null, clientTts: false, currentScene: DEFAULT_SCENE, lastSeenMs: Date.now(), pingCapable: false };
+}
+
+/** 心跳：多久没任何消息判半开连接（三个客户端 ping 周期）。 */
+export const HEARTBEAT_TIMEOUT_MS = 30_000;
+/** 心跳：连接层扫描间隔。 */
+export const HEARTBEAT_SWEEP_MS = 10_000;
+
+/**
+ * 半开连接判定（抽出供单测）：仅对证明过会发 ping 的新客户端做超时判死。
+ * 老客户端不发 ping（pingCapable=false）、静止时零流量，绝不能被误杀——它们没自动重连兜底，
+ * 一旦被踢就彻底掉线卡住。真实死连接仍由 TCP close 走原有 close 处理清理，与本判定无关。
+ */
+export function isConnectionDead(session: VoiceSession, now: number): boolean {
+  return session.pingCapable && now - session.lastSeenMs > HEARTBEAT_TIMEOUT_MS;
 }
 
 const VISIT_FLUSH_THRESHOLD = 20; // 单角色累积超此轮数即中途 flush，兜底长会话掉线全丢
@@ -1837,6 +1869,15 @@ export async function handleWsMessage(
 
   // 玩家身份：记进会话，供后续记忆/Visit 按玩家归属（P3/P4 消费）。
   if (typeof msg.playerId === 'string' && msg.playerId) session.playerId = msg.playerId;
+
+  // 心跳：任意消息刷新活跃时刻（空闲扫描据此判半开连接）；
+  // ping 回 pong 并标记本连接会发 ping——只有这类连接才做「超时即断」（见连接层扫描）。
+  session.lastSeenMs = Date.now();
+  if (msg.type === 'ping') {
+    session.pingCapable = true;
+    socket.send(JSON.stringify({ type: 'pong' }));
+    return;
+  }
 
   // 时间偏移握手：回带 t0 + 服务端毫秒钟。倒计时 HUD 双端读数一致、位置插值时间戳都靠它。
   if (msg.type === 'time_sync') {

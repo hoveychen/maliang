@@ -82,6 +82,13 @@ var _should_reconnect := false  ## 是否要维持连接（connect 起、disconn
 var _reconnect_backoff := RECONNECT_BASE_S ## 当前退避时长（连上即重置为 base）
 var _reconnect_wait := 0.0      ## 距下次重拨的倒计时
 
+## 心跳（app 层 JSON ping/pong）：客户端定时发 ping，服务端回 pong。
+## 任意回包都算「链路活着」；超时无任何回包即判半开连接，强制关连触发上面的自动重连。
+const PING_INTERVAL_S := 10.0    ## 发 ping 间隔
+const HEARTBEAT_TIMEOUT_S := 30.0 ## 无任何回包多久判死（三个 ping 周期）
+var _ping_accum := 0.0          ## 距下次发 ping 的累计
+var _since_rx := 0.0            ## 距上次收到任意回包的累计
+
 ## WS 是否已连上（供手机状态栏信号格显示网络是否通畅）。
 func is_online() -> bool:
 	return _open
@@ -109,6 +116,16 @@ func _open_socket() -> void:
 ## 退避序列：翻倍封顶。抽成纯函数供单测。
 func _next_backoff(cur: float) -> float:
 	return minf(cur * 2.0, RECONNECT_MAX_S)
+
+## 心跳步进（抽出供单测）：到点发 ping；有回包则复位活跃时钟，否则累计。
+## 返回是否已超时（无任何回包超过 HEARTBEAT_TIMEOUT_S）——调用方据此强制关连。
+func _step_heartbeat(delta: float, got_rx: bool) -> bool:
+	_since_rx = 0.0 if got_rx else _since_rx + delta
+	_ping_accum += delta
+	if _ping_accum >= PING_INTERVAL_S:
+		_ping_accum = 0.0
+		_send({ "type": "ping" })
+	return _since_rx > HEARTBEAT_TIMEOUT_S
 
 ## 连接 URL 带 clientTts=1 能力声明：服务端全程跳过 TTS 合成只发文本+voiceId，
 ## 客户端 edge-tts 本地合成；edge 不通时逐句 send_tts_request 降级（服务端仍保留全套 TTS）。
@@ -280,12 +297,19 @@ func _poll_ws(delta: float) -> void:
 		if not _open:
 			_open = true
 			_reconnect_backoff = RECONNECT_BASE_S # 连上即重置退避，下次断线从 base 起
+			_ping_accum = 0.0
+			_since_rx = 0.0                       # 心跳时钟随新连接归零
 			connected.emit()
+		var got_rx := false
 		while _ws.get_available_packet_count() > 0:
+			got_rx = true
 			var raw := _ws.get_packet().get_string_from_utf8()
 			var data: Variant = JSON.parse_string(raw)
 			if typeof(data) == TYPE_DICTIONARY:
 				_dispatch(data)
+		if _step_heartbeat(delta, got_rx):
+			# 超时无回包：半开连接，强制关连；下一帧回落 CLOSED 触发自动重连。
+			_ws.close()
 	elif st == WebSocketPeer.STATE_CLOSED:
 		if _open:
 			_open = false
@@ -309,6 +333,10 @@ func _dispatch(data: Dictionary) -> void:
 	if OS.get_environment("MALIANG_WS_DEBUG") != "":
 		print("[ws] ", String(data.get("type", "")))
 	match String(data.get("type", "")):
+		"pong":
+			pass # 心跳回执：活跃时钟已在 _poll_ws 靠「收到任意回包」复位，无需额外处理
+		"ping":
+			_send({ "type": "pong" }) # 服务端反向探活时回执（当前服务端不发，留作对称兜底）
 		"character_response":
 			character_response.emit(data)
 		"tts_chunk":

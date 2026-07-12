@@ -44,6 +44,33 @@ func _init() -> void:
 	b._tick_reconnect(2.0) # 再到点：4s
 	fails += _check("二次退避翻倍", b._reconnect_backoff, 4.0)
 
+	# ── _step_heartbeat：到点发 ping（用 sent 信号观测）──
+	var pings: Array = []
+	b.sent.connect(func(m: Dictionary) -> void:
+		if m.get("type", "") == "ping": pings.append(m))
+	b._ping_accum = 0.0
+	b._since_rx = 0.0
+	var timed_out := b._step_heartbeat(9.0, false) # 9<10：未到发 ping 点
+	fails += _check("未到点不发 ping", pings.size(), 0)
+	fails += _check("未超时", timed_out, false)
+	b._step_heartbeat(1.5, false) # 累计 10.5≥10：发一条 ping
+	fails += _check("到点发一条 ping", pings.size(), 1)
+
+	# ── _step_heartbeat：收到回包复位活跃时钟，永不超时 ──
+	b._since_rx = 25.0 # 逼近超时
+	b._step_heartbeat(10.0, true) # got_rx=true → 复位
+	fails += _check("收回包复位活跃时钟", b._since_rx, 0.0)
+
+	# ── _step_heartbeat：持续无回包，超过 30s 判超时 ──
+	b._since_rx = 0.0
+	b._ping_accum = 0.0
+	var died := false
+	for i in range(40): # 40×1s=40s > 30s
+		if b._step_heartbeat(1.0, false):
+			died = true
+			break
+	fails += _check("持续无回包最终超时", died, true)
+
 	b.free()
 	if fails == 0:
 		print("backend_reconnect tests PASS")
