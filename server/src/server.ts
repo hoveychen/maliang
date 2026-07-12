@@ -310,7 +310,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     }
     const hash = provided
       ? store.putAsset({ bytes: Uint8Array.from(Buffer.from(provided, 'base64')), mime: 'image/png' })
-      : await generateSprite(adapters, FAIRY_VISUAL_DESC, store);
+      : (await generateSprite(adapters, FAIRY_VISUAL_DESC, store)).hash; // 仙子用本地图集渲染，锚点不落
     fairy.appearance.spriteAsset = hash;
     fairy.appearance.visualDescription = FAIRY_VISUAL_DESC;
     store.saveCharacter(fairy);
@@ -334,10 +334,11 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       const desc = char.appearance.visualDescription.trim();
       if (desc.length === 0) return reply.code(400).send({ error: 'character has no visualDescription' });
       const prev = char.appearance.spriteAsset;
-      const hash = await generateSprite(adapters, desc, store);
-      char.appearance.spriteAsset = hash;
+      const gen = await generateSprite(adapters, desc, store);
+      char.appearance.spriteAsset = gen.hash;
+      if (gen.anchors) char.appearance.anchors = gen.anchors; // 新立绘=新坐标系，锚点必须一起换
       store.saveCharacter(char);
-      return { id: char.id, name: char.name, prev, spriteAsset: hash };
+      return { id: char.id, name: char.name, prev, spriteAsset: gen.hash };
     },
   );
 
@@ -565,10 +566,24 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (desc.length === 0) return reply.code(400).send({ error: 'visualDescription required' });
     const check = await adapters.moderation.moderateText(desc);
     if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
-    const hash = await generateSprite(adapters, desc, store);
+    const gen = await generateSprite(adapters, desc, store);
     // 试点：玩家形象静态先返回，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
-    triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
-    return { spriteAsset: hash };
+    triggerIdleAnimation(adapters, store, gen.hash, toSpriteSheet);
+    // anchors 随返回体进设备档案（玩家档案在 user://profile.json，服务端够不着，见设计 §2.3）
+    return { spriteAsset: gen.hash, anchors: gen.anchors ?? undefined };
+  });
+
+  // 存量玩家档案补算锚点（设计 §2.3）：老档案只有 spriteAsset 没有 anchors，客户端发现缺失时
+  // 按 hash 现算一次并自行落档。开放路由（同 /assets 哲学：hash 内容寻址、只读不改状态、
+  // 每 hash 一次 vision 调用成本可忽略）。资产不存在 404。
+  app.post<{ Body: { spriteAsset?: string } | null }>('/player-sprite/anchors', async (req, reply) => {
+    const hash = (req.body?.spriteAsset ?? '').trim();
+    if (hash.length === 0) return reply.code(400).send({ error: 'spriteAsset required' });
+    const blob = store.getAsset(hash);
+    if (!blob) return reply.code(404).send({ error: 'asset not found' });
+    const anchors = await detectCharacterAnchors(adapters.anchors, blob);
+    if (!anchors) return reply.code(422).send({ error: 'asset not decodable' });
+    return { spriteAsset: hash, anchors };
   });
 
   // onboarding 自我介绍：转写（客户端直送或送 PCM 走服务端 ASR）→ LLM 提取名字/称呼

@@ -83,18 +83,22 @@ async function ensureFacingRight(
 }
 
 /**
- * 为已存在角色（如小神仙）生成一张 sprite：image → cutout → 朝向兜底 → 存储，返回 assetHash。
- * 与 createCharacter 的造角色管线不同——这里不新建角色、不跑文字审核（描述是固定的）。
+ * 为已存在角色（如小神仙）/玩家形象生成一张 sprite：image → cutout → 朝向兜底 → 存储。
+ * 返回 assetHash + 锚点（吃 trim 后最终立绘，与 createCharacter 同坐标系；检测失败 anchors=null）。
+ * 与 createCharacter 的造角色管线不同——这里不新建角色、不跑文字审核（描述是固定的/调用方已审）。
  */
 export async function generateSprite(
   adapters: ServiceAdapters,
   visualDescription: string,
   store: WorldStore,
-): Promise<string> {
+): Promise<{ hash: string; anchors: CharacterAnchors | null }> {
   const cut = await generateCut(adapters, visualDescription);
   const upright = await ensureFacingRight(adapters, visualDescription, cut);
   // 裁到贴身盒：生图是大画布、角色周围大片透明，裁掉后角色占满显示框（见 trimToContent）
-  return store.putAsset(trimToContent(upright));
+  const finalSprite = trimToContent(upright);
+  const hash = store.putAsset(finalSprite);
+  const anchors = await detectCharacterAnchors(adapters.anchors, finalSprite);
+  return { hash, anchors };
 }
 
 /**

@@ -92,7 +92,7 @@ export async function seedForestCharacters(
       continue;
     }
     try {
-      const assetHash = await generateSprite(adapters, seed.visualDescription, store);
+      const { hash: assetHash, anchors } = await generateSprite(adapters, seed.visualDescription, store);
       const character: Character = {
         id: randomUUID(),
         worldId,
@@ -101,7 +101,12 @@ export async function seedForestCharacters(
         personality: seed.personality,
         voiceId: seed.voiceId,
         greetingStyle: seed.greetingStyle,
-        appearance: { visualDescription: seed.visualDescription, spriteAsset: assetHash, scale: 1.0 },
+        appearance: {
+          visualDescription: seed.visualDescription,
+          spriteAsset: assetHash,
+          scale: 1.0,
+          ...(anchors ? { anchors } : {}),
+        },
         memory: [],
         chatHistory: [],
         state: 'idle',
