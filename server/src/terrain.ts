@@ -86,6 +86,10 @@ export const T_PAVER_BRICK = 29;   // 人行道砖（可抬高）
 export const T_CROSSWALK = 30;     // 斑马线
 export const T_CONCRETE = 31;      // 水泥（未来混凝土/医院手术室共用，可抬高）
 export const T_LAWN_GRID = 32;     // 草坪格
+// 玩具房间主题地表（themed-terrain P3）：木地板/瓷砖复用现有类型。
+export const T_CARPET_RED = 33;    // 地毯红
+export const T_CARPET_BLUE = 34;   // 地毯蓝
+export const T_PUZZLE_MAT = 35;    // 拼图垫
 
 /** 合法的存储 tile 类型集合（校验用；3/4 是客户端崖壁 B 码，不入此集）。 */
 export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
@@ -95,6 +99,7 @@ export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
   T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE,
   T_COBBLE, T_STONE_SLAB, T_FARM_FURROW, T_MARBLE, T_MOSAIC, T_WOOD_FLOOR,
   T_ASPHALT, T_PAVER_BRICK, T_CROSSWALK, T_CONCRETE, T_LAWN_GRID,
+  T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT,
 ]);
 /** 可行走地表（非水）——新地形一律按草地行走规则；仅水阻挡。 */
 export function isWalkableTileType(t: number): boolean {

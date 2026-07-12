@@ -404,5 +404,24 @@
     "_note": "现代 P3 斑马线。gen_pattern_tex.py crosswalk --period 6。",
     "kind": "crosswalk",
     "period": 6
+  },
+  "carpet_red": {
+    "source": "PROC",
+    "_note": "玩具 P3 地毯红。gen_pattern_tex carpet --base #b8433f。",
+    "kind": "carpet",
+    "base": "#b8433f"
+  },
+  "carpet_blue": {
+    "source": "PROC",
+    "_note": "玩具 P3 地毯蓝。gen_pattern_tex carpet --base #3f5bb0 --seed 11。",
+    "kind": "carpet",
+    "base": "#3f5bb0",
+    "seed": 11
+  },
+  "puzzle_mat": {
+    "source": "PROC",
+    "_note": "玩具 P3 拼图垫。gen_pattern_tex puzzle --period 4。",
+    "kind": "puzzle",
+    "period": 4
   }
 }

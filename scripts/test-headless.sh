@@ -74,6 +74,7 @@ UNIT_TESTS=(
   test_terrain_roman
   test_terrain_ancient_china
   test_terrain_modern_city
+  test_terrain_toy_room
   test_sticker_edges
   test_forest_scene
   test_forest_reach
