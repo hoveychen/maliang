@@ -11,6 +11,14 @@ const PATH := "user://profile.json"
 static func exists() -> bool:
 	return FileAccess.file_exists(PATH)
 
+## 是否已经建过「真角色」——name 或 sprite_asset 至少一个非空。
+## 注意别用 exists()：profile.json 是共享袋子，device_id / graphics / play_budget / intro_seen /
+## player_id 都往里写，任一非创建路径落盘都会让文件存在。菜单入口分流必须问「有没有角色」，
+## 而不是「文件在不在」，否则画质档/设备档一落盘就永久跳过创建（见 test/test_menu_gate.gd）。
+static func has_character() -> bool:
+	var p := load_profile()
+	return not String(p.get("name", "")).is_empty() or not String(p.get("sprite_asset", "")).is_empty()
+
 ## 读档案；缺失/损坏返回空字典。
 static func load_profile() -> Dictionary:
 	var f := FileAccess.open(PATH, FileAccess.READ)
