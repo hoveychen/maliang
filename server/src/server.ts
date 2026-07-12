@@ -85,7 +85,7 @@ import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
-import { findStickerOption, composeStickerDesc } from './sticker_creation_options.ts';
+import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
@@ -1497,8 +1497,9 @@ export async function createCharacterAsync(
 /**
  * 引导式创造图标批量生成：遍历图标库每个选项，走图标专用管线 generateIconAsset
  * （图标画风生图→抠图→程序加白 die-cut 边→putAsset）出一张图，存「option id→asset hash」映射。
- * 覆盖造角色全库 + 造物专属的 kind/motion（prop_ 前缀）；造物的 color/size 复用造角色同 id，
- * 不重复生成（同 id 幂等跳过）。幂等：已生成的跳过，除非 force。opts.only 限定只生成指定 id。
+ * 覆盖造角色全库 + 造物专属 kind/motion（prop_ 前缀）+ 造贴纸专属 kind 图案（stk_ 前缀）；
+ * 造物/贴纸的 color/size 复用造角色同 id，不重复生成（同 id 幂等跳过）。
+ * 幂等：已生成的跳过，除非 force。opts.only 限定只生成指定 id。
  * 返回生成/跳过/失败清单。绝不抛（单项失败不影响其它）。
  */
 export async function generateCreationIcons(
@@ -1515,6 +1516,8 @@ export async function generateCreationIcons(
   const jobs: { id: string; prompt: string }[] = [
     ...CREATION_OPTIONS.map((o) => ({ id: o.id, prompt: iconPrompt(o.id) })),
     ...PROP_CREATION_OPTIONS.filter((o) => o.id.startsWith('prop_')).map((o) => ({ id: o.id, prompt: propIconPrompt(o.id) })),
+    // 造贴纸专属图案(stk_ 前缀)：color 复用造角色同 id、不重复生成，与造物同理。
+    ...STICKER_CREATION_OPTIONS.filter((o) => o.id.startsWith('stk_')).map((o) => ({ id: o.id, prompt: stickerIconPrompt(o.id) })),
   ];
   for (const job of jobs) {
     if (onlySet && !onlySet.has(job.id)) continue;

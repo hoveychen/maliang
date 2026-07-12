@@ -6,15 +6,18 @@ import { createMockAdapters } from '../src/adapters/mock.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 import { CREATION_OPTIONS } from '../src/creation_options.ts';
 import { PROP_CREATION_OPTIONS } from '../src/prop_creation_options.ts';
+import { STICKER_CREATION_OPTIONS } from '../src/sticker_creation_options.ts';
 
 function fakeSocket(): { send: (d: string) => void; sent: Array<Record<string, unknown>> } {
   const sent: Array<Record<string, unknown>> = [];
   return { send: (d: string) => sent.push(JSON.parse(d)), sent };
 }
 
-// 图标全库 = 造角色全部 + 造物专属(prop_ 前缀的 kind/motion)；造物的 color/size 复用造角色同 id，不另生成。
+// 图标全库 = 造角色全部 + 造物专属(prop_ 前缀) + 造贴纸专属(stk_ 前缀的 kind 图案)；
+// 造物/贴纸的 color/size 复用造角色同 id，不另生成。
 const PROP_OWN = PROP_CREATION_OPTIONS.filter((o) => o.id.startsWith('prop_'));
-const TOTAL_ICONS = CREATION_OPTIONS.length + PROP_OWN.length;
+const STICKER_OWN = STICKER_CREATION_OPTIONS.filter((o) => o.id.startsWith('stk_'));
+const TOTAL_ICONS = CREATION_OPTIONS.length + PROP_OWN.length + STICKER_OWN.length;
 
 test('generateCreationIcons：全量生成（含造物专属）+ 幂等 + force 重生', async () => {
   const store = new WorldStore();
@@ -26,6 +29,7 @@ test('generateCreationIcons：全量生成（含造物专属）+ 幂等 + force 
   assert.equal(r1.failed.length, 0);
   assert.ok(store.getCreationIcon('cat').length > 0, 'cat 应有图标 hash');
   assert.ok(store.getCreationIcon('prop_flower').length > 0, 'prop_flower 应有图标 hash');
+  assert.ok(store.getCreationIcon('stk_sun').length > 0, 'stk_sun 贴纸图案应有图标 hash');
   assert.equal(Object.keys(store.listCreationIcons()).length, TOTAL_ICONS);
   // 幂等：再跑全部跳过
   const r2 = await generateCreationIcons(adapters, store);
