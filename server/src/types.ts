@@ -383,6 +383,10 @@ export interface Player {
   // 贴纸锚点：玩家 anchors 算在设备档案里（服务端够不着），随 world_info.profile 上报存这儿，
   // 再经 presence 转发给同场景其他人——「别人看到的我」的贴纸位（design §5 actors 流转发）。老档缺省。
   anchors?: CharacterAnchors;
+  // 玩家身上贴的贴纸（placement-interaction §3.3 方案 A）：与 Character.attachments 同构，但**服务端权威**
+  // ——由「装扮」app 的 player_attach 写入（非设备 profile 上报），故 world_info upsert 必须保留旧值不被 profile 覆盖。
+  // 经 presenceOf 随 actors 流转发，让同场景其他人也看到「我」戴的贴纸。
+  attachments?: Array<{ slot: 'headTop' | 'handL' | 'handR'; itemId: string }>;
 }
 // 注：玩家位置不在这里——它按 (world, scene, player) 存 player_positions 表。
 // 只按 playerId 存位置在多场景下毫无意义（同一 tile 在不同场景是不同地方）。
