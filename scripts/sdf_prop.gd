@@ -139,20 +139,24 @@ func push_uniforms() -> void:
 	var pos := PackedVector4Array()
 	var rot := PackedVector4Array()
 	var par := PackedVector4Array()
+	var cur := PackedVector4Array()  # bezier 弯管控制点 B.xy/C.xy（其余基本体为 0）
 	for pr: SdfMath.Prim in prims:
 		var o := pr.xform.origin
 		pos.append(Vector4(o.x, o.y, o.z, float(pr.shape)))
 		var q := pr.xform.basis.get_rotation_quaternion()
 		rot.append(Vector4(q.x, q.y, q.z, q.w))
 		par.append(Vector4(pr.params.x, pr.params.y, pr.params.z, pr.blend))
+		cur.append(pr.curve)
 	_mats[0].set_shader_parameter("prim_pos", pos)
 	_mats[0].set_shader_parameter("prim_rot", rot)
 	_mats[0].set_shader_parameter("prim_params", par)
+	_mats[0].set_shader_parameter("prim_curve", cur)
 	# 描边被摘除时不给游离 pass 上传（省一半 uniform 流量）；重挂后下帧自然补上
 	if _mats.size() > 1 and _mats[0].next_pass != null:
 		_mats[1].set_shader_parameter("prim_pos", pos)
 		_mats[1].set_shader_parameter("prim_rot", rot)
 		_mats[1].set_shader_parameter("prim_params", par)
+		_mats[1].set_shader_parameter("prim_curve", cur)
 
 ## 启用锚点游走：以当前局部位置为圆心、radius 为半径漫游（父空间为区块局部系，
 ## 跟随世界环面重定位）。seed 用于确定性行为（同一 tile 的物件每次表现一致）。

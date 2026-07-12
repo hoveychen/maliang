@@ -11,6 +11,8 @@ const SHAPE_SPHERE := 0
 const SHAPE_CAPSULE := 1  ## params: x=半径, y=半身长（两球心距的一半），沿局部 Y
 const SHAPE_CONE := 2     ## 圆头锥: x=底半径(y=-半高处), y=顶半径(y=+半高处), z=半高
 const SHAPE_BOX := 3      ## params: xyz=半边长，圆角=最小半边长×BOX_ROUND_FRAC
+const SHAPE_TORUS := 4    ## 环: x=大半径R, y=管半径r, z=弧半角(度,180=满环,<180 开口C环开口在-Y)；环在 XY 平面、孔轴沿 Z
+const SHAPE_BEZIER := 5   ## 弯管: params x=起点管半径r0, y=终点管半径r1, z=fork(端口挖口,0=无)；curve=(B.xy,C.xy) 局部,A 在原点；曲线在 XY 平面
 
 const BOX_ROUND_FRAC := 0.2
 
@@ -18,6 +20,7 @@ const BOX_ROUND_FRAC := 0.2
 class Prim:
 	var shape: int = SdfMath.SHAPE_SPHERE
 	var params := Vector3.ZERO
+	var curve := Vector4.ZERO  ## 仅 bezier 用：B.xy, C.xy（局部，A 固定原点）
 	var color := Color.WHITE
 	var blend := 0.25  ## 参与融合的最大 blend 半径；细件（天线/幌杆）调小防被吞掉
 	var xform := Transform3D.IDENTITY:
@@ -62,6 +65,27 @@ static func box(xform: Transform3D, half_extents: Vector3, color := Color.WHITE,
 	p.xform = xform
 	return p
 
+## 环：R=大半径、r=管半径、arc_deg=弧半角(180 满环)。环在局部 XY 平面、孔轴沿 Z。
+static func torus(xform: Transform3D, R: float, r: float, arc_deg := 180.0, color := Color.WHITE, blend := 0.25) -> Prim:
+	var p := Prim.new()
+	p.shape = SHAPE_TORUS
+	p.params = Vector3(R, r, arc_deg)
+	p.color = color
+	p.blend = blend
+	p.xform = xform
+	return p
+
+## 弯管：曲线在局部 XY 平面 A(原点)→B→C，管半径 r0→r1 变径，fork>0 端口挖口。
+static func bezier(xform: Transform3D, b: Vector2, c: Vector2, r0: float, r1: float, fork := 0.0, color := Color.WHITE, blend := 0.25) -> Prim:
+	var p := Prim.new()
+	p.shape = SHAPE_BEZIER
+	p.params = Vector3(r0, r1, fork)
+	p.curve = Vector4(b.x, b.y, c.x, c.y)
+	p.color = color
+	p.blend = blend
+	p.xform = xform
+	return p
+
 ## 让局部 Y 轴对准 a→b、原点在中点的刚体变换（腿骨/绳段摆位用）。
 static func between_xform(a: Vector3, b: Vector3) -> Transform3D:
 	var d := b - a
@@ -96,6 +120,10 @@ static func prim_dist(pr: Prim, p: Vector3) -> float:
 			return _round_cone(lp, pr.params.x, pr.params.y, pr.params.z)
 		SHAPE_BOX:
 			return _round_box(lp, pr.params)
+		SHAPE_TORUS:
+			return _torus(lp, pr.params.x, pr.params.y, pr.params.z)
+		SHAPE_BEZIER:
+			return _bezier_tube(lp, pr.curve, pr.params.x, pr.params.y, pr.params.z)
 	return 1e9
 
 ## IQ 的 sdRoundCone：底球(半径 r1)在 y=-half_h，顶球(半径 r2)在 y=+half_h。
@@ -119,6 +147,80 @@ static func _round_box(p: Vector3, he: Vector3) -> float:
 	var outside := Vector3(maxf(q.x, 0.0), maxf(q.y, 0.0), maxf(q.z, 0.0)).length()
 	var inside := minf(maxf(q.x, maxf(q.y, q.z)), 0.0)
 	return outside + inside - rr
+
+## 环面（与 shader sd_torus 一致）：环在 XY 平面、孔轴沿 Z。arc_deg=180 满环，<180 开口 C 环。
+static func _torus(p: Vector3, big_r: float, r: float, arc_deg: float) -> float:
+	if arc_deg >= 179.5:
+		return Vector2(Vector2(p.x, p.y).length() - big_r, p.z).length() - r
+	var sc := Vector2(sin(deg_to_rad(arc_deg)), cos(deg_to_rad(arc_deg)))
+	var pa := Vector3(absf(p.x), p.y, p.z)
+	var pxy := Vector2(pa.x, pa.y)
+	var k := pxy.dot(sc) if (sc.y * pa.x > sc.x * pa.y) else pxy.length()
+	return sqrt(pa.dot(pa) + big_r * big_r - 2.0 * big_r * k) - r
+
+## 平面二次贝塞尔到点距离（IQ 闭式解，与 shader sd_bezier 一致）。返回 Vector2(面内距, 最近 t)。
+static func _bezier(pos: Vector2, big_a: Vector2, big_b: Vector2, big_c: Vector2) -> Vector2:
+	var a := big_b - big_a
+	var b := big_a - 2.0 * big_b + big_c
+	var c := a * 2.0
+	var d := big_a - pos
+	# 退化：控制点共线且 B≈中点时 b≈0（闭式解会除零）→ 退回线段 A→C 距离
+	if b.dot(b) < 1e-8:
+		var ba := big_c - big_a
+		var pa := pos - big_a
+		var tseg := clampf(pa.dot(ba) / maxf(ba.dot(ba), 1e-8), 0.0, 1.0)
+		return Vector2((pa - ba * tseg).length(), tseg)
+	var kk := 1.0 / b.dot(b)
+	var kx := kk * a.dot(b)
+	var ky := kk * (2.0 * a.dot(a) + d.dot(b)) / 3.0
+	var kz := kk * d.dot(a)
+	var res := 0.0
+	var tres := 0.0
+	var pp := ky - kx * kx
+	var p3 := pp * pp * pp
+	var q := kx * (2.0 * kx * kx - 3.0 * ky) + kz
+	var h := q * q + 4.0 * p3
+	if h >= 0.0:
+		h = sqrt(h)
+		var x := (Vector2(h, -h) - Vector2(q, q)) / 2.0
+		var uv := Vector2(signf(x.x) * pow(absf(x.x), 1.0 / 3.0), signf(x.y) * pow(absf(x.y), 1.0 / 3.0))
+		var tt := clampf(uv.x + uv.y - kx, 0.0, 1.0)
+		var e := d + (c + b * tt) * tt
+		res = e.dot(e)
+		tres = tt
+	else:
+		var z := sqrt(-pp)
+		var v := acos(q / (pp * z * 2.0)) / 3.0
+		var m := cos(v)
+		var n := sin(v) * 1.732050808
+		var t3 := Vector3(
+			clampf((m + m) * z - kx, 0.0, 1.0),
+			clampf((-n - m) * z - kx, 0.0, 1.0),
+			clampf((n - m) * z - kx, 0.0, 1.0),
+		)
+		var e0 := d + (c + b * t3.x) * t3.x
+		var e1 := d + (c + b * t3.y) * t3.y
+		var d1 := e0.dot(e0)
+		var d2 := e1.dot(e1)
+		if d1 < d2:
+			res = d1
+			tres = t3.x
+		else:
+			res = d2
+			tres = t3.y
+	return Vector2(sqrt(res), tres)
+
+## bezier 圆管（与 shader sd_bezier_tube 一致）：A=原点，B/C 由 curve 给，半径 r0→r1，fork 端口挖口。
+static func _bezier_tube(lp: Vector3, curve: Vector4, r0: float, r1: float, fork: float) -> float:
+	var big_a := Vector2.ZERO
+	var big_b := Vector2(curve.x, curve.y)
+	var big_c := Vector2(curve.z, curve.w)
+	var dt := _bezier(Vector2(lp.x, lp.y), big_a, big_b, big_c)
+	var d := Vector2(dt.x, lp.z).length() - lerpf(r0, r1, dt.y)
+	if fork > 0.0:
+		var tip := big_c + (big_c - big_b).normalized() * fork * 0.9
+		d = maxf(d, -(Vector2(lp.x, lp.y).distance_to(tip) - fork))
+	return d
 
 ## 多项式 smooth-min：k 越大融合越圆润。k→0 退化为 min。
 static func smin(a: float, b: float, k: float) -> float:
@@ -170,6 +272,13 @@ static func rest_aabb(prims: Array, margin := 0.1) -> AABB:
 				r += maxf(pr.params.y, pr.params.z)
 			SHAPE_BOX:
 				r = pr.params.length() + pr.blend + margin
+			SHAPE_TORUS:
+				# 环从中心伸到 R+r（params.x=R, params.y=r）
+				r = pr.params.x + pr.params.y + pr.blend + margin
+			SHAPE_BEZIER:
+				# A 在原点，曲线在 B/C 凸包内；从中心的最远伸展 = max(|B|,|C|)+管半径
+				var reach := maxf(Vector2(pr.curve.x, pr.curve.y).length(), Vector2(pr.curve.z, pr.curve.w).length())
+				r = reach + maxf(pr.params.x, pr.params.y) + pr.blend + margin
 		var c := pr.xform.origin
 		var b := AABB(c - Vector3(r, r, r), Vector3(2 * r, 2 * r, 2 * r))
 		aabb = b if first else aabb.merge(b)

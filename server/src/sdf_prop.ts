@@ -9,7 +9,7 @@ export interface SdfPropSpin {
 }
 
 export interface SdfPropPart {
-  shape: 'sphere' | 'capsule' | 'cone' | 'box';
+  shape: 'sphere' | 'capsule' | 'cone' | 'box' | 'torus' | 'bezier';
   pos: [number, number, number];
   rot?: [number, number, number];
   color: number;
@@ -22,6 +22,14 @@ export interface SdfPropPart {
   r2?: number;
   h?: number;
   size?: [number, number, number];
+  // torus（环/圈/把手/光环）：R=大半径, r=管半径, arc=弧半角(度,180满环)
+  R?: number;
+  arc?: number;
+  // bezier（弯管：花茎/彩带/尾巴）：r0/r1=起终管半径, fork=端口挖口, b/c=局部控制点(A在原点)
+  r0?: number;
+  fork?: number;
+  b?: [number, number];
+  c?: [number, number];
 }
 
 export interface SdfPropLocomotion {
@@ -68,7 +76,7 @@ export type SdfPropValidation =
   | { ok: false; error: string };
 
 const MAX_PRIMS = 24; // 与 shaders/sdf_field.gdshaderinc 一致
-const SHAPES = new Set(['sphere', 'capsule', 'cone', 'box']);
+const SHAPES = new Set(['sphere', 'capsule', 'cone', 'box', 'torus', 'bezier']);
 const LOCO_TYPES = new Set(['none', 'walker', 'hopper', 'flyer']);
 const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
@@ -82,6 +90,13 @@ function vec3(v: unknown, lo: number, hi: number): [number, number, number] | nu
   const out = v.slice(0, 3).map((x) => num(x, NaN, lo, hi));
   if (out.some((x) => Number.isNaN(x))) return null;
   return out as [number, number, number];
+}
+
+function vec2(v: unknown, lo: number, hi: number): [number, number] | null {
+  if (!Array.isArray(v) || v.length < 2) return null;
+  const out = v.slice(0, 2).map((x) => num(x, NaN, lo, hi));
+  if (out.some((x) => Number.isNaN(x))) return null;
+  return out as [number, number];
 }
 
 /** 校验 + clamp 归一化。结构性错误（形状/腿数/预算）拒收，数值越界一律 clamp。 */
@@ -147,6 +162,22 @@ export function validateSdfPropSpec(raw: unknown): SdfPropValidation {
         const size = vec3(p.size ?? [0.4, 0.4, 0.4], 0.04, 4);
         if (!size) return { ok: false, error: 'box.size 不合法' };
         part.size = size;
+        break;
+      }
+      case 'torus':
+        part.R = num(p.R, 0.4, 0.02, 2.5);
+        part.r = num(p.r, 0.12, 0.02, 1.5);
+        part.arc = num(p.arc, 180, 1, 180);
+        break;
+      case 'bezier': {
+        part.r0 = num(p.r0, 0.12, 0.02, 1.5);
+        part.r1 = num(p.r1, 0.08, 0.02, 1.5);
+        part.fork = num(p.fork, 0, 0, 1);
+        const b = vec2(p.b ?? [0.3, 0.3], -4, 4);
+        const c = vec2(p.c ?? [0.6, 0], -4, 4);
+        if (!b || !c) return { ok: false, error: 'bezier b/c 不合法' };
+        part.b = b;
+        part.c = c;
         break;
       }
     }

@@ -17,6 +17,7 @@ uniform vec4 prim_pos[MAX_PRIMS];
 uniform vec4 prim_rot[MAX_PRIMS];
 uniform vec4 prim_params[MAX_PRIMS];
 uniform vec4 prim_color[MAX_PRIMS];
+uniform vec4 prim_curve[MAX_PRIMS]; // 仅 bezier(shape 5) 用：B.xy, C.xy（局部，A 固定在原点）；其余基本体为 0
 uniform float blend_k = 0.25;       // 全局融合半径
 uniform float color_k = 0.18;       // 颜色软混合宽度
 uniform float curvature = 0.0015;   // world-bend 曲率（与 BendMat.CURVATURE 一致）
@@ -57,6 +58,72 @@ float sd_round_box(vec3 p, vec3 he) {
 	return length(max(q, vec3(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0) - rr;
 }
 
+// 环面：环在 XY 平面、孔轴沿 Z。arc_deg=180 满环，<180 开口 C 环（开口居中在 -Y）。
+// 满环用解析式；开口段用 IQ capped-torus（以 +Y 为对称轴的弧）。
+float sd_torus(vec3 p, float R, float r, float arc_deg) {
+	if (arc_deg >= 179.5) {
+		return length(vec2(length(p.xy) - R, p.z)) - r;
+	}
+	vec2 sc = vec2(sin(radians(arc_deg)), cos(radians(arc_deg)));
+	p.x = abs(p.x);
+	float k = (sc.y * p.x > sc.x * p.y) ? dot(p.xy, sc) : length(p.xy);
+	return sqrt(dot(p, p) + R * R - 2.0 * R * k) - r;
+}
+
+// 平面二次贝塞尔到点的距离（IQ 闭式解）。返回 vec2(面内无符号距, 最近参数 t∈[0,1])。
+vec2 sd_bezier(vec2 pos, vec2 A, vec2 B, vec2 C) {
+	vec2 a = B - A, b = A - 2.0 * B + C, c = a * 2.0, d = A - pos;
+	// 退化：控制点共线且 B≈中点时 b≈0（闭式解会除零）→ 退回线段 A→C 距离
+	if (dot(b, b) < 1e-8) {
+		vec2 ba = C - A, pa = pos - A;
+		float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0);
+		return vec2(length(pa - ba * t), t);
+	}
+	float kk = 1.0 / dot(b, b);
+	float kx = kk * dot(a, b);
+	float ky = kk * (2.0 * dot(a, a) + dot(d, b)) / 3.0;
+	float kz = kk * dot(d, a);
+	float res = 0.0, tres = 0.0;
+	float pp = ky - kx * kx;
+	float p3 = pp * pp * pp;
+	float q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+	float h = q * q + 4.0 * p3;
+	if (h >= 0.0) {
+		h = sqrt(h);
+		vec2 x = (vec2(h, -h) - q) / 2.0;
+		vec2 uv = sign(x) * pow(abs(x), vec2(1.0 / 3.0));
+		float tt = clamp(uv.x + uv.y - kx, 0.0, 1.0);
+		res = dot(d + (c + b * tt) * tt, d + (c + b * tt) * tt);
+		tres = tt;
+	} else {
+		float z = sqrt(-pp);
+		float v = acos(q / (pp * z * 2.0)) / 3.0;
+		float m = cos(v), n = sin(v) * 1.732050808;
+		vec3 t3 = clamp(vec3(m + m, -n - m, n - m) * z - kx, 0.0, 1.0);
+		vec2 e0 = d + (c + b * t3.x) * t3.x;
+		vec2 e1 = d + (c + b * t3.y) * t3.y;
+		float d1 = dot(e0, e0);
+		float d2 = dot(e1, e1);
+		if (d1 < d2) { res = d1; tres = t3.x; } else { res = d2; tres = t3.y; }
+	}
+	return vec2(sqrt(res), tres);
+}
+
+// bezier 圆管：曲线在 XY 平面(A=原点, B/C 由 prim_curve 给)，圆截面半径 r0→r1 变径。
+// fork>0 时在 C 端外侧挖圆口。
+float sd_bezier_tube(vec3 lp, vec4 curve, float r0, float r1, float fork) {
+	vec2 A = vec2(0.0);
+	vec2 B = curve.xy;
+	vec2 C = curve.zw;
+	vec2 dt = sd_bezier(lp.xy, A, B, C);
+	float d = length(vec2(dt.x, lp.z)) - mix(r0, r1, dt.y);
+	if (fork > 0.0) {
+		vec2 tip = C + normalize(C - B) * fork * 0.9;
+		d = max(d, -(length(lp.xy - tip) - fork));
+	}
+	return d;
+}
+
 float sdf_prim(int i, vec3 p) {
 	vec3 lp = quat_unrotate(prim_rot[i], p - prim_pos[i].xyz);
 	int shape = int(prim_pos[i].w + 0.5);
@@ -67,7 +134,9 @@ float sdf_prim(int i, vec3 p) {
 		return length(lp) - pa.x;
 	}
 	if (shape == 2) { return sd_round_cone(lp, pa.x, pa.y, pa.z); }
-	return sd_round_box(lp, pa);
+	if (shape == 3) { return sd_round_box(lp, pa); }
+	if (shape == 4) { return sd_torus(lp, pa.x, pa.y, pa.z); }
+	return sd_bezier_tube(lp, prim_curve[i], pa.x, pa.y, pa.z);
 }
 
 float smin(float a, float b, float k) {
