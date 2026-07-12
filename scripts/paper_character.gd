@@ -192,9 +192,10 @@ func _anchor_for(slot: String) -> Dictionary:
 	return fb
 
 ## alpha 兜底：headTop=最顶不透明行中心；hand=身高 55% 行身体边缘内收 5%。
-## 图集模式/取不到 Image 时用固定比例。
+## 图集(sprite-sheet)模式只扫左上第 0 格：cell0 在原点，把扫描范围收到单格 cellW×cellH 即可，
+## 锚点归一化到单格（与 _position_sticker/几何同坐标系）。取不到 Image（贴图未就绪）时才退固定比例。
 func _fallback_anchor(slot: String) -> Dictionary:
-	var img: Image = texture.get_image() if texture != null and _sheet.is_empty() else null
+	var img: Image = texture.get_image() if texture != null else null
 	if img == null:
 		match slot:
 			"headTop": return { "x": 0.5, "y": 0.02 }
@@ -202,6 +203,9 @@ func _fallback_anchor(slot: String) -> Dictionary:
 			_: return { "x": 0.75, "y": FALLBACK_HAND_Y }
 	var w := img.get_width()
 	var h := img.get_height()
+	if not _sheet.is_empty():
+		w = int(_sheet.get("cellW", w))
+		h = int(_sheet.get("cellH", h))
 	if slot == "headTop":
 		for y in range(h):
 			var sum := 0.0

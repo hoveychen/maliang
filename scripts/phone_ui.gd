@@ -72,6 +72,7 @@ var _avatar_btn: Button             ## "换形象"按钮（生成中禁用防连
 var _avatar_preview: VBoxContainer  ## 换形象预览区（新形象图 + ✓/✗）
 var _avatar_img: TextureRect        ## 预览图
 var _avatar_hash := ""              ## 待确认的新形象资产 hash（✓ 才落档案）
+var _avatar_anchors: Dictionary = {}  ## 与 _avatar_hash 配对的贴纸锚点（✓ 才随档案落盘）
 var _gfx_buttons := {}              ## 画质旋钮控件 {key: Button}
 
 func _init(world) -> void:
@@ -482,6 +483,7 @@ func close_app() -> void:
 	if _avatar_preview != null:
 		_avatar_preview.visible = false
 		_avatar_hash = ""
+		_avatar_anchors = {}
 	back_pressed.emit()
 
 ## ── 状态栏/桌面 widget 刷新 ─────────────────────────────────────────────────
@@ -911,6 +913,8 @@ func _on_avatar_regen_pressed() -> void:
 	_avatar_btn.disabled = false
 	if tex == null:
 		return # 离线/生成失败：按钮恢复可再试，不打断小朋友
+	var anch: Variant = res.get("anchors")
+	_avatar_anchors = anch if typeof(anch) == TYPE_DICTIONARY else {}
 	_avatar_hash = new_hash
 	_avatar_img.texture = tex
 	_avatar_preview.visible = true
@@ -921,12 +925,15 @@ func _on_avatar_regen_yes() -> void:
 		return
 	var profile := PlayerProfile.load_profile()
 	profile["sprite_asset"] = _avatar_hash
+	profile["anchors"] = _avatar_anchors # 与 sprite_asset 成对落档；换形象后旧锚点必须一起换掉
 	PlayerProfile.save_profile(profile)
 	_avatar_hash = ""
+	_avatar_anchors = {}
 	_avatar_preview.visible = false
 	_w.game_audio.play_sfx("confirm")
 	_w._apply_player_sprite() # 热更新在场玩家贴图，立即生效
 
 func _on_avatar_regen_no() -> void:
 	_avatar_hash = ""
+	_avatar_anchors = {}
 	_avatar_preview.visible = false
