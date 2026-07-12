@@ -53,6 +53,19 @@ CC BY 3.0 许可全文：https://creativecommons.org/licenses/by/3.0/
 - **Sci-Fi Robots** — 未来机器人主题的机器人/机甲。`assets/scifi/robots`。
 - **Animated Fish** — 海底主题的海洋生物。`assets/underwater`。
 
+### Poly Haven — 主题地形纹理源（themed-terrain，全 CC0 1.0）
+主题地形 tile 贴图由以下 CC0 光扫纹理经 `tools/watercolorize.py` 程序化水彩风格化而来
+（源纹理不入库，仅记录出处；风格化产物入 `assets/textures/terrain/`）。
+
+| 用途 | Poly Haven slug | 链接 |
+|---|---|---|
+| 沙 sand | `coast_sand_02` | https://polyhaven.com/a/coast_sand_02 |
+| 雪 snow | `snow_03` | https://polyhaven.com/a/snow_03 |
+| 珊瑚 coral | `coral_ground_02` | https://polyhaven.com/a/coral_ground_02 |
+| 白瓷砖 tile | `long_white_tiles` | https://polyhaven.com/a/long_white_tiles |
+
+> P1-P3 逐主题铺开时，新增的每个 Poly Haven / ambientCG 源都追加到本表。
+
 ---
 
 ## 弃用的资产（许可不兼容公开仓库，留档备查）
