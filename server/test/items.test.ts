@@ -3,13 +3,28 @@ import assert from 'node:assert/strict';
 import {
   BUILTIN_ITEMS, getBuiltinItem, resolveBuiltin,
   footprintOrigin, rotatedFootprint, buildStaticOccupancy, validateTerrainItems,
+  creationItemDef,
 } from '../src/items.ts';
+import { fallbackSdfPropSpec } from '../src/sdf_prop.ts';
 import { argYawDeg, yawToArg, emptyTerrain, T_PATH, T_WATER, REQUIRED_GRID } from '../src/terrain.ts';
 import { WorldStore } from '../src/persistence.ts';
 import type { ItemDef } from '../src/types.ts';
 
 const G = REQUIRED_GRID;
 const at = (x: number, y: number) => y * G + x;
+
+// ── 造物 footprint 随体型档（prop-size）────────────────────────────────────
+test('creationItemDef: big 造物 footprint 3×3(+1环), small/medium 保持 1×1', () => {
+  const big = creationItemDef('w1', 'p-big', { ...fallbackSdfPropSpec('big'), scale: 1.4 });
+  assert.equal(big.footprintW, 3);
+  assert.equal(big.footprintH, 3);
+  const mid = creationItemDef('w1', 'p-mid', { ...fallbackSdfPropSpec('mid'), scale: 1.0 });
+  assert.equal(mid.footprintW, 1);
+  assert.equal(mid.footprintH, 1);
+  const small = creationItemDef('w1', 'p-small', { ...fallbackSdfPropSpec('small'), scale: 0.7 });
+  assert.equal(small.footprintW, 1);
+  assert.equal(small.footprintH, 1);
+});
 
 // ── 内置 seed ────────────────────────────────────────────────────────────
 
