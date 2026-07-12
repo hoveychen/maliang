@@ -1,0 +1,30 @@
+罗马主题 3D 资产来源与署名
+================================
+
+2026-07-12 去重复：原先 roman:* 复用 medieval 的 glb（缩略图与中世纪王国字节相同），
+现换成 Sketchfab 上真正的罗马风低多边形模型。全部 CC-BY 4.0（署名即可用，允许再分发+改
+修+商用），下方逐件署名。renderRef key 见 assets/packs/roman/pack.json。
+
+许可：Creative Commons Attribution 4.0 International (CC BY 4.0)
+      https://creativecommons.org/licenses/by/4.0/
+
+文件 → 原模型 / 作者 / 来源
+--------------------------------
+roman_wall.glb        ← "Roman Wall (Free)"                  by wolfgar74      (Sketchfab)
+    https://sketchfab.com/3d-models/roman-wall-free-e72fecb250464d3ca76ac4bcba56248f
+roman_wall_corner.glb ← "Roman Wall 2 (Free)"                by wolfgar74      (Sketchfab)
+    https://sketchfab.com/3d-models/20197957c04f477db3f8489b72f60b49
+roman_column_base.glb ← "Roman Column (Free)"                by wolfgar74      (Sketchfab)
+    https://sketchfab.com/3d-models/roman-column-free-99c64d026bfe4567a6192650c862b9a8
+roman_arch.glb        ← "Low Poly Roman Triumphal Arch (WIP)" by alexferrart3D (Sketchfab)
+    https://sketchfab.com/3d-models/low-poly-roman-triumphal-arch-wip-570ba6a3c1ed43bb96a472f689154f90
+roman_watchtower.glb  ← "Low Poly Roman Lighthouse (WIP)"    by alexferrart3D  (Sketchfab)
+    https://sketchfab.com/3d-models/268ab4da3bac4989b8f42b14f75fef0b
+roman_tower_b.glb     ← "Low Poly Roman Temple (WIP)"        by alexferrart3D  (Sketchfab)
+    https://sketchfab.com/3d-models/low-poly-roman-temple-wip-5953273cfe5346cbacf704809a404c83
+roman_fort.glb        ← "Low Poly Roman Insula 1 (WIP)"      by alexferrart3D  (Sketchfab)
+    https://sketchfab.com/3d-models/6562e2ffeb3c4bd8ae5b714c6600db20
+
+备注：roman_tower（roman:roman_tower）仍复用 medieval/hexagon/building_tower_A_blue.gltf
+（作者 Kay Lousberg，CC0，见 assets/medieval/SOURCES.txt）——其渲染唯一、非重复簇，本次未替换。
+scale 为按各 glb 真实 AABB 测得的首版值，真机手感微调留后续。

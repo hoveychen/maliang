@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://b1spbqn71xi6t"
-path="res://.godot/imported/bedSingle.glb-cdb3b2737537a63dc8a98fe2e3ea4874.scn"
+uid="uid://cc4gcbvuncoyx"
+path="res://.godot/imported/roman_arch.glb-345ceccec5b06e01b6192ff79dab2e43.scn"
 
 [deps]
 
-source_file="res://assets/hospital/bedSingle.glb"
-dest_files=["res://.godot/imported/bedSingle.glb-cdb3b2737537a63dc8a98fe2e3ea4874.scn"]
+source_file="res://assets/roman/roman_arch.glb"
+dest_files=["res://.godot/imported/roman_arch.glb-345ceccec5b06e01b6192ff79dab2e43.scn"]
 
 [params]
 
