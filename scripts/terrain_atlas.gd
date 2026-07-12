@@ -189,14 +189,22 @@ static func _cliff_fn(corner: int, variant: int) -> Callable:
 			return Color(0.0, 1.0, b, 0.5)  # 亮草包边（rim 色查表）
 		return _grass_ctl(x, y, LUM_GRASS_MID, b)
 
-## 崖壁 cell：干净平铺（themed-terrain P3 老板拍板）——A 恒 0.5（shader ctl.a*2 → 1.0× 中性），
-## 侧壁 = 纯 side_layer 贴图 × tint，无凹缝暗边 / 无亮棱线 / 无地层带明暗。
-## 原先 d<0 凹缝(0.325=0.65×) + d<RIM 亮棱线(0.575=1.15×) + _wall_lum 地层带被去除：
-## 那圈深色圆角凹缝就是老板反馈的「tile 固定黑色半透明边」，室内光滑墙面尤其不该有卡通描边。
+## 崖壁 cell：无横向凹缝暗边（老板拍板去黑边），但沿纵向烘一道「崖顶亮→崖底暗」的明暗浮雕
+## （A 通道，shader ctl.a*2 还原为乘数）——崖顶受光/积雪高光，崖基背光入影，破「白方糖硬方块」感。
+## 浮雕只随纵向位置 y 变化、不随有符号距离 d 变化 → 边缘与主体同高处明暗一致，无卡通描边（去黑边保留）。
+## 强度按主题逐层调（shader wall_relief[层]）：雪族满档出雪崖感，岩/土中档，瓷砖/金属/大理石 0=平铺
+## （沿用老板已验收的室外/室内光滑墙观感，零回归）。
+## 纵向映射：一个墙格 = 上半(NW/NE 角，崖顶→墙格中)+下半(SW/SE 角，墙格中→崖底)，
+##   v_global 0=崖顶 1=崖底；lerp(WALL_RELIEF_TOP, WALL_RELIEF_BOT)。
 ## R=1(全 body 域,不混基底) / G=0(无描边,不占 rim 色) / B=ROLE_CLIFF_WALL(线性过滤下恒定)。
-static func _wall_fn(_corner: int, _variant: int) -> Callable:
-	return func(_x: float, _y: float) -> Color:
-		return Color(1.0, 0.0, float(ROLE_CLIFF_WALL) / 8.0, 0.5)
+const WALL_RELIEF_TOP := 1.5   ## 崖壁顶缘明暗乘数（积雪高光/受光棱；A=0.75）
+const WALL_RELIEF_BOT := 0.66  ## 崖壁基部明暗乘数（背光入影；A=0.33）
+static func _wall_fn(corner: int, _variant: int) -> Callable:
+	var is_top := corner == Autotile.C_NW or corner == Autotile.C_NE
+	return func(_x: float, y: float) -> Color:
+		var v_global := (y / float(CELL)) * 0.5 + (0.0 if is_top else 0.5)
+		var lum := lerpf(WALL_RELIEF_TOP, WALL_RELIEF_BOT, v_global)
+		return Color(1.0, 0.0, float(ROLE_CLIFF_WALL) / 8.0, lum * 0.5)
 
 ## NW 规范角坐标下，到域边界的有符号距离（正 = 在路/高地内）。
 static func _signed_dist(cx: float, cy: float, variant: int, r_out := R_OUT) -> float:

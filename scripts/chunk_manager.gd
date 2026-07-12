@@ -204,6 +204,7 @@ static func _make_ground_mat() -> ShaderMaterial:
 	m.set_shader_parameter("top_array", TerrainTextures.build_texture_array())
 	m.set_shader_parameter("layer_tint", TerrainTextures.layer_tints_linear())
 	m.set_shader_parameter("layer_mean", TerrainTextures.layer_means_linear())
+	m.set_shader_parameter("wall_relief", TerrainTextures.layer_wall_reliefs())
 	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
 	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
 	m.set_shader_parameter("curvature", BendMat.CURVATURE)

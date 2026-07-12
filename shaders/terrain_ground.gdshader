@@ -16,6 +16,9 @@ uniform sampler2DArray top_array : source_color, filter_linear_mipmap, repeat_en
 // 数组长度 = TerrainTextures.SHADER_ARRAY_SIZE（P3 12 主题全铺预留 64；两处必须同步）。
 uniform vec3 layer_tint[64];
 uniform vec3 layer_mean[64];
+// 崖壁纵向明暗浮雕强度（逐侧壁层）：0=平铺（沿用老板已验收的光滑墙），1=满档崖顶亮/崖底暗（雪崖感）。
+// 只作用于崖壁 role（ROLE_CLIFF_WALL），顶面/地表明暗（草纹/斑点）不受影响。见 TerrainTextures.layer_wall_reliefs。
+uniform float wall_relief[64];
 uniform vec3 path_rim : source_color = vec3(0.97, 0.92, 0.74);   // 路亮描边
 uniform vec3 cliff_rim : source_color = vec3(0.63, 0.86, 0.42);  // 崖缘亮草包边（仅草地崖唇 cell 用）
 // 万物基底层：body tile 的 autotile 过渡子掩码（ctl.r<1 的圆角处）恒采此层。
@@ -30,7 +33,8 @@ uniform bool low_detail = false;
 uniform float roughness : hint_range(0.0, 1.0) = 0.95;
 uniform float curvature = 0.0015;
 
-const int ROLE_CLIFF_RIM = 3;  // = TerrainAtlas.ROLE_CLIFF_RIM（B*8；仅用于选 rim 色）
+const int ROLE_CLIFF_RIM = 3;   // = TerrainAtlas.ROLE_CLIFF_RIM（B*8；仅用于选 rim 色）
+const int ROLE_CLIFF_WALL = 4;  // = TerrainAtlas.ROLE_CLIFF_WALL（B*8；崖壁浮雕按层强度插值）
 
 varying flat int v_layer;
 
@@ -53,7 +57,10 @@ void fragment() {
 	vec3 body = low_detail ? layer_tint[v_layer] : layer_col(v_layer, wuv);
 	vec3 col = mix(base, body, ctl.r);                     // 主体域 R 混基底/body
 	col = mix(col, role == ROLE_CLIFF_RIM ? cliff_rim : path_rim, ctl.g);  // 描边
-	col *= ctl.a * 2.0;                                    // 明暗纹样
+	float lum = ctl.a * 2.0;                               // 明暗纹样
+	if (role == ROLE_CLIFF_WALL)                           // 崖壁纵向浮雕按侧壁层强度插值（雪崖满档 / 光滑墙 0）
+		lum = mix(1.0, lum, wall_relief[v_layer]);
+	col *= lum;
 	ALBEDO = col;
 	ROUGHNESS = roughness;
 }

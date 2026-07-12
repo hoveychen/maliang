@@ -318,6 +318,20 @@ static func side_layer(ttype: int) -> int:
 		TerrainMap.T_HAZARD: return LAYER_HAZARD
 	return LAYER_CLIFF_WALL
 
+## 层 → 崖壁纵向明暗浮雕强度（shader wall_relief[]，只作用于崖壁 role）。
+## 默认 0 = 平铺（沿用老板已验收的干净墙面，室外岩壁/室内光滑墙零回归）；
+## 雪族满档出「崖顶积雪高光→崖基入影」的雪崖感，破老板反馈的「白方糖硬方块」。
+## 冰面略低（冰本就通透少积雪），雪泥/裸岩积雪/雪原/压实雪拉满。加主题默认继承 0，需要时再点名。
+static func layer_wall_reliefs() -> PackedFloat32Array:
+	var r := PackedFloat32Array()
+	r.resize(SHADER_ARRAY_SIZE)
+	r[LAYER_SNOW] = 1.0
+	r[LAYER_PACKED_SNOW] = 1.0
+	r[LAYER_SLUSH] = 0.9
+	r[LAYER_ROCK_SNOW] = 1.0
+	r[LAYER_ICE] = 0.85
+	return r
+
 ## PackedColorArray → shader vec3[] 用的线性 PackedVector3Array（补齐到 SHADER_ARRAY_SIZE）。
 ## 手动 sRGB→线性：shader 侧 uniform 不带 source_color（数组 uniform 的 source_color 支持
 ## 各版本不一），与 source_color 采样的贴图在线性空间一致（复现旧 : source_color 语义）。

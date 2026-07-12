@@ -54,11 +54,14 @@ func _init() -> void:
 	fails += _check("cliff top grass", 1 if (top.r < 0.05 and _btype(top) == TerrainAtlas.ROLE_CLIFF_RIM) else 0, 1)
 	var wallc := _probe(img, TerrainAtlas.CLIFF_WALL, Autotile.C_NW, Autotile.V_FULL, 16.0, 16.0)
 	fails += _check("wall body", 1 if (wallc.r > 0.95 and _btype(wallc) == TerrainAtlas.ROLE_CLIFF_WALL) else 0, 1)
-	# themed-terrain P3 老板拍板：侧壁干净平铺——A 恒 0.5（1.0× 中性），无凹缝暗边/无棱线/无地层带。
-	# 边缘处与主体明暗一致（不再有深色圆角凹缝 = 老板反馈的「黑色半透明边」）。
-	fails += _check("wall body A 中性 0.5", 1 if absf(wallc.a - 0.5) < 0.01 else 0, 1)
+	# themed-terrain P3：侧壁去横向黑边（保留），但沿纵向烘「崖顶亮→崖底暗」明暗浮雕（破白方糖）。
+	# 崖顶（NW 角 cell 顶，y≈1）应明显亮于崖底（SE 角 cell 底，y≈31）。浮雕仅随 y 变、不随 d 变。
+	var wall_top := _probe(img, TerrainAtlas.CLIFF_WALL, Autotile.C_NW, Autotile.V_FULL, 16.0, 1.0)
+	var wall_bot := _probe(img, TerrainAtlas.CLIFF_WALL, Autotile.C_SE, Autotile.V_FULL, 16.0, 31.0)
+	fails += _check("wall 崖顶亮于崖底(纵向浮雕)", 1 if (wall_top.a - wall_bot.a) > 0.1 else 0, 1)
+	# 去黑边保留：同一纵向高度上，边缘（V_EDGE_V 贴 x=1）与主体明暗一致，无深色圆角凹缝。
 	var crev := _probe(img, TerrainAtlas.CLIFF_WALL, Autotile.C_NW, Autotile.V_EDGE_V, 1.0, 16.0)
-	fails += _check("wall 无凹缝暗边(边缘=主体明暗)", 1 if absf(crev.a - wallc.a) < 0.01 else 0, 1)
+	fails += _check("wall 无凹缝暗边(边缘=主体同高)", 1 if absf(crev.a - wallc.a) < 0.01 else 0, 1)
 
 	# 收敛 body cell（themed-terrain P1）：沙/雪/瓷砖/所有主题地表共用 CELL_BODY 一组几何，
 	# 整格 V_FULL 铺满（R=1）、无描边（G=0）、B=ROLE_BODY；OUTER 角外缘是草。

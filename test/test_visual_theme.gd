@@ -45,8 +45,11 @@ func _initialize() -> void:
 	var pitch := deg_to_rad(float(OS.get_environment("PITCH") if OS.get_environment("PITCH")!="" else "44"))
 	var dist := float(OS.get_environment("DIST") if OS.get_environment("DIST")!="" else "19")
 	camera.position = Vector3(0.0, sin(pitch)*dist, cos(pitch)*dist)
-	camera.look_at(Vector3.ZERO, Vector3.UP)
 	root.add_child(camera)
+	# AIMY：看向点的 y 偏移（默认 0=看渲染原点）。bend 曲率把远处地形卷成穹顶下沉，
+	# 取负值让相机多向下看、把 focus 处的地块从画面底部提到中央（QA 取景用，不影响观感判断）。
+	var aim_y := float(OS.get_environment("AIMY")) if OS.get_environment("AIMY")!="" else 0.0
+	camera.look_at(Vector3(0.0, aim_y, 0.0), Vector3.UP)
 	var fp := OS.get_environment("FOCUS"); var ft := Vector2i(45,33)
 	if fp != "": ft = Vector2i(int(fp.split(",")[0]), int(fp.split(",")[1]))
 	var focus := TerrainMap.tile_center(ft)
