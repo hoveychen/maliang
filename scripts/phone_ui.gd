@@ -20,9 +20,10 @@ const PHONE_APPS := [
 	["home", "回家", "app_home"],
 	["flowers", "小红花", "app_flowers"],
 	["items", "物品", "app_items"],
+	["dress", "装扮", "app_stickers"],
 	["settings", "设置", "app_settings"],
 ]
-const PHONE_APP_FALLBACK := { "home": "ic_pin", "flowers": "reward_flower", "items": "ic_gift", "settings": "ic_gear" }
+const PHONE_APP_FALLBACK := { "home": "ic_pin", "flowers": "reward_flower", "items": "ic_gift", "dress": "app_stickers", "settings": "ic_gear" }
 ## 小红花经济常量（与 server/src/types.ts 对齐）。
 const MAX_FLOWERS := 9              ## 小红花上限（3×3 格）
 const STAMPS_PER_FLOWER := 3        ## 每满 3 章换 1 朵花
@@ -461,6 +462,12 @@ func _step_phone_pager(delta: float) -> void:
 
 ## 打开一个 app：跨页只显示该页并刷新，发 app_opened（world 翻到跨页）。
 func open_app(id: String) -> void:
+	# 「装扮」不是跨页 app：不翻手机，改为收起手机 + 对自己开贴纸盘（world 承接）。
+	if id == "dress":
+		if _w.game_audio != null:
+			_w.game_audio.play_sfx("select")
+		_w._begin_dress_self()
+		return
 	if not _album_pages.has(id):
 		return
 	if _w.game_audio != null:

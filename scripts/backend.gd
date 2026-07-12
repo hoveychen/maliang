@@ -23,6 +23,7 @@ signal sticker_denied(data: Dictionary)    ## 小红花不足未买成：{ world
 ## 角色贴纸挂/摘（character-anchors §5）：{ worldId, sceneId, characterId, slot, itemId|null }。
 ## 场景定向广播，发起者也靠它落地渲染（与 terrain_patch 同哲学）。
 signal character_attach(data: Dictionary)
+signal player_attach(data: Dictionary)   ## 自己/别人的贴纸挂摘广播：{ worldId, sceneId, playerId, slot, itemId }
 signal failed(reason: String)
 # 奖赏系统：world_info 后的状态同步 / 委托完成盖章升花
 signal world_state(data: Dictionary)
@@ -232,6 +233,10 @@ func send_sticker_buy(world_id: String, item_id: String) -> void:
 func send_character_attach(world_id: String, character_id: String, slot: String, item_id: String) -> void:
 	_send({ "type": "character_attach", "worldId": world_id, "characterId": character_id, "slot": slot, "itemId": item_id })
 
+## 给自己贴纸挂/摘：item_id 空串 = 摘下该槽。服务端按 session.playerId/currentScene 落地并广播（含自己）。
+func send_player_attach(world_id: String, slot: String, item_id: String) -> void:
+	_send({ "type": "player_attach", "worldId": world_id, "slot": slot, "itemId": item_id })
+
 func _send(obj: Dictionary) -> void:
 	# 统一注入玩家身份：每条出站消息带 playerId（设备端 UUID），服务端按玩家归属记忆/Visit。
 	if not player_id.is_empty() and not obj.has("playerId"):
@@ -310,6 +315,8 @@ func _dispatch(data: Dictionary) -> void:
 			sticker_denied.emit(data)
 		"character_attach":
 			character_attach.emit(data)
+		"player_attach":
+			player_attach.emit(data)
 		"stage_begin":
 			stage_begin.emit(data)
 		"stage_cmd":
