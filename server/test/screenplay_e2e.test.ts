@@ -330,8 +330,154 @@ test('三幕小剧场: 选角名字对不上 → 脚本抛错 → 广播 stage_a
 
 // ---------------------------------------------------------------------------
 
+const SOCCER_ACTORS: StageActorInfo[] = [
+  { id: 'p1', name: '宝宝', isPlayer: true },
+];
+
+test('踢球: spawnBall → 划两侧球门 → 球进门(服务端 enter 判定)计分/复位 → 先到分获胜收场', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const stop = autoAck(a);
+
+  const done = stages.startStage('w1', {
+    code: loadScreenplay('soccer'),
+    actors: SOCCER_ACTORS,
+    params: {
+      center: { x: 75, y: 75 },
+      goalRed: { x: 20, y: 75, r: 6 },
+      goalBlue: { x: 130, y: 75, r: 6 },
+      gameSec: 120,
+      winScore: 2,
+    },
+  });
+  assert.ok(done);
+
+  // 开局：生成球（完成型，worker 分配 id=ball1）+ 倒计时。球走服务端 enter 判定，不下发客户端探测器。
+  await waitFor(() => a.cmds().some((m) => m.op === 'spawn_ball'));
+  const spawn = a.cmds().find((m) => m.op === 'spawn_ball')!;
+  assert.equal((spawn.args as Record<string, unknown>).id, 'ball1', '球 id 由 worker 分配');
+  await waitFor(() => a.cmds().some((m) => m.op === 'hud_countdown'));
+  assert.equal((a.cmds().find((m) => m.op === 'hud_countdown')!.args as Record<string, unknown>).sec, 120);
+  assert.equal(a.ofType('stage_cmd').some((m) => m.op === 'watch' && (m.args as Record<string, unknown>).ev === 'enter'), false,
+    'enter(球门)走服务端求值，不下发客户端探测器');
+
+  // 第一颗球滚进蓝队门(130,75) → 红队得 1 分 → 复位回中场(ball_reset)。
+  stages.updatePositions('w1', [{ id: 'ball1', x: 130, y: 75 }]);
+  await waitFor(() => a.cmds().some((m) => m.op === 'hud_toast'));
+  assert.match(String((a.cmds().find((m) => m.op === 'hud_toast')!.args as Record<string, unknown>).text), /红队进球/);
+  assert.equal(a.cmds().filter((m) => m.op === 'hud_score_add').length, 1, '进一个球计一分');
+  await waitFor(() => a.cmds().some((m) => m.op === 'ball_reset'));
+
+  // 球离开球门(回中场)→ 再进蓝队门 → 红队第 2 分 = winScore → 获胜收场。
+  stages.updatePositions('w1', [{ id: 'ball1', x: 75, y: 75 }]);
+  stages.updatePositions('w1', [{ id: 'ball1', x: 130, y: 75 }]);
+
+  const r = await done!;
+  stop();
+  assert.equal(r.status, 'done');
+  const res = r.status === 'done' ? r.result : undefined;
+  assert.equal(res?.winner, '红队');
+  assert.equal(res?.red, 2);
+  assert.equal(res?.blue, 0);
+  assert.match(String(res?.praise), /红队赢啦/);
+  // 两个计分板各建一次；先到分那球不复位（游戏已结束），故只复位一次
+  assert.equal(a.cmds().filter((m) => m.op === 'hud_score').length, 2, '红蓝两队各一块计分板');
+  assert.equal(a.cmds().filter((m) => m.op === 'hud_score_add').length, 2, '两粒进球各计一分');
+  assert.equal(a.cmds().filter((m) => m.op === 'ball_reset').length, 1, '只有非获胜球才复位');
+  assert.equal(a.cmds().some((m) => m.op === 'hud_cancel'), true, '收场前撤倒计时');
+  assert.deepEqual(a.ofType('stage_end')[0]?.result, res);
+  assert.equal(stages.activeIn('w1'), false);
+
+  record('soccer', SOCCER_ACTORS, a);
+});
+
+test('踢球: 时间到平局也能收场（一球没进）', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const stop = autoAck(a);
+  const done = stages.startStage('w1', { code: loadScreenplay('soccer'), actors: SOCCER_ACTORS, params: { gameSec: 60 } });
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'watch' && (m.args as Record<string, unknown>).ev === 'timer'));
+  const watch = a.ofType('stage_cmd').find((m) => m.op === 'watch' && (m.args as Record<string, unknown>).ev === 'timer')!;
+  await a.say({ type: 'stage_event', kind: 'timer', subId: (watch.args as Record<string, unknown>).subId as string });
+  const r = await done!;
+  stop();
+  assert.equal(r.status, 'done');
+  const res = r.status === 'done' ? r.result : undefined;
+  assert.equal(res?.winner, '平局');
+  assert.match(String(res?.praise), /平局/);
+  assert.equal(a.cmds().some((m) => m.op === 'hud_score_add'), false, '一球没进');
+});
+
+// ---------------------------------------------------------------------------
+
+const EAGLE_ACTORS: StageActorInfo[] = [
+  { id: 'a1', name: '老鹰', isPlayer: false, voiceId: 'zh-CN-YunxiaNeural' },
+  { id: 'a2', name: '母鸡', isPlayer: false, voiceId: 'zh-CN-XiaoxiaoNeural' },
+  { id: 'a3', name: '小鸡甲', isPlayer: false, voiceId: 'zh-CN-XiaoyiNeural' },
+  { id: 'a4', name: '小鸡乙', isPlayer: false, voiceId: 'zh-CN-XiaoyiNeural' },
+  { id: 'p1', name: '宝宝', isPlayer: true },
+];
+
+test('老鹰抓小鸡: 链式 follow + 鹰追队尾 → near 抓捕(服务端判定)逐只出局 → 抓光收场（纯脚本复用现有原语）', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const stop = autoAck(a);
+
+  const done = stages.startStage('w1', {
+    code: loadScreenplay('eagle_and_chicks'),
+    actors: EAGLE_ACTORS,
+    params: { catchDist: 2 },
+  });
+  assert.ok(done);
+
+  // 链式跟随：母鸡跟小朋友、小鸡一个跟一个、鹰追队尾(小鸡乙 a4)。全是现有 follow，无新原语。
+  await waitFor(() => a.cmds().filter((m) => m.op === 'follow').length >= 4);
+  const follows = a.cmds().filter((m) => m.op === 'follow');
+  assert.deepEqual(follows.slice(0, 4).map((m) => [m.actorId, (m.args as Record<string, unknown>).target]), [
+    ['a2', 'p1'], // 母鸡跟小朋友
+    ['a3', 'a2'], // 小鸡甲跟母鸡
+    ['a4', 'a3'], // 小鸡乙跟小鸡甲
+    ['a1', 'a4'], // 老鹰追队尾（小鸡乙）
+  ]);
+  assert.equal(a.ofType('stage_cmd').some((m) => m.op === 'watch' && (m.args as Record<string, unknown>).ev === 'near'), false,
+    'near 抓捕走服务端求值，不下发客户端探测器');
+
+  // 鹰追上队尾小鸡乙(a4) → 抓到出局 → 改追新队尾小鸡甲(a3)
+  stages.updatePositions('w1', [{ id: 'a1', x: 0, y: 0 }, { id: 'a4', x: 50, y: 0 }]);
+  stages.updatePositions('w1', [{ id: 'a1', x: 49, y: 0 }]); // dist=1 ≤ 2 → 抓到 a4
+  await waitFor(() => a.cmds().filter((m) => m.op === 'follow').length >= 5);
+  const retarget = a.cmds().filter((m) => m.op === 'follow')[4];
+  assert.deepEqual([retarget.actorId, (retarget.args as Record<string, unknown>).target], ['a1', 'a3'], '鹰改追新队尾小鸡甲');
+  assert.match(String((a.cmds().find((m) => m.op === 'hud_toast')!.args as Record<string, unknown>).text), /小鸡乙被抓住/);
+
+  // 鹰追上小鸡甲(a3) → 抓光 → 收场
+  stages.updatePositions('w1', [{ id: 'a3', x: 10, y: 0 }, { id: 'a1', x: 80, y: 0 }]);
+  stages.updatePositions('w1', [{ id: 'a1', x: 11, y: 0 }]); // dist=1 → 抓到 a3
+
+  const r = await done!;
+  stop();
+  assert.equal(r.status, 'done');
+  const res = r.status === 'done' ? r.result : undefined;
+  assert.equal(res?.winner, '老鹰');
+  assert.equal(res?.caught, 2);
+  assert.match(String(res?.praise), /小鸡都被抓住/);
+  assert.equal(a.cmds().filter((m) => m.op === 'follow').length, 5, '链式 4 条 + 抓掉一只后重定向 1 条');
+  assert.equal(a.cmds().filter((m) => m.op === 'stop').length, 4, '每抓一只：鹰停 + 该小鸡停');
+  assert.equal(a.cmds().filter((m) => m.op === 'hud_score_add').length, 2, '抓到两只各计一分');
+  assert.equal(a.cmds().filter((m) => m.op === 'hud_toast').length, 2);
+  assert.equal(a.cmds().some((m) => m.op === 'spawn_ball'), false, '纯追逐玩法不需要球原语');
+  assert.deepEqual(a.ofType('stage_end')[0]?.result, res);
+
+  record('eagle_and_chicks', EAGLE_ACTORS, a);
+});
+
+// ---------------------------------------------------------------------------
+
 test('golden: 命令流与 test/fixtures/screenplay_cmds.json 一致（Godot 侧回放同一份）', () => {
-  assert.deepEqual(Object.keys(recorded).sort(), ['hide_and_seek', 'three_act_play'], '两个剧本都录到了');
+  assert.deepEqual(Object.keys(recorded).sort(), ['eagle_and_chicks', 'hide_and_seek', 'soccer', 'three_act_play'], '四个剧本都录到了');
   const json = `${JSON.stringify(recorded, null, 2)}\n`;
   if (process.env.UPDATE_GOLDEN === '1') {
     mkdirSync(new URL('.', GOLDEN), { recursive: true });
