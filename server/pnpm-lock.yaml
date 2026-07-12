@@ -26,6 +26,9 @@ importers:
       sherpa-onnx-node:
         specifier: ^1.13.3
         version: 1.13.3
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
     devDependencies:
       '@types/node':
         specifier: ^22.10.5
@@ -33,9 +36,6 @@ importers:
       '@types/pngjs':
         specifier: ^6.0.5
         version: 6.0.5
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
 
 packages:
 

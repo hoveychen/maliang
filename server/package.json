@@ -16,11 +16,11 @@
     "fastify": "^5.2.1",
     "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0",
-    "sherpa-onnx-node": "^1.13.3"
+    "sherpa-onnx-node": "^1.13.3",
+    "typescript": "^5.7.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "@types/pngjs": "^6.0.5",
-    "typescript": "^5.7.3"
+    "@types/pngjs": "^6.0.5"
   }
 }
