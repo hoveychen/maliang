@@ -205,6 +205,24 @@ export function isValidTile(tile: TilePos): boolean {
   return inRange(tile.tileX) && inRange(tile.tileY);
 }
 
+/** 立绘上的一个归一化锚点（x,y ∈ [0,1]，原点左上，相对 flip/trim 后的最终立绘图片）。 */
+export interface AnchorPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * 角色立绘锚点（docs/character-anchors-design.md §1）：贴纸/道具的附着位。
+ * source='vision' 表示三点全部由 vision LLM 原生检测通过合法性校验；
+ * 任一点降级到固定比例兜底即记 'fallback'。
+ */
+export interface CharacterAnchors {
+  headTop: AnchorPoint;
+  handL: AnchorPoint;
+  handR: AnchorPoint;
+  source: 'vision' | 'fallback';
+}
+
 export interface Character {
   id: string;
   worldId: string;
@@ -214,7 +232,7 @@ export interface Character {
   voiceId: string;
   /** 进对话时的招呼风格（warm|shy|playful|gentle）；缺省按 id 稳定哈希落到一种，见 greetings.ts。 */
   greetingStyle?: string;
-  appearance: { visualDescription: string; spriteAsset: string; scale: number };
+  appearance: { visualDescription: string; spriteAsset: string; scale: number; anchors?: CharacterAnchors };
   memory: string[];
   chatHistory: ChatTurn[];
   state: string;

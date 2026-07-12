@@ -333,6 +333,12 @@ export function createMockAdapters(): ServiceAdapters {
         return 'right' as const; // mock：默认合规朝向（测试想验证翻转/重试时自行覆盖）
       },
     },
+    anchors: {
+      async detectAnchors(_image: ImageBlob) {
+        // mock：确定性点位（头顶正中/两侧中腰），过 nearOpaque 校验与否取决于测试给的图
+        return { headTop: { x: 0.5, y: 0.05 }, handL: { x: 0.2, y: 0.55 }, handR: { x: 0.8, y: 0.55 } };
+      },
+    },
     moderation: {
       async moderateText(text: string) {
         return BAD_WORDS.test(text)

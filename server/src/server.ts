@@ -69,6 +69,7 @@ interface DeviceReport {
   app?: string;
 }
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
+import { detectCharacterAnchors } from './anchors.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
 import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
@@ -480,6 +481,44 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     reply.header('x-terrain-version', String(rec.version));
     reply.type('application/octet-stream');
     return reply.send(Buffer.from(rec.bytes));
+  });
+
+  // 管理端点：存量角色锚点回填（docs/character-anchors-design.md §2.3，retrim 先例）。
+  // 扫全库有 spriteAsset 的角色，缺 anchors（或 ?force=1 全量重算）的过一遍 vision 检测
+  // （失败走像素兜底，见 anchors.ts）并原地写回。vision 走钱但每角色只一次 flash 调用。
+  // ?world=<id> 限定单个世界。必须配 MALIANG_ADMIN_TOKEN。
+  app.post<{ Querystring: { world?: string; force?: string } }>('/admin/detect-anchors', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const worldFilter = req.query.world;
+    const force = req.query.force === '1';
+    const results: { id: string; name: string; source?: string; skipped?: string }[] = [];
+    for (const w of store.listWorlds().filter((x) => !worldFilter || x.id === worldFilter)) {
+      for (const c of store.listCharacters(w.id)) {
+        const hash = c.appearance?.spriteAsset;
+        if (!hash) continue; // 仙子等无立绘跳过
+        if (c.appearance.anchors && !force) {
+          results.push({ id: c.id, name: c.name, skipped: 'has anchors' });
+          continue;
+        }
+        const blob = store.getAsset(hash);
+        if (!blob) {
+          results.push({ id: c.id, name: c.name, skipped: 'asset missing' });
+          continue;
+        }
+        const anchors = await detectCharacterAnchors(adapters.anchors, blob);
+        if (!anchors) {
+          results.push({ id: c.id, name: c.name, skipped: 'decode failed' });
+          continue;
+        }
+        c.appearance.anchors = anchors;
+        store.saveCharacter(c);
+        results.push({ id: c.id, name: c.name, source: anchors.source });
+      }
+    }
+    return { count: results.length, detected: results.filter((r) => r.source).length, results };
   });
 
   // 管理端点：存量角色立绘「原地裁边」。把已存立绘裁到贴身盒（trimToContent）重新入库，

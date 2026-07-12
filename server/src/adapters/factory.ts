@@ -13,6 +13,7 @@ import { OpenRouterImageAdapter } from './openrouter_image.ts';
 import { OpenRouterVideoAdapter } from './openrouter_video.ts';
 import { ChromaKeyCutoutAdapter } from './chroma_cutout.ts';
 import { OpenRouterOrientationAdapter } from './openrouter_orientation.ts';
+import { OpenRouterAnchorAdapter } from './openrouter_anchors.ts';
 import { LocalASRAdapter, LocalTTSAdapter, hasLocalVoiceModels } from './local.ts';
 import { FallbackTTSAdapter, MinimaxTTSAdapter } from './minimax.ts';
 import { OpenRouterModerationAdapter } from './openrouter_moderation.ts';
@@ -97,6 +98,7 @@ export function createAdapters(config: Config): ServiceAdapters {
     // idle 动画：异步补，慢（60~90s），自带长超时轮询，不共享上面的 client。
     video: new OpenRouterVideoAdapter(config.openrouterApiKey as string, { model: config.videoModel }),
     orientation: new OpenRouterOrientationAdapter(visionClient, config.visionModel),
+    anchors: new OpenRouterAnchorAdapter(visionClient, config.visionModel),
     asr,
     tts,
     moderation: new OpenRouterModerationAdapter(client, config.moderationTextModel),
