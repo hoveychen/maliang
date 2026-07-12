@@ -735,8 +735,8 @@ func refresh_items() -> void:
 			tb.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 			glyph = tb
 		else:
-			glyph = UiAssets.icon_button("ic_gift", 92.0) # 点一下摆到玩家身旁
-		glyph.pressed.connect(func() -> void: _w._place_bag_item(String(item_id)))
+			glyph = UiAssets.icon_button("ic_gift", 92.0) # 点一下进摆放模式（自己选位）
+		glyph.pressed.connect(func() -> void: _w._begin_placement(String(item_id)))
 		var name_label := Label.new()
 		var display := String(def.get("name", "小玩意"))
 		name_label.text = display if count <= 1 else "%s×%d" % [display, count]

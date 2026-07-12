@@ -62,7 +62,7 @@ func _tick() -> void:
 			_check("task chip shows target+stamp icons", chip_icons >= 2, true)
 			_check("wallet flowers synced", scene.call("_red_flower_count"), 2)
 			scene.call("_toggle_album")
-			_check("phone opens", (scene.get("paper_phone") as PaperPhone).state != PaperPhone.State.STOWED, true)
+			_check("phone opens", (scene.get("paper_phone") as PaperPhone).state != PaperPhone.State.DOCKED, true)
 			scene.call("_toggle_album")
 		5:
 			# deliver 判定：亲自走到目标角色旁开始对话 = 送达

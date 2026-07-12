@@ -1047,6 +1047,9 @@ func _setup_hud() -> void:
 	# NPC 对话态的贴纸盘（character-anchors P4）：背包有贴纸时亮起，选贴纸→选槽位贴上。
 	_build_sticker_view(layer)
 
+	# 放置模式 HUD（placement-p1）：从物品 app 进入摆放时亮起——顶部提示 + 底部「转一转/收起来/放这里」。
+	_build_placement_view(layer)
+
 	# 收听 HUD：近身对话期间浮在横幅上方——AIGC 生成的奶油圆角边框贴图（hud_listen，
 	# 麦克风+音波+星饰烤进边框），一排珊瑚色声波柱嵌在边框空心内板、随音量跳动，
 	# 给不识字的小朋友一个又大又清楚的「现在在听你说话」提示。
@@ -1555,6 +1558,7 @@ func _process(delta: float) -> void:
 	_update_portal_markers()   # 传送门拱随世界滚动（与角色同一套环面最短位移）
 	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
+	_update_place_ghost()
 	_update_voice_wave(delta)
 	tp = _prof_lap(tp, "tap/wave")
 	_update_think_bubble(delta)
@@ -2371,6 +2375,18 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not aid.is_empty():
 					_stage.on_local_tap(aid)
 		return
+	# 放置模式（placement-p1）：单指点地 → 幽灵挪到该 tile（贴纸吸附最近边）；吞掉走路/拾取/
+	# 跟随/缩放，交互都交给底部 HUD。双指相机手势本模式下不接（避免幽灵与镜头抢手）。
+	if _placing:
+		if event is InputEventScreenTouch or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
+			if not event.pressed:
+				var g := _pick_ground(event.position)
+				if g != Vector2.INF:
+					_place_tile = WorldGrid.to_tile(g)
+					if _place_is_edge:
+						_place_edge = _nearest_edge(g)
+					_refresh_place_ghost()
+		return
 	# 调试：选中角色后按 Enter/空格。小神仙→造角色；其他→本地 move_to（离线演示）。
 	if event.is_action_pressed("ui_accept") and selected != null:
 		var d := _find_npc_dict(selected)
@@ -2882,6 +2898,24 @@ var _sticker_view: Control          ## 贴纸盘容器（NPC 对话态显示）
 var _sticker_row: HBoxContainer     ## 动态格子行
 var _sticker_pick := ""             ## 已选中的贴纸实体 id（空=贴纸选择段）
 const STICKER_SLOTS := [["headTop", "头顶"], ["handL", "左手"], ["handR", "右手"]]
+
+# ── 放置模式（placement-p1 §3.1/§3.2）────────────────────────────────────────
+# 从物品 app 点物品进入：一次一件，跟手幽灵(footprint 高亮片)随点地移动，合法绿/非法红，
+# 点「放这里」发 item_place 带玩家选的 tile+yaw(+edge)，取消退出。服务端零改（真权威校验
+# 仍在 validateTerrainItems，客户端高亮只是好用的预判）。
+var _placing := false               ## 是否在放置模式
+var _place_item_id := ""            ## 正在放的物品实体 id
+var _place_is_edge := false         ## true=贴纸（贴 tile 边），false=tile 物品
+var _place_tile := Vector2i.ZERO    ## 当前目标 tile（锚点）
+var _place_yaw := 0.0               ## tile 物品朝向 0/90/180/270
+var _place_edge := TerrainMap.EDGE_S ## 贴纸选中的边（吸附光标最近边）
+var _place_legal := false           ## 当前位置是否合法（决定绿/红 + 能否确认）
+var _place_ghost: MeshInstance3D    ## footprint 高亮片（贴弯曲地表，随世界滚动重摆）
+var _place_nub: MeshInstance3D      ## 朝向指示小块（footprint 正面半格外）
+var _place_ghost_logical := Vector2.ZERO ## 幽灵中心逻辑坐标（每帧据此重摆）
+var _place_view: Control            ## 放置 HUD（放这里/转一转/收起来）
+var _place_hint: Label              ## HUD 顶部提示条
+var _place_confirm_btn: Button      ## 「放这里」按钮（按合法性启用/灰显）
 
 func _build_sticker_view(host: CanvasLayer) -> void:
 	_sticker_view = Control.new()
@@ -3607,6 +3641,8 @@ func _on_scene_entered(data: Dictionary) -> void:
 	if sid.is_empty():
 		return
 	_portal_armed = false # 落地时多半正站在返回传送点上：走出去才重新武装（_step_portal）
+	if _placing:
+		_end_placement() # 换场景丢弃在飞的摆放（tile 索引跨场景无意义）
 	_unload_scene()
 	ItemCatalog.set_defs(data.get("items", [])) # 新场景可能引用没见过的造物实体
 
@@ -4326,36 +4362,208 @@ func _step_prop_press(delta: float) -> void:
 			if game_audio != null:
 				game_audio.play_sfx("enter")
 
-## 物品页点一下：背包一份摆到玩家身旁（本地就近找位，服务端校验后广播落地）。
-## 贴纸（mount edge）走边缘找位：优先玩家所站 tile 的南边缘（面向相机=孩子看得见），
-## 被占顺时针换边，四边全占螺旋外扩（docs/sticker-items-design.md §2.4）。
-func _place_bag_item(item_id: String) -> void:
+## 物品页点一下：进入放置模式（placement-p1 §3.1/§3.2）——收手机、亮 HUD，幽灵停在玩家
+## 身旁一个合法初始位（沿用旧的就近找位当默认落点），再由玩家点地挪位、转朝向、确认落地。
+## 贴纸（mount edge）默认吸到玩家所站 tile 的空边（南边优先=面向相机）。
+func _begin_placement(item_id: String) -> void:
 	if int(bag.get(item_id, 0)) < 1 or not online:
 		return
+	_placing = true
+	_place_item_id = item_id
+	_place_is_edge = String(ItemCatalog.get_def(item_id).get("mount", "tile")) == "edge"
+	_place_yaw = 0.0
+	_place_edge = TerrainMap.EDGE_S
 	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
-	if String(ItemCatalog.get_def(item_id).get("mount", "tile")) == "edge":
+	if _place_is_edge:
 		var espot := _find_sticker_spot(WorldGrid.to_tile(WorldGrid.wrap_pos(anchor)))
-		if espot.z < 0:
-			banner.text = "这里贴不下啦，换个地方试试"
-			banner.visible = true
-			return
-		_bag_action = "place"
-		backend.send_item_place(world_id, item_id, Vector2i(espot.x, espot.y), 0.0, espot.z)
-		if game_audio != null:
-			game_audio.play_sfx("pluck")
-		_close_phone()
-		return
-	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0)))
-	var spot := _find_item_spot(want)
-	if spot.x < 0:
-		banner.text = "这里放不下啦，换个地方试试"
-		banner.visible = true
+		if espot.z >= 0:
+			_place_tile = Vector2i(espot.x, espot.y)
+			_place_edge = espot.z
+		else:
+			_place_tile = WorldGrid.to_tile(WorldGrid.wrap_pos(anchor))
+	else:
+		var spot := _find_item_spot(WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0))))
+		_place_tile = spot if spot.x >= 0 else WorldGrid.to_tile(WorldGrid.wrap_pos(anchor))
+	if selected != null:
+		_exit_interaction()
+	_close_phone() # 收起手机看落位（幂等，同时退近身相机）
+	if _place_view != null:
+		_place_view.visible = true
+	_refresh_place_ghost()
+
+## 确认落地：发 item_place 带玩家选的 tile+yaw（贴纸带 edge）。合法才发；服务端权威复检后广播落地。
+func _confirm_placement() -> void:
+	if not _placing or not _place_legal:
 		return
 	_bag_action = "place"
-	backend.send_item_place(world_id, item_id, spot, randf() * 360.0)
+	if _place_is_edge:
+		backend.send_item_place(world_id, _place_item_id, _place_tile, 0.0, _place_edge)
+	else:
+		backend.send_item_place(world_id, _place_item_id, _place_tile, _place_yaw)
 	if game_audio != null:
 		game_audio.play_sfx("pluck") # 从册子拈出来
-	_close_phone() # 收起手机看物件落地（幂等，同时退近身相机）
+	_end_placement()
+
+## 退出放置模式（确认后/取消/切场景）：藏幽灵与 HUD，清状态。
+func _end_placement() -> void:
+	_placing = false
+	_place_item_id = ""
+	if _place_ghost != null:
+		_place_ghost.visible = false
+	if _place_view != null:
+		_place_view.visible = false
+
+## 放置 HUD：底部一排大按钮（转一转/收起来/放这里）+ 顶部提示条。全屏透明容器不吃点击，
+## 只有按钮吃——空地点击照样穿透到 _unhandled_input 去挪幽灵（placement-p1 §3.1）。
+func _build_placement_view(host: CanvasLayer) -> void:
+	_place_view = Control.new()
+	_place_view.name = "PlacementView"
+	_place_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_place_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_place_view.visible = false
+	host.add_child(_place_view)
+	_place_hint = Label.new()
+	_place_hint.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_place_hint.offset_top = 40.0
+	_place_hint.offset_bottom = 110.0
+	_place_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_place_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_style_label(_place_hint, 30)
+	_place_view.add_child(_place_hint)
+	var row := HBoxContainer.new()
+	row.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	row.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	row.offset_top = -150.0
+	row.offset_bottom = -34.0
+	row.add_theme_constant_override("separation", 28)
+	_place_view.add_child(row)
+	var turn := Button.new()
+	turn.custom_minimum_size = Vector2(150.0, 116.0)
+	UiAssets.style_card_button(turn, 22.0)
+	turn.text = "转一转"
+	turn.pressed.connect(_rotate_placement)
+	row.add_child(turn)
+	var cancel := Button.new()
+	cancel.custom_minimum_size = Vector2(150.0, 116.0)
+	UiAssets.style_card_button(cancel, 22.0)
+	cancel.text = "收起来"
+	cancel.pressed.connect(func() -> void:
+		if game_audio != null:
+			game_audio.play_sfx("enter")
+		_end_placement())
+	row.add_child(cancel)
+	_place_confirm_btn = Button.new()
+	_place_confirm_btn.custom_minimum_size = Vector2(190.0, 116.0)
+	UiAssets.style_card_button(_place_confirm_btn, 24.0)
+	_place_confirm_btn.text = "放这里"
+	_place_confirm_btn.pressed.connect(_confirm_placement)
+	row.add_child(_place_confirm_btn)
+
+## 朝向：点「转一转」加 90°（4 向）。贴纸无朝向（朝向由所在边法线定），转按钮对它无效。
+func _rotate_placement() -> void:
+	if _place_is_edge:
+		return
+	_place_yaw = fmod(_place_yaw + 90.0, 360.0)
+	if game_audio != null:
+		game_audio.play_sfx("bell")
+	_refresh_place_ghost()
+
+## yaw(度) → footprint arg（256 档，与服务端 yawToArg 同口径）：仅用于 90/270 时 W/H 互换判定。
+func _yaw_to_arg(yaw: float) -> int:
+	return int(round(fposmod(yaw, 360.0) / 360.0 * 256.0)) % 256
+
+## 点地落在 _place_tile 内的相对位置 → 最近的边（贴纸吸附）。+x=东 +y=南。
+func _nearest_edge(ground: Vector2) -> int:
+	var w := WorldGrid.wrap_pos(ground)
+	var fx := w.x / WorldGrid.TILE_SIZE - float(_place_tile.x) - 0.5
+	var fy := w.y / WorldGrid.TILE_SIZE - float(_place_tile.y) - 0.5
+	if absf(fx) >= absf(fy):
+		return TerrainMap.EDGE_E if fx > 0.0 else TerrainMap.EDGE_W
+	return TerrainMap.EDGE_S if fy > 0.0 else TerrainMap.EDGE_N
+
+## 当前目标是否合法（客户端预判，绿/红上色 + 门确认；服务端 validateTerrainItems 是真权威）。
+func _placement_legal() -> bool:
+	if _place_is_edge:
+		return TerrainMap.tile_type(_place_tile) != TerrainMap.T_WATER \
+			and TerrainMap.edge_item_id(_place_tile, _place_edge).is_empty()
+	if not TerrainMap.tile_item_id(_place_tile).is_empty():
+		return false
+	var span := ItemCatalog.footprint(_place_item_id, _yaw_to_arg(_place_yaw))
+	var origin := Vector2i(_place_tile.x - (span.x - 1) / 2, _place_tile.y - (span.y - 1) / 2)
+	var path_ok := bool(ItemCatalog.get_def(_place_item_id).get("pathOk", false))
+	return OccupancyMap.prop_area_ok(origin, span.x, span.y, path_ok)
+
+## 重算幽灵：合法性→颜色，footprint/边→mesh 尺寸与朝向指示，存中心逻辑坐标供每帧重摆。
+func _refresh_place_ghost() -> void:
+	if _place_ghost == null:
+		_place_ghost = MeshInstance3D.new()
+		_place_ghost.mesh = BoxMesh.new()
+		var mat := StandardMaterial3D.new()
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_place_ghost.material_override = mat
+		_place_nub = MeshInstance3D.new()
+		_place_nub.mesh = BoxMesh.new()
+		(_place_nub.mesh as BoxMesh).size = Vector3(0.5, 0.14, 0.5)
+		_place_nub.material_override = mat
+		_place_ghost.add_child(_place_nub)
+		add_child(_place_ghost)
+	_place_ghost.visible = true
+	_place_legal = _placement_legal()
+	var mat := _place_ghost.material_override as StandardMaterial3D
+	mat.albedo_color = Color(0.35, 1.0, 0.5, 0.55) if _place_legal else Color(1.0, 0.4, 0.4, 0.55)
+	var ts := WorldGrid.TILE_SIZE
+	var center_tile := Vector2(float(_place_tile.x) + 0.5, float(_place_tile.y) + 0.5)
+	if _place_is_edge:
+		# 贴纸：1×1 tile 上一条贴边的薄条（长边沿该边，往边法线外挪半格）。
+		var along_x := _place_edge == TerrainMap.EDGE_N or _place_edge == TerrainMap.EDGE_S
+		(_place_ghost.mesh as BoxMesh).size = Vector3(ts * 0.9, 0.14, 0.4) if along_x else Vector3(0.4, 0.14, ts * 0.9)
+		var off := Vector2.ZERO
+		match _place_edge:
+			TerrainMap.EDGE_N: off = Vector2(0.0, -0.5)
+			TerrainMap.EDGE_S: off = Vector2(0.0, 0.5)
+			TerrainMap.EDGE_E: off = Vector2(0.5, 0.0)
+			TerrainMap.EDGE_W: off = Vector2(-0.5, 0.0)
+		center_tile += off
+		_place_nub.visible = false
+	else:
+		var span := ItemCatalog.footprint(_place_item_id, _yaw_to_arg(_place_yaw))
+		var origin := Vector2(float(_place_tile.x) - float(span.x - 1) / 2.0, float(_place_tile.y) - float(span.y - 1) / 2.0)
+		center_tile = origin + Vector2(float(span.x), float(span.y)) * 0.5
+		(_place_ghost.mesh as BoxMesh).size = Vector3(float(span.x) * ts * 0.92, 0.12, float(span.y) * ts * 0.92)
+		# 朝向指示小块：贴在 footprint「正面」半格外，随 yaw 转（0=南朝相机）。
+		_place_nub.visible = true
+		var dir := Vector2.ZERO
+		match _yaw_to_arg(_place_yaw) * 360 / 256:
+			0: dir = Vector2(0.0, 1.0)
+			90: dir = Vector2(-1.0, 0.0)
+			180: dir = Vector2(0.0, -1.0)
+			270: dir = Vector2(1.0, 0.0)
+		_place_nub.position = Vector3(dir.x * (float(span.x) * ts * 0.5 + 0.2), 0.02, dir.y * (float(span.y) * ts * 0.5 + 0.2))
+	_place_ghost_logical = WorldGrid.wrap_pos(center_tile * ts)
+	_update_place_ghost()
+	_update_placement_hint()
+
+## 每帧把幽灵重摆到弯曲地表（世界随玩家滚动，逻辑坐标固定，渲染位置要重算）。
+func _update_place_ghost() -> void:
+	if not _placing or _place_ghost == null or not _place_ghost.visible:
+		return
+	var d := WorldGrid.shortest_delta(focus_logical, _place_ghost_logical)
+	var ty := float(TerrainMap.tile_height(_place_tile)) * TerrainMap.STEP_HEIGHT
+	_place_on_bent_ground(_place_ghost, Vector3(d.x, ty + 0.08, d.y))
+
+## HUD 提示 + 「放这里」按钮按合法性启用/灰显。
+func _update_placement_hint() -> void:
+	if _place_hint == null:
+		return
+	var noun := "贴纸" if _place_is_edge else "东西"
+	if _place_legal:
+		_place_hint.text = "点空地挪一挪，好了就按「放这里」"
+	else:
+		_place_hint.text = "这里放不下这个%s，换个地方点点看" % noun
+	if _place_confirm_btn != null:
+		_place_confirm_btn.disabled = not _place_legal
+		_place_confirm_btn.modulate = Color.WHITE if _place_legal else Color(1, 1, 1, 0.4)
 
 ## 贴纸边缘找位：want tile 起螺旋外扩，每 tile 按 S→E→W→N 试空边（S 面向相机优先）。
 ## 返回 Vector3i(x, y, side)；找不到 side=-1。边缘不占地，只查该边为空。
@@ -5860,7 +6068,7 @@ func _pulse_album_button() -> void:
 
 ## 手机开合（点左下角手机按钮切换）：开→3D 手机弹出+遮罩+进近身相机；关→反之。
 ## 音效挂在这里而非 _open_phone/_close_phone：那两个是幂等内部函数，
-## _place_bag_item 会调 _close_phone 收起手机，挂进去就会在非用户操作时误响。
+## _begin_placement 会调 _close_phone 收起手机，挂进去就会在非用户操作时误响。
 func _toggle_album() -> void:
 	if game_audio != null:
 		game_audio.play_sfx("page")
