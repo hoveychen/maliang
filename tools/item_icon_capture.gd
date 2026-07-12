@@ -26,10 +26,12 @@ extends SceneTree
 ## ⚠️ GPU 停滞会产出「冻结帧」而非空白帧：连续渲染到某件后 SubViewport 不再刷新、冻结在上一张
 ## 成功帧上。这帧非空白，光靠空白护栏（_render_item 里 area<64）拦不住，会被当成当前物品上传——
 ## 一整批连号物品就全焊上同一张冻结图（生产曾 98/156 件中招，分 4 个连号簇）。两道防线：
-##   1) 停滞帧护栏：本进程内若一件的 PNG 与上一张已上传的 PNG 字节完全相同，判为冻结帧 → 跳过不传，
-##      留给下个新进程（GPU 干净）重渲。见 _run 里的 _last_png 比对。
-##   2) 每进程上限 ITEM_ICON_MAX_PER_RUN（默认 20，0=不限）：上传够 N 件就自动退出，趁 GPU 未累积到
-##      停滞阈值就换新进程，配合 until 循环收敛。这是治本：根本不让 GPU 撑到冻结。
+##   1) 每进程上限 ITEM_ICON_MAX_PER_RUN（默认 8，0=不限）【主防线/治本】：上传够 N 件就自动退出，
+##      趁 GPU 未累积到停滞阈值就换新进程，配合 until 循环收敛。冻结阈值随机器差异极大（实测 5~30 不等），
+##      若日志出现 stale 或事后发现重复图簇，就把它调更小；ITEM_ICON_MAX_PER_RUN=1（一件一进程）最稳、零冻结风险。
+##   2) 停滞帧护栏【次要防线】：本进程内若一件的 PNG 与上一张已上传的字节完全相同，判为疑似冻结帧 → 跳过不传，
+##      留给下个新进程单渲。注意：共享同一 glb 的合法物品（roman:* 复用 medieval、hospital 病床复用 furniture 单人床）
+##      正常渲染就是字节相同，会被误判 stale 跳过——但它们随后会被单独重渲上传，只是多几趟、不会永久丢失。
 ## 修历史坏数据：ITEM_ICON_REDO_HASHES=hash1,hash2,... 让「当前 iconHash 命中该列表」的物品无视
 ##   已有图强制重渲（重渲出唯一新图后即脱离该列表，自然被后续进程跳过，配合上限+until 收敛）。
 
@@ -45,7 +47,8 @@ var _base := "http://127.0.0.1:8080"
 var _token := ""
 var _only: PackedStringArray = []
 var _force := false  # 默认跳过已有缩略图的物品（可续跑）；ITEM_ICON_FORCE=1 全量重渲
-var _max_per_run := 20  # 每进程上传上限，够了就自退避免 GPU 累积到停滞（0=不限）
+var _max_per_run := 8  # 每进程上传上限，够了就自退避免 GPU 累积到停滞（0=不限）；冻结阈值随机器差异大
+                        #（实测 5~30 不等），若出现 stale 跳过或重复图簇就调小；ITEM_ICON_MAX_PER_RUN=1 最稳（一件一进程）
 var _redo_hashes: PackedStringArray = []  # 当前 iconHash 命中即强制重渲（修历史坏数据）
 var _last_png: PackedByteArray = PackedByteArray()  # 上一张已上传 PNG，用于停滞帧比对
 var _vp: SubViewport
@@ -148,11 +151,14 @@ func _run() -> void:
 			skip += 1
 			continue
 		var png := img.save_png_to_buffer()
-		# 停滞帧护栏：GPU 累积后 SubViewport 会冻结在上一张成功帧上。这帧非空白、骗过空白护栏，
-		# 但与上一张已上传的 PNG 字节完全相同——判为冻结帧，跳过不传，留给下个新进程重渲。
-		# （不同 3D 模型的正常渲染不会字节级相同，故此比对不会误伤真实物品。）
+		# 停滞帧护栏（次要防线，主防线是每进程上限）：GPU 累积后 SubViewport 会冻结在上一张成功帧上，
+		# 这帧非空白、骗过空白护栏，若与上一张已上传的 PNG 字节相同就判冻结帧、跳过留待新进程。
+		# ⚠️ 注意：字节相同不一定是冻结——共享同一 glb 的物品（如 roman:* 复用 medieval 资产、
+		# hospital 病床复用 furniture 单人床）正常渲染就是字节相同。此处会把这类合法项误判为 stale
+		# 而跳过；但它们会在后续进程被单独重渲上传（until 收敛），不会永久丢失，只是多几趟。
+		# 真正堵住冻结的是每进程上限（把每进程渲染件数压到 GPU 累积到冻结阈值之前）。
 		if not _last_png.is_empty() and png == _last_png:
-			print("[icon] stale %s（与上一张字节相同，疑 GPU 停滞冻结帧）→ 跳过留待新进程" % id)
+			print("[icon] stale %s（与上一张字节相同，疑冻结帧或合法共享资产）→ 跳过留待新进程单渲" % id)
 			stale += 1
 			continue
 		var res: Dictionary = await _post_icon(id, Marshalls.raw_to_base64(png))
