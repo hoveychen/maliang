@@ -26,8 +26,12 @@ export interface GenMessage {
 /** 一次原始生成：把对话喂给（强）模型，返回它吐的原始文本（应是 {cast,code} 的 JSON）。 */
 export type DraftFn = (messages: GenMessage[]) => Promise<string>;
 
-/** 生成层默认最多尝试次数（首次 + 带错重生成）。老板要求 1-2 次重试环。 */
-export const DEFAULT_GEN_ATTEMPTS = 3;
+/**
+ * 生成层默认最多尝试次数（首次 + 带错重生成）。
+ * 定为 5：2026-07-12 真调 kimi-k2.6 扩测 7 个冷门口语，5/7 需 ≥2 轮、丢沙包/捉迷藏用满 3 轮才过，
+ * 3 轮对更难的口语是边界——给到 5 留余地。生成不在对话闭环、不怕慢（仙子已先应下），多一两轮几乎无代价。
+ */
+export const DEFAULT_GEN_ATTEMPTS = 5;
 
 function stripFences(s: string): string {
   return s.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/i, '').trim();
