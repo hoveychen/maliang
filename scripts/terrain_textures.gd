@@ -27,7 +27,10 @@ const LAYER_DEEP_BED := 12    ## 深水床（brown_mud_leaves_01 风格化，暗
 const LAYER_COUNT := 13
 
 ## shader 端 layer_tint[]/layer_mean[] 的固定数组长度（预留冗余，P3 加层不必改 shader）。
-const SHADER_ARRAY_SIZE := 16
+## P3（12 主题全铺）预计 40-50 层，故 16→64（老板 2026-07-12 定：最小改动，
+## 单全局数组，接受老 Mali 全主题常驻的显存代价，留真机测试再优化——见 [[tablet-perf-investigation]]）。
+## 与 shaders/terrain_ground.gdshader 的 layer_tint[N]/layer_mean[N] 必须同步。
+const SHADER_ARRAY_SIZE := 64
 
 ## 层 → 贴图资源路径（下标 = 层索引，顺序敏感）。各层须同尺寸同格式（现全 1024² RGB）。
 const LAYER_TEX_PATHS: Array[String] = [

@@ -13,8 +13,9 @@ render_mode cull_back, diffuse_lambert, specular_disabled, world_vertex_coords;
 uniform sampler2D control_tex : filter_linear_mipmap, repeat_disable;  // 控制图选域用（老 Mali 上大覆盖面最贵的采样）
 uniform sampler2DArray top_array : source_color, filter_linear_mipmap, repeat_enable;  // 顶面+侧壁贴图数组（层序 = TerrainTextures.LAYER_*）
 // 逐层色调 / 均值（TerrainTextures.layer_tints_linear/means_linear 传入，已 sRGB→线性；下标 = 层索引）。
-uniform vec3 layer_tint[16];
-uniform vec3 layer_mean[16];
+// 数组长度 = TerrainTextures.SHADER_ARRAY_SIZE（P3 12 主题全铺预留 64；两处必须同步）。
+uniform vec3 layer_tint[64];
+uniform vec3 layer_mean[64];
 uniform vec3 path_rim : source_color = vec3(0.97, 0.92, 0.74);   // 路亮描边
 uniform vec3 cliff_rim : source_color = vec3(0.63, 0.86, 0.42);  // 崖缘亮草包边（仅草地崖唇 cell 用）
 // 万物基底层：body tile 的 autotile 过渡子掩码（ctl.r<1 的圆角处）恒采此层。
