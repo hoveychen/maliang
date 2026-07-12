@@ -3695,6 +3695,8 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 	if not real:
 		color = Color(0.85, 0.8, 1.0) if c.get("isFairy", false) else Color(0.92, 0.92, 0.92)
 	npc.setup(tex, color, String(c.get("name", "")))
+	if real: # 立绘锚点（贴纸附着位，character-anchors）：只有真立绘的坐标系有意义
+		npc.set_anchors(appearance.get("anchors", {}))
 	var is_fairy := bool(c.get("isFairy", false))
 	if is_fairy:
 		BlobShadow.detach(npc) # 悬浮飞行不落地，脚下暗斑穿帮
