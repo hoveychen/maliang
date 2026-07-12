@@ -139,6 +139,7 @@ run_test test_intro_skip           --fixed-fps 10 --quit-after 60
 run_test test_intro_benchmark      --fixed-fps 60 --quit-after 3600
 run_test test_world_notice         --fixed-fps 10 --quit-after 40
 run_test test_player_anchors       --fixed-fps 10 --quit-after 30
+run_test test_remote_player_anchors --fixed-fps 10 --quit-after 30
 run_test test_visual_greeting      --fixed-fps 10 --quit-after 60
 run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
 run_test test_paper_actions        --fixed-fps 10 --quit-after 60

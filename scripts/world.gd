@@ -1748,7 +1748,9 @@ func _apply_replicated(id: String, pos: Vector2, t: int, now_local: int, is_play
 	if ra.is_empty():
 		# presence 通常已经先把副本立起来了；这里是兜底（快照丢了/本端还没收到 join）。
 		var p: Dictionary = _presence.get(id, {})
-		ra = _spawn_remote_actor(id, pos, String(p.get("spriteAsset", "")), String(p.get("name", "")))
+		var panch: Variant = p.get("anchors")
+		ra = _spawn_remote_actor(id, pos, String(p.get("spriteAsset", "")), String(p.get("name", "")),
+			panch if typeof(panch) == TYPE_DICTIONARY else {})
 		_remote_actors[id] = ra
 	(ra["buf"] as RemoteActorBuffer).push(t, pos, now_local)
 
@@ -1769,12 +1771,13 @@ func _halt_npc_for_replication(n: Dictionary) -> void:
 
 ## 远端玩家 avatar 的渲染副本。先用占位立起来（网络往返期间也得有个人在那儿），
 ## 拿到 presence 的 spriteAsset 就换成那个小朋友的真实立绘（与本地玩家同一套归一化）。
-func _spawn_remote_actor(id: String, pos: Vector2, sprite := "", disp_name := "") -> Dictionary:
+func _spawn_remote_actor(id: String, pos: Vector2, sprite := "", disp_name := "", anchors := {}) -> Dictionary:
 	var node := PaperCharacter.new()
 	add_child(node)
 	var label := disp_name if not disp_name.is_empty() else id
 	node.setup(critter_tex, Color(0.86, 0.92, 1.0), label) # setup 内部归一尺寸 + 挂脚下暗斑
-	_apply_player_sprite_to(node, sprite) # fire-and-forget：空 asset 直接返回，图到了替换占位
+	# anchors 由 presence 转发（服务端 §5）：别人看到的我，贴纸位吃真锚点；缺省（老档）留空走 alpha 兜底。
+	_apply_player_sprite_to(node, sprite, anchors) # fire-and-forget：空 asset 直接返回，图到了替换占位
 	return { "node": node, "logical": pos, "id": id, "buf": RemoteActorBuffer.new(), "is_remote": true }
 
 ## 在场名单（进世界/换场景一次性下发）：把同场景的其他小朋友立起来——包括站着不动的。
@@ -1803,7 +1806,9 @@ func _upsert_presence(a: Dictionary) -> void:
 	var pos := focus_logical
 	if tile is Dictionary and (tile as Dictionary).has("tileX"):
 		pos = Vector2(float(tile["tileX"]), float(tile["tileY"]))
-	_remote_actors[pid] = _spawn_remote_actor(pid, pos, String(a.get("spriteAsset", "")), String(a.get("name", "")))
+	var anch: Variant = a.get("anchors")
+	_remote_actors[pid] = _spawn_remote_actor(pid, pos, String(a.get("spriteAsset", "")), String(a.get("name", "")),
+		anch if typeof(anch) == TYPE_DICTIONARY else {})
 
 ## 别人造出了新伙伴：本端就地降生（否则要重进场景才看得到它）。
 func _on_character_spawned(data: Dictionary) -> void:
