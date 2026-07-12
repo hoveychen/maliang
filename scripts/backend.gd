@@ -3,6 +3,8 @@ extends Node
 ## 后端 WS 客户端：连接 maliang-server，发造角色/语音请求，收进度/回应。
 
 signal connected
+## 连接断开（曾 open 后转 closed）：供手机状态栏改信号格、也标记进入重连退避
+signal disconnected
 signal character_response(data: Dictionary)
 signal tts_chunk(pcm: PackedByteArray)
 signal tts_end
@@ -72,15 +74,58 @@ var _open := false
 ## 当前玩家 id（设备端稳定 UUID）：由 world.gd bootstrap 时从档案设入，_send 统一注入每条消息。
 var player_id := ""
 
+## 自动重连（弱网/半开连接兜底）：connect_to_server 起意后，断线即指数退避重拨，
+## 重连成功走 _open false→true 复用 connected 信号自动重握手（world.gd 已连好 _send_world_info+time_sync）。
+const RECONNECT_BASE_S := 1.0   ## 首次退避
+const RECONNECT_MAX_S := 15.0   ## 退避封顶
+var _should_reconnect := false  ## 是否要维持连接（connect 起、disconnect_from_server 止）
+var _reconnect_backoff := RECONNECT_BASE_S ## 当前退避时长（连上即重置为 base）
+var _reconnect_wait := 0.0      ## 距下次重拨的倒计时
+
+## 心跳（app 层 JSON ping/pong）：客户端定时发 ping，服务端回 pong。
+## 任意回包都算「链路活着」；超时无任何回包即判半开连接，强制关连触发上面的自动重连。
+const PING_INTERVAL_S := 10.0    ## 发 ping 间隔
+const HEARTBEAT_TIMEOUT_S := 30.0 ## 无任何回包多久判死（三个 ping 周期）
+var _ping_accum := 0.0          ## 距下次发 ping 的累计
+var _since_rx := 0.0            ## 距上次收到任意回包的累计
+
 ## WS 是否已连上（供手机状态栏信号格显示网络是否通畅）。
 func is_online() -> bool:
 	return _open
 
 func connect_to_server() -> void:
+	_should_reconnect = true
+	_reconnect_backoff = RECONNECT_BASE_S
+	_reconnect_wait = 0.0
+	_open_socket()
+
+## 主动断开（离开世界/退出）：停掉自动重连，避免后台不停重拨。
+func disconnect_from_server() -> void:
+	_should_reconnect = false
+	_ws.close()
+	_open = false
+
+func _open_socket() -> void:
+	# CLOSED 的 WebSocketPeer 不复用（残留状态），每次重拨换新 peer。
+	_ws = WebSocketPeer.new()
 	# 默认入站缓冲 64KB：慢帧场景（录屏/低端机）下一帧间隔内的 TTS 分片突发
 	# 会撑爆缓冲直接断连，后续推送（如 item_created）全部丢失——调大到 2MB。
 	_ws.inbound_buffer_size = 2 * 1024 * 1024
 	_ws.connect_to_url(full_url())
+
+## 退避序列：翻倍封顶。抽成纯函数供单测。
+func _next_backoff(cur: float) -> float:
+	return minf(cur * 2.0, RECONNECT_MAX_S)
+
+## 心跳步进（抽出供单测）：到点发 ping；有回包则复位活跃时钟，否则累计。
+## 返回是否已超时（无任何回包超过 HEARTBEAT_TIMEOUT_S）——调用方据此强制关连。
+func _step_heartbeat(delta: float, got_rx: bool) -> bool:
+	_since_rx = 0.0 if got_rx else _since_rx + delta
+	_ping_accum += delta
+	if _ping_accum >= PING_INTERVAL_S:
+		_ping_accum = 0.0
+		_send({ "type": "ping" })
+	return _since_rx > HEARTBEAT_TIMEOUT_S
 
 ## 连接 URL 带 clientTts=1 能力声明：服务端全程跳过 TTS 合成只发文本+voiceId，
 ## 客户端 edge-tts 本地合成；edge 不通时逐句 send_tts_request 降级（服务端仍保留全套 TTS）。
@@ -240,30 +285,58 @@ func _send(obj: Dictionary) -> void:
 	if _open:
 		_ws.send_text(JSON.stringify(obj))
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var t0 := Time.get_ticks_usec()
-	_poll_ws()
+	_poll_ws(delta)
 	ProcProf.add("ws", Time.get_ticks_usec() - t0)
 
-func _poll_ws() -> void:
+func _poll_ws(delta: float) -> void:
 	_ws.poll()
 	var st := _ws.get_ready_state()
 	if st == WebSocketPeer.STATE_OPEN:
 		if not _open:
 			_open = true
+			_reconnect_backoff = RECONNECT_BASE_S # 连上即重置退避，下次断线从 base 起
+			_ping_accum = 0.0
+			_since_rx = 0.0                       # 心跳时钟随新连接归零
 			connected.emit()
+		var got_rx := false
 		while _ws.get_available_packet_count() > 0:
+			got_rx = true
 			var raw := _ws.get_packet().get_string_from_utf8()
 			var data: Variant = JSON.parse_string(raw)
 			if typeof(data) == TYPE_DICTIONARY:
 				_dispatch(data)
+		if _step_heartbeat(delta, got_rx):
+			# 超时无回包：半开连接，强制关连；下一帧回落 CLOSED 触发自动重连。
+			_ws.close()
 	elif st == WebSocketPeer.STATE_CLOSED:
-		_open = false
+		if _open:
+			_open = false
+			_reconnect_wait = _reconnect_backoff # 从当前退避起算（刚断=base）
+			disconnected.emit()
+		_tick_reconnect(delta)
+
+## 断线后的重拨节拍：倒计时到点换新 peer 重拨，并把退避翻倍备下次。
+## CONNECTING 期间状态既非 OPEN 也非 CLOSED，本函数不被调用；只有回落 CLOSED 才继续倒计时。
+func _tick_reconnect(delta: float) -> void:
+	if not _should_reconnect:
+		return
+	_reconnect_wait -= delta
+	if _reconnect_wait > 0.0:
+		return
+	_open_socket()
+	_reconnect_backoff = _next_backoff(_reconnect_backoff)
+	_reconnect_wait = _reconnect_backoff       # 本次若失败，下次按翻倍后的间隔再拨
 
 func _dispatch(data: Dictionary) -> void:
 	if OS.get_environment("MALIANG_WS_DEBUG") != "":
 		print("[ws] ", String(data.get("type", "")))
 	match String(data.get("type", "")):
+		"pong":
+			pass # 心跳回执：活跃时钟已在 _poll_ws 靠「收到任意回包」复位，无需额外处理
+		"ping":
+			_send({ "type": "pong" }) # 服务端反向探活时回执（当前服务端不发，留作对称兜底）
 		"character_response":
 			character_response.emit(data)
 		"tts_chunk":
