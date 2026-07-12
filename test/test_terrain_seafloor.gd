@@ -16,6 +16,7 @@ func _init() -> void:
 	_test_seed_scene_coverage()
 	_test_layer_mappings()
 	_test_type_aware_walls()
+	_test_base_layer_modal()
 	print("test_terrain_seafloor: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
 
@@ -80,6 +81,37 @@ func _test_type_aware_walls() -> void:
 
 	cm.free()
 	TerrainMap.reset()
+
+## ④ 万物基底层按场景模态地表：海底切片(细沙为多)→ 细沙层、全草世界→ 草层。
+## 这是「主题地形边缘不露草绿」的修复（shader base_layer 不再写死 grass）——过渡子掩码
+## 采模态地表而非草。rebuild() 只读 TerrainMap + 设 _base_layer，裸实例即可验。
+func _test_base_layer_modal() -> void:
+	var cm := ChunkManager.new()
+	# 海底：export_seafloor 底铺细沙，模态非水地表 = 细沙 → 基底 = SAND 层
+	TerrainMap.reset()
+	TerrainMap.load_from_bytes(SEAFLOOR.build_terrain_bytes())
+	cm.rebuild()
+	_check("海底场景基底层 = 细沙", cm._base_layer, TerrainTextures.LAYER_SAND)
+	# 全草世界：模态 = 草 → 基底 = GRASS 层（村庄不回归）
+	TerrainMap.reset()
+	TerrainMap.load_from_bytes(_grass_bytes())
+	cm.rebuild()
+	_check("全草世界基底层 = 草", cm._base_layer, TerrainTextures.LAYER_GRASS)
+	cm.free()
+	TerrainMap.reset()
+
+## 全草平地 v1 .mltr（HEADER + 3 平面清零 = 全草/高0/深0）。
+func _grass_bytes() -> PackedByteArray:
+	var n := WorldGrid.GRID_TILES
+	var buf := PackedByteArray()
+	buf.resize(HEADER + 3 * n * n)
+	for i in range(4):
+		buf[i] = "MLTR".unicode_at(i)
+	buf[4] = 1
+	buf[5] = n
+	buf[6] = n
+	buf.encode_float(7, WorldGrid.TILE_SIZE)
+	return buf
 
 ## 全草平地 v1 .mltr，改：reef(5,5) 抬高 1 级、coarse(10,10) 抬高 1 级。
 func _controlled_bytes() -> PackedByteArray:

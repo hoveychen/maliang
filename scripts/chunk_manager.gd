@@ -74,12 +74,42 @@ var _claims: Dictionary = {}
 ## 且 benchmark 会反复换档——必须记住，否则这一档写空/被重建的材质打回默认。
 var _terrain_low_detail := false
 
+## 万物基底层（themed-terrain P2）：body tile autotile 过渡子掩码采的底色层。默认草地（0）；
+## rebuild() 按当前 TerrainMap 的模态地表刷新——海底场景 → 细沙层，避免边缘露草绿。
+## 与 low_detail 同款懒建记忆态：材质可能晚于本值建成，须记住并在建材质时补上。
+var _base_layer := TerrainTextures.LAYER_GRASS
+
 func set_terrain_low_detail(on: bool) -> void:
 	_terrain_low_detail = on
 	if _ground_mat != null:
 		_ground_mat.set_shader_parameter("low_detail", on)
 	if _water_mat != null:
 		_water_mat.set_shader_parameter("low_detail", on)
+
+## 设万物基底层并（若材质已建）即时下发。数据源见 _refresh_base_layer()。
+func set_base_layer(layer: int) -> void:
+	_base_layer = layer
+	if _ground_mat != null:
+		_ground_mat.set_shader_parameter("base_layer", layer)
+
+## 按当前 TerrainMap 的模态地表（出现最多的非水 tile 类型）定基底层：草地世界→草，
+## 海底/雪原等单一主题场景→该主题主地表。混合主题公园（P4）取占比最大者（近似，非逐 tile）。
+func _refresh_base_layer() -> void:
+	var n := WorldGrid.GRID_TILES
+	var counts := {}
+	for z in range(n):
+		for x in range(n):
+			var tt := TerrainMap.tile_type(Vector2i(x, z))
+			if tt == TerrainMap.T_WATER:
+				continue  # 水走湖床/水面 shader，不作基底候选
+			counts[tt] = int(counts.get(tt, 0)) + 1
+	var best_type := TerrainMap.T_GRASS
+	var best_n := -1
+	for tt: int in counts:
+		if counts[tt] > best_n:
+			best_n = counts[tt]
+			best_type = tt
+	set_base_layer(TerrainTextures.top_layer(best_type))
 
 ## 画质开关记忆态：chunk 是 3×3 流送、越界重铺会重建 deco 子节点，新建的贴片影 /
 ## SDF 物件必须沿用当前开关态，否则重铺一次就打回默认。setter 同时切现有节点。
@@ -144,6 +174,7 @@ func _make_slot() -> Dictionary:
 		_ground_mat = _make_ground_mat()
 		_water_mat = _make_water_mat()
 		set_terrain_low_detail(_terrain_low_detail)  # 懒建材质沿用当前档（见 setter 注释）
+		set_base_layer(_base_layer)                  # 同上：懒建材质补上当前基底层
 	var root := Node3D.new()
 	add_child(root)
 	var tile := MeshInstance3D.new()
@@ -199,6 +230,7 @@ static func _make_water_mat() -> ShaderMaterial:
 ## docs/multi-scene-design.md 步骤⑤边界1；玩家/角色/动态物件的卸载由换场景流程另管。
 ## 复位期间槽位仍显示旧网格，直到被 update() 逐帧重铺（换场景走过场遮挡，见步骤⑤）。
 func rebuild() -> void:
+	_refresh_base_layer()  # 换场景可能换主题 → 按新地形定万物基底层（themed-terrain P2）
 	_chunk_meshes.clear()
 	_water_meshes.clear()
 	for slot in _slots:
