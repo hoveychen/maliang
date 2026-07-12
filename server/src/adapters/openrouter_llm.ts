@@ -62,7 +62,14 @@ const ABILITY_DESC: Record<string, string> = {
   move_to: 'move_to=去某个地方或某个角色身边，params:{"location_name":"地点名"} 或 {"character_name":"角色名"}（小朋友说「过来/到我这来」时 character_name 填"玩家"）',
   follow: 'follow=跟着一个人一起走，params:{"target_name":"玩家"}（跟着小朋友）或 {"target_name":"角色名"}',
   stop_follow: 'stop_follow=停止跟随，params:{}',
-  do_action: 'do_action=做一个动作，params:{"action":"wave|jump|spin|nod"}（挥手/跳/转圈/点头）',
+  do_action:
+    'do_action=做一个动作，params:{"action":"动作名"}。20 种纸片动作——' +
+    'wave挥手 jump跳跳 spin转圈 nod点头 flip翻跟头 backflip后空翻 cartwheel侧手翻 twirl芭蕾旋 helicopter直升机旋 ' +
+    'paperflip翻面(露纸背) peek侧身隐身(纸片变一条线) lie_down躺平 faceplant扑街 ' +
+    'curl_up卷成纸筒 shiver瑟瑟发抖 wiggle扭扭舞 puff挺胸鼓气 bounce弹弹球 squish拍扁自己 stretch长高高。' +
+    '按情绪选：开心=jump|twirl|bounce|wiggle，得意炫耀=puff|backflip|paperflip|helicopter，' +
+    '害羞害怕=shiver|curl_up|peek，累了沮丧=lie_down|faceplant，逗小朋友笑=squish|stretch|flip|cartwheel；' +
+    '小朋友点名要某个动作（如「躺平」「翻个面」）就用对应那个',
   chat_with: 'chat_with=走到某个角色身边和它聊天，params:{"character_name":"角色名"}',
   deliver_message: 'deliver_message=给某个角色带一句话，params:{"to":"角色名","message":"要带的话"}',
   give: 'give=小朋友把自己的贴纸送给某个角色（小朋友亲自走过去送），params:{"character_name":"角色名","item":"贴纸id"}',

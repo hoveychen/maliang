@@ -222,9 +222,18 @@ func _init() -> void:
 	fails += _check("do_action done after duration", ex11.is_done(), true)
 	var d12 := { "logical": l_start, "id": "actor2" }
 	var ex12 := BehaviorExecutor.new()
-	ex12.setup(d12, { "commands": [ { "type": "do_action", "params": { "action": "backflip" } } ] })
+	ex12.setup(d12, { "commands": [ { "type": "do_action", "params": { "action": "moonwalk" } } ] })
 	ex12.step(dt)
 	fails += _check("unknown action falls back to wave", String(d12.get("paper_action", "")), "wave")
+
+	# 20 种动作全在时长表里、且每种都能原样写进契约键（不被 fallback 吞掉）
+	fails += _check("action table has 20 entries", BehaviorExecutor.ACTION_DUR.size(), 20)
+	for a in BehaviorExecutor.ACTION_DUR:
+		var da := { "logical": l_start, "id": "actor_%s" % a }
+		var exa := BehaviorExecutor.new()
+		exa.setup(da, { "commands": [ { "type": "do_action", "params": { "action": a } } ] })
+		exa.step(dt)
+		fails += _check("do_action passes through %s" % a, String(da.get("paper_action", "")), a)
 
 	# chat_with：走到聊天对象旁 → 写 chat_with/chat_t 契约键 → 停留 CHAT_DUR 后完成
 	OccupancyMap.clear()

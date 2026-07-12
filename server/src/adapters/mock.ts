@@ -162,9 +162,19 @@ export function createMockAdapters(): ServiceAdapters {
             performerName,
           };
         }
-        const actionM = /(挥手|跳一?下|转个?圈|点头)/.exec(transcript);
-        if (actionM) {
-          const action = ({ 挥: 'wave', 跳: 'jump', 转: 'spin', 点: 'nod' } as Record<string, string>)[actionM[1]![0]!] ?? 'wave';
+        // 有序匹配：长词在前防"翻跟头/翻面"这类同前缀误吞（20 种动作见 openrouter_llm ABILITY_DESC）
+        const ACTION_WORDS: Array<[RegExp, string]> = [
+          [/翻个?跟头|前滚翻/, 'flip'], [/后空翻/, 'backflip'], [/侧手翻/, 'cartwheel'],
+          [/翻个?面/, 'paperflip'], [/躺平|躺下/, 'lie_down'], [/扑街|摔一?跤/, 'faceplant'],
+          [/卷起来|卷成/, 'curl_up'], [/发抖|哆嗦/, 'shiver'], [/扭一?扭/, 'wiggle'],
+          [/鼓气|挺胸/, 'puff'], [/弹弹球|弹跳/, 'bounce'], [/拍扁|压扁/, 'squish'],
+          [/长高|拉长/, 'stretch'], [/躲起来|藏起来/, 'peek'], [/芭蕾/, 'twirl'],
+          [/直升机/, 'helicopter'], [/挥手/, 'wave'], [/跳一?下/, 'jump'],
+          [/转个?圈/, 'spin'], [/点头/, 'nod'],
+        ];
+        const actionHit = ACTION_WORDS.find(([re]) => re.test(transcript));
+        if (actionHit) {
+          const action = actionHit[1];
           return {
             kind: 'command',
             replyText: '看我的！',
