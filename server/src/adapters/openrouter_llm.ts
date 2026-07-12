@@ -53,6 +53,7 @@ const SDF_PROP_SYSTEM = `你是幼儿园游戏「maliang」的物件设计师。
 - **默认是安静的物品**：locomotion 用 "none"（自带轻微呼吸），不要加眼睛/嘴把物品拟人化。只有小朋友明确说"会走/会跳/会飞/活的"才用 walker/hopper/flyer，明确说有脸才加五官。
 - 会动的细节优先用轻量手段表达：花头/招牌用 "group":"head"（轻轻摇摆点头）；风车叶/陀螺用 "spin"（多片叶共用同一 pivot/axis 即整体同转）；飘带/穗子用 ropes。
 - y 向上、单位米，小物件总高 0.1~1.5、建筑 1~3；最大件半径/半边长 ≤0.8；所有件最低点 ≥0（不埋进地面）。身体件 2~6 个就够，引擎融合后自然圆润。
+- **按这个物件的正常参考尺寸设计，不要因为小朋友说「大/小」就改变整体尺寸**——体型大小由系统另行整体缩放，你只管把形状本身按常规比例拼好。
 - 装饰件（斑点/门/图案）必须凸出宿主表面：其中心放在宿主表面上或更靠外，至少露出一半体积——完全埋进大件内部会被引擎收进皮下、看不见也上不了色。例：宿主是 r=0.8 的球，斑点 r=0.15 的中心离宿主中心应 ≥0.8。
 - walker 的 hip_h 与身体底部齐平；hopper/flyer 不长腿。
 - 明快温暖的配色；绝不包含暴力、恐怖、武器、成人内容。
@@ -159,8 +160,10 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
       raw = null;
     }
     const checked = validateSdfPropSpec(raw);
-    if (!checked.ok) return fallbackSdfPropSpec('mystery_hopper');
-    return checked.spec;
+    const size = sizeToScale(inferSizeFromText(intentText));
+    if (!checked.ok) return { ...fallbackSdfPropSpec('mystery_hopper'), scale: size };
+    // 体型档倍率由 size 统管（LLM 按中性参考尺寸设计，见 SDF_PROP_SYSTEM），覆写 validate 的默认 1.0
+    return { ...checked.spec, scale: size };
   }
 
   async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
