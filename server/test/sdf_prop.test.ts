@@ -59,7 +59,7 @@ test('mock designSdfProp: 体型词经 sizeToScale 落 spec.scale（prop-size）
 
 test('validateSdfPropSpec: 结构性错误拒收', () => {
   const bad = [
-    { palette: ['#fff'], parts: [{ shape: 'torus', pos: [0, 0, 0], color: 0 }] }, // 未知形状
+    { palette: ['#fff'], parts: [{ shape: 'pyramid', pos: [0, 0, 0], color: 0 }] }, // 未知形状
     { palette: ['red'], parts: [{ shape: 'sphere', pos: [0, 0, 0], color: 0 }] }, // 非 hex 颜色
     { palette: ['#fff'], parts: [] }, // parts 为空
     {
@@ -97,6 +97,48 @@ test('validateSdfPropSpec: 数值越界 clamp 而非拒收', () => {
 
 test('fallbackSdfPropSpec 自身必须过校验', () => {
   assert.ok(validateSdfPropSpec(fallbackSdfPropSpec('x')).ok);
+});
+
+test('validateSdfPropSpec: torus/bezier 新形状被接受并归一化/clamp', () => {
+  const res = validateSdfPropSpec({
+    palette: ['#e07a9c', '#7bc47f'],
+    parts: [
+      { shape: 'torus', pos: [0, 0.5, 0], R: 0.5, r: 0.15, arc: 90, color: 0 },
+      { shape: 'bezier', pos: [0, 1, 0], b: [0.3, 0.4], c: [0.6, 0], r0: 0.12, r1: 0.05, color: 1 },
+    ],
+    locomotion: { type: 'none' },
+  });
+  assert.ok(res.ok);
+  if (res.ok) {
+    const t = res.spec.parts[0];
+    assert.equal(t.shape, 'torus');
+    assert.equal(t.R, 0.5);
+    assert.equal(t.arc, 90);
+    const z = res.spec.parts[1];
+    assert.equal(z.shape, 'bezier');
+    assert.deepEqual(z.b, [0.3, 0.4]);
+    assert.deepEqual(z.c, [0.6, 0]);
+    assert.equal(z.r0, 0.12);
+  }
+  // 越界 clamp：arc>180→180、管半径 clamp
+  const clamped = validateSdfPropSpec({
+    palette: ['#fff'],
+    parts: [{ shape: 'torus', pos: [0, 0, 0], R: 99, r: 99, arc: 999, color: 0 }],
+    locomotion: { type: 'none' },
+  });
+  assert.ok(clamped.ok);
+  if (clamped.ok) {
+    assert.equal(clamped.spec.parts[0].arc, 180);
+    assert.equal(clamped.spec.parts[0].R, 2.5);
+    assert.equal(clamped.spec.parts[0].r, 1.5);
+  }
+  // bezier 坏 b/c 拒收
+  const badBez = validateSdfPropSpec({
+    palette: ['#fff'],
+    parts: [{ shape: 'bezier', pos: [0, 0, 0], b: [0.3], color: 0 }],
+    locomotion: { type: 'none' },
+  });
+  assert.equal(badBez.ok, false);
 });
 
 // ---- mock 适配器 ----
