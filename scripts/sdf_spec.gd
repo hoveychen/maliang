@@ -134,11 +134,38 @@ static func parse(spec: Dictionary) -> Dictionary:
 		"parts": parts,
 		"locomotion": loco,
 		"ropes": ropes,
+		"scale": clampf(_f(spec.get("scale", 1.0)), 0.4, 2.0),
 	}
+	# 体型档整体缩放（prop-size，见 docs/prop-size-design.md）：造物不归一，scale 是乘在几何上的
+	# 倍率。统一缩放所有长度/位置量（含动画振幅 hip/hop/hover/翅），rate/speed（频率/移速）不缩放。
+	_apply_scale(config)
 	var total := _prim_total(config)
 	if total > MAX_PRIMS:
 		return _err("基本体总数 %d 超过上限 %d（身体件+腿×2+翅膀+绳段）" % [total, MAX_PRIMS])
 	return config
+
+## 体型档整体缩放：就地把 config 的几何量乘 scale（长度/位置/振幅），频率/移速不动。
+static func _apply_scale(config: Dictionary) -> void:
+	var s: float = config.scale
+	if is_equal_approx(s, 1.0):
+		return
+	config.blend *= s
+	config.outline *= s
+	for part in config.parts:
+		part.pos *= s
+		part.params *= s
+		if part.spin.has("pivot"):
+			part.spin.pivot *= s
+	var loco: Dictionary = config.locomotion
+	# 尺寸/振幅类乘 s；rate（频率）与 speed（世界移速）不缩放
+	for k in ["leg_r", "hip_h", "hop_h", "hover_h", "wing_r", "wing_len"]:
+		loco[k] = float(loco[k]) * s
+	loco.stance *= s      # Vector2
+	loco.wing_pos *= s    # Vector3
+	for rope in config.ropes:
+		rope.anchor *= s
+		rope.r *= s
+		rope.seg_len *= s
 
 static func _prim_total(config: Dictionary) -> int:
 	var n: int = config.parts.size()

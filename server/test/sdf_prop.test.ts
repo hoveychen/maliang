@@ -31,6 +31,32 @@ test('validateSdfPropSpec: 接受合法 spec 并归一化', () => {
   }
 });
 
+test('validateSdfPropSpec: scale 缺省 1.0 / 读取 / 越界 clamp[0.4,2.0]（prop-size）', () => {
+  const base = {
+    name: 'x', palette: ['#e8b04b'], parts: [{ shape: 'sphere', pos: [0, 0.5, 0], r: 0.3, color: 0 }],
+    locomotion: { type: 'none' }, ropes: [],
+  };
+  const def = validateSdfPropSpec(base);
+  assert.ok(def.ok && def.spec.scale === 1.0, '缺省 1.0');
+  const big = validateSdfPropSpec({ ...base, scale: 1.4 });
+  assert.ok(big.ok && big.spec.scale === 1.4, '读取 1.4');
+  const over = validateSdfPropSpec({ ...base, scale: 99 });
+  assert.ok(over.ok && over.spec.scale === 2.0, '越界 clamp 上限');
+  const under = validateSdfPropSpec({ ...base, scale: 0.1 });
+  assert.ok(under.ok && under.spec.scale === 0.4, '越界 clamp 下限');
+});
+
+test('fallbackSdfPropSpec 带 scale 1.0（prop-size）', () => {
+  assert.equal(fallbackSdfPropSpec('x').scale, 1.0);
+});
+
+test('mock designSdfProp: 体型词经 sizeToScale 落 spec.scale（prop-size）', async () => {
+  const { llm } = createMockAdapters();
+  assert.equal((await llm.designSdfProp('一个巨大的风车')).scale, 1.4);
+  assert.equal((await llm.designSdfProp('一个很小的蘑菇')).scale, 0.7);
+  assert.equal((await llm.designSdfProp('一个红色的路牌')).scale, 1.0);
+});
+
 test('validateSdfPropSpec: 结构性错误拒收', () => {
   const bad = [
     { palette: ['#fff'], parts: [{ shape: 'torus', pos: [0, 0, 0], color: 0 }] }, // 未知形状

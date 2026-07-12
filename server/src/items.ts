@@ -14,6 +14,7 @@
 import type { ItemDef, } from './types.ts';
 import { GRID_TILES } from './types.ts';
 import type { SdfPropSpec } from './sdf_prop.ts';
+import { scaleToSize } from './creation_options.ts';
 import { T_PATH, T_WATER, TerrainFormatError, argYawDeg, type Terrain } from './terrain.ts';
 
 /** 内置物品定义（≈22 行）。顺序即村庄 palette 的习惯顺序，无语义。 */
@@ -245,19 +246,21 @@ function sticker(id: string, name: string): ItemDef {
 }
 
 /**
- * 语音造物的实体行（spec 内联进 items 表）。占地统一 1×1（旧动态物件同款），
- * pathOk=true——孩子把玩具摆在路上是常态，不拦；wander 与客户端 _prop_wander 同款推导
- * （会动的物件给一点游走半径）。
+ * 语音造物的实体行（spec 内联进 items 表）。占地默认 1×1（旧动态物件同款），
+ * 但 big 体型档（scale≈1.4）的造物 +1 环 → 3×3，让大物件脚下占更多格、挡路更真实
+ * （prop-size；footprint 须奇数边、锚点居中，见本文件顶部约定）。small/medium 保持 1×1 避免 0 格。
+ * pathOk=true——孩子把玩具摆在路上是常态，不拦；wander 与客户端 _prop_wander 同款推导。
  */
 export function creationItemDef(worldId: string, id: string, spec: SdfPropSpec): ItemDef {
+  const span = scaleToSize(spec.scale) === 'big' ? 3 : 1;
   return {
     id,
     worldId,
     name: spec.name || '小宝贝',
     renderRef: 'sdf_inline',
     spec,
-    footprintW: 1,
-    footprintH: 1,
+    footprintW: span,
+    footprintH: span,
     blocking: true,
     pathOk: true,
     wander: spec.locomotion && spec.locomotion.type !== 'none' ? 1.2 : 0,

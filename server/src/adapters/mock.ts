@@ -111,6 +111,8 @@ export function createMockAdapters(): ServiceAdapters {
           ],
           locomotion,
           ropes: [{ pos: [0, 1.2, -0.45], segments: 3, r: 0.06, len: 0.2, color: 0 }],
+          // 体型档：从意图文本确定性推断→倍率（与真实路径同 sizeToScale），客户端整体缩放
+          scale: sizeToScale(inferSizeFromText(intentText)),
         };
       },
       async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {

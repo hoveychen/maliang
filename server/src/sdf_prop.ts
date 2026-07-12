@@ -55,6 +55,12 @@ export interface SdfPropSpec {
   parts: SdfPropPart[];
   locomotion: SdfPropLocomotion;
   ropes: SdfPropRope[];
+  /**
+   * 体型档整体缩放倍率（明显档 小0.7/中1.0/大1.4，见 docs/prop-size-design.md）。
+   * 造物不归一（部件是绝对米），故 scale 是乘在 LLM 设计几何上的倍率；客户端构建 prims 时
+   * 每部件 pos/r/len/size 统一乘它。缺省 1.0。由 designSdfProp 从 size 经 sizeToScale 填。
+   */
+  scale: number;
 }
 
 export type SdfPropValidation =
@@ -206,6 +212,7 @@ export function validateSdfPropSpec(raw: unknown): SdfPropValidation {
       parts,
       locomotion,
       ropes,
+      scale: num(r.scale, 1.0, 0.4, 2.0), // 体型档倍率；raw 一般不含（LLM 按中性尺寸设计），默认 1.0
     },
   };
 }
@@ -223,5 +230,6 @@ export function fallbackSdfPropSpec(name: string): SdfPropSpec {
     ],
     locomotion: { type: 'hopper', hop_h: 0.4, rate: 1.4, speed: 0.8 },
     ropes: [],
+    scale: 1.0,
   };
 }
