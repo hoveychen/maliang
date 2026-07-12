@@ -56,6 +56,7 @@ UNIT_TESTS=(
   test_frame_sampler
   test_backend_player_id
   test_backend_reconnect
+  test_pos_codec
   test_stage_agent
   test_screenplay_replay
   test_remote_actor_buffer
