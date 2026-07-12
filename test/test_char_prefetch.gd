@@ -30,6 +30,13 @@ func _init() -> void:
 		fails += _check("status=%s→选静态" % st, String(r["hash"]), "spriteX")
 		fails += _check("status=%s→is_anim 假" % st, bool(r["is_anim"]), false)
 
+	# --- _body_scale：size→scale 体型倍率（character-size）---
+	fails += _check("大体型 scale=1.4 透传", float(w.call("_body_scale", {"scale": 1.4})), 1.4)
+	fails += _check("小体型 scale=0.7 透传", float(w.call("_body_scale", {"scale": 0.7})), 0.7)
+	fails += _check("缺 scale→1.0(存量不跳变)", float(w.call("_body_scale", {})), 1.0)
+	fails += _check("坏数据超上限→clamp 2.0", float(w.call("_body_scale", {"scale": 99.0})), 2.0)
+	fails += _check("坏数据 0→clamp 下限 0.4", float(w.call("_body_scale", {"scale": 0.0})), 0.4)
+
 	w.free()
 	print("test_char_prefetch: %d fail(s)" % fails)
 	quit(fails)

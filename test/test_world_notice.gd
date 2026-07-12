@@ -41,6 +41,10 @@ func _run_checks() -> void:
 	_check("超出半径→不触发", scene.call("notice_ready", 20.0, 0.0, false, 0.0), false)
 	_check("走动中→不触发", scene.call("notice_ready", 3.0, 0.5, false, 0.0), false)
 	_check("忙碌(选中/聊天/动作中)→不触发", scene.call("notice_ready", 3.0, 0.0, true, 0.0), false)
+	# 体型缩放注意半径（character-size）：基准 6.5m。大角色(1.4→9.1m)在 8m 处触发；小角色(0.7→4.55m)在 5m 处不触发。
+	_check("大体型 8m→在放大半径内触发", scene.call("notice_ready", 8.0, 0.0, false, 0.0, 1.4), true)
+	_check("默认体型 8m→超基准半径不触发", scene.call("notice_ready", 8.0, 0.0, false, 0.0, 1.0), false)
+	_check("小体型 5m→缩小半径外不触发", scene.call("notice_ready", 5.0, 0.0, false, 0.0, 0.7), false)
 
 	# 停掉所有执行器,免得 wander 在断言间挪动村民
 	for ex in (scene.get("_executors") as Array):
