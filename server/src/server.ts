@@ -115,7 +115,7 @@ function sniffImageMime(b: Uint8Array): string {
 }
 
 /** 在世界中央种一个小神仙（默认能造角色）。 */
-function seedFairy(worldId: string): Character {
+export function seedFairy(worldId: string): Character {
   return {
     id: randomUUID(),
     worldId,
@@ -308,11 +308,21 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (fairy.appearance.spriteAsset && !force && !provided) {
       return { id: fairy.id, spriteAsset: fairy.appearance.spriteAsset, regenerated: false };
     }
-    const hash = provided
-      ? store.putAsset({ bytes: Uint8Array.from(Buffer.from(provided, 'base64')), mime: 'image/png' })
-      : (await generateSprite(adapters, FAIRY_VISUAL_DESC, store)).hash; // 仙子用本地图集渲染，锚点不落
+    // 仙子走 NPC 同款 vision 锚点检测（每个仙子用自己立绘的真锚点，消除"锚点不落"例外，见设计 §5）。
+    let hash: string;
+    let anchors: CharacterAnchors | null;
+    if (provided) {
+      const blob = { bytes: Uint8Array.from(Buffer.from(provided, 'base64')), mime: 'image/png' };
+      hash = store.putAsset(blob);
+      anchors = await detectCharacterAnchors(adapters.anchors, blob);
+    } else {
+      const gen = await generateSprite(adapters, FAIRY_VISUAL_DESC, store);
+      hash = gen.hash;
+      anchors = gen.anchors;
+    }
     fairy.appearance.spriteAsset = hash;
     fairy.appearance.visualDescription = FAIRY_VISUAL_DESC;
+    if (anchors) fairy.appearance.anchors = anchors;
     store.saveCharacter(fairy);
     // 试点：静态立绘先返回，idle 动画后台异步补（客户端轮询 /sprite-anim/:hash）
     triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
