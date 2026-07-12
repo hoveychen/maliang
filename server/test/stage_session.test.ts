@@ -333,6 +333,31 @@ test('规则订阅: enter 边沿——圈内不重复触发，出圈后再进再
   assert.deepEqual(a.ofType('stage_end')[0]?.result, { n: 2 }, '圈内那帧没多计，出圈再进才第二次');
 });
 
+test('球命令面: spawnBall 广播 spawn_ball → ack 后 on(enter, ball, region) 对球复制位置判定 → 触发', async () => {
+  const { stages, conn } = rig();
+  const a = conn('cA');
+  await a.say({ type: 'world_info', worldId: 'w1', playerId: 'p1' });
+  const done = stages.startStage('w1', {
+    // spawnBall 是完成型（await ack 才继续）；ack 后布进球判定 + hud 门闩（放订阅后保证 enter 先登记）。
+    code: `const ball = await stage.spawnBall([0, 0]); const goal = stage.region({ x: 50, y: 0, r: 5 }); stage.once('enter', ball, goal).then(() => stage.end({ goal: true })); stage.hud.score('ready','');`,
+    actors: ACTORS,
+    timeoutMs: 5000,
+  });
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'spawn_ball'));
+  const spawn = a.ofType('stage_cmd').find((m) => m.op === 'spawn_ball')!;
+  assert.equal((spawn.args as Record<string, unknown>).id, 'ball1', '球 id 由 worker 分配');
+  await a.say({ type: 'stage_event', kind: 'ack', cmdId: spawn.cmdId }); // 客户端落位完成
+  await waitFor(() => a.ofType('stage_cmd').some((m) => m.op === 'hud_score'));
+  assert.equal(a.ofType('stage_cmd').some((m) => m.op === 'watch'), false, 'enter(球)同样服务端求值，不下发 watch');
+  // 球位置像角色一样进复制流（id=ball1）：门外不触发，进门触发。
+  stages.updatePositions('w1', [{ id: 'ball1', x: 0, y: 0 }]);
+  assert.equal(stages.activeIn('w1'), true, '球还没进门');
+  stages.updatePositions('w1', [{ id: 'ball1', x: 51, y: 0 }]);
+  const r = await done!;
+  assert.equal(r.status, 'done');
+  assert.deepEqual(a.ofType('stage_end')[0]?.result, { goal: true });
+});
+
 test('规则订阅: countdown.onDone → 广播 watch(ev=timer) → timer 事件归零触发 → end', async () => {
   const { stages, conn } = rig();
   const a = conn('cA');
