@@ -16,6 +16,9 @@ const SPHERE_RINGS := 16
 const CAPSULE_SEGS := 20
 const CAPSULE_RINGS := 12
 const BOX_SUBDIV := 6
+const TUBE_RADIAL := 10   ## 环面/弯管圆截面段数
+const TORUS_ALONG := 32   ## 满环沿环方向段数（按弧比例缩）
+const BEZIER_ALONG := 18  ## 弯管沿曲线采样段数
 
 static func build(prims: Array, density := 1.0) -> ArrayMesh:
 	var verts := PackedVector3Array()
@@ -49,6 +52,40 @@ static func _append_shell(
 	uv2s: PackedVector2Array,
 	idx: PackedInt32Array,
 ) -> void:
+	# 环面/弯管：走扫掠变径圆管壳（中心线折线 + 每点半径），不用 PrimitiveMesh。
+	if pr.shape == SdfMath.SHAPE_TORUS or pr.shape == SdfMath.SHAPE_BEZIER:
+		var pts := PackedVector3Array()
+		var radii := PackedFloat32Array()
+		var closed := false
+		if pr.shape == SdfMath.SHAPE_TORUS:
+			var big_r: float = pr.params.x
+			var minor: float = pr.params.y
+			var arc: float = pr.params.z
+			closed = arc >= 179.5
+			# 弧对称于 +Y 轴（φ=90°），半宽 arc；满环则整圈
+			var span := deg_to_rad(minf(arc, 180.0)) * 2.0
+			var n := maxi(6, roundi(TORUS_ALONG * density * (span / TAU)))
+			var count := n if closed else n + 1
+			for k in range(count):
+				var frac := float(k) / float(n)
+				var phi := deg_to_rad(90.0 - arc) + span * frac
+				pts.append(Vector3(cos(phi) * big_r, sin(phi) * big_r, 0.0))
+				radii.append(minor)
+		else:
+			var big_a := Vector3.ZERO
+			var big_b := Vector3(pr.curve.x, pr.curve.y, 0.0)
+			var big_c := Vector3(pr.curve.z, pr.curve.w, 0.0)
+			var n := maxi(4, roundi(BEZIER_ALONG * density))
+			for k in range(n + 1):
+				var t := float(k) / float(n)
+				var omt := 1.0 - t
+				# 二次贝塞尔 B(t) = (1-t)²A + 2(1-t)t·Bctrl + t²C
+				var pt := big_a * (omt * omt) + big_b * (2.0 * omt * t) + big_c * (t * t)
+				pts.append(pt)
+				radii.append(lerpf(pr.params.x, pr.params.y, t))
+		_append_tube(pts, radii, closed, prim_index, verts, norms, uvs, uv2s, idx)
+		return
+
 	var src: PrimitiveMesh
 	match pr.shape:
 		SdfMath.SHAPE_SPHERE:
@@ -91,6 +128,89 @@ static func _append_shell(
 		uv2s.append(Vector2(prim_index, 0.0))
 	for j in range(si.size()):
 		idx.append(base + si[j])
+
+## 沿中心线折线扫掠圆截面（半径逐点给）成一根管壳。环面/弯管共用。
+## 曲线在局部 XY 平面，圆截面在 (面内法向, Z 轴) 平面内——故截面基向量取
+## 面内法向 N=(T.y,-T.x,0) 与世界 Z，两者都 ⊥ 切向 T。closed=true 首尾环相连成闭环
+## （满环），false 则两端 fan-cap 补盖成水密壳（吸附会把盖拉到 SDF 面）。
+static func _append_tube(
+	pts: PackedVector3Array,
+	radii: PackedFloat32Array,
+	closed: bool,
+	prim_index: float,
+	verts: PackedVector3Array,
+	norms: PackedVector3Array,
+	uvs: PackedVector2Array,
+	uv2s: PackedVector2Array,
+	idx: PackedInt32Array,
+) -> void:
+	var m := pts.size()
+	if m < 2:
+		return
+	var ring_base := PackedInt32Array()  # 每个中心点第一个环顶点的全局索引
+	for i in range(m):
+		# 切向：闭环首尾环绕，开管端点用单侧差分
+		var t_dir: Vector3
+		if closed:
+			t_dir = pts[(i + 1) % m] - pts[(i - 1 + m) % m]
+		elif i == 0:
+			t_dir = pts[1] - pts[0]
+		elif i == m - 1:
+			t_dir = pts[m - 1] - pts[m - 2]
+		else:
+			t_dir = pts[i + 1] - pts[i - 1]
+		var tan := t_dir.normalized() if t_dir.length() > 1e-6 else Vector3(1, 0, 0)
+		var n_plane := Vector3(tan.y, -tan.x, 0.0)
+		if n_plane.length() < 1e-6:
+			n_plane = Vector3(1, 0, 0)
+		n_plane = n_plane.normalized()
+		var z_axis := Vector3(0, 0, 1)
+		ring_base.append(verts.size())
+		for j in range(TUBE_RADIAL):
+			var a := TAU * float(j) / float(TUBE_RADIAL)
+			var dir := n_plane * cos(a) + z_axis * sin(a)
+			verts.append(pts[i] + dir * radii[i])
+			norms.append(dir)
+			uvs.append(Vector2(float(i) / float(m - 1), float(j) / float(TUBE_RADIAL)))
+			uv2s.append(Vector2(prim_index, 0.0))
+	# 环间四边形（两三角）
+	var seg := m if closed else m - 1
+	for i in range(seg):
+		var a0: int = ring_base[i]
+		var b0: int = ring_base[(i + 1) % m]
+		for j in range(TUBE_RADIAL):
+			var j1 := (j + 1) % TUBE_RADIAL
+			idx.append(a0 + j); idx.append(b0 + j); idx.append(a0 + j1)
+			idx.append(a0 + j1); idx.append(b0 + j); idx.append(b0 + j1)
+	# 开管两端 fan-cap 补盖成水密壳
+	if not closed:
+		_cap_end(pts[0], radii[0], ring_base[0], true, prim_index, verts, norms, uvs, uv2s, idx)
+		_cap_end(pts[m - 1], radii[m - 1], ring_base[m - 1], false, prim_index, verts, norms, uvs, uv2s, idx)
+
+## 用中心点 fan 封住一端的环。start=true 为首端（法线朝反切向），否则尾端。
+static func _cap_end(
+	center: Vector3,
+	r: float,
+	ring0: int,
+	is_start: bool,
+	prim_index: float,
+	verts: PackedVector3Array,
+	norms: PackedVector3Array,
+	uvs: PackedVector2Array,
+	uv2s: PackedVector2Array,
+	idx: PackedInt32Array,
+) -> void:
+	var c := verts.size()
+	verts.append(center)
+	norms.append(Vector3(0, 0, 1))
+	uvs.append(Vector2(0.5, 0.5))
+	uv2s.append(Vector2(prim_index, 0.0))
+	for j in range(TUBE_RADIAL):
+		var j1 := (j + 1) % TUBE_RADIAL
+		if is_start:
+			idx.append(c); idx.append(ring0 + j1); idx.append(ring0 + j)
+		else:
+			idx.append(c); idx.append(ring0 + j); idx.append(ring0 + j1)
 
 ## 胶囊壳 → 圆头锥壳：按高度把 xz 半径从 r1 插到 r2，端帽的 y 也压到各自半径。
 ## 只是给吸附一个近似初始面，不追求与 SdfMath._round_cone 严格一致。

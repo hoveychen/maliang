@@ -109,6 +109,9 @@ func _init() -> void:
 		SdfMath.capsule(Transform3D.IDENTITY, 0.25, 0.4),
 		SdfMath.cone(Transform3D(Basis.IDENTITY, Vector3(0.5, 0, 0)), 0.3, 0.1, 0.4),
 		SdfMath.box(Transform3D(Basis.IDENTITY, Vector3(-0.6, 0, 0)), Vector3(0.2, 0.3, 0.2)),
+		SdfMath.torus(Transform3D(Basis.IDENTITY, Vector3(0, 1.6, 0)), 0.5, 0.12, 180.0),   # 满环
+		SdfMath.torus(Transform3D(Basis.IDENTITY, Vector3(1.2, 0.6, 0)), 0.4, 0.1, 90.0),   # 开口把手
+		SdfMath.bezier(Transform3D(Basis.IDENTITY, Vector3(-1.2, 0.4, 0)), Vector2(0.3, 0.5), Vector2(0.7, 0.0), 0.12, 0.05),  # 弯管
 	]
 	var mesh := SdfMeshBuilder.build(prims)
 	fails += _check("single surface", mesh.get_surface_count(), 1)
