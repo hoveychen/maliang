@@ -76,6 +76,12 @@ CC BY 3.0 许可全文：https://creativecommons.org/licenses/by/3.0/
 | 泥沼 mud_bog（侏罗 P3）| `brown_mud_02` | https://polyhaven.com/a/brown_mud_02 |
 | 蕨类草地 fern（侏罗 P3）| `forrest_ground_03` | https://polyhaven.com/a/forrest_ground_03 |
 | 碎石 rubble（侏罗/罗马 P3）| `bicolour_gravel` | https://polyhaven.com/a/bicolour_gravel |
+| 鹅卵石 cobble（中世纪/中国 P3）| `cobblestone_05` | https://polyhaven.com/a/cobblestone_05 |
+| 石板 stone_slab（中世纪/罗马/中国 P3）| `cobblestone_floor_04` | https://polyhaven.com/a/cobblestone_floor_04 |
+| 农田垄 farm_furrow（中世纪 P3）| `brown_mud_dry` | https://polyhaven.com/a/brown_mud_dry |
+| 大理石 marble（罗马 P3）| `marble_01` | https://polyhaven.com/a/marble_01 |
+| 马赛克 mosaic（罗马 P3）| `marble_mosaic_tiles` | https://polyhaven.com/a/marble_mosaic_tiles |
+| 木地板 wood_floor（中国/玩具/厨房 P3）| `wood_floor` | https://polyhaven.com/a/wood_floor |
 
 > P1-P3 逐主题铺开时，新增的每个 Poly Haven / ambientCG 源都追加到本表。
 

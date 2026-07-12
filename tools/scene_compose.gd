@@ -198,6 +198,8 @@ static func _deco_kind(scene_id: String, gt: Vector2i) -> int:
 		return DECO_NONE  # 冰雪切片仅地形，无散布物品（themed-terrain P3）
 	if scene_id == "jurassic":
 		return DECO_NONE  # 侏罗纪切片仅地形，无散布物品（themed-terrain P3）
+	if scene_id == "medieval":
+		return DECO_NONE  # 中世纪切片仅地形，无散布物品（themed-terrain P3）
 	return _deco_kind_village(gt)
 
 ## village 分区散布：从北往南——山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、
