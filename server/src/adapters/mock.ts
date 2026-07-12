@@ -100,15 +100,21 @@ export function createMockAdapters(): ServiceAdapters {
           : hop
             ? { type: 'hopper', hop_h: 0.45, rate: 1.5, speed: 0.9 }
             : { type: 'walker', legs: 4, leg_r: 0.1, hip_h: 0.6, stance: [0.45, 0.4], speed: 0.8 };
+        // 环/弯管关键词 → 确定性追加 torus/bezier 部件（真实实现由 LLM 自由拼）
+        const ring = /(圈|环|甜甜圈|轮|光环|呼啦圈|镯)/.test(intentText);
+        const curvy = /(茎|藤|彩带|尾巴|拱|钩|弯)/.test(intentText);
+        const parts: SdfPropSpec['parts'] = [
+          { shape: 'box', pos: [0, 0.95, 0], size: [0.9, 0.7, 0.8], color: 1 },
+          { shape: 'sphere', pos: [0, 1.5, 0.2], r: 0.22, color: 0, blend: 0.15 },
+        ];
+        if (ring) parts.push({ shape: 'torus', pos: [0, 1.95, 0.1], R: 0.3, r: 0.08, arc: 180, color: 0, blend: 0.1 });
+        if (curvy) parts.push({ shape: 'bezier', pos: [0.4, 0.95, 0], b: [0.2, 0.4], c: [0.5, 0.7], r0: 0.06, r1: 0.03, color: 0, blend: 0.08 });
         return {
           name: 'mock_prop',
           palette: ['#e8b04b', '#f4ead4'],
           blend: 0.26,
           outline: 0.04,
-          parts: [
-            { shape: 'box', pos: [0, 0.95, 0], size: [0.9, 0.7, 0.8], color: 1 },
-            { shape: 'sphere', pos: [0, 1.5, 0.2], r: 0.22, color: 0, blend: 0.15 },
-          ],
+          parts,
           locomotion,
           ropes: [{ pos: [0, 1.2, -0.45], segments: 3, r: 0.06, len: 0.2, color: 0 }],
           // 体型档：从意图文本确定性推断→倍率（与真实路径同 sizeToScale），客户端整体缩放

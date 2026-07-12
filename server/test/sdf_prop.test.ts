@@ -154,6 +154,15 @@ test('mock designSdfProp: 关键词决定运动方式，产物过校验', async 
   for (const s of [fly, hop, walk]) assert.ok(validateSdfPropSpec(s).ok);
 });
 
+test('mock designSdfProp: 环/弯关键词产出 torus/bezier 且过校验', async () => {
+  const { llm } = createMockAdapters();
+  const ring = await llm.designSdfProp('一个甜甜圈');
+  assert.ok(ring.parts.some((p) => p.shape === 'torus'), '甜甜圈含 torus');
+  const stem = await llm.designSdfProp('一根弯弯的花茎');
+  assert.ok(stem.parts.some((p) => p.shape === 'bezier'), '花茎含 bezier');
+  for (const s of [ring, stem]) assert.ok(validateSdfPropSpec(s).ok, 'mock 产物过校验');
+});
+
 // ---- 路由 ----
 
 test('POST /sdf-props: 描述 → 校验后的 spec；空描述 400；违禁词 400', async () => {
