@@ -351,6 +351,8 @@ export interface VoiceResponse {
   propRequest?: string;
   /** create_character 意图的新伙伴描述：不下发客户端，由 WS 层摘走并异步造角色（gen_progress/gen_complete 推送）。仅小仙子有此能力。 */
   characterRequest?: string;
+  /** create_sticker 意图的贴纸描述：不下发客户端，由 WS 层摘走并异步造贴纸（sticker_pending/item_created 推送）。仅小仙子有此能力。 */
+  stickerRequest?: string;
   /** 主动招呼（进对话对方先开口）：transcript 为空且非玩家发起，客户端据此跳过「没听清」提示。 */
   greeting?: boolean;
 }
@@ -459,8 +461,8 @@ export interface CreationAttrs {
   motion?: string;      // 会不会动：安静/会转/会飘/会跳（造物用，映射 SDF locomotion/spin）
 }
 
-/** 引导式创造的目标：造新角色 or 造新物件。会话状态机据此分派 guide 与生成接口。 */
-export type CreationGoal = 'character' | 'prop';
+/** 引导式创造的目标：造新角色 / 造新物件 / 造贴纸。会话状态机据此分派 guide 与生成接口。 */
+export type CreationGoal = 'character' | 'prop' | 'sticker';
 
 /** 引导式创造会话状态：连接级（一个孩子一条连接），挂在 VoiceSession 上。 */
 export interface CreationState {

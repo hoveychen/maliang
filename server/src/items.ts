@@ -267,6 +267,27 @@ export function creationItemDef(worldId: string, id: string, spec: SdfPropSpec):
   };
 }
 
+/**
+ * 造贴纸的实体行（fairy-stickers）：与内置 sticker() 同为 mount:'edge' 薄片，但贴图来自网络资产哈希
+ * 而非打包资源——renderRef 用 `sticker:@<hash>` 约定（内置是 `sticker:<name>`）。客户端边缘/角色锚点
+ * 取图路径见 skey 是否以 '@' 打头分流（打包 load_resource vs api.fetch_texture）。
+ * footprint/blocking/wander 对边缘物无意义（恒 1×1/false/0），与内置贴纸一致。
+ */
+export function creationStickerDef(worldId: string, id: string, name: string, assetHash: string): ItemDef {
+  return {
+    id,
+    worldId,
+    name: name || '贴纸',
+    renderRef: `sticker:@${assetHash}`,
+    footprintW: 1,
+    footprintH: 1,
+    blocking: false,
+    pathOk: true,
+    wander: 0,
+    mount: 'edge',
+  };
+}
+
 const BUILTIN_BY_ID = new Map(BUILTIN_ITEMS.map((d) => [d.id, d]));
 
 export function getBuiltinItem(id: string): ItemDef | undefined {

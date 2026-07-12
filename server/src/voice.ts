@@ -129,6 +129,13 @@ export async function respondToTranscript(
       if (desc) response.characterRequest = desc;
       intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'create_character');
     }
+    // create_sticker 同理：摘走交给 WS 层异步造贴纸（sticker_pending/item_created 推送）。仅小仙子会发。
+    const stickerCmd = intent.behaviorScript.commands.find((c) => c.type === 'create_sticker');
+    if (stickerCmd) {
+      const desc = String(stickerCmd.params?.description ?? '').trim();
+      if (desc) response.stickerRequest = desc;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'create_sticker');
+    }
     if (intent.behaviorScript.commands.length > 0) {
       response.behaviorScript = intent.behaviorScript;
       // 执行者：小朋友点名让别的角色做（「小蓝跟我来」）→ 脚本挂到那个角色；缺省挂正在对话的角色
@@ -145,9 +152,9 @@ export async function respondToTranscript(
       }
     }
   }
-  // 造角色/造物入口：不在这里合成/发普通回应，交给 WS 层的引导会话（guideCreation/guideProp）驱动——
+  // 造角色/造物/造贴纸入口：不在这里合成/发普通回应，交给 WS 层的引导会话（guideCreation/guideProp/guideSticker）驱动——
   // 由它合成仙子的问句 TTS 并下发 creation_prompt（含图标选项），避免入口这轮重复出声。
-  if (response.characterRequest || response.propRequest) return response;
+  if (response.characterRequest || response.propRequest || response.stickerRequest) return response;
   // LLM 在这句回应里发起了委托候选 → 设为进行中，随 character_response 下发给客户端做提示
   if (intent.offerTask && taskCandidate) {
     store.setActiveTask(worldId, playerId, taskCandidate);

@@ -77,7 +77,7 @@ import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
-import { BUILTIN_ITEMS, creationItemDef, getBuiltinItem, validateTerrainItems } from './items.ts';
+import { BUILTIN_ITEMS, creationItemDef, creationStickerDef, getBuiltinItem, validateTerrainItems } from './items.ts';
 import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrain_edit.ts';
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
@@ -85,6 +85,7 @@ import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
+import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
@@ -130,7 +131,7 @@ export function seedFairy(worldId: string): Character {
     behaviorScript: { commands: [{ type: 'wait', params: { duration: 1 } }], loop: true },
     position: WORLD_CENTER_TILE,
     sceneId: DEFAULT_SCENE,
-    abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop'],
+    abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop', 'create_sticker'],
     relationships: {},
   };
 }
@@ -1290,7 +1291,7 @@ async function denyForNoFlowers(
   store: WorldStore,
   worldId: string,
   playerId: string,
-  kind: 'prop' | 'character',
+  kind: 'prop' | 'character' | 'sticker',
   clientTts = false,
 ): Promise<void> {
   const line = flowerDeniedLine();
@@ -1304,7 +1305,8 @@ async function denyForNoFlowers(
     }
   }
   socket.send(JSON.stringify({
-    type: kind === 'prop' ? 'prop_denied' : 'gen_denied',
+    // sticker 复用造物的 prop_denied UX（都进背包、都要攒花），character 走 gen_denied。
+    type: kind === 'character' ? 'gen_denied' : 'prop_denied',
     reason: 'no_flowers',
     message: line,
     ttsAsset,
@@ -1327,7 +1329,7 @@ async function openCreationSession(
   spawn?: SpawnCtx, // 造角色的降生上下文（落在发起者身边 + 广播给同场景的人）
 ): Promise<void> {
   if (!hasFlower(store, worldId, session.playerId)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, goal === 'prop' ? 'prop' : 'character', session.clientTts);
+    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, goal === 'character' ? 'character' : goal, session.clientTts);
     return;
   }
   session.creation = newCreationState(goal);
@@ -1414,6 +1416,58 @@ export async function createPropAsync(
   }
 }
 
+/** create_sticker 异步落地（fairy-stickers）：与 createPropAsync 平行，但产物是扁平 die-cut 贴纸。
+ *  扣花 → sticker_pending → 审核描述 → designSticker(名字+英文生图 prompt) → generateIconAsset 管线
+ *  （生图→抠图→加白边→存资产哈希）→ creationStickerDef(mount:'edge', renderRef `sticker:@<hash>`) →
+ *  upsertItem + bagAdd → item_created 推送（复用造物落地路径：进背包，摆放走放置模式）。
+ *  0 花拦截推 prop_denied（复用造物拒绝 UX）；任何失败都退还那朵花并推 prop_failed。 */
+export async function createStickerAsync(
+  socket: { send: (data: string) => void },
+  worldId: string,
+  playerId: string,
+  description: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  clientTts = false,
+  creatorId = '', // 造贴纸的角色（小仙子）：给了就在造完后记一条 creation 记忆
+): Promise<void> {
+  if (!store.spendFlower(worldId, playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'sticker', clientTts);
+    return;
+  }
+  // 开造即报：客户端据此退出对话、就地立起占位符（复用造物的 prop_pending 熔炉动静）。
+  socket.send(JSON.stringify({ type: 'sticker_pending', worldId, wallet: store.getWallet(worldId, playerId) }));
+  let created = false;
+  try {
+    const check = await adapters.moderation.moderateText(description);
+    if (!check.allowed) {
+      socket.send(JSON.stringify({ type: 'sticker_failed', reason: 'moderation blocked' }));
+      return;
+    }
+    const { name, prompt } = await adapters.llm.designSticker(description);
+    // 复用图标专用管线：扁平生图 → 绿幕抠图 → 程序加白 die-cut 贴纸边 → 存资产哈希。
+    const assetHash = await generateIconAsset(adapters, prompt, store);
+    const def = creationStickerDef(worldId, randomUUID(), name, assetHash);
+    store.upsertItem(def);
+    store.bagAdd(worldId, playerId, def.id);
+    created = true;
+    if (creatorId) {
+      store.addMemory(creatorId, { text: `帮小朋友做过「${def.name}」贴纸（${description.slice(0, 60)}）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
+    }
+    socket.send(JSON.stringify({
+      type: 'item_created',
+      worldId,
+      item: def,
+      wallet: store.getWallet(worldId, playerId),
+      bag: store.getBag(worldId, playerId),
+    }));
+  } catch (err) {
+    socket.send(JSON.stringify({ type: 'sticker_failed', reason: String(err) }));
+  } finally {
+    if (!created) store.refundFlower(worldId, playerId); // 造失败/被审核挡：退还
+  }
+}
+
 /** create_character 异步落地：造角色管线（spec→审核→生图→抠图→持久化），gen_progress 逐阶段推、
  *  完成 gen_complete、失败 gen_failed。与 create_character_request 复用同一实现；语音触发时不自带 gate
  *  （语音回合已在上层限流，与 createPropAsync 一致）。 */
@@ -1475,8 +1529,9 @@ export async function createCharacterAsync(
 /**
  * 引导式创造图标批量生成：遍历图标库每个选项，走图标专用管线 generateIconAsset
  * （图标画风生图→抠图→程序加白 die-cut 边→putAsset）出一张图，存「option id→asset hash」映射。
- * 覆盖造角色全库 + 造物专属的 kind/motion（prop_ 前缀）；造物的 color/size 复用造角色同 id，
- * 不重复生成（同 id 幂等跳过）。幂等：已生成的跳过，除非 force。opts.only 限定只生成指定 id。
+ * 覆盖造角色全库 + 造物专属 kind/motion（prop_ 前缀）+ 造贴纸专属 kind 图案（stk_ 前缀）；
+ * 造物/贴纸的 color/size 复用造角色同 id，不重复生成（同 id 幂等跳过）。
+ * 幂等：已生成的跳过，除非 force。opts.only 限定只生成指定 id。
  * 返回生成/跳过/失败清单。绝不抛（单项失败不影响其它）。
  */
 export async function generateCreationIcons(
@@ -1493,6 +1548,8 @@ export async function generateCreationIcons(
   const jobs: { id: string; prompt: string }[] = [
     ...CREATION_OPTIONS.map((o) => ({ id: o.id, prompt: iconPrompt(o.id) })),
     ...PROP_CREATION_OPTIONS.filter((o) => o.id.startsWith('prop_')).map((o) => ({ id: o.id, prompt: propIconPrompt(o.id) })),
+    // 造贴纸专属图案(stk_ 前缀)：color 复用造角色同 id、不重复生成，与造物同理。
+    ...STICKER_CREATION_OPTIONS.filter((o) => o.id.startsWith('stk_')).map((o) => ({ id: o.id, prompt: stickerIconPrompt(o.id) })),
   ];
   for (const job of jobs) {
     if (onlySet && !onlySet.has(job.id)) continue;
@@ -1543,13 +1600,16 @@ export async function advanceCreation(
   const state = session.creation;
   if (!state) return;
   const isProp = state.goal === 'prop';
-  // 会话目标决定汇总描述用哪套：造物 composePropDesc，造角色 describeCreationAttrs。
-  const summarize = () => isProp ? composePropDesc(state.attrs) : describeCreationAttrs(state);
-  // done 时按目标分派到对应的异步造：造物 createPropAsync，造角色 createCharacterAsync。
-  // 造物进的是背包（私有，不广播；摆到地上时 terrain_patch 自带实体定义），只有造角色要降生广播。
-  const finishCreate = (desc: string) => isProp
-    ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId)
-    : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId, spawn);
+  const isSticker = state.goal === 'sticker';
+  // 会话目标决定汇总描述用哪套：造贴纸 composeStickerDesc，造物 composePropDesc，造角色 describeCreationAttrs。
+  const summarize = () => isSticker ? composeStickerDesc(state.attrs) : isProp ? composePropDesc(state.attrs) : describeCreationAttrs(state);
+  // done 时按目标分派到对应的异步造：造贴纸 createStickerAsync，造物 createPropAsync，造角色 createCharacterAsync。
+  // 造贴纸/造物都进背包（私有，不广播；摆放走放置模式 terrain_patch 自带实体定义），只有造角色要降生广播。
+  const finishCreate = (desc: string) => isSticker
+    ? createStickerAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId)
+    : isProp
+      ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId)
+      : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId, spawn);
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
   // 超轮兜底（适配器无关）：已追问满上限还没 done，就用现有属性直接造——绝不无限追问。
   // 此前只有 mock 在 turnCount>=5 时强制 done，线上 LLM 属性解析不进去就会原地循环。
@@ -1561,7 +1621,7 @@ export async function advanceCreation(
   }
   let r;
   try {
-    r = isProp ? await adapters.llm.guideProp(state, childInput) : await adapters.llm.guideCreation(state, childInput);
+    r = isSticker ? await adapters.llm.guideSticker(state, childInput) : isProp ? await adapters.llm.guideProp(state, childInput) : await adapters.llm.guideCreation(state, childInput);
   } catch (err) {
     // guide 挂了：用现有属性兜底造，不让幼儿卡住
     console.warn(`guide(${state.goal}) 失败，用现有属性兜底造：${String(err)}`);
@@ -1615,7 +1675,7 @@ export async function advanceCreation(
     return;
   }
   // 追问：合成仙子问句 TTS（失败不阻塞；clientTts 时客户端自己合成）+ 下发图标选项卡
-  const lookup = isProp ? findPropOption : findOption;
+  const lookup = isSticker ? findStickerOption : isProp ? findPropOption : findOption;
   const options = (r.optionIds ?? [])
     .map((id) => lookup(id))
     .filter((o): o is NonNullable<typeof o> => !!o)
@@ -2012,8 +2072,8 @@ export async function handleWsMessage(
     try {
       // 点选 → 用该选项的中文 label 当输入；否则用语音转写文本。
       const optId = typeof msg.optionId === 'string' ? msg.optionId : '';
-      // 点选 → 该选项中文 label 当输入；造物会话查物品图标库，造角色查角色图标库。
-      const lookup = session.creation.goal === 'prop' ? findPropOption : findOption;
+      // 点选 → 该选项中文 label 当输入；造贴纸查贴纸图标库，造物查物品图标库，造角色查角色图标库。
+      const lookup = session.creation.goal === 'sticker' ? findStickerOption : session.creation.goal === 'prop' ? findPropOption : findOption;
       const picked = optId ? lookup(optId) : undefined;
       // 点选路径确定性入账：option 自带 category，服务端直接写 attrs，不依赖 LLM 把 label 解析进
       // updatedAttrs——此前解析失败属性不进账，guide 看到的状态不变，就会重复问同一个问题。
@@ -2070,6 +2130,10 @@ export async function handleWsMessage(
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
         return;
       }
+      if (response.stickerRequest) {
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.stickerRequest, adapters, store, response.replyText, 'sticker', spawnCtx());
+        return;
+      }
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -2124,6 +2188,10 @@ export async function handleWsMessage(
       }
       if (response.propRequest) {
         await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
+        return;
+      }
+      if (response.stickerRequest) {
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.stickerRequest, adapters, store, response.replyText, 'sticker', spawnCtx());
         return;
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
@@ -2251,6 +2319,10 @@ export async function handleWsMessage(
       }
       if (response.propRequest) {
         await openCreationSession(socket, session, worldId, characterId, response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
+        return;
+      }
+      if (response.stickerRequest) {
+        await openCreationSession(socket, session, worldId, characterId, response.stickerRequest, adapters, store, response.replyText, 'sticker', spawnCtx());
         return;
       }
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));

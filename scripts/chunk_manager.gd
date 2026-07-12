@@ -380,7 +380,8 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 				if sid.is_empty():
 					continue
 				var skey := String(ItemCatalog.get_def(sid).get("renderRef", "")).get_slice(":", 1)
-				if PackRegistry.category(skey) != "sticker":
+				# skey 以 '@' 打头 = 造贴纸的网络资产哈希(sticker:@<hash>),合法;否则须是打包贴纸。
+				if not skey.begins_with("@") and PackRegistry.category(skey) != "sticker":
 					continue # 未注册/未来的墙篱笆类边缘物走独立分支
 				var off: Vector2 = EDGE_OFFSETS[side] * WorldGrid.TILE_SIZE
 				var out_n := off.normalized() * STICKER_OUT
@@ -908,14 +909,49 @@ func _flush_building_shadows(parent: Node3D, centers: Array) -> void:
 ## mesh 和 bend 包裹后的材质（_wrap_material 有缓存，同调色板 atlas 只建一份）。
 static var _scatter_kinds: Dictionary = {}
 
+## 造贴纸的网络资产贴图缓存（hash→Texture2D）：world 侧按 renderRef 'sticker:@<hash>' 预热
+## （api.fetch_texture），本类 _scatter_kind 同步读。缓存后 world 触发 rebuild() 用真图重建。
+static var _sticker_asset_tex: Dictionary = {}
+static var _sticker_placeholder_tex: Texture2D = null
+
+## 1×1 透明占位（资产贴图未到时用，绝不崩；到货后 rebuild 换真图）。
+static func _sticker_placeholder() -> Texture2D:
+	if _sticker_placeholder_tex == null:
+		var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+		img.set_pixel(0, 0, Color(1, 1, 1, 0))
+		_sticker_placeholder_tex = ImageTexture.create_from_image(img)
+	return _sticker_placeholder_tex
+
+## world 预热完成后灌入资产贴图：存缓存 + 失效该键的散布种类（下次 rebuild 用真图+真宽高比重建）。
+static func cache_sticker_asset(hash: String, tex: Texture2D) -> void:
+	if tex == null:
+		return
+	_sticker_asset_tex[hash] = tex
+	_scatter_kinds.erase("sticker:@" + hash) # 丢掉占位版本，逼 _scatter_kind 用真图重建
+
+## world 预热前查重：已缓存就不重复拉网络。
+static func has_sticker_asset(hash: String) -> bool:
+	return _sticker_asset_tex.has(hash)
+
+## 同步取已缓存的造贴纸资产贴图（角色锚点贴纸盘用）；未预热到 → null。
+static func get_sticker_asset(hash: String) -> Texture2D:
+	return _sticker_asset_tex.get(hash) as Texture2D
+
 func _scatter_kind(key: String) -> Dictionary:
 	if _scatter_kinds.has(key):
 		return _scatter_kinds[key]
 	var info := {}
 	if key.begins_with("sticker:"):
 		# 贴纸竖片：QuadMesh 底边对齐原点（center_offset 上移半高），宽按贴图比例；
-		# 贴图经 PackRegistry（category "sticker"）运行时 load。
-		var tex := PackRegistry.load_resource(key.get_slice(":", 1)) as Texture2D
+		# 打包贴纸经 PackRegistry 运行时 load；造贴纸(skey '@<hash>')从资产缓存取，未到用透明占位。
+		var skey := key.get_slice(":", 1)
+		var tex: Texture2D
+		if skey.begins_with("@"):
+			tex = _sticker_asset_tex.get(skey.substr(1)) as Texture2D
+			if tex == null:
+				tex = _sticker_placeholder()
+		else:
+			tex = PackRegistry.load_resource(skey) as Texture2D
 		var q := QuadMesh.new()
 		var w := STICKER_H * (float(tex.get_width()) / float(tex.get_height()) if tex != null else 1.0)
 		q.size = Vector2(w, STICKER_H)
