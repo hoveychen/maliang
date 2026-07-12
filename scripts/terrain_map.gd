@@ -42,9 +42,10 @@ static var _types := PackedByteArray()
 static var _heights := PackedByteArray()
 static var _depths := PackedByteArray()
 ## v2 物品层：tile 正上方物品（palette 索引/参数）与四面边缘（N/E/S/W 顺序）。
-static var _item_ref := PackedByteArray()
+## item_ref/edges 用 Int32（Godot 无 Int16）容纳 v3 的 u16 palette 索引（>255）；item_arg 恒 u8。
+static var _item_ref := PackedInt32Array()
 static var _item_arg := PackedByteArray()
-static var _edges: Array[PackedByteArray] = []
+static var _edges: Array[PackedInt32Array] = []
 ## palette：索引-1 → 物品实体 id；本地 _paint() 地形无物品，palette 为空。
 static var _palette := PackedStringArray()
 ## true = 数组来自服务端下发的 .mltr，而非本地 _paint()。离线/回测时恒为 false。
@@ -53,8 +54,9 @@ static var _from_server := false
 const MLTR_MAGIC := "MLTR"
 const MLTR_VERSION_1 := 1
 const MLTR_VERSION := 2
+const MLTR_VERSION_3 := 3  ## palette >255：itemRef+4 边缘 + count 升 u16 小端
 const MLTR_HEADER := 11
-const MLTR_PLANES := 9  ## v2 平面数（v1 是前 3 张）
+const MLTR_PLANES := 9  ## 平面数（v1 是前 3 张；v3 平面数同 9，仅 5 张变宽）
 
 ## 边缘平面顺序，与 server/src/terrain.ts EDGE_* 一一对应。
 const EDGE_N := 0
@@ -70,7 +72,7 @@ static func reset() -> void:
 	_types = PackedByteArray()
 	_heights = PackedByteArray()
 	_depths = PackedByteArray()
-	_item_ref = PackedByteArray()
+	_item_ref = PackedInt32Array()
 	_item_arg = PackedByteArray()
 	_edges = []
 	_palette = PackedStringArray()
@@ -93,7 +95,7 @@ static func load_from_bytes(buf: PackedByteArray) -> Dictionary:
 		if buf[i] != MLTR_MAGIC.unicode_at(i):
 			return _load_err("bad magic")
 	var version := buf[4]
-	if version != MLTR_VERSION_1 and version != MLTR_VERSION:
+	if version != MLTR_VERSION_1 and version != MLTR_VERSION and version != MLTR_VERSION_3:
 		return _load_err("version %d" % version)
 	if buf[5] != n or buf[6] != n:
 		return _load_err("grid %dx%d, expect %dx%d" % [buf[5], buf[6], n, n])
@@ -101,9 +103,9 @@ static func load_from_bytes(buf: PackedByteArray) -> Dictionary:
 	var types: PackedByteArray
 	var heights: PackedByteArray
 	var depths: PackedByteArray
-	var item_ref := PackedByteArray()
+	var item_ref := PackedInt32Array()
 	var item_arg := PackedByteArray()
-	var edges: Array[PackedByteArray] = []
+	var edges: Array[PackedInt32Array] = []
 	var palette := PackedStringArray()
 
 	if version == MLTR_VERSION_1:
@@ -115,24 +117,28 @@ static func load_from_bytes(buf: PackedByteArray) -> Dictionary:
 		item_ref.resize(count)
 		item_arg.resize(count)
 		for e in range(4):
-			var z := PackedByteArray()
+			var z := PackedInt32Array()
 			z.resize(count)
 			edges.append(z)
 	else:
-		# v2：九平面 + palette 尾段（count u8 + count×(len u8 + utf8)）
-		if buf.size() < MLTR_HEADER + MLTR_PLANES * count + 1:
+		# v2：九平面全 u8；v3：itemRef+4 边缘 + palette count 升 u16 小端
+		var wide := version == MLTR_VERSION_3
+		var ref_w := 2 if wide else 1
+		var count_w := 2 if wide else 1
+		# 平面字节：types/heights/depths/itemArg 各 1B，itemRef+4 边缘各 ref_w
+		var plane_bytes := 4 * count + 5 * ref_w * count
+		if buf.size() < MLTR_HEADER + plane_bytes + count_w:
 			return _load_err("length %d" % buf.size())
 		var off := MLTR_HEADER
 		types = buf.slice(off, off + count); off += count
 		heights = buf.slice(off, off + count); off += count
 		depths = buf.slice(off, off + count); off += count
-		item_ref = buf.slice(off, off + count); off += count
+		item_ref = _read_ref_plane(buf, off, count, wide); off += ref_w * count
 		item_arg = buf.slice(off, off + count); off += count
 		for e in range(4):
-			edges.append(buf.slice(off, off + count))
-			off += count
-		var pal_n := buf[off]
-		off += 1
+			edges.append(_read_ref_plane(buf, off, count, wide)); off += ref_w * count
+		var pal_n := buf.decode_u16(off) if wide else buf[off]
+		off += count_w
 		for i in range(pal_n):
 			if off >= buf.size():
 				return _load_err("palette truncated at %d" % i)
@@ -173,6 +179,19 @@ static func load_from_bytes(buf: PackedByteArray) -> Dictionary:
 
 static func _load_err(msg: String) -> Dictionary:
 	return { "ok": false, "changed": false, "error": msg }
+
+## 读一张引用平面（itemRef/edge）到 Int32 数组：wide=v3 每格 u16 小端，否则 u8。
+## 与 server/src/terrain.ts 的 putU16/readU16Plane 逐字节对齐（小端）。
+static func _read_ref_plane(buf: PackedByteArray, from: int, count: int, wide: bool) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	out.resize(count)
+	if wide:
+		for i in range(count):
+			out[i] = buf.decode_u16(from + 2 * i)
+	else:
+		for i in range(count):
+			out[i] = buf[from + i]
+	return out
 
 ## 应用服务端 terrain_patch 的增量编辑（服务端已做语义校验，这里只做边界防御）。
 ## patch: { paletteAppend?: [{index,itemId}], edits: [{x,y,t?,h?,d?,item?:[ref,arg]|null,edge?:[side,ref]}] }
@@ -328,7 +347,7 @@ static func _ensure_built() -> void:
 	_item_arg.resize(n * n)
 	_edges = []
 	for e in range(4):
-		var z := PackedByteArray()
+		var z := PackedInt32Array()
 		z.resize(n * n)
 		_edges.append(z)
 	_palette = PackedStringArray()
