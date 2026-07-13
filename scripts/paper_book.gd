@@ -17,7 +17,7 @@ extends Node3D
 
 const PAGE_H := 1.0               ## 页高（本地基准，勿改：fit 按此反算 scale）
 const PAGE_W := 0.85              ## 单页宽（跨页 1.7:1，对齐 story 插画宽幅比例）
-const PAGE_STACK_T := 0.085       ## 页堆总厚（左+右恒等于它；厚书才有"书册边缘"）
+const PAGE_STACK_T := 0.105      ## 页堆总厚（左+右恒等于它；厚书才有"书册边缘"与深沟槽）
 const STACK_BASE_FRAC := 0.35     ## 两侧页堆基线占比（走进度的只有中间 30%，两边始终厚）
 const COVER_T := 0.030            ## 精装封面板厚
 const COVER_MARGIN := 0.045       ## 封面板比页面多出的裙边
@@ -32,6 +32,7 @@ const FACE_PAGE_L := "page_l"
 const FACE_PAGE_R := "page_r"
 
 var _spread_vp: SubViewport            ## 跨页内容视口（create_spread 后有效）
+var _pivot: Node3D                     ## 内部整体位移（合书居中↔摊开居中的平滑过渡）
 var _hinge_spine: Node3D
 var _hinge_front: Node3D
 var _board_front: MeshInstance3D
@@ -90,7 +91,7 @@ static func profile_shade(pts: PackedVector2Array, t: float, bind_z := BIND_Z) -
 	var depth_range := maxf(t - bind_z, 1e-5)
 	for i in pts.size():
 		var d := clampf((t - pts[i].y) / depth_range, 0.0, 1.0)
-		out[i] = 1.0 - 0.42 * pow(d, 1.15)
+		out[i] = 1.0 - 0.50 * pow(d, 1.15)
 	return out
 
 ## 翻页纸形变（P3 翻页动画用）：右页剖面 → 左页剖面（镜像）的弧线插值。
@@ -126,15 +127,20 @@ static func spread_px(face: String, uv: Vector2, px: Vector2i) -> Vector2:
 # ── 几何 ─────────────────────────────────────────────────────────────────────
 
 func _build() -> void:
+	# 所有几何挂内部 pivot：合书态只占右半幅，pivot 左移让合上的书居中，
+	# 翻开时随 open_frac 平滑滑回摊开居中（书边开边滑到位）。
+	_pivot = Node3D.new()
+	_pivot.name = "Pivot"
+	add_child(_pivot)
 	var board_w := PAGE_W + COVER_MARGIN
 	# 右封面板（固定，=后封面）
-	add_child(_make_board("BoardR", board_w,
+	_pivot.add_child(_make_board("BoardR", board_w,
 		Vector3(SPINE_W * 0.5 + board_w * 0.5, 0.0, COVER_T * 0.5)))
 	# 书脊板（铰链在右板左缘 x=SPINE_W/2）→ 前封面板（铰链在书脊左缘）
 	_hinge_spine = Node3D.new()
 	_hinge_spine.name = "HingeSpine"
 	_hinge_spine.position = Vector3(SPINE_W * 0.5, 0.0, 0.0)
-	add_child(_hinge_spine)
+	_pivot.add_child(_hinge_spine)
 	_hinge_spine.add_child(_make_board("BoardSpine", SPINE_W,
 		Vector3(-SPINE_W * 0.5, 0.0, COVER_T * 0.5)))
 	_hinge_front = Node3D.new()
@@ -159,7 +165,7 @@ func _build() -> void:
 	_page_r = MeshInstance3D.new()
 	_page_r.name = "PageR"
 	_page_r.position = Vector3(0.0, 0.0, COVER_T)
-	add_child(_page_r)
+	_pivot.add_child(_page_r)
 	# 翻页纸（翻页动画期间才可见）
 	_sheet_mat_f = _paper_mat(Color(0.97, 0.95, 0.90))
 	_sheet_mat_b = _paper_mat(Color(0.97, 0.95, 0.90))
@@ -167,9 +173,11 @@ func _build() -> void:
 	_sheet.name = "Sheet"
 	_sheet.position = Vector3(0.0, 0.0, COVER_T)
 	_sheet.visible = false
-	add_child(_sheet)
+	_pivot.add_child(_sheet)
 	rebuild_pages()
 	set_open_frac(1.0)
+
+const CLOTH_COLOR := Color(0.545, 0.170, 0.195)  ## 精装布面深绯红（与 book_cover 封面同色系）
 
 func _make_board(bname: String, w: float, pos: Vector3) -> MeshInstance3D:
 	var box := BoxMesh.new()
@@ -178,9 +186,31 @@ func _make_board(bname: String, w: float, pos: Vector3) -> MeshInstance3D:
 	mi.name = bname
 	mi.mesh = box
 	mi.position = pos
-	mi.material_override = _paper_mat(Color(0.78, 0.45, 0.40)) # 布面精装酒红占位（P4 换贴图）
+	mi.material_override = _paper_mat(CLOTH_COLOR)
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi
+
+## 封面插画：贴在前封面板外侧面（合书时朝相机；翻开后朝下藏起）。
+func set_cover_texture(tex: Texture2D) -> void:
+	if tex == null:
+		return
+	var old := _board_front.get_node_or_null("CoverArt")
+	if old != null:
+		(((old as MeshInstance3D).material_override) as StandardMaterial3D).albedo_texture = tex
+		return
+	var board_w := PAGE_W + COVER_MARGIN
+	var q := QuadMesh.new()
+	q.size = Vector2(board_w, PAGE_H + COVER_MARGIN * 2.0)
+	var mi := MeshInstance3D.new()
+	mi.name = "CoverArt"
+	mi.mesh = q
+	mi.position = Vector3(0.0, 0.0, -COVER_T * 0.5 - FACE_EPS)
+	mi.rotation.y = PI # 面朝板外侧(-Z)，从该侧看不镜像
+	var m := _paper_mat(Color.WHITE)
+	m.albedo_texture = tex
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_board_front.add_child(mi)
 
 ## 纸面材质：unshaded 保证亮度稳定（沟槽立体感靠顶点色，见 profile_shade）；
 ## 双面渲染省掉绕序心智负担（几何量小，代价可忽略）。
@@ -291,11 +321,19 @@ static func _quad(st: SurfaceTool,
 # ── 姿态 ─────────────────────────────────────────────────────────────────────
 
 ## 开合：0=合上（书脊立起 90°、前封面再折 90° 连同左页堆盖到右堆顶）→ 1=完全摊平。
+## 合书只占右半幅：pivot 左移把合上的书挪到画面中央，翻开时平滑滑回。
 func set_open_frac(f: float) -> void:
 	_open_frac = clampf(f, 0.0, 1.0)
 	var closed := 1.0 - _open_frac
 	_hinge_spine.rotation.y = deg_to_rad(90.0) * closed
 	_hinge_front.rotation.y = deg_to_rad(90.0) * closed
+	var closed_cx := SPINE_W * 0.5 + (PAGE_W + COVER_MARGIN) * 0.5 # 合书的横向中心
+	_pivot.position.x = -closed_cx * closed
+	# 合书时页面变暗（合拢的书页间没有光），翻开过程阴影自然褪去——
+	# 也遮掉合书态左缝里露出的一条鲜艳页面
+	var dim := lerpf(0.5, 1.0, _open_frac)
+	_page_mat_l.albedo_color = Color(dim, dim, dim)
+	_page_mat_r.albedo_color = Color(dim, dim, dim)
 
 func open_frac() -> float:
 	return _open_frac
@@ -425,12 +463,11 @@ func create_spread(px: Vector2i) -> void:
 	add_child(_spread_vp)
 	var tex := _spread_vp.get_texture()
 	# 右页网格 u∈[0,1]（0=书脊）采样右半幅：scale 0.5、offset 0.5
-	_page_mat_r.albedo_color = Color.WHITE
+	# （albedo_color 是开合明暗，由 set_open_frac 维护，此处不动）
 	_page_mat_r.albedo_texture = tex
 	_page_mat_r.uv1_scale = Vector3(0.5, 1.0, 1.0)
 	_page_mat_r.uv1_offset = Vector3(0.5, 0.0, 0.0)
 	# 左页网格 u 也是 0=书脊，采样左半幅需反向：scale -0.5、offset 0.5
-	_page_mat_l.albedo_color = Color.WHITE
 	_page_mat_l.albedo_texture = tex
 	_page_mat_l.uv1_scale = Vector3(-0.5, 1.0, 1.0)
 	_page_mat_l.uv1_offset = Vector3(0.5, 0.0, 0.0)

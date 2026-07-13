@@ -2,22 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b31br8vsshs3d"
-path.s3tc="res://.godot/imported/book_open_bg.png-d7a01d6b3fc70b9001034a8aa26faeac.s3tc.ctex"
-path.etc2="res://.godot/imported/book_open_bg.png-d7a01d6b3fc70b9001034a8aa26faeac.etc2.ctex"
+uid="uid://dnybxuypc7ht7"
+path="res://.godot/imported/book_cover.png-283dd09ac562c5d08e6eafb397312c90.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc", "etc2_astc"],
-"vram_texture": true
+"vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ui/book_open_bg.png"
-dest_files=["res://.godot/imported/book_open_bg.png-d7a01d6b3fc70b9001034a8aa26faeac.s3tc.ctex", "res://.godot/imported/book_open_bg.png-d7a01d6b3fc70b9001034a8aa26faeac.etc2.ctex"]
+source_file="res://assets/ui/book_cover.png"
+dest_files=["res://.godot/imported/book_cover.png-283dd09ac562c5d08e6eafb397312c90.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0

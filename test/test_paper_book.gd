@@ -138,11 +138,11 @@ func _run_node(book: PaperBook, cam: Camera3D) -> void:
 	# 合书姿态：前封面板翻到右堆顶、左页堆随铰链叠进书里；页面不可拾取
 	book.set_open_frac(0.0)
 	_check(book.pick(Vector3(w * 0.5, 0.0, 2.0), Vector3(0, 0, -1)).is_empty(), "合书态页面不可拾取")
-	var bf := book.get_node("HingeSpine/HingeFront/BoardFront") as MeshInstance3D
+	var bf := book.get_node("Pivot/HingeSpine/HingeFront/BoardFront") as MeshInstance3D
 	var bf_pos := bf.global_transform.origin
 	_check(bf_pos.z > PaperBook.SPINE_W - PaperBook.COVER_T, "合书:前封面板抬到书侧高(z=%.3f)" % bf_pos.z)
-	_check(bf_pos.x > 0.0, "合书:前封面板盖在右堆上方(x>0)")
-	var pl := book.get_node("HingeSpine/HingeFront/PageL") as MeshInstance3D
+	_check(absf(bf_pos.x) < 0.01, "合书:整书居中(封面板 x≈0,实测 %.3f)" % bf_pos.x)
+	var pl := book.get_node("Pivot/HingeSpine/HingeFront/PageL") as MeshInstance3D
 	_check((pl.global_transform.basis * Vector3(0, 0, 1)).z < -0.99, "合书:左页堆翻转扣在右堆顶(法线朝下)")
 	# 重新摊开：拾取恢复、左页堆回到左半
 	book.set_open_frac(1.0)
@@ -192,7 +192,7 @@ func _run_node(book: PaperBook, cam: Camera3D) -> void:
 	_check(swapped[0] == 1, "swap_content 恰被调用一次")
 	_check(absf(book.progress() - 0.6) < 1e-6, "翻页后进度=0.6")
 	_check(not book.is_turning(), "翻页动画收尾")
-	_check(not (book.get_node("Sheet") as MeshInstance3D).visible, "翻页纸收起")
+	_check(not (book.get_node("Pivot/Sheet") as MeshInstance3D).visible, "翻页纸收起")
 	# 落地后两侧页堆厚度=新进度分配（用拾取面高反查）
 	var sp := PaperBook.stack_split(0.6)
 	var lh := book.pick(Vector3(-w * 0.9, 0.0, 2.0), Vector3(0, 0, -1))

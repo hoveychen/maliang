@@ -344,13 +344,6 @@
       "prompt": "a round warm yellow laughing face with wide open smile and squeezed happy eyes"
     },
     {
-      "id": "book_open_bg",
-      "kind": "illustration",
-      "targetW": 1600,
-      "targetH": 1000,
-      "prompt": "an open hardcover fairytale storybook lying flat facing the viewer, two blank cream paper pages with softly curled edges and visible paper grain, warm red-brown leather cover border around the pages, gold corner ornaments, perfectly symmetrical straight-on view, the blank pages fill most of the frame"
-    },
-    {
       "id": "page_paper",
       "kind": "illustration",
       "targetW": 1024,
@@ -433,6 +426,13 @@
       "kind": "sticker",
       "targetSize": 256,
       "prompt": "a cute folded white paper airplane with a round warm yellow happy face on its side, flying with a short dashed swoosh trail"
+    },
+    {
+      "id": "book_cover",
+      "kind": "illustration",
+      "targetW": 880,
+      "targetH": 1024,
+      "prompt": "front cover artwork of a hardcover children's fairytale storybook, deep warm crimson cloth background with an ornate golden decorative frame border, a cute tiny fairy with sparkling translucent wings floating in the center surrounded by golden stars and magic sparkles, flat rich storybook cover composition, straight-on view filling the whole frame"
     }
   ]
 }
