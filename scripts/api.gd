@@ -86,7 +86,7 @@ func _decode_image_async(buf: PackedByteArray) -> Texture2D:
 	var img: Image = out[0]
 	return null if img == null else ImageTexture.create_from_image(img)
 
-## 新建世界（后端会种入小神仙）。失败返回空字典。
+## 新建世界（后端会种入点点）。失败返回空字典。
 func create_world() -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)

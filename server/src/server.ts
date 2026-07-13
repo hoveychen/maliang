@@ -82,7 +82,7 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
@@ -118,14 +118,14 @@ function sniffImageMime(b: Uint8Array): string {
   return 'image/png';
 }
 
-/** 在世界中央种一个小神仙（默认能造角色）。 */
+/** 在世界中央种一个点点（默认能造角色）。 */
 export function seedFairy(worldId: string): Character {
   return {
     id: randomUUID(),
     worldId,
     isFairy: true,
-    name: '小神仙',
-    personality: '温柔的小神仙，能按小朋友的想法创造新伙伴。',
+    name: FAIRY_NAME,
+    personality: FAIRY_PERSONALITY,
     voiceId: FAIRY_VOICE,
     appearance: { visualDescription: FAIRY_VISUAL_DESC, spriteAsset: '', scale: 1.2 },
     memory: [],
@@ -134,7 +134,9 @@ export function seedFairy(worldId: string): Character {
     behaviorScript: { commands: [{ type: 'wait', params: { duration: 1 } }], loop: true },
     position: WORLD_CENTER_TILE,
     sceneId: DEFAULT_SCENE,
-    abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop', 'create_sticker', 'play_game', 'guide_to', 'guide_stop'],
+    // 不含 move_to / deliver_message：effectiveAbilities 对 isFairy 恒剔除 LOCOMOTION_ABILITIES，
+    // 留在数组里只是历史残留（她拿到也兑现不了——笔没有腿）。
+    abilities: ['create_character', 'create_prop', 'create_sticker', 'play_game', 'guide_to', 'guide_stop'],
     relationships: {},
   };
 }
@@ -271,14 +273,14 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { ok: true, levels: levels ?? sample.levels, samples: store.listDeviceLevels(sample.gpu, sample.benchVersion).length };
   });
 
-  // 新建世界（种入小神仙）
+  // 新建世界（种入点点）
   app.post('/worlds', async () => {
     const world = store.createWorld();
     store.addCharacter(seedFairy(world.id));
     return { id: world.id, characters: characterListView(store, world.id) };
   });
 
-  // 拉世界状态。固定的 "default" 世界不存在时自动创建并种入小神仙
+  // 拉世界状态。固定的 "default" 世界不存在时自动创建并种入点点
   // （初始村民由 seed 脚本生成；客户端默认加载 default 世界）。
   app.get<{ Params: { id: string } }>('/worlds/:id', async (req, reply) => {
     let world = store.getWorld(req.params.id);
@@ -298,7 +300,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     };
   });
 
-  // 为世界里的小神仙补一张真实 sprite。幂等：已有则跳过；?force=true 强制重生成；
+  // 为世界里的点点补一张真实 sprite。幂等：已有则跳过；?force=true 强制重生成；
   // body 带 pngBase64 时直接存该图（部署验收过的候选，确定性替换，隐含 force）。
   app.post<{
     Params: { id: string };
@@ -2252,7 +2254,7 @@ export async function handleWsMessage(
       voiceId: session.playerId ? voiceForPlayer(session.playerId, store.getPlayer(session.playerId)?.gender) : '',
       bag: store.getBag(worldId, session.playerId),
       activeTask: store.getActiveTask(worldId, session.playerId),
-      // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
+      // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按点点旁降生）
       playerPos: session.playerId ? store.getPlayerTile(worldId, msg.sceneId ?? DEFAULT_SCENE, session.playerId) : undefined,
     }));
     // 中途加入：世界正在演出时补发 stage_begin，让新连接锁交互并接住后续舞台命令/位置流。

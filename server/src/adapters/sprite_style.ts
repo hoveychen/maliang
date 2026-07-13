@@ -41,7 +41,7 @@ export function buildIconPrompt(visualDescription: string): string {
 }
 
 /**
- * 小神仙（引导精灵）的形象主体：娜薇式发光小仙子——迷你仙子女孩 + 青蓝光晕 +
+ * 点点（引导精灵）的形象主体：娜薇式发光小仙子——迷你仙子女孩 + 青蓝光晕 +
  * 透明虫翅 + 星尘，游戏内按头部大小悬浮渲染。统一画风后缀仍由 buildSpritePrompt 拼接。
  */
 export const FAIRY_VISUAL_DESC =
