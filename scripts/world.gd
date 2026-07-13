@@ -940,6 +940,29 @@ func end_guide(trigger: String = "") -> void:
 	if not trigger.is_empty() and fairy_voice != null:
 		fairy_voice.try_play(trigger)
 
+## 换场景落地时推进引路（跨场景引路：她把小朋友带到门口，他自己走进去，到那边接着带）。
+## 引路计划是 world.gd 的成员，_unload_scene 不碰它——它天然活过场景切换，这里只推进段号。
+func _guide_on_scene_entered(sid: String) -> void:
+	if _fairy_guide.is_empty():
+		return
+	var plan: Dictionary = _fairy_guide["plan"]
+	var legs: Array = plan.get("legs", [])
+	var leg := int(_fairy_guide.get("leg", 0))
+	# 正常推进：走的就是计划里的那道门
+	if leg < legs.size() and String((legs[leg] as Dictionary).get("toScene", "")) == sid:
+		_fairy_guide["leg"] = leg + 1
+		_fairy_guide["nudge_t"] = GUIDE_NUDGE_INTERVAL
+		_fairy_guide.erase("last_gap")
+		return
+	# 抄了近路直达目标场景（孩子自己走了别的门）：不作废，直接领向最终目标
+	if sid == String(plan.get("targetScene", "")):
+		_fairy_guide["leg"] = legs.size()
+		_fairy_guide["nudge_t"] = GUIDE_NUDGE_INTERVAL
+		_fairy_guide.erase("last_gap")
+		return
+	# 走进了计划外的门：引路作废——在错的场景里继续领只会把他带得更偏
+	end_guide("guide_cancel")
+
 ## 当前路点：还有没走完的 portal 段就先去那道门；否则就是最终目标。
 ## 目标是角色时按【名字实时重解析】——村民自己会走动，下发时的坐标快照早过时了（老板拍板：不钉住他）。
 func _guide_waypoint() -> Vector2:
@@ -3817,6 +3840,7 @@ func _on_scene_entered(data: Dictionary) -> void:
 	if sid.is_empty():
 		return
 	_portal_armed = false # 落地时多半正站在返回传送点上：走出去才重新武装（_step_portal）
+	_guide_on_scene_entered(sid) # 跨场景引路：推进到下一段（她在门这边送，到那边接着领）
 	if _placing:
 		_end_placement() # 换场景丢弃在飞的摆放（tile 索引跨场景无意义）
 	_unload_scene()

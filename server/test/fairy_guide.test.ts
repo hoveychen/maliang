@@ -9,6 +9,7 @@ import { createMockAdapters } from '../src/adapters/mock.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { respondToTranscript } from '../src/voice.ts';
 import { planGuide, listGuideTargets } from '../src/guide.ts';
+import { routeScenes } from '../src/scene_graph.ts';
 import type { Character, IntentContext, IntentResult, Scene } from '../src/types.ts';
 import { effectiveAbilities } from '../src/types.ts';
 
@@ -153,9 +154,112 @@ test('planGuide：名字模糊匹配（ASR 多字，「风车那儿」→ 风车
   assert.equal(plan!.targetName, '风车');
 });
 
-test('listGuideTargets：只列当前场景，且带场景名', () => {
+test('listGuideTargets：带场景名（LLM 才能说「小明在森林」）', () => {
   const store = freshWorld();
   const targets = listGuideTargets(store, 'w1', 'village');
-  assert.ok(targets.every((t) => t.sceneId === 'village'));
-  assert.ok(targets.every((t) => t.sceneName === '村庄'), '要带场景名，LLM 才能说「小明在森林」');
+  const windmill = targets.find((t) => t.name === '风车');
+  assert.equal(windmill?.sceneName, '村庄');
+});
+
+// ── 跨场景（P3）：portal 图 BFS + 2 跳上限 ───────────────────────────────────
+//
+// 拓扑（只有 village↔forest↔cave 这一条链，desert 孤立）：
+//   village ──> forest ──> cave        desert（没有任何 portal 连过来）
+//   village <── forest <── cave
+
+/** 建一条 village → forest → cave 的链，外加一个不连通的 desert。 */
+function seedChain(store: WorldStore): void {
+  const mk = (sceneId: string, name: string, portals: Scene['portals']): Scene => ({
+    worldId: 'w1', sceneId, name, terrainAsset: '', gridTiles: 75, pois: [], portals, terrainVersion: 0,
+  });
+  store.upsertScene(mk('forest', '森林', [
+    { tile: [5, 5], radius: 3, toScene: 'village', toTile: [70, 70] },
+    { tile: [60, 60], radius: 3, toScene: 'cave', toTile: [1, 1] },
+  ]));
+  store.upsertScene(mk('cave', '山洞', [{ tile: [1, 1], radius: 3, toScene: 'forest', toTile: [60, 60] }]));
+  store.upsertScene(mk('desert', '沙漠', [])); // 孤岛：没有 portal 连过来
+  // village 已由 seedScene 建好（带 POI），补一条通往 forest 的门
+  const village = store.getScene('w1', 'village')!;
+  village.portals = [{ tile: [70, 70], radius: 3, toScene: 'forest', toTile: [5, 5] }];
+  store.upsertScene(village);
+}
+
+test('routeScenes：同场景 = 空路径；相邻 = 1 跳', () => {
+  const store = freshWorld();
+  seedChain(store);
+  assert.deepEqual(routeScenes(store, 'w1', 'village', 'village'), []);
+  const legs = routeScenes(store, 'w1', 'village', 'forest');
+  assert.equal(legs?.length, 1);
+  assert.equal(legs![0]!.sceneId, 'village');
+  assert.equal(legs![0]!.toScene, 'forest');
+  assert.deepEqual(legs![0]!.portalTile, { tileX: 70, tileY: 70 }, '要给出这一段该走的那道门');
+});
+
+test('routeScenes：2 跳可达（village → forest → cave）', () => {
+  const store = freshWorld();
+  seedChain(store);
+  const legs = routeScenes(store, 'w1', 'village', 'cave');
+  assert.equal(legs?.length, 2);
+  assert.deepEqual(legs!.map((l) => l.toScene), ['forest', 'cave']);
+});
+
+test('routeScenes：不可达 → null（孤立场景带不过去）', () => {
+  const store = freshWorld();
+  seedChain(store);
+  assert.equal(routeScenes(store, 'w1', 'village', 'desert'), null);
+});
+
+test('routeScenes：超过 2 跳上限 → null（老板：小朋友扛不住长途跋涉）', () => {
+  const store = freshWorld();
+  seedChain(store);
+  // 把链接长一节：cave → deep（village 到 deep 要 3 跳）
+  store.upsertScene({
+    worldId: 'w1', sceneId: 'deep', name: '深洞', terrainAsset: '', gridTiles: 75, pois: [], portals: [], terrainVersion: 0,
+  });
+  const cave = store.getScene('w1', 'cave')!;
+  cave.portals = [...cave.portals, { tile: [9, 9], radius: 3, toScene: 'deep', toTile: [2, 2] }];
+  store.upsertScene(cave);
+  assert.equal(routeScenes(store, 'w1', 'village', 'cave')?.length, 2, '2 跳仍然可以');
+  assert.equal(routeScenes(store, 'w1', 'village', 'deep'), null, '3 跳超上限，宁可让她说「太远啦」');
+});
+
+test('planGuide：跨场景找村民 → 带 portal 逐跳', () => {
+  const store = freshWorld();
+  seedChain(store);
+  const ming = seedChar(store, 'w1', 'ming', '小明');
+  ming.sceneId = 'forest';
+  ming.position = { tileX: 33, tileY: 44 };
+  store.saveCharacter(ming);
+
+  const plan = planGuide(store, 'w1', 'village', { character_name: '小明' });
+  assert.ok(plan, '小明在森林，村庄能走过去 → 应给出计划');
+  assert.equal(plan!.targetScene, 'forest');
+  assert.deepEqual(plan!.targetTile, { tileX: 33, tileY: 44 });
+  assert.equal(plan!.legs.length, 1, '村庄 → 森林 一道门');
+  assert.equal(plan!.legs[0]!.toScene, 'forest');
+});
+
+test('planGuide：目标在够不着的场景 → null（不发 guide，只留口头回应）', () => {
+  const store = freshWorld();
+  seedChain(store);
+  const lost = seedChar(store, 'w1', 'lost', '小远');
+  lost.sceneId = 'desert'; // 孤岛，走不过去
+  store.saveCharacter(lost);
+
+  assert.equal(planGuide(store, 'w1', 'village', { character_name: '小远' }), null);
+});
+
+test('listGuideTargets：够不着的目标不上菜单（列了 LLM 就会应下，而 planGuide 又会拒）', () => {
+  const store = freshWorld();
+  seedChain(store);
+  const ming = seedChar(store, 'w1', 'ming', '小明');
+  ming.sceneId = 'forest';
+  store.saveCharacter(ming);
+  const lost = seedChar(store, 'w1', 'lost', '小远');
+  lost.sceneId = 'desert';
+  store.saveCharacter(lost);
+
+  const names = listGuideTargets(store, 'w1', 'village').map((t) => t.name);
+  assert.ok(names.includes('小明'), '森林可达 → 该上菜单');
+  assert.ok(!names.includes('小远'), '沙漠不可达 → 不该上菜单，免得她应下却带不了');
 });
