@@ -101,6 +101,35 @@ func _tick() -> void:
 		_check("点「不去了」即停", (scene.get("_fairy_guide") as Dictionary).is_empty(), true)
 		var btn: Button = scene.get("guide_stop_button")
 		_check("取消后按钮收起", btn == null or not btn.visible, true)
+		# ── 兜底①：要找的人根本不在场 → 宽限后作废（别领着他走向一个空坐标） ──
+		scene.call("start_guide", {
+			"targetKind": "character",
+			"targetName": "查无此人",
+			"targetScene": "village",
+			"targetTile": { "tileX": START_TILE.x, "tileY": START_TILE.y },
+			"legs": [],
+		})
+
+	if frame == 92:
+		_check("目标不在场时，宽限期内不急着作废", not (scene.get("_fairy_guide") as Dictionary).is_empty(), true)
+		var g: Dictionary = scene.get("_fairy_guide")
+		g["lost_t"] = 99.0 # 快进过宽限期（GUIDE_LOST_GRACE=5s）
+
+	if frame == 96:
+		_check("目标一直找不到 → 引路作废", (scene.get("_fairy_guide") as Dictionary).is_empty(), true)
+		# ── 兜底②：进对话时按钮收起（引路只是挂起，不是取消） ──
+		scene.call("start_guide", _plan(START_TILE))
+		scene.set("selected", (scene.call("_find_fairy") as Dictionary).get("node"))
+		scene.call("_sync_guide_button")
+
+	if frame == 100:
+		var btn2: Button = scene.get("guide_stop_button")
+		_check("对话中按钮收起", btn2 != null and not btn2.visible, true)
+		_check("但引路没被取消（只是挂起）", not (scene.get("_fairy_guide") as Dictionary).is_empty(), true)
+		scene.set("selected", null)
+		scene.call("_sync_guide_button")
+		var btn3: Button = scene.get("guide_stop_button")
+		_check("退出对话后按钮回来", btn3 != null and btn3.visible, true)
 		if fails == 0:
 			print("fairy_guide PASS")
 		else:
