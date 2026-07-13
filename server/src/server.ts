@@ -87,7 +87,7 @@ import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale } from './creatio
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
-import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { completeTaskOnEvent, completeWishOnAbility, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
@@ -1299,6 +1299,38 @@ async function pushPraiseTts(
   await pushLineTts(socket, adapters, store, praiseLine(task, settle), npc?.voiceId ?? 'cn-child-default', clientTts);
 }
 
+/**
+ * 一个玩法【真正成功】了（造出了东西 / 开了一局游戏 / 仙子答应带路）——心愿闭环的唯一入口。
+ *
+ * 两件事：
+ * ① 记进 discovered：此后全世界再没人漏这个心愿的话（「已发现的不再提」，见 wishes.ts）。
+ * ② 若进行中的委托正是盼着它的那个心愿 → 盖章 + 让【许愿的那个村民】用自己的音色道谢。
+ *    这一步是满足感的闭环：小朋友帮了忙，得有人认出来并激动。少了它，漏话就只是句怪话。
+ *
+ * 复用 task_complete 报文 = 客户端零改动就有现成的盖章庆祝演出。
+ */
+async function fulfillAbility(
+  socket: { send: (data: string) => void },
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  worldId: string,
+  playerId: string,
+  ability: string,
+  clientTts = false,
+): Promise<void> {
+  store.addDiscovered(worldId, playerId, ability);
+  const done = completeWishOnAbility(worldId, playerId, ability, store);
+  if (!done) return; // 没人在盼这个玩法：只算发现，不盖章
+  socket.send(JSON.stringify({
+    type: 'task_complete',
+    task: done.task,
+    stampStyle: done.task.stampStyle,
+    flowerGained: done.flowerGained,
+    wallet: done.wallet,
+  }));
+  await pushPraiseTts(socket, adapters, store, worldId, done.task, done, clientTts);
+}
+
 /** 造物/造角色余额检查：至少 1 朵小红花才放行。 */
 function hasFlower(store: WorldStore, worldId: string, playerId: string): boolean {
   return store.getWallet(worldId, playerId).flowers >= 1;
@@ -1420,6 +1452,8 @@ export async function startGameAsync(
   if (!run) { await say(BUSY_LINE); return; }
   // 不 await 终局：演出要演几分钟，stage_begin 已广播给全场，这里只管把它跑起来。
   void run.catch(() => {});
+  // 真开演了才算「发现了能一起玩游戏」——前面每个 return 都是没开成，不能算。
+  await fulfillAbility(socket, adapters, store, worldId, session.playerId, 'play_game', session.clientTts);
 }
 
 async function pushLineTts(
@@ -1492,6 +1526,8 @@ export async function createPropAsync(
       wallet: store.getWallet(worldId, playerId),
       bag: store.getBag(worldId, playerId),
     }));
+    // 造物成功 = 发现了「能造东西」这个玩法；若有村民正盼着它 → 盖章 + 它用自己的音色道谢
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_prop', clientTts);
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
   } finally {
@@ -1544,6 +1580,7 @@ export async function createStickerAsync(
       wallet: store.getWallet(worldId, playerId),
       bag: store.getBag(worldId, playerId),
     }));
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_sticker', clientTts);
   } catch (err) {
     socket.send(JSON.stringify({ type: 'sticker_failed', reason: String(err) }));
   } finally {
@@ -1601,6 +1638,7 @@ export async function createCharacterAsync(
     if (character.appearance.spriteAsset) {
       triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
     }
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_character', clientTts);
   } catch (err) {
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
@@ -2309,6 +2347,9 @@ export async function handleWsMessage(
         await startGameAsync(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.gameRequest, response.replyText, adapters, store, hub, stages);
         return;
       }
+      // 仙子答应带路 = 发现了「引路」玩法（宽松口径：应下就算，不等走到——
+      // 中途反悔的 3 岁小朋友不该被剥夺盖章）。若有村民正盼着去哪儿 → 心愿达成。
+      if (response.guide) await fulfillAbility(socket, adapters, store, msg.worldId ?? '', session.playerId, 'guide_to', session.clientTts);
       socket.send(JSON.stringify({ type: 'character_response', ...response }));
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -2374,6 +2415,9 @@ export async function handleWsMessage(
         await startGameAsync(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.gameRequest, response.replyText, adapters, store, hub, stages);
         return;
       }
+      // 仙子答应带路 = 发现了「引路」玩法（宽松口径：应下就算，不等走到——
+      // 中途反悔的 3 岁小朋友不该被剥夺盖章）。若有村民正盼着去哪儿 → 心愿达成。
+      if (response.guide) await fulfillAbility(socket, adapters, store, msg.worldId ?? '', session.playerId, 'guide_to', session.clientTts);
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -2510,6 +2554,9 @@ export async function handleWsMessage(
         await startGameAsync(socket, session, worldId, characterId, response.gameRequest, response.replyText, adapters, store, hub, stages);
         return;
       }
+      // 仙子答应带路 = 发现了「引路」玩法（宽松口径：应下就算，不等走到——
+      // 中途反悔的 3 岁小朋友不该被剥夺盖章）。若有村民正盼着去哪儿 → 心愿达成。
+      if (response.guide) await fulfillAbility(socket, adapters, store, worldId, playerId, 'guide_to', session.clientTts);
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       recordVisitTurn(session, worldId, playerId, characterId, response.transcript, response.replyText, adapters, store);
     } catch (err) {
