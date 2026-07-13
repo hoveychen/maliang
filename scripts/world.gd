@@ -120,6 +120,7 @@ var _vt_response := 0     ## character_response 到达
 var _vt_tts_out := 0      ## 本轮首个 TTS 音频起播
 var banner: Label
 var heard_label: Label   ## 顶部显示 ASR 识别到的文字（"听到：…"，给家长确认）
+var confirm_bar: ConfirmBar ## 说完先听一遍的确认条（仅 confirm_mode 开时出现）
 
 var critter_tex: Texture2D
 var npcs: Array = []              ## [{ node:PaperCharacter, logical:Vector2 }]
@@ -393,7 +394,12 @@ func _setup_audio() -> void:
 	_vc.local_final.connect(_on_capture_local_final)
 	_vc.cancelled.connect(_on_capture_cancelled)
 	_vc.asr_ready.connect(_on_capture_ready)
+	_vc.confirm_ready.connect(_on_capture_confirm_ready)
 	add_child(_vc)
+	if confirm_bar != null:
+		confirm_bar.replay_pressed.connect(_vc.replay)
+		confirm_bar.accept_pressed.connect(_vc.accept)
+		confirm_bar.retry_pressed.connect(_vc.retry)
 
 ## 开放麦门禁（每帧）：端侧未就绪不喂（绝不上传）；喊话只走端侧；否则按 FSM mic_open。
 ## cooldown 已折进 FSM（COOLDOWN 态非 mic_open），退避倒计时在 _process 里推进。
@@ -1162,6 +1168,18 @@ func _setup_hud() -> void:
 	_style_label(heard_label, 24)
 	heard_label.visible = false
 	layer.add_child(heard_label)
+
+	# 说完先听一遍：确认条（confirm_mode 开时才亮）。摆屏幕下方三分之一——
+	# 别盖住正在对话的角色，孩子的视线本来就在角色脸上。
+	confirm_bar = ConfirmBar.new()
+	confirm_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	confirm_bar.offset_left = -220.0
+	confirm_bar.offset_right = 220.0
+	confirm_bar.offset_top = -240.0
+	confirm_bar.offset_bottom = -60.0
+	confirm_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	confirm_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	layer.add_child(confirm_bar)
 
 	# 思考状态：小字弱化到顶部（给家长看），幼儿看角色头顶的 _think_bubble 动画
 	thinking_label = Label.new()
@@ -4769,6 +4787,13 @@ func _reset_empty_streak() -> void:
 func _on_capture_ready() -> void:
 	pass
 
+## 确认模式：识别好了但先别发——VoiceCapture 正在回放那句话，亮确认条等孩子点。
+## 收条在 _on_capture_committed（accept 会补发 committed）与退对话时。
+func _on_capture_confirm_ready(text: String) -> void:
+	thinking_label.visible = false # 说完不等于采纳：这会儿还没人在思考
+	if confirm_bar != null:
+		confirm_bar.show_for(text)
+
 ## 开口：清零本轮耗时戳。识别在端侧，开口这一刻不需要通知服务端。
 func _on_capture_begin() -> void:
 	_vt_speak_start = Time.get_ticks_msec()
@@ -4780,6 +4805,8 @@ func _on_capture_begin() -> void:
 
 ## 说完：亮思考态、造物投掷，等端侧识别出文本（local_final）。不关麦（继续聆听）。
 func _on_capture_committed() -> void:
+	if confirm_bar != null:
+		confirm_bar.hide_bar() # 采纳了（或本就没开确认模式）：收条
 	# 喊话没有服务端回复要等：不亮「思考中」、不开解卡定时器（端侧 ASR final 秒回）
 	if _talk_pid.is_empty():
 		thinking_label.visible = true

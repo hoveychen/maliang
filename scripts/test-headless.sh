@@ -51,6 +51,7 @@ UNIT_TESTS=(
   test_voice_vad
   test_voice_capture
   test_voice_confirm
+  test_confirm_bar
   test_game_audio
   test_sdf_static_baker
   test_paper_idle
