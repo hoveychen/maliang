@@ -368,6 +368,14 @@ export class WorldStore {
         data TEXT NOT NULL,
         PRIMARY KEY (world_id, player_id)
       );
+      -- 玩家已发现的玩法（造物/造角色/玩游戏…）：村民只漏【还没被发现】的心愿，
+      -- 发现一个就再没人念叨它——「已发现的不再提」是发现感成立的前提（见 wishes.ts）。
+      CREATE TABLE IF NOT EXISTS player_discovered (
+        world_id TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (world_id, player_id)
+      );
       -- 玩家位置：必须带场景。只按 playerId 存位置在多场景下毫无意义——
       -- 「小明在 (12,30)」是村庄的池塘边还是森林的空地？
       CREATE TABLE IF NOT EXISTS player_positions (
@@ -986,6 +994,38 @@ export class WorldStore {
       .prepare('SELECT player_id, data FROM wallets WHERE world_id = ? ORDER BY player_id')
       .all(worldId) as { player_id: string; data: string }[];
     return rows.map((r) => ({ playerId: r.player_id, wallet: coerceWallet(JSON.parse(r.data)).wallet }));
+  }
+
+  /** 某玩家在某世界已发现的玩法（wishes.ts 的 ability 名）。没有行 = 什么都还没发现。 */
+  getDiscovered(worldId: string, playerId: string): string[] {
+    const row = this.#db
+      .prepare('SELECT data FROM player_discovered WHERE world_id = ? AND player_id = ?')
+      .get(worldId, this.#walletKey(playerId)) as { data: string } | undefined;
+    if (!row) return [];
+    try {
+      const raw: unknown = JSON.parse(row.data);
+      return Array.isArray(raw) ? raw.filter((a): a is string => typeof a === 'string') : [];
+    } catch {
+      return []; // 行损坏当作没发现过：最坏结果是村民多念叨一次，不该因此崩
+    }
+  }
+
+  /**
+   * 记一个玩法为「已发现」。返回 true 表示这是【第一次】发现它——
+   * 调用方据此决定要不要重发漏话（心愿池变了）+ 判定心愿达成。已发现过则原样返回 false、不写库。
+   */
+  addDiscovered(worldId: string, playerId: string, ability: string): boolean {
+    if (!this.#worldExists(worldId)) return false;
+    const cur = this.getDiscovered(worldId, playerId);
+    if (cur.includes(ability)) return false;
+    cur.push(ability);
+    this.#db
+      .prepare(
+        'INSERT INTO player_discovered (world_id, player_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(world_id, player_id) DO UPDATE SET data = excluded.data',
+      )
+      .run(worldId, this.#walletKey(playerId), JSON.stringify(cur));
+    return true;
   }
 
   getActiveTask(worldId: string, playerId: string): ActiveTask | null {
