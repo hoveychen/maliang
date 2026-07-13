@@ -153,6 +153,26 @@ func _run(scene: Node) -> void:
 			grown += 1
 	_check(grown == 9, "满 9：还是 9 朵，没多长")
 
+	# 小朋友「自己点一下砸下去」这条路（默认路径！上面几段走的都是 1.2s 超时兜底）：
+	# 把兜底拉到 5s，点一下卡，仪式必须**立刻**推进完；耗时远小于兜底 = 证明是点击触发的。
+	scene.set("stamp_seen", { "flowers": 0, "stampProgress": 0, "stampsTotal": 0 })
+	scene.set("wallet", { "flowers": 0, "stampProgress": 1, "stampsTotal": 1, "hearts": 5 })
+	scene._apply_wallet(scene.get("wallet"))
+	pui.hover_timeout = 5.0
+	var t0 := Time.get_ticks_msec()
+	pui.play_ceremony(StampCeremony.plan(scene.get("stamp_seen"), scene.get("wallet"), []))  # 不 await：先让它停在招手
+	for _f in 3:
+		await scene.get_tree().process_frame
+	_check(card.has_tool(), "招手中：橡皮章浮在空槽上")
+	card.tapped.emit()   # ← 小朋友点了一下卡
+	var guard := 0
+	while pui.ceremony_playing() and guard < 600:
+		await scene.get_tree().process_frame
+		guard += 1
+	var spent := Time.get_ticks_msec() - t0
+	_check(not pui.ceremony_playing() and spent < 4500, "点一下就砸下去（%dms，没等满 5s 兜底）" % spent)
+	_check(int((scene.get("stamp_seen") as Dictionary).get("stampsTotal", -1)) == 1, "点砸完：游标认账")
+
 	StampCeremony.save_seen(StampCeremony.empty_seen())  # 别把本次测试的游标留给别的测试
 	var hearts_label: Label = pui.get("_hearts_label")
 	_check(hearts_label != null and hearts_label.text == "x5", "集邮册爱心行=钱包 hearts（player-interaction 移植）")
