@@ -44,6 +44,7 @@ UNIT_TESTS=(
   test_behavior_executor
   test_edge_tts
   test_fairy_voice
+  test_npc_wish_voice
   test_prebaked_voice
   test_onboarding_bgm_mute
   test_onboarding_asr_gate

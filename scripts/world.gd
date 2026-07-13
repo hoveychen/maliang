@@ -249,6 +249,7 @@ var _stage_speaks: Array = []     ## 进行中的舞台念白 { done:Callable, d
 var _stage_balls := {}            ## C 档球实体 id → StageBall 节点（spawn_ball 建、收场统一 free）
 var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
 var fairy_voice: FairyVoice       ## 预制台词播放器（构建期 TTS，运行期零调用）
+var npc_wish_voice: NpcWishVoice  ## 村民心愿漏话（3D 定位音，按距离衰减；见 npc_wish_voice.gd）
 var game_audio: GameAudio         ## BGM + 音效（语音/思考时自动 duck）
 var _fairy_bubble: Sprite3D       ## 小仙子说话时的音符气泡（AIGC ic_note）
 var _fairy_greeted := false       ## 每次启动只问候一次
@@ -392,6 +393,11 @@ func _setup_audio() -> void:
 	edge_tts = EdgeTts.new()
 	edge_tts.name = "EdgeTts"
 	add_child(edge_tts) # 探活由 _step_edge_tts 首帧触发（available 初始 false）
+	# 村民心愿漏话：必须建在 edge_tts 之后——它持有 edge_tts 引用，早建会拿到 null 且【静默不出声】。
+	npc_wish_voice = NpcWishVoice.new()
+	npc_wish_voice.name = "NpcWishVoice"
+	npc_wish_voice.edge_tts = edge_tts # 复用同一个 edge-tts（共享探活与时钟纠偏）
+	add_child(npc_wish_voice)
 	game_audio = GameAudio.new()
 	game_audio.name = "GameAudio"
 	add_child(game_audio)
@@ -1078,6 +1084,10 @@ func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
 	_update_fairy_bubble(fairy)
 	if InteractionFsm.player_engaged(_fsm_inputs()):
 		return
+	# 村民正在漏话时仙子闭嘴（反向门禁在 NpcWishVoice.update 的 is_speaking 里）：
+	# 两个声源叠在一起，小朋友一句也听不清，两边的话都白说了。
+	if npc_wish_voice != null and npc_wish_voice.is_speaking():
+		return
 	_fairy_chat_t -= delta
 	if _fairy_chat_t > 0.0:
 		return
@@ -1090,6 +1100,20 @@ func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
 	if not _guide_used and fairy_voice.try_play("guide_hint"):
 		return
 	fairy_voice.try_play(_ambient_trigger())
+
+## 村民心愿漏话：服务端下发台词，模块自己按距离/冷却/全局间隔决定谁在什么时候嘟囔一句。
+## 仙子正在说话时全员闭嘴（正向门禁在 _fairy_ambient 里）——两个声源叠着谁也听不清。
+func _update_npc_wishes(delta: float) -> void:
+	if npc_wish_voice == null or player.is_empty():
+		return
+	var engaged := InteractionFsm.player_engaged(_fsm_inputs()) \
+			or (fairy_voice != null and fairy_voice.is_playing())
+	npc_wish_voice.update(delta, npcs, player["logical"], engaged)
+
+## 服务端下发的漏话候选（进世界/换场景/发现新玩法后重发）：整份替换，旧台词立即作废。
+func _on_npc_wishes(wishes: Array) -> void:
+	if npc_wish_voice != null:
+		npc_wish_voice.set_wishes(wishes)
 
 ## 音符气泡：小仙子出声时挂在头顶（氛围闲聊与 POI 提醒共用）。
 func _update_fairy_bubble(fairy: Dictionary) -> void:
@@ -1733,6 +1757,7 @@ func _process(delta: float) -> void:
 	_step_remote_actors(delta) # 多人复制：先按缓冲推进被复制 NPC/远端副本的 logical，再统一渲染
 	_reposition_npcs(delta)
 	_update_npc_notice(delta)  # 近身空闲村民偶尔转头看玩家打招呼（在 reposition 后跑，paper_walk 已更新）
+	_update_npc_wishes(delta)  # 近身村民偶尔漏一句心愿（3D 定位音，走近才听清）
 	_update_portal_markers()   # 传送门拱随世界滚动（与角色同一套环面最短位移）
 	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
@@ -3374,6 +3399,7 @@ func _setup_backend() -> void:
 	backend.character_response.connect(_on_character_response)
 	backend.world_state.connect(_on_world_state)
 	backend.task_complete.connect(_on_task_complete)
+	backend.npc_wishes.connect(_on_npc_wishes)
 	backend.praise_tts.connect(_on_praise_tts)
 	backend.tts_chunk.connect(_on_tts_chunk)
 	# 残余积压由 _drain_tts_stream 排空；generator 不会自己停，标记后播完主动 stop
