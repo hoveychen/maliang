@@ -1523,6 +1523,15 @@ export class WorldStore {
     this.#persistSpriteAnims();
   }
 
+  /** 所有「存有三段原片」的立绘 hash —— repack-all 的工作清单（v1 老记录没有原片，不在内）。 */
+  listSpriteAnimsWithClips(): string[] {
+    const out: string[] = [];
+    for (const [hash, rec] of this.#spriteAnims) {
+      if (rec.status === 'ready' && rec.clipVideos) out.push(hash);
+    }
+    return out;
+  }
+
   setSpriteAnimFailed(spriteHash: string): void {
     this.#spriteAnims.set(spriteHash, { status: 'failed' });
     this.#persistSpriteAnims();
