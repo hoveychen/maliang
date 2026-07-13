@@ -97,15 +97,22 @@ if [ "$PLATFORM" = "ios" ]; then
   # 3a-ios. 合并 godot-cpp 的静态库进来。
   # scons 产出的 .a 只含本扩展的目标文件；Godot 的 iOS 导出只链 .gdextension 里声明的这一个
   # 库，godot-cpp 不会被单独链进去——不合并的话 Xcode 链接期会一片 godot::* 未定义符号。
-  OURS="$BIN/libmaliang_asr.ios.$TARGET.arm64.a"
+  STAGED="$EXT/bin_ios/libmaliang_asr.ios.$TARGET.arm64.a"   # scons 产物：只含本扩展
   CPPLIB="$EXT/godot-cpp/bin/libgodot-cpp.ios.$TARGET.arm64.a"
-  [ -f "$OURS" ] || { echo "scons 没产出 $OURS"; exit 1; }
+  OURS="$BIN/libmaliang_asr.ios.$TARGET.arm64.a"             # 合并产物：交给 Godot
+  [ -f "$STAGED" ] || { echo "scons 没产出 $STAGED"; exit 1; }
   [ -f "$CPPLIB" ] || { echo "找不到 godot-cpp 静态库：$CPPLIB"; exit 1; }
-  MERGED="$BIN/libmaliang_asr.ios.$TARGET.merged.a"
+  mkdir -p "$BIN"
   echo "libtool 合并 godot-cpp 符号 ..."
-  libtool -static -o "$MERGED" "$OURS" "$CPPLIB"
-  mv "$MERGED" "$OURS"
-  echo "完成：$OURS（$(du -h "$OURS" | cut -f1)）"
+  libtool -static -o "$OURS" "$STAGED" "$CPPLIB"   # 每次从暂存重新合并，幂等
+
+  # 3b-ios. sherpa/onnxruntime 的 xcframework 放到 bin/ 下，供 .gdextension 的
+  # [dependencies] 引用——Godot 的 iOS 导出会把它们拷进 Xcode 工程并链接。
+  rm -rf "$BIN/sherpa-onnx.xcframework" "$BIN/onnxruntime.xcframework"
+  cp -R "$EXT/sherpa-onnx-ios/sherpa-onnx.xcframework" "$BIN/"
+  cp -R "$EXT/sherpa-onnx-ios/onnxruntime.xcframework" "$BIN/"
+
+  echo "完成：$OURS（$(du -h "$OURS" | cut -f1)）+ sherpa/onnxruntime xcframework"
   exit 0
 fi
 
