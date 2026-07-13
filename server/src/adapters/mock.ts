@@ -419,17 +419,6 @@ export function createMockAdapters(): ServiceAdapters {
         return inferSizeFromText(visualDescription);
       },
     },
-    asr: {
-      async transcribe(_audio: AudioBlob): Promise<string> {
-        return '你好呀'; // mock：固定转写；真实走 sherpa-onnx
-      },
-      openStream() {
-        return {
-          feed(_chunk: Uint8Array): void { /* mock：忽略分片 */ },
-          async finish(): Promise<string> { return '你好呀'; },
-        };
-      },
-    },
     tts: {
       async synthesize(_text: string, _voiceId: string): Promise<AudioBlob> {
         return audioStub();

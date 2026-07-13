@@ -1,4 +1,4 @@
-// 生产语音链路实测：wss 走一遍 voice_start/chunk/end（真实中文音频）+ voice_transcript 路径，量延迟。
+// 生产语音链路实测：wss 走一遍 voice_transcript（端侧转写直送，唯一语音入口），量延迟。
 // 用法：node tools/voice_prod_probe.mjs [wss://maliang-api.muveeai.com]
 import { createRequire } from 'node:module';
 
@@ -39,23 +39,10 @@ function waitResponse(timeoutMs = 40000) {
   });
 }
 
-// 1) 流式音频路径（服务端 ASR）
-ws.send(JSON.stringify({ type: 'voice_start', worldId: world.id, characterId }));
-for (let off = 0; off < pcm.length; off += 4800) {
-  ws.send(JSON.stringify({ type: 'voice_chunk', audio: pcm.subarray(off, off + 4800).toString('base64') }));
-}
+// 端侧转写路径（voice_transcript 直送）——服务端 ASR 已退役，这是唯一的语音入口
 let t0 = Date.now();
-ws.send(JSON.stringify({ type: 'voice_end' }));
-let resp = await waitResponse();
-console.log(`[音频路径] voice_end→回复 ${Date.now() - t0}ms 转写「${resp.transcript}」回复「${resp.replyText.slice(0, 30)}…」`);
-
-const asset = await fetch(`${BASE}/assets/${resp.ttsAsset}`);
-console.log(`[TTS 资产] mime=${asset.headers.get('content-type')} 大小=${(await asset.arrayBuffer()).byteLength}B`);
-
-// 2) 端侧转写路径（voice_transcript 直送）
-t0 = Date.now();
 ws.send(JSON.stringify({ type: 'voice_transcript', worldId: world.id, characterId, transcript: '你好呀，我们一起去种向日葵吧' }));
-resp = await waitResponse();
+const resp = await waitResponse();
 console.log(`[转写路径] voice_transcript→回复 ${Date.now() - t0}ms 回复「${resp.replyText.slice(0, 30)}…」`);
 
 ws.close();

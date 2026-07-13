@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import type { ServiceAdapters, ASRStream } from './adapters/types.ts';
+import type { ServiceAdapters } from './adapters/types.ts';
 import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
@@ -657,17 +657,12 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { spriteAsset: hash, anchors };
   });
 
-  // onboarding 自我介绍：转写（客户端直送或送 PCM 走服务端 ASR）→ LLM 提取名字/称呼
-  // → TTS 复述确认音频。提取不到名字返回空串，客户端播预制 retry 重问（多轮）。
+  // onboarding 自我介绍：客户端端侧识别好的转写 → LLM 提取名字/称呼 → TTS 复述确认音频。
+  // 提取不到名字返回空串，客户端播预制 retry 重问（多轮）。识别一律在端侧完成，本路由只收文本。
   app.post<{
-    Body: { transcript?: string; pcmBase64?: string; rate?: number } | null;
-  }>('/onboarding/intro', { bodyLimit: 8 * 1024 * 1024 }, async (req) => {
-    let transcript = (req.body?.transcript ?? '').trim();
-    if (transcript.length === 0 && req.body?.pcmBase64) {
-      const bytes = Uint8Array.from(Buffer.from(req.body.pcmBase64, 'base64'));
-      const mime = `audio/L16;rate=${req.body.rate ?? 16000}`;
-      transcript = (await adapters.asr.transcribe({ bytes, mime })).trim();
-    }
+    Body: { transcript?: string } | null;
+  }>('/onboarding/intro', async (req) => {
+    const transcript = (req.body?.transcript ?? '').trim();
     if (transcript.length === 0) return { transcript: '', name: '', nickname: '' };
     const prof = await adapters.llm.extractProfile(transcript);
     if (!prof.name && !prof.nickname) return { transcript, name: '', nickname: '' };
@@ -1072,11 +1067,9 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       }
     }, HEARTBEAT_SWEEP_MS);
     heartbeatSweep.unref?.(); // 不因这个定时器阻止进程优雅退出
-    // 连接断开时释放可能仍持有的限流名额（录到一半断线），并 flush 会话记忆兜底（前端没发 leave_world 就掉线）
+    // 连接断开时 flush 会话记忆兜底（前端没发 leave_world 就掉线）
     socket.on('close', () => {
       clearInterval(heartbeatSweep);
-      if (session.gate) { session.gate.release(); session.gate = null; }
-      session.active = false;
       notifyHubLeave(hub, connKey, stages, session.playerId);
       void endSessionVisit(session, adapters, store, Date.now());
     });
@@ -1163,15 +1156,15 @@ export async function maybeCompactVisit(
   }
 }
 
-/** 边说边识别的单连接语音会话：voice_start 开识别流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
+/**
+ * 单连接语音会话。识别一律在客户端端侧完成（Android 插件 / macOS GDExtension 的 sherpa），
+ * 服务端只收 voice_transcript 的成品文本——服务端 ASR 已整条退役，不再有边说边识别的音频会话。
+ */
 export interface VoiceSession {
-  active: boolean;
   worldId: string;
   characterId: string;
   /** 当前玩家 id（设备端稳定 UUID，随消息上报）：供记忆/Visit 按玩家归属（P3/P4 消费）。 */
   playerId: string;
-  asr: ASRStream | null;
-  gate: { release: () => void } | null;
   /** 进行中的会话（world_info 起、leave_world/close 收尾）；每轮对话增量累积其中，结束批量抽记忆。 */
   visit: VisitState | null;
   /** 进行中的引导式造角色会话（对小仙子说造角色即开启）；期间语音/点选都当造角色答复，见 advanceCreation。 */
@@ -1199,8 +1192,11 @@ export interface VoiceSession {
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null, creation: null, clientTts: false, posBin: false, currentScene: DEFAULT_SCENE, lastSeenMs: Date.now(), pingCapable: false };
+  return { worldId: '', characterId: '', playerId: '', visit: null, creation: null, clientTts: false, posBin: false, currentScene: DEFAULT_SCENE, lastSeenMs: Date.now(), pingCapable: false };
 }
+
+/** 服务端 ASR 退役后被废弃的 WS 消息类型：收到即静默丢弃（见 handleWsMessage 末尾）。 */
+const RETIRED_VOICE_TYPES = new Set(['voice_input', 'voice_start', 'voice_chunk', 'voice_end', 'voice_cancel']);
 
 /** 心跳：多久没任何消息判半开连接（三个客户端 ping 周期）。 */
 export const HEARTBEAT_TIMEOUT_MS = 30_000;
@@ -2027,9 +2023,7 @@ export async function handleWsMessage(
     byFairy?: boolean;
     characterId?: string;
     slot?: string; // character_attach：贴纸槽位（headTop/handL/handR）
-    audio?: string; // base64
-    format?: string;
-    transcript?: string; // voice_transcript：端侧 ASR 已识别的文本
+    transcript?: string; // voice_transcript：端侧 ASR 已识别的文本（唯一语音入口）
     text?: string; // tts_request：客户端 edge-tts 失败时求服务端合成的文本
     voiceId?: string; // tts_request：合成音色
     locations?: unknown; // world_info：世界地点名清单
@@ -2276,51 +2270,8 @@ export async function handleWsMessage(
     return;
   }
 
-  if (msg.type === 'voice_input') {
-    const gate = limiter.tryAcquire(connKey, Date.now());
-    if (!gate.ok) {
-      socket.send(JSON.stringify({ type: 'voice_failed', reason: gate.reason }));
-      return;
-    }
-    try {
-      const audioBytes = Uint8Array.from(Buffer.from(msg.audio ?? '', 'base64'));
-      const transcript = (await adapters.asr.transcribe({ bytes: audioBytes, mime: msg.format ?? 'audio/wav' })).trim();
-      // 造角色引导会话进行中：这句话当造角色答复，不走 routeIntent。
-      if (session.creation?.active) {
-        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', spawnCtx());
-        return;
-      }
-      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene, visitContext(session, msg.characterId ?? ''));
-      // 造角色/造物入口：开引导会话，不发普通回应（问句 TTS + 图标卡由会话驱动）。
-      if (response.characterRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText, 'character', spawnCtx());
-        return;
-      }
-      if (response.propRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
-        return;
-      }
-      if (response.stickerRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.stickerRequest, adapters, store, response.replyText, 'sticker', spawnCtx());
-        return;
-      }
-      // 玩游戏入口：生成剧本→过 typecheck→开演（stage_begin 广播全场），不发普通回应。
-      if (response.gameRequest) {
-        await startGameAsync(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.gameRequest, response.replyText, adapters, store, hub, stages);
-        return;
-      }
-      socket.send(JSON.stringify({ type: 'character_response', ...response }));
-      // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
-      recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
-    } catch (err) {
-      socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
-    } finally {
-      gate.release();
-    }
-    return;
-  }
-
-  // ── 端侧 ASR：客户端（Android 插件）本地识别完成，直送转写文本，跳过服务端 ASR ──
+  // ── 端侧 ASR：客户端（Android 插件 / macOS GDExtension）本地识别完成，直送转写文本。
+  // 这是唯一的语音入口——服务端 ASR（voice_input 整段、voice_start/chunk/end 流式）已整条退役。──
   if (msg.type === 'voice_transcript') {
     const gate = limiter.tryAcquire(connKey, Date.now());
     if (!gate.ok) {
@@ -2436,86 +2387,6 @@ export async function handleWsMessage(
       socket.send(JSON.stringify({ type: 'tts_failed', reason: String(err) }));
     } finally {
       gate.release();
-    }
-    return;
-  }
-
-  // ── 边说边识别：分片随到随发识别器，voice_end 时识别已基本完成（见 asr-live-stream 计划）──
-  if (msg.type === 'voice_start') {
-    if (session.gate) { session.gate.release(); session.gate = null; } // 上一会话没正常收尾，先释放
-    const gate = limiter.tryAcquire(connKey, Date.now());
-    if (!gate.ok) {
-      socket.send(JSON.stringify({ type: 'voice_failed', reason: gate.reason }));
-      return;
-    }
-    session.active = true;
-    session.worldId = msg.worldId ?? '';
-    session.characterId = msg.characterId ?? '';
-    session.asr = adapters.asr.openStream(); // 立即开识别流，分片随到随发
-    session.gate = gate;
-    return;
-  }
-
-  if (msg.type === 'voice_chunk') {
-    if (session.active && session.asr && msg.audio) session.asr.feed(Buffer.from(msg.audio, 'base64'));
-    return; // 分片实时喂识别器，不回包
-  }
-
-  // 误触/中途放弃（按住说话 <0.4s 松手）：丢弃识别流（finish 让 sherpa 识别流释放，
-  // 转写弃用），释放 gate，不回任何包——客户端取消后不该看到任何反馈。
-  if (msg.type === 'voice_cancel') {
-    if (session.asr) void session.asr.finish().catch(() => {});
-    session.active = false;
-    session.asr = null;
-    if (session.gate) { session.gate.release(); session.gate = null; }
-    return;
-  }
-
-  if (msg.type === 'voice_end') {
-    if (!session.active || !session.asr) {
-      socket.send(JSON.stringify({ type: 'voice_failed', reason: '没有进行中的录音会话' }));
-      return;
-    }
-    const { worldId, characterId, playerId, asr } = session;
-    session.active = false;
-    session.asr = null;
-    try {
-      const transcript = await asr.finish(); // 识别尾巴：流式期间已基本识完
-      // 造角色引导会话进行中：这句话当造角色答复，不走 routeIntent。
-      if (session.creation?.active) {
-        await advanceCreation(socket, session, worldId, characterId, transcript, adapters, store, '', spawnCtx());
-        return;
-      }
-      const ttsHooks = {
-        onResponse: (r: VoiceResponse) => socket.send(JSON.stringify({ type: 'character_response', ...r })),
-        onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
-        onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
-      };
-      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene, visitContext(session, characterId));
-      // 造角色/造物入口：开引导会话，不发普通回应。
-      if (response.characterRequest) {
-        await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store, response.replyText, 'character', spawnCtx());
-        return;
-      }
-      if (response.propRequest) {
-        await openCreationSession(socket, session, worldId, characterId, response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
-        return;
-      }
-      if (response.stickerRequest) {
-        await openCreationSession(socket, session, worldId, characterId, response.stickerRequest, adapters, store, response.replyText, 'sticker', spawnCtx());
-        return;
-      }
-      // 玩游戏入口：生成剧本→过 typecheck→开演（stage_begin 广播全场），不发普通回应。
-      if (response.gameRequest) {
-        await startGameAsync(socket, session, worldId, characterId, response.gameRequest, response.replyText, adapters, store, hub, stages);
-        return;
-      }
-      if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
-      recordVisitTurn(session, worldId, playerId, characterId, response.transcript, response.replyText, adapters, store);
-    } catch (err) {
-      socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
-    } finally {
-      if (session.gate) { session.gate.release(); session.gate = null; }
     }
     return;
   }
@@ -2780,6 +2651,12 @@ export async function handleWsMessage(
     hub.broadcastScene(msg.worldId ?? '', session.currentScene, relay, connKey);
     return;
   }
+
+  // 退役协议（服务端 ASR，2026-07-13）：老客户端可能仍发音频会话消息。静默忽略而不是落到下面的
+  // unknown type——voice_chunk 是 150ms 一片的高频消息，逐片回 error 等于给老客户端刷一场 error 风暴。
+  // 注意：老客户端发完 voice_end 会一直等不到 character_response（服务端不再识别音频），
+  // 由它自己的思考超时解卡。真机一律走端侧 ASR（voice_transcript），不受影响。
+  if (RETIRED_VOICE_TYPES.has(msg.type ?? '')) return;
 
   socket.send(JSON.stringify({ type: 'error', error: `unknown type: ${msg.type}` }));
 }

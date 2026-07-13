@@ -1,17 +1,9 @@
-import type { ServiceAdapters, AudioBlob } from './adapters/types.ts';
+import type { ServiceAdapters } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, ChatTurn, VoiceResponse } from './types.ts';
 import { effectiveAbilities } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
 import { pickGreeting } from './greetings.ts';
-
-export interface VoiceInput {
-  worldId: string;
-  characterId: string;
-  /** 说话的玩家（设备端稳定 UUID；空串=未上报玩家的历史/旧客户端，记忆落未绑定桶）。 */
-  playerId: string;
-  audio: AudioBlob;
-}
 
 const RECENT_TURNS = 6; // 旧路径兜底：调用方没给 session 历史时，回喂持久 chat_turns 的近 N 条（child+npc 各算一条）
 
@@ -20,20 +12,6 @@ export class CharacterNotFoundError extends Error {
     super(`character not found: ${worldId}/${characterId}`);
     this.name = 'CharacterNotFoundError';
   }
-}
-
-/**
- * 语音输入编排（见 docs/m2-voice-plan.md）：
- * ASR(音频→文字) → 意图路由(闲聊/指令) → 文字审核 → TTS(文字→音频) → 更新 memory/chat_history。
- * 返回 VoiceResponse 供 WS 推 character_response。
- */
-export async function handleVoice(
-  input: VoiceInput,
-  adapters: ServiceAdapters,
-  store: WorldStore,
-): Promise<VoiceResponse> {
-  const transcript = await adapters.asr.transcribe(input.audio);
-  return respondToTranscript(input.worldId, input.characterId, input.playerId, transcript, adapters, store);
 }
 
 /**

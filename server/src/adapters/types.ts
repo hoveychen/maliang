@@ -109,18 +109,8 @@ export interface AnchorAdapter {
   detectAnchors(image: ImageBlob): Promise<RawAnchorPoints | null>;
 }
 
-/** 语音识别：音频 → 中文文字。真实实现走 sherpa-onnx（LocalASRAdapter）。 */
-/** 流式识别会话：录音中持续 feed 分片（实时喂本地 sherpa 识别器），finish 收尾并返回最终转写。 */
-export interface ASRStream {
-  feed(chunk: Uint8Array): void;
-  finish(): Promise<string>;
-}
-
-export interface ASRAdapter {
-  transcribe(audio: AudioBlob): Promise<string>;
-  /** 边说边识别：voice_start 时开流，分片随到随发，voice_end 调 finish 拿转写。 */
-  openStream(): ASRStream;
-}
+// 语音识别没有服务端适配器：识别一律在客户端端侧完成（Android 插件 / macOS GDExtension 的
+// sherpa-onnx），服务端只收 voice_transcript 的成品文本。服务端 ASR 于 2026-07-13 整条退役。
 
 /** 流式合成回调：onStart 在首个分片前带 mime（客户端要先知道采样率），onChunk 按序推 PCM16 分片。 */
 export interface TTSStreamCallbacks {
@@ -151,7 +141,6 @@ export interface ServiceAdapters {
   video: VideoAdapter;
   orientation: OrientationAdapter;
   anchors: AnchorAdapter;
-  asr: ASRAdapter;
   tts: TTSAdapter;
   moderation: ModerationAdapter;
 }
