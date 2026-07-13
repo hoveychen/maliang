@@ -113,7 +113,7 @@ export interface Wallet {
 export const STAMP_STYLES: readonly string[] = ['star', 'smile', 'paw', 'medal', 'heart'];
 
 /** 委托类型：完成判定全部是客户端确定性事件（送达回调/相邻/到点），不靠 LLM 猜。 */
-export type TaskType = 'deliver' | 'bring' | 'visit';
+export type TaskType = 'deliver' | 'bring' | 'visit' | 'wish';
 
 /** 进行中的委托。同一时刻至多一个（幼儿单任务心智，完成判定也无歧义）。完成 = 盖 1 章。 */
 export interface ActiveTask {
@@ -125,6 +125,12 @@ export interface ActiveTask {
   locationName?: string; // visit：地点名（客户端 POI 判定）
   message?: string; // deliver：要带的话
   stampStyle: string; // 完成时盖的章款式 id（STAMP_STYLES 之一，纯演出）
+  /**
+   * wish：这个心愿勾的玩法（wishes.ts 的 ability 名，如 create_prop）。
+   * 完成判定不走客户端上报——服务端在造物/造角色/玩游戏【成功】的那个代码点自己知道
+   * （见 completeWishOnAbility）。村民不会魔法，真正兑现心愿的是小仙子。
+   */
+  wishAbility?: string;
 }
 
 /** LLM 从玩家意图产出的角色设定（落地前）。 */
@@ -345,6 +351,11 @@ export interface IntentContext {
   activeTask?: ActiveTask;
   /** 可发起的委托候选（无进行中委托时服务端生成）：LLM 觉得时机合适就用自己口吻发起并置 offerTask。 */
   taskCandidate?: ActiveTask;
+  /**
+   * 这个角色当下的心愿背景（wishes.ts 的 WishDef.context）：它刚才可能在旁边自言自语漏过这件事，
+   * 小朋友凑上来问的就是它。注入后角色被搭话时能自然接上自己的念想——而不是一脸茫然。
+   */
+  wishContext?: string;
   /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing，命中 prompt cache。 */
   cacheKey?: string;
 }

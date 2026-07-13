@@ -2,11 +2,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WorldStore } from '../src/persistence.ts';
 import { pickTaskCandidate, completeTaskOnEvent } from '../src/tasks.ts';
+import { WISH_ABILITIES } from '../src/wishes.ts';
 import { INITIAL_FLOWERS, type ActiveTask, type Character } from '../src/types.ts';
 
 function seed(): WorldStore {
   const s = new WorldStore();
   s.createWorld('w1');
+  // 本文件测的是【跑腿委托】的按玩家隔离。心愿委托优先于跑腿（见 wishes.ts），
+  // 故先把玩法全标记为已发现 = 心愿池已空的「常规循环」阶段。A/B 各自一份进度。
+  for (const p of ['A', 'B']) {
+    for (const a of WISH_ABILITIES) s.addDiscovered('w1', p, a);
+  }
   for (const [id, name] of [['n1', '小蓝'], ['n2', '小绿']] as const) {
     const c: Character = {
       id, worldId: 'w1', isFairy: false, name, personality: 'p', voiceId: 'v',

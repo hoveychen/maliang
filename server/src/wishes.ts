@@ -18,6 +18,16 @@ export interface WishDef {
   context: string;
   /** 心愿达成时的道谢（走 pushPraiseTts，村民自己的音色）。 */
   thanks: string[];
+  /**
+   * 兑现它要花掉一朵小红花吗（造物/造角色/造贴纸都扣 1 朵，见 server.ts spendFlower）。
+   *
+   * 这个标记扛着一个死锁：心愿委托优先于跑腿委托，而跑腿是赚小红花的路子。
+   * 小朋友花光了花、心愿池又只剩造物类 → 唯一能接的活是造物，但造不起；
+   * 跑腿委托被心愿挡住 → 赚不回花 → 永久卡死。所以【买不起就不勾】：
+   * 没花时这类心愿既不进委托候选、也不漏话，让位给跑腿委托去赚花。
+   * 顺带还消掉一种挫败——被勾起了兴趣，凑过去却发现造不起。
+   */
+  costsFlower: boolean;
 }
 
 /**
@@ -27,6 +37,7 @@ export interface WishDef {
 export const WISHES: Record<string, WishDef> = {
   create_prop: {
     ability: 'create_prop',
+    costsFlower: true,
     leaks: [
       '我家门口空落落的…要是有棵会开花的树，该多好呀。',
       '唉…下雨天我都没地方躲，要是这儿有个小亭子就好啦。',
@@ -40,6 +51,7 @@ export const WISHES: Record<string, WishDef> = {
   },
   create_character: {
     ability: 'create_character',
+    costsFlower: true,
     leaks: [
       '一个人搭积木好没意思…要是有个小伙伴陪我就好啦。',
       '我这儿有两块小饼干呢…可是没人跟我一起吃。',
@@ -53,6 +65,7 @@ export const WISHES: Record<string, WishDef> = {
   },
   create_sticker: {
     ability: 'create_sticker',
+    costsFlower: true,
     leaks: [
       '别人衣服上都有亮晶晶的小星星…就我这儿光秃秃的。',
       '我好想在身上贴一个小太阳呀，那样走到哪儿都是暖暖的。',
@@ -66,6 +79,7 @@ export const WISHES: Record<string, WishDef> = {
   },
   play_game: {
     ability: 'play_game',
+    costsFlower: false,
     leaks: [
       '我捡到一个球！可是…一个人踢好像不好玩。',
       '我以前跟好多小朋友一起跑来跑去…现在没人陪我跑啦。',
@@ -79,6 +93,7 @@ export const WISHES: Record<string, WishDef> = {
   },
   guide_to: {
     ability: 'guide_to',
+    costsFlower: false,
     leaks: [
       '我昨天飞过一个地方，那儿的花会发光呢…可惜好远好远。',
       '山那边好像有什么在闪…我一个人不敢去看。',
@@ -119,8 +134,16 @@ function hash(s: string): number {
  * 稳定性是设计的一部分：小朋友第二次路过时听见的还是同一个念想，
  * 才会觉得「这个人一直想要棵树」，而不是「这人每次胡说八道」。
  */
-export function wishFor(characterId: string, discovered: readonly string[]): WishDef | null {
-  const pool = WISH_ABILITIES.filter((a) => !discovered.includes(a));
+export function wishFor(
+  characterId: string,
+  discovered: readonly string[],
+  canAfford = true,
+): WishDef | null {
+  const pool = WISH_ABILITIES.filter((a) => {
+    if (discovered.includes(a)) return false;
+    if (!canAfford && WISHES[a]!.costsFlower) return false; // 买不起就不勾（见 costsFlower）
+    return true;
+  });
   if (pool.length === 0) return null;
   return WISHES[pool[hash(characterId) % pool.length]!]!;
 }
@@ -130,8 +153,9 @@ export function pickLeak(
   characterId: string,
   discovered: readonly string[],
   rng: () => number = Math.random,
+  canAfford = true,
 ): string {
-  const wish = wishFor(characterId, discovered);
+  const wish = wishFor(characterId, discovered, canAfford);
   const pool = wish ? wish.leaks : IDLE_DOING;
   return pool[Math.floor(rng() * pool.length)]!;
 }
