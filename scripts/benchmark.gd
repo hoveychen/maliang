@@ -141,7 +141,7 @@ func _spawn_load() -> void:
 		var atlas := load(String(v["atlas"])) as Texture2D
 		if atlas != null:
 			var phase := float(i) / float(EXTRA_CHARS) * 3.9  # 错开相位，避免整齐同帧的机械感
-			npc.play_idle(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
+			npc.play_anim(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
 		npcs.append({ "node": npc, "logical": lg, "id": "bench_%d" % i })
 
 ## 压测负载退场（embedded：不 change_scene，得就地清掉 bench_ 角色，把干净场景交给转正）。

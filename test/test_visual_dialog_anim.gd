@@ -47,7 +47,7 @@ func _animate_fairy_and_enter() -> void:
 	img.fill(Color(1, 1, 1, 1))
 	var atlas := ImageTexture.create_from_image(img)
 	var meta := { "cols": 1, "rows": 4, "frameCount": 4, "fps": 8, "cellW": 64, "cellH": 64 }
-	(fairy["node"] as Object).call("play_idle", atlas, meta, 1.5, 0.0)
+	(fairy["node"] as Object).call("play_anim", atlas, meta, 1.5, 0.0)
 	# 玩家保持静态占位；记录其可见高度（相机基础构图应由它主导，仙子只有 1.5m 更矮）
 	player_h = float(scene.call("_char_top", scene.get("player")["node"]))
 	scene.call("_enter_interaction", fairy["node"])

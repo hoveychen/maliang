@@ -1,5 +1,5 @@
 extends SceneTree
-## PaperCharacter.play_idle 的独立测试：sprite-sheet 图集切换后，
+## PaperCharacter.play_anim 的独立测试：sprite-sheet 图集切换后，
 ## 几何按单格 cellW×cellH 归一化到期望世界高度（不是整张图集尺寸）。
 ## 运行: Godot --headless --path . --script res://test/test_paper_idle.gd
 
@@ -26,7 +26,7 @@ func _init() -> void:
 	get_root().add_child(pc)
 
 	# 期望世界高度 6.0 米 → pixel_size = 6/cellH = 6/30 = 0.2
-	pc.play_idle(atlas, meta, 6.0)
+	pc.play_anim(atlas, meta, 6.0)
 
 	fails += _check("pixel_size 按 cellH 算", pc.pixel_size, 0.2)
 

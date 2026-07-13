@@ -736,7 +736,7 @@ func _setup_npcs() -> void:
 		if atlas != null:
 			# 相位按序错开，避免三只同帧起跳的机械感（31帧/8fps ≈ 3.9s 循环），与 _spawn_server_character 一致
 			var phase := float(i) / float(positions.size()) * 3.9
-			npc.play_idle(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
+			npc.play_anim(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
 		var lg := WorldGrid.wrap_pos(positions[i])
 		var did := "demo_%s" % String(v["slug"])
 		npcs.append({ "node": npc, "logical": lg, "id": did })
@@ -844,7 +844,7 @@ func _poll_idle_anim(node: PaperCharacter, sprite_hash: String, world_height: fl
 			var meta: Dictionary = rec.get("meta", {})
 			var atlas := await api.fetch_texture(String(rec.get("animAsset", "")))
 			if atlas != null and is_instance_valid(node):
-				node.play_idle(atlas, meta, world_height, phase)
+				node.play_anim(atlas, meta, world_height, phase)
 			return
 		if status == "failed":
 			return
@@ -4355,8 +4355,8 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 	if is_fairy:
 		BlobShadow.detach(npc) # 悬浮飞行不落地，脚下暗斑穿帮
 		npc.wants_ground_shadow = false  # 切「角色实时阴影」刷新时别给悬浮角色挂脚下 blob
-		if use_anim: # 已是动画图集：直接以动画降生（play_idle 覆盖 setup 的静态尺寸，同帧无闪）
-			npc.play_idle(tex, anim_meta, FAIRY_HEIGHT, 0.0)
+		if use_anim: # 已是动画图集：直接以动画降生（play_anim 覆盖 setup 的静态尺寸，同帧无闪）
+			npc.play_anim(tex, anim_meta, FAIRY_HEIGHT, 0.0)
 		else:
 			# 小仙子随从：头部大小（时之笛式），无论真图/占位都按 FAIRY_HEIGHT 归一
 			npc.pixel_size = FAIRY_HEIGHT / float(tex.get_height())
@@ -4366,7 +4366,7 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 		# 相位按 id 错开，避免整村同帧起跳的机械感（31帧/8fps 循环约 3.9s）。
 		var anim_phase := float(cid.hash() % 256) / 256.0 * 3.9
 		if use_anim: # 已是动画图集：直接以动画降生
-			npc.play_idle(tex, anim_meta, body_h, anim_phase)
+			npc.play_anim(tex, anim_meta, body_h, anim_phase)
 		else:
 			# 生成图分辨率高，按高度归一化到 body_h（=6.0×体型），脚底对齐原点
 			var h := float(tex.get_height())
