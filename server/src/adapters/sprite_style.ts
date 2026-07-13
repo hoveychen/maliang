@@ -41,9 +41,16 @@ export function buildIconPrompt(visualDescription: string): string {
 }
 
 /**
- * 点点（引导精灵）的形象主体：娜薇式发光小仙子——迷你仙子女孩 + 青蓝光晕 +
- * 透明虫翅 + 星尘，游戏内按头部大小悬浮渲染。统一画风后缀仍由 buildSpritePrompt 拼接。
+ * 点点（神笔的笔灵）的形象主体（见 docs/fairy-persona-design.md）：抱着一支比自己还大的毛笔的
+ * 纸艺小飞人，折纸翅膀 + 墨点尾迹，奶白/朱砂/墨黑三色。游戏内按头部大小悬浮渲染。
+ * 统一画风后缀（含白边黑框贴纸风 + 绿幕）仍由 buildSpritePrompt 拼接。
+ *
+ * 改成英文（与其他所有角色一致——她曾是唯一的中文硬编码例外）。刻意用 creature/spirit 而非 girl：
+ * 往「器物精灵/非人/无性别」推，规避 PUBLIC 幼儿产品的过度性化风险（见设计 §3.4）。
+ * SPRITE_STYLE_SUFFIX 的硬约束仍在——描述里绝不写任何 IP 名，只写外观。
  */
 export const FAIRY_VISUAL_DESC =
-  '一个发光的迷你小仙子女孩，全身包裹着柔和的青蓝色光球光晕，四片透明闪亮的蜻蜓翅膀，' +
-  '圆脸大眼睛温柔微笑，短短的淡蓝色头发，小小的白裙子，身后拖着闪烁的星星光尘';
+  'a tiny paper-craft brush spirit, a small round creature hugging an oversized calligraphy ' +
+  'brush taller than itself, two folded-paper wings, creamy off-white paper body with ' +
+  'vermilion-red accents and an ink-black brush tip, big round eyes and a proud little smile, ' +
+  'a trail of small ink dots floating behind it';
