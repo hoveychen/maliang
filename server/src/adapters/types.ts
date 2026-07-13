@@ -29,6 +29,12 @@ export interface VideoBlob {
   mime: string;
 }
 
+/**
+ * 角色动画段名。每段一条独立生成的绿幕视频，三段共用一张图集（见 sprite_sheet.ts）。
+ * 客户端按角色状态选段，优先级 talking > moving > idle（见 world.gd）。
+ */
+export type ClipName = 'idle' | 'moving' | 'talking';
+
 /** LLM：造角色 spec / 意图路由 / 角色对话。真实实现接 OpenRouter。 */
 export interface LLMAdapter {
   designCharacter(intentText: string, byFairy: boolean): Promise<CharacterSpec>;
@@ -78,7 +84,8 @@ export interface CutoutAdapter {
  * 慢（60~90s），只在造角色后异步补，不进对话闭环。
  */
 export interface VideoAdapter {
-  generateIdleAnimation(sprite: ImageBlob): Promise<VideoBlob>;
+  /** 立绘 → 某一段的绿幕循环 mp4（首尾闭合）。每段一次调用、一次计费。 */
+  generateClip(sprite: ImageBlob, clip: ClipName): Promise<VideoBlob>;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { PNG } from 'pngjs';
-import type { ImageBlob, VideoAdapter, VideoBlob } from './types.ts';
+import type { ClipName, ImageBlob, VideoAdapter, VideoBlob } from './types.ts';
 
 // 标准 chroma 绿（广播抠像绿），与 ChromaKeyCutoutAdapter 的 isGreen 判定一致。
 const CHROMA_GREEN: [number, number, number] = [0, 177, 64];
@@ -7,13 +7,34 @@ const TARGET_ASPECT = 16 / 9;
 
 const VIDEOS_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 
-// 通用 idle 提示：不含具体角色词（任意立绘复用），锁死原地+纯绿背景+首尾闭合。
-const IDLE_PROMPT =
-  'The character does a gentle idle animation: subtle breathing, slight up-and-down bobbing, ' +
-  'small calm idle motion. Camera is completely static, no position drift, the character stays ' +
-  'perfectly centered. The background MUST stay a perfectly flat, solid chroma-key green with NO ' +
-  'scenery, NO gradient, NO shadow cast on the background. The final frame returns exactly to the ' +
-  'starting pose for a seamless, looping animation.';
+// 三段提示词都不含具体角色词（任意立绘复用）。
+//
+// 共享约束（SHARED）是三段能共用同一张图集的前提：三段各自生成，但客户端切段时只换帧、
+// 不换几何——若某段里角色变大/走出画/镜头推近，三段合流后的并集裁剪盒会被撑大，全部三段
+// 的角色都跟着变小，且切段时位置会漂。所以「原地、同尺寸、不推镜」在每段里都得钉死。
+const SHARED_CONSTRAINTS =
+  'The camera is completely static: no zoom, no pan, no dolly. The character stays perfectly ' +
+  'centered, at exactly the same size and screen position as the input image, and never moves ' +
+  'out of frame or towards the camera. The background MUST stay a perfectly flat, solid ' +
+  'chroma-key green with NO scenery, NO gradient, NO shadow cast on the background. The final ' +
+  'frame returns exactly to the starting pose for a seamless, looping animation.';
+
+const CLIP_PROMPTS: Record<ClipName, string> = {
+  idle:
+    'The character does a gentle idle animation: subtle breathing, slight up-and-down bobbing, ' +
+    'small calm idle motion. ' + SHARED_CONSTRAINTS,
+  // 「原地踏步」是关键：真往前走会离开画面中心，撑破共用裁剪盒。游戏里的位移由引擎推节点，
+  // 这段动画只负责「腿在动」这件事。
+  moving:
+    'The character walks in place, marching on the spot like on a treadmill: legs lift and step ' +
+    'in a clear walk cycle, arms swing naturally, the body bobs slightly with each step. The ' +
+    'character does NOT travel forwards, backwards or sideways — it stays rooted on the same spot. ' +
+    SHARED_CONSTRAINTS,
+  talking:
+    'The character is cheerfully talking: the mouth opens and closes with speech, the head nods ' +
+    'and tilts a little, and the hands make small friendly gestures near the chest. The feet stay ' +
+    'planted on the same spot. ' + SHARED_CONSTRAINTS,
+};
 
 /**
  * 透明立绘合成到纯 chroma 绿 16:9 画布（居中，alpha over green）。
@@ -85,9 +106,10 @@ export interface VideoAdapterOptions {
 }
 
 /**
- * OpenRouter 视频生成（Seedance）：透明立绘 → idle 循环绿幕 mp4。
+ * OpenRouter 视频生成（Seedance）：透明立绘 → 某一段的循环绿幕 mp4。
  * /api/v1/videos 是异步端点：submit → poll → download，与 chat/completions 不同，故自带 HTTP。
  * 关键：同一张绿幕图同时当 first_frame + last_frame → 视频回到起点 → 天然无缝闭合。
+ * 一个角色三段（idle/moving/talking）= 调三次 = 计费三次（480p/4s 约 $0.046/次）。
  */
 export class OpenRouterVideoAdapter implements VideoAdapter {
   readonly #apiKey: string;
@@ -106,7 +128,7 @@ export class OpenRouterVideoAdapter implements VideoAdapter {
     this.#maxWaitMs = opts.maxWaitMs ?? 10 * 60 * 1000;
   }
 
-  async generateIdleAnimation(sprite: ImageBlob): Promise<VideoBlob> {
+  async generateClip(sprite: ImageBlob, clip: ClipName): Promise<VideoBlob> {
     const green = compositeOnGreen(sprite);
     const dataUri = `data:image/png;base64,${Buffer.from(green.bytes).toString('base64')}`;
 
@@ -114,7 +136,7 @@ export class OpenRouterVideoAdapter implements VideoAdapter {
       method: 'POST',
       body: JSON.stringify({
         model: this.#model,
-        prompt: IDLE_PROMPT,
+        prompt: CLIP_PROMPTS[clip],
         duration: this.#duration,
         resolution: this.#resolution,
         aspect_ratio: '16:9',

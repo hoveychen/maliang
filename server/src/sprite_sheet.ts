@@ -13,12 +13,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PNG } from 'pngjs';
 import { ChromaKeyCutoutAdapter } from './adapters/chroma_cutout.ts';
-import type { CutoutAdapter, ImageBlob, VideoBlob } from './adapters/types.ts';
+import type { ClipName, CutoutAdapter, ImageBlob, VideoBlob } from './adapters/types.ts';
 
 const execFileP = promisify(execFile);
 
-/** 角色动画段名。客户端按状态选段：talking > moving > idle（见 world.gd）。 */
-export type ClipName = 'idle' | 'moving' | 'talking';
+export type { ClipName };
+/** 生成/打包顺序，也是图集里的段序。 */
 export const CLIP_NAMES: readonly ClipName[] = ['idle', 'moving', 'talking'] as const;
 
 /** 某段在图集里的帧区间（行主序连续下标，可跨行）。 */

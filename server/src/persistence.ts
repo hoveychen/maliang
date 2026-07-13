@@ -7,7 +7,7 @@ import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FL
 import { creationItemDef, getBuiltinItem } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
-import type { ImageBlob } from './adapters/types.ts';
+import type { ClipName, ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { sanitizeLevels, type DeviceSample, type Levels } from './device_profile.ts';
 
@@ -86,6 +86,19 @@ export interface SpriteAnimRecord {
   status: 'pending' | 'ready' | 'failed';
   animAsset?: string;
   meta?: SpriteSheetMeta;
+  /**
+   * 图集版本。缺省 = 1 = 单段 idle（本字段上线前的老记录）；2 = 三段 idle/moving/talking。
+   * 回填据此判断哪些 ready 记录需要重跑（见 backfillCharacterAnimations）。
+   */
+  version?: number;
+  /**
+   * 段名 → 该段原始绿幕 mp4 的资产 hash。
+   *
+   * 留着原片是有意的：视频是花钱生成的（每段约 $0.046），而图集的帧率/分辨率/打包方式
+   * 都还会变（比如日后把抽帧从 8fps 提到原片的原生帧率）。存了原片，重打图集就是一次纯
+   * 本地 ffmpeg，零成本；不存就得重新向 Seedance 买一遍。原片不下发给客户端。
+   */
+  clipVideos?: Partial<Record<ClipName, string>>;
 }
 
 /** scenes 表的一行（列名 snake_case；terrain blob 单独走 getSceneTerrain，不在此）。 */
@@ -1496,8 +1509,17 @@ export class WorldStore {
     this.#persistSpriteAnims();
   }
 
-  setSpriteAnimReady(spriteHash: string, animAsset: string, meta: SpriteSheetMeta): void {
-    this.#spriteAnims.set(spriteHash, { status: 'ready', animAsset, meta });
+  /**
+   * 置 ready。extra 带图集版本与三段原片的资产 hash（v2 路径必传；v1 老路径不传，
+   * 记录里就没有 version/clipVideos，回填会认出它是老版本并重跑）。
+   */
+  setSpriteAnimReady(
+    spriteHash: string,
+    animAsset: string,
+    meta: SpriteSheetMeta,
+    extra?: { version?: number; clipVideos?: Partial<Record<ClipName, string>> },
+  ): void {
+    this.#spriteAnims.set(spriteHash, { status: 'ready', animAsset, meta, ...extra });
     this.#persistSpriteAnims();
   }
 
