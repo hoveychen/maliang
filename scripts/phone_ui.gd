@@ -54,6 +54,7 @@ var _album_pages: Dictionary = {}   ## app id → Control 页面
 # —— 小红花/集邮页 ——
 var _flower_field: FlowerField      ## 左页花田（3×3 土坑，自绘）
 var _stamp_card: StampCard          ## 右页盖章卡（三槽，自绘）
+var _ink_drops: InkDrops            ## 墨滴层（三章化墨越过中缝去左页种花）
 var _stamps_total_label: Label      ## 累计盖章数
 var _hearts_label: Label            ## 收到的爱心计数（玩家互动送❤，只增不减）
 var _ceremony_playing := false      ## 盖章/种花仪式进行中（此时别拿钱包覆盖画面）
@@ -632,6 +633,11 @@ func _build_flowers_page() -> Control:
 	hearts_row.add_child(_hearts_label)
 	foot.add_child(hearts_row)
 	root.add_child(foot)
+
+	# 墨滴层：最后加 = 画在花田/章卡之上，才能从右页的章卡飞越中缝落到左页的土坑里
+	_ink_drops = InkDrops.new()
+	_ink_drops.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(_ink_drops)
 	return root
 
 ## 刷新小红花/集邮 + 物品页（钱包/背包数据变化、开手机、开 app 时都会调）。
@@ -663,6 +669,10 @@ var hover_timeout := 1.2
 ## 有欠盖的章吗（手机角标 / 开 app 时是否起仪式）。
 func has_pending_stamps() -> bool:
 	return StampCeremony.pending_count(_w.stamp_seen, _w.wallet) > 0
+
+## 仪式在演吗（world 对账据此按兵不动，别把小朋友正在盖的章抹掉）。
+func ceremony_playing() -> bool:
+	return _ceremony_playing
 
 ## 等一小会儿（仪式的节拍停顿）。中止时立刻返回，不拖着。
 func _sleep(sec: float) -> void:
@@ -741,23 +751,82 @@ func _play_stamp(slot: int, style: String) -> void:
 	_stamp_card.set_tool(-1, 0.0)
 	await _sleep(0.15)   # 两个章之间喘口气
 
-## 三章种出一朵花（P4 接墨滴过中缝 + 纸茎弹出）。
+## 三章种出一朵花：三个章一起发金光 → 墨浮起来凝成三滴 → 划弧越过对折中缝 → 渗进空土坑
+## → 纸茎弹出、叶子展开 → 花绽放 + 叮 + 星星。分镜时长见 design §4.2。
 func _play_bloom(cell: int) -> void:
-	if _flower_field != null:
-		_flower_field.set_stem(cell, 1.0)
-		_flower_field.set_bloom(cell, 1.0)
-	if _stamp_card != null:
-		_stamp_card.clear_stamps()
+	if _flower_field == null or _stamp_card == null:
+		return
+	# GLOW：三个章一起发金光（"要变魔法了"）
+	var glow: Tween = _w.create_tween()
+	glow.tween_method(func(v: float) -> void: _stamp_card.set_glow(v), 0.0, 1.0, 0.25)
+	await glow.finished
+	if _ceremony_abort:
+		return
 
-## 一朵花被花掉（造角色/造物扣费）。
+	# INK_LIFT + FLY：墨从纸上浮起来，划弧越过中缝，落进左页那格空土坑
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("whoosh")
+	if _ink_drops != null:
+		_ink_drops.launch(
+			_stamp_card.position + _stamp_card.slot_center(1),   # 从章卡正中那个槽起飞
+			_flower_field.position + _flower_field.cell_center(cell))
+	var fly: Tween = _w.create_tween()
+	fly.set_parallel(true)
+	fly.tween_method(func(v: float) -> void: _ink_drops.set_progress(v), 0.0, 1.0, 0.55) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	# 墨飞走了，章卡上的墨印就淡掉（墨真的"离开"了纸面，不是凭空消失）
+	for i in STAMPS_PER_FLOWER:
+		fly.tween_method(func(v: float) -> void: _stamp_card.set_print(i, v), 1.0, 0.0, 0.30) \
+			.set_delay(0.06 * float(i))
+	fly.tween_method(func(v: float) -> void: _stamp_card.set_glow(v), 1.0, 0.0, 0.30)
+	await fly.finished
+	_ink_drops.stop()
+	_stamp_card.clear_stamps()
+	if _ceremony_abort:
+		return
+
+	# SPROUT → BLOOM → SPARK：纸茎弹出、花绽放、星星散开
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("bloom")
+	var grow: Tween = _w.create_tween()
+	grow.tween_method(func(v: float) -> void: _flower_field.set_stem(cell, v), 0.0, 1.0, 0.50) \
+		.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	grow.tween_method(func(v: float) -> void: _flower_field.set_bloom(cell, v), 0.0, 1.0, 0.38) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	grow.parallel().tween_method(func(v: float) -> void: _flower_field.set_spark(cell, v), 0.0, 1.0, 0.45)
+	await grow.finished
+	_flower_field.set_spark(cell, 0.0)
+	if _w.fairy_voice != null:
+		_w.fairy_voice.try_play("flower_grown")   # 「三个章，种出一朵小红花啦！」
+	await _sleep(0.25)
+
+## 一朵花被花掉（造角色/造物扣费）：那朵花被摘起、缩小飞走。
+## 花不再是无声消失的数字——小朋友得看见自己的花变成了什么。
 func _play_pluck(cell: int) -> void:
-	if _flower_field != null:
-		_flower_field.set_bloom(cell, 0.0)
-		_flower_field.set_stem(cell, 0.0)
+	if _flower_field == null:
+		return
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("pluck")
+	var t: Tween = _w.create_tween()
+	t.tween_method(func(v: float) -> void: _flower_field.set_bloom(cell, v), 1.0, 0.0, 0.35) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	t.parallel().tween_method(func(v: float) -> void: _flower_field.set_stem(cell, v), 1.0, 0.0, 0.35)
+	await t.finished
+	await _sleep(0.10)
 
-## 花田满 9：章卡攒满也种不出花，只提示一下。
+## 花田满 9：章卡攒满也种不出花（服务端 settleWallet 把 progress 停在 3）。
+## 别默默什么都不发生——花田整体脉冲一下 + 仙子提醒「先用掉一朵」。
 func _play_field_full() -> void:
-	pass
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("oops")
+	if _w.fairy_voice != null:
+		_w.fairy_voice.try_play("field_full")   # 「花田满啦，先用掉一朵吧」
+	if _flower_field != null:
+		var t: Tween = _w.create_tween()
+		t.tween_method(func(v: float) -> void: _flower_field.modulate = Color(1, 1, 1, v), 1.0, 0.55, 0.18)
+		t.tween_method(func(v: float) -> void: _flower_field.modulate = Color(1, 1, 1, v), 0.55, 1.0, 0.30)
+		await t.finished
+	await _sleep(0.20)
 
 ## 把花田/章卡直接摆成「见证游标」的状态（无动画）。仪式演完后也调它做最终对齐。
 func _sync_album_to_wallet() -> void:

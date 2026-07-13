@@ -16,8 +16,11 @@ func _check(cond: bool, msg: String) -> void:
 func _initialize() -> void:
 	var scene: Node = load("res://main.tscn").instantiate()
 	root.add_child(scene)
+	# ⚠️ 必须 await _run —— 它内部要等盖章/种花仪式的 Tween 跑完（真协程）。不 await 的话
+	# 第一个 await 一挂起，这个 lambda 就直接 print+quit(0) 了：后半段断言一条都没执行，
+	# 却报 fails=0 的假绿灯。
 	scene.ready.connect(func() -> void:
-		_run(scene)
+		await _run(scene)
 		print("phone_menu smoke: fails=%d" % _fails)
 		quit(_fails))
 
@@ -82,6 +85,12 @@ func _run(scene: Node) -> void:
 	_check(phone.state == PaperPhone.State.FRONT, "返回后回正面态")
 	_check(String(pui.get("_phone_open_app")) == "", "返回后 open_app 清空")
 
+	# ⚠️ 先等离线兜底那次 _apply_wallet 落定（连不上后端 → 几十帧后套用默认钱包）。仪式现在要跑
+	# 真 Tween（好几秒的真帧），期间那个迟到的 bootstrap 会把测试塞的钱包冲成默认值 {3,0,0}，
+	# 演完 snap 过去，断言就莫名其妙地对不上了。
+	for _f in 60:
+		await scene.get_tree().process_frame
+
 	# 小红花/集邮 app：花田/章卡画的是**见证游标**（小朋友亲眼见过的），不是服务端钱包——
 	# 欠盖的章要等他开手机亲手盖上去。这里钱包与游标一致（无欠章），画面应等于钱包。
 	# 游标显式落到「刚见证完 7 个章」——否则 world._ready 从本机 profile.json 读到的残留会让
@@ -118,6 +127,27 @@ func _run(scene: Node) -> void:
 	_check(int(seen.get("stampsTotal", -1)) == 9 and int(seen.get("flowers", -1)) == 3,
 		"仪式演完：见证游标推到钱包（长出第 3 朵花）")
 	_check(not pui.has_pending_stamps(), "仪式演完：角标灭")
+
+	# 摘花（造角色扣 1 朵）：花田少一朵，游标跟上
+	scene.set("wallet", { "flowers": 2, "stampProgress": 0, "stampsTotal": 9, "hearts": 5 })
+	scene._apply_wallet(scene.get("wallet"))
+	await pui.play_ceremony(StampCeremony.plan(scene.get("stamp_seen"), scene.get("wallet"), []))
+	_check(int((scene.get("stamp_seen") as Dictionary).get("flowers", -1)) == 2, "摘花：游标跟到 2 朵")
+	_check(field.bloom_of(2) < 0.5, "摘花：第 3 格空了")
+
+	# 花田满 9：章卡攒满也不长花，只提示（不崩、不多长花）
+	scene.set("stamp_seen", { "flowers": 9, "stampProgress": 2, "stampsTotal": 30 })
+	scene.set("wallet", { "flowers": 9, "stampProgress": 3, "stampsTotal": 31, "hearts": 5 })
+	scene._apply_wallet(scene.get("wallet"))
+	var full_beats := StampCeremony.plan(scene.get("stamp_seen"), scene.get("wallet"), [])
+	await pui.play_ceremony(full_beats)
+	_check(int((scene.get("stamp_seen") as Dictionary).get("stampProgress", -1)) == 3, "满 9：章卡停在攒满")
+	var grown := 0
+	for i in 9:
+		if field.bloom_of(i) > 0.5:
+			grown += 1
+	_check(grown == 9, "满 9：还是 9 朵，没多长")
+
 	StampCeremony.save_seen(StampCeremony.empty_seen())  # 别把本次测试的游标留给别的测试
 	var hearts_label: Label = pui.get("_hearts_label")
 	_check(hearts_label != null and hearts_label.text == "x5", "集邮册爱心行=钱包 hearts（player-interaction 移植）")

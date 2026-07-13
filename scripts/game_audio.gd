@@ -31,6 +31,7 @@ const SFX := {
 	# 集邮册盖章那一记木槌闷响（CC0 Kenney Impact Sounds）。全套音效里原本一记撞击声都没有——
 	# 「狠狠打上一个章」全靠它，别拿 click/confirm 那种脆响凑合。
 	"thunk": "res://assets/audio/kenney_impact/impactWood_medium_000.ogg",
+	"bloom": "res://assets/audio/kenney_jingles/jingles_PIZZI01.ogg", # 三章种出一朵小红花
 }
 const BGM_STEPS := [
 	"res://assets/audio/bgm/bgm_carefree.wav",       # 尤克里里+口哨，阳光轻快（~204s，菜单也垫这首）

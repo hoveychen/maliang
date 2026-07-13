@@ -6486,6 +6486,11 @@ func _apply_wallet(w: Variant) -> void:
 ## 钱包变动后对账：能立刻认的就认（初始送花/admin 补账/别的静默调整），
 ## 该演的（盖章/开花/摘花）留给小红花页的仪式，这里只亮角标。
 func _reconcile_stamps() -> void:
+	# 仪式正在演的时候别动游标：这会儿钱包完全可能被别的报文刷新（world_state 重连、别人送
+	# 爱心、造物扣费…），此刻认账会把小朋友正在盖的那几个章一把抹掉。仪式演完自己会 snap
+	# 到那时最新的钱包（服务端永远权威），不需要这里插手。
+	if phone_ui != null and phone_ui.ceremony_playing():
+		return
 	var beats := StampCeremony.plan(stamp_seen, wallet, _stamp_styles)
 	if beats.is_empty():
 		_commit_stamp_seen()
