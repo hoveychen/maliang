@@ -846,7 +846,7 @@ func _poll_idle_anim(node: PaperCharacter, sprite_hash: String, world_height: fl
 		var status := String(rec.get("status", "none"))
 		if status == "ready":
 			var meta: Dictionary = rec.get("meta", {})
-			var atlas := await api.fetch_texture(String(rec.get("animAsset", "")))
+			var atlas := await api.fetch_texture(String(rec.get("animAsset", "")), true) # 图集走显存块压缩
 			if atlas != null and is_instance_valid(node):
 				node.play_anim(atlas, meta, world_height, phase)
 			return
@@ -4333,7 +4333,8 @@ func _prefetch_one(c: Dictionary, results: Dictionary, pending: Array) -> void:
 	if not sprite.is_empty():
 		var rec := await api.fetch_sprite_anim(sprite)
 		var pick := _pick_char_asset(rec, sprite)
-		var tex := await api.fetch_texture(String(pick["hash"]))
+		# 动画图集走显存块压缩（三段图集是显存大头）；回落的静态立绘不压（放大给孩子看，色块瑕疵明显）
+		var tex := await api.fetch_texture(String(pick["hash"]), bool(pick["is_anim"]))
 		if tex != null:
 			entry["tex"] = tex
 			entry["is_anim"] = bool(pick["is_anim"])

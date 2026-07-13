@@ -125,15 +125,29 @@ export function unionCropFrames(frames: ImageBlob[], pad = 4, alphaThresh = 8): 
   minY = Math.max(0, minY - pad);
   maxX = Math.min(W - 1, maxX + pad);
   maxY = Math.min(H - 1, maxY + pad);
-  let cw = maxX - minX + 1;
-  const ch = maxY - minY + 1;
-  if (cw % 2 === 1) cw += minX + cw < W ? 1 : 0; // 宽尽量偶数（GPU 友好），越界则不强求
+
+  // cell 宽高一律向上取到 4 的倍数 —— 这是给客户端 GPU 块压缩（ETC2/S3TC）留的地基，
+  // 不是随手的"GPU 友好"。块压缩以 4×4 像素为一块：cellW 不是 4 的倍数时，第 k 格的
+  // 起始列 k*cellW 就落在块的中间，同一个块会同时压到「上一格的右边缘」和「这一格的
+  // 左边缘」—— 压完帧与帧之间串色。对齐到 4 之后每格都从块边界开始，串色不可能发生。
+  // 顺带：cols*cellW 也必然是 4 的倍数，整张图集不会被 Godot 静默 resize（实测 166 宽
+  // 会被悄悄改成 168，那会让所有 UV 算错格）。
+  const cw = align4(maxX - minX + 1);
+  const ch = align4(maxY - minY + 1);
+  // 对齐多出来的那几列/行留透明：只在右/下补，角色在格内的位置不变（各帧仍对齐）。
+  const copyW = Math.min(cw, W - minX);
+  const copyH = Math.min(ch, H - minY);
 
   return decoded.map((p) => {
-    const out = new PNG({ width: cw, height: ch });
-    PNG.bitblt(p, out, minX, minY, cw, ch, 0, 0);
+    const out = new PNG({ width: cw, height: ch }); // 零初始化 = 全透明
+    PNG.bitblt(p, out, minX, minY, copyW, copyH, 0, 0);
     return { bytes: new Uint8Array(PNG.sync.write(out)), mime: 'image/png' } as ImageBlob;
   });
+}
+
+/** 向上取到 4 的倍数。 */
+function align4(n: number): number {
+  return (n + 3) & ~3;
 }
 
 /**
