@@ -3492,7 +3492,9 @@ func _on_failed(reason: String) -> void:
 	thinking_label.visible = false
 	# gen_failed 也走这里（backend 把它并进 failed）：造砸了就把传送门收起来，
 	# 否则它会一直亮着，孩子等一个永远不来的新朋友。
-	_clear_placeholder(PLACEHOLDER_PORTAL_ID)
+	# 传送门真立起过 → 是造角色翻车（非 ASR 没听清），点点笑自己手笨；ASR 没听清不发这句。
+	if _clear_placeholder(PLACEHOLDER_PORTAL_ID).x >= 0:
+		_fairy_say("create_fail")
 	game_audio.play_sfx("oops")
 	push_warning("voice/gen failed: %s" % reason)
 	if selected != null:
@@ -4450,6 +4452,13 @@ func _clear_creation_placeholder() -> void:
 	_clear_placeholder(PLACEHOLDER_FORGE_ID)
 	_clear_placeholder(PLACEHOLDER_EASEL_ID)
 
+## 点点造物三段的预制台词（见 docs/fairy-persona-design.md 锚点①：爱显摆手艺）：
+##   create_start 开工碎碎念、create_done 做完求夸、create_fail 画歪了笑自己手笨。
+## 台词在 assets/voice/fairy/lines.json，缺 fairy_voice / 缺对应触发词都静默跳过（try_play 内部兜底）。
+func _fairy_say(trigger: String) -> void:
+	if fairy_voice != null:
+		fairy_voice.try_play(trigger)
+
 ## 造角色开工：引导会话已结束，服务端开造。退出对话，立起传送门。
 func _on_gen_progress(_stage: String) -> void:
 	_in_creation = false # 先清，免得 _exit_interaction 误发 creation_cancel
@@ -4460,6 +4469,7 @@ func _on_gen_progress(_stage: String) -> void:
 	_spawn_placeholder(PLACEHOLDER_PORTAL_ID, PlaceholderSpecs.PORTAL)
 	banner.text = "传送门打开啦，新朋友就要来了！"
 	banner.visible = true
+	_fairy_say("create_start") # 点点边画边碎碎念，把这几秒空窗变成「她在为我干活」
 
 func _on_gen_complete(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造角色扣了 1 朵花，同步最新钱包
@@ -4480,6 +4490,7 @@ func _on_gen_complete(data: Dictionary) -> void:
 	game_audio.play_sfx("fanfare")
 	banner.text = "%s 来啦！" % String(character.get("name", "新朋友"))
 	banner.visible = true
+	_fairy_say("create_done") # 求夸：「好看吗好看吗？点点画的哦！」
 
 ## 造物开工（服务端已扣花）：退出对话，立起魔法熔炉。
 func _on_prop_pending(data: Dictionary) -> void:
@@ -4492,6 +4503,7 @@ func _on_prop_pending(data: Dictionary) -> void:
 	_spawn_placeholder(PLACEHOLDER_FORGE_ID, PlaceholderSpecs.FORGE)
 	banner.text = "魔法熔炉烧起来啦！"
 	banner.visible = true
+	_fairy_say("create_start")
 
 ## 造贴纸开工（已扣花）：退出对话、就地立起魔法画板占位符，孩子看得见「正在做贴纸」。
 func _on_sticker_pending(data: Dictionary) -> void:
@@ -4504,6 +4516,7 @@ func _on_sticker_pending(data: Dictionary) -> void:
 	_spawn_placeholder(PLACEHOLDER_EASEL_ID, PlaceholderSpecs.EASEL)
 	banner.text = "魔法画板刷刷刷！"
 	banner.visible = true
+	_fairy_say("create_start")
 
 ## 语音造物完成（万物皆物品）：实体定义入目录 + 背包一份到手；在熔炉/玩家旁本地找位
 ## 发 item_place，渲染统一等 terrain_patch 广播回来落地。找不到位/离线就留在背包
@@ -4538,6 +4551,7 @@ func _on_item_created(data: Dictionary) -> void:
 	ItemCatalog.set_defs([item]) # 新实体先入目录（patch 回来才认得 renderRef/spec）
 	_prewarm_sticker_assets([item]) # 造贴纸:预热网络贴图(打包贴纸/造物无 @ 前缀,跳过)
 	thinking_label.visible = false
+	_fairy_say("create_done") # 求夸：造物/贴纸都在此汇合，下面分支各走各的落地，求夸只发一次
 	# 先收占位符腾出格子，成品就落在那儿；占位符没立成就退回玩家身旁。
 	# 造物立熔炉、造贴纸立画板——哪个在就收哪个（另一个 no-op 返回负值）。
 	var tile := _clear_placeholder(PLACEHOLDER_FORGE_ID)
@@ -4614,6 +4628,7 @@ func _on_prop_failed(_reason: String) -> void:
 	_clear_placeholder(PLACEHOLDER_FORGE_ID) # 造砸了：熔炉收起来，别让它烧到天荒地老
 	banner.text = "没变出来，再说一次试试"
 	banner.visible = true
+	_fairy_say("create_fail") # 翻车归因自己：「哎呀，点点今天手笨笨的……」——把技术负债改写成笑点
 
 ## 造贴纸失败（审核/异常，服务端已退花）：收起画板 + oops 提示。
 func _on_sticker_failed(_reason: String) -> void:
@@ -4622,6 +4637,7 @@ func _on_sticker_failed(_reason: String) -> void:
 	game_audio.play_sfx("oops")
 	banner.text = "没做出来，再说一次试试"
 	banner.visible = true
+	_fairy_say("create_fail")
 
 ## 小红花不足被拦（造物/造角色）：同步钱包 + 横幅引导 + 播服务端带来的仙子引导语。
 func _on_reward_denied(data: Dictionary) -> void:
