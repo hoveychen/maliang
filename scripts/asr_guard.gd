@@ -9,13 +9,16 @@ extends RefCounted
 
 ## 本平台是否「本应有端侧 ASR」。
 ## - Android：恒为真（AAR 打进 APK，缺失即坏包）。
+## - iOS：恒为真。iOS 没有 editor 形态——跑起来的 iOS 进程必然是导出包，而导出包里
+##   GDExtension 静态库 + 模型是随包的（scripts/export-ios.sh 会当场数、缺了 exit 1）。
+##   所以缺失只可能是坏包，硬报错拒进游戏。
 ## - macOS：仅**导出构建**（is_template=OS.has_feature("template")）为真——导出的 .app 把
 ##   GDExtension + 模型随包带走（play-mac.sh / package-mac-app.sh 注入 Contents/Resources/
 ##   asr-models），缺失即坏包，硬报错拒进游戏。editor/headless 从源码跑不受门禁约束（模型
 ##   不随包，见文件头）。真实端侧识别路径由 macos_asr_recognize.gd 专测覆盖。
 ## - 其它平台：为假。
 static func asr_required(os_name: String, is_template: bool = false) -> bool:
-	if os_name == "Android":
+	if os_name == "Android" or os_name == "iOS":
 		return true
 	if os_name == "macOS":
 		return is_template
