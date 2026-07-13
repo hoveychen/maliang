@@ -419,9 +419,15 @@ func set_open_frac(f: float) -> void:
 	_hinge_front.rotation.y = deg_to_rad(90.0) * closed
 	var closed_cx := SPINE_W * 0.5 + (PAGE_W + COVER_MARGIN) * 0.5 # 合书的横向中心
 	_pivot.position.x = -closed_cx * closed
+	# 书芯滑移（"活背"精装：合拢时书芯相对壳体滑向书脊墙）——不滑的话
+	# 页堆会从封面左侧戳出 SPINE_W/2 宽的一条（装订点在书脊中线 x=0，
+	# 而合拢的壳体只包住 x≥SPINE_W/2）
+	var slide := SPINE_W * 0.5 * closed
+	_page_r.position.x = slide
+	_page_l.position.x = SPINE_W * 0.5 - slide
 	# 合书时页面变暗（合拢的书页间没有光），翻开过程阴影自然褪去——
 	# 也遮掉合书态左缝里露出的一条鲜艳页面
-	var dim := lerpf(0.5, 1.0, _open_frac)
+	var dim := lerpf(0.62, 1.0, _open_frac)
 	_page_mat_l.albedo_color = Color(dim, dim, dim)
 	_page_mat_r.albedo_color = Color(dim, dim, dim)
 	_update_shadow()

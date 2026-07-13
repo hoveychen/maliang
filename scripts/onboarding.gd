@@ -26,9 +26,9 @@ const CAM_FOV := 40.0
 const CAM_DIST := 1.6                    ## 书离相机距离
 const BOOK_FILL := 0.80                  ## 跨页宽占屏比
 const BOOK_NDC := Vector2(0.0, -0.03)    ## 书中心落点（NDC）
-## 摊在桌上的阅读俯角 + 一点侧摆（业界书本菜单的标准机位：大俯角看见厚度与页缘,
-## 微侧摆打破对称;之前近正视角是"红色相框"观感的帮凶）
-const BOOK_TILT := Vector3(0.60, -0.055, 0.015)
+## 摊在桌上的阅读俯角（大俯角看见厚度与页缘、书脊沟槽;之前近正视角是
+## "红色相框"观感的帮凶）。相机正对书本:不加 yaw/roll 侧摆(老板点名要正视)。
+const BOOK_TILT := Vector3(0.60, 0.0, 0.0)
 const TURN_TIME := 0.55                  ## 翻一页时长
 const OPEN_TIME := 1.1                   ## 翻开封面时长
 const CLOSED_BEAT := 0.8                 ## 开场合书停顿
