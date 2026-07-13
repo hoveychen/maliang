@@ -174,6 +174,34 @@ func _run_node(book: PaperBook, cam: Camera3D) -> void:
 		await process_frame
 	_check(pressed[0], "点击穿透:右页中心按钮收到 pressed")
 
+	# ── 动画编排（headless 无渲染,只钉状态机与几何结果）──
+	book.set_open_frac(0.0)
+	await book.play_open(0.05)
+	_check(absf(book.open_frac() - 1.0) < 1e-6, "play_open 结束=完全摊平")
+	var swapped := [0]
+	var turn_done := [false]
+	var turn := func() -> void:
+		await book.turn_page(func() -> void: swapped[0] += 1, 0.6, 0.06)
+		turn_done[0] = true
+	turn.call()
+	await process_frame
+	_check(book.is_turning(), "翻页动画进行中")
+	_check(book.pick(Vector3(w * 0.5, 0.0, 2.0), Vector3(0, 0, -1)).is_empty(), "翻页中页面不可拾取")
+	while not turn_done[0]:
+		await process_frame
+	_check(swapped[0] == 1, "swap_content 恰被调用一次")
+	_check(absf(book.progress() - 0.6) < 1e-6, "翻页后进度=0.6")
+	_check(not book.is_turning(), "翻页动画收尾")
+	_check(not (book.get_node("Sheet") as MeshInstance3D).visible, "翻页纸收起")
+	# 落地后两侧页堆厚度=新进度分配（用拾取面高反查）
+	var sp := PaperBook.stack_split(0.6)
+	var lh := book.pick(Vector3(-w * 0.9, 0.0, 2.0), Vector3(0, 0, -1))
+	var rh := book.pick(Vector3(w * 0.9, 0.0, 2.0), Vector3(0, 0, -1))
+	_check(not lh.is_empty() and absf(float(lh["dist"]) - (2.0 - PaperBook.COVER_T - sp.x - PaperBook.FACE_EPS)) < 0.01,
+		"左堆按新进度增厚")
+	_check(not rh.is_empty() and absf(float(rh["dist"]) - (2.0 - PaperBook.COVER_T - sp.y - PaperBook.FACE_EPS)) < 0.01,
+		"右堆按新进度变薄")
+
 ## 二分找"右页 uv.x≈u0"的世界 x（拾取即真相，避免手工重算弧长映射）。
 func _find_world_x_for_u(book: PaperBook, u0: float) -> float:
 	var lo := 0.0
