@@ -1,6 +1,11 @@
-// idle 动画视频 → 透明 sprite-sheet 图集。
+// 角色动画视频 → 透明 sprite-sheet 图集。
 // 流程：ffmpeg 按目标 fps 抽帧并缩放 → 逐帧抠绿（复用 ChromaKeyCutoutAdapter）→ 拼网格图集。
-// 图集 + meta 交给客户端：paper shader 按 fps 推进 UV cell 播放（见 P4）。
+// 图集 + meta 交给客户端：paper shader 按 fps 推进 UV cell 播放。
+//
+// 多段（idle/moving/talking）：三段帧打进「同一张图集」，且共用「同一个并集裁剪盒」。
+// 后者是硬要求——各段独立裁剪会得到不同的 cellW/cellH，客户端按 cellH 归一化世界高度
+// （PaperCharacter.play_anim），切段时角色身高就会跳一下。共用盒还顺带让三段只下一次、
+// 只占一张纹理，且切段不必重算几何。
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, writeFile, readFile, readdir, rm } from 'node:fs/promises';
@@ -12,6 +17,18 @@ import type { CutoutAdapter, ImageBlob, VideoBlob } from './adapters/types.ts';
 
 const execFileP = promisify(execFile);
 
+/** 角色动画段名。客户端按状态选段：talking > moving > idle（见 world.gd）。 */
+export type ClipName = 'idle' | 'moving' | 'talking';
+export const CLIP_NAMES: readonly ClipName[] = ['idle', 'moving', 'talking'] as const;
+
+/** 某段在图集里的帧区间（行主序连续下标，可跨行）。 */
+export interface ClipRange {
+  /** 段首帧在图集里的全局下标。 */
+  start: number;
+  /** 段内帧数。 */
+  count: number;
+}
+
 export interface SpriteSheetMeta {
   cols: number;
   rows: number;
@@ -21,6 +38,11 @@ export interface SpriteSheetMeta {
   cellH: number;
   width: number;
   height: number;
+  /**
+   * 段名 → 帧区间。缺省（老图集，v1）= 整张图集就是一段 idle，客户端按 idle-only 处理。
+   * 新图集（v2）总是三段齐全。
+   */
+  clips?: Partial<Record<ClipName, ClipRange>>;
 }
 
 export interface SpriteSheetOptions {
@@ -114,10 +136,14 @@ export function unionCropFrames(frames: ImageBlob[], pad = 4, alphaThresh = 8): 
   });
 }
 
-/** 把等尺寸帧拼成近正方形网格图集（透明底，bitblt 逐帧贴入）。纯函数，供单测。 */
+/**
+ * 把等尺寸帧拼成近正方形网格图集（透明底，bitblt 逐帧贴入）。纯函数，供单测。
+ * clips：段名 → 帧区间（下标须落在 frames 内）。省略则不写 meta.clips（= 老的单段 idle 图集）。
+ */
 export function packAtlas(
   frames: ImageBlob[],
   fps: number,
+  clips?: Partial<Record<ClipName, ClipRange>>,
 ): { atlas: ImageBlob; meta: SpriteSheetMeta } {
   if (frames.length === 0) throw new Error('sprite sheet: no frames');
   const first = PNG.sync.read(Buffer.from(frames[0]!.bytes));
@@ -137,31 +163,94 @@ export function packAtlas(
     PNG.bitblt(p, atlas, 0, 0, cellW, cellH, cx, cy);
   });
 
+  const meta: SpriteSheetMeta = {
+    cols, rows, frameCount: frames.length, fps, cellW, cellH,
+    width: cols * cellW, height: rows * cellH,
+  };
+  if (clips) {
+    for (const [name, r] of Object.entries(clips)) {
+      if (r.count <= 0 || r.start < 0 || r.start + r.count > frames.length) {
+        throw new Error(`sprite sheet: clip ${name} 区间 [${r.start},${r.start + r.count}) 越界(共 ${frames.length} 帧)`);
+      }
+    }
+    meta.clips = clips;
+  }
   return {
     atlas: { bytes: new Uint8Array(PNG.sync.write(atlas)), mime: 'image/png' },
-    meta: { cols, rows, frameCount: frames.length, fps, cellW, cellH, width: cols * cellW, height: rows * cellH },
+    meta,
   };
 }
 
-/** 绿幕 idle mp4 → 透明 sprite-sheet 图集 + meta（抽帧→抠绿→打包）。 */
+/** 一段绿幕视频 → 抠好绿的等尺寸帧（尚未跨段统一裁剪）。 */
+async function keyedFramesOf(
+  mp4: VideoBlob,
+  fps: number,
+  cellH: number,
+  cutout: CutoutAdapter,
+  dropLast: boolean,
+): Promise<ImageBlob[]> {
+  let frames = await extractFrames(mp4, fps, cellH);
+  if (dropLast && frames.length > 2) frames = frames.slice(0, -1);
+  return Promise.all(frames.map((f) => cutout.removeBackground(f)));
+}
+
+/** 单段绿幕 mp4 → 透明 sprite-sheet 图集 + meta（抽帧→抠绿→打包）。老路径，meta 不带 clips。 */
 export async function videoToSpriteSheet(
   mp4: VideoBlob,
   opts: SpriteSheetOptions = {},
 ): Promise<{ atlas: ImageBlob; meta: SpriteSheetMeta }> {
   const fps = opts.fps ?? 8;
+  const cutout = opts.cutout ?? new ChromaKeyCutoutAdapter();
+  const keyed = await keyedFramesOf(mp4, fps, opts.cellH ?? 256, cutout, opts.dropLastFrame !== false);
+  // 抠绿后两侧透明，裁到并集内容盒再打包 —— 图集去掉大片空白，省移动端显存。
+  const packed = packAtlas(unionCropFrames(keyed), fps);
+  return finishAtlas(packed, opts);
+}
+
+/**
+ * 多段绿幕 mp4（idle/moving/talking）→ 一张三段图集 + 带 clips 的 meta。
+ *
+ * 关键：三段的帧**先合到一起再 unionCropFrames**，所以共用同一个裁剪盒 → 同一个 cellW×cellH。
+ * 分开裁会让每段 cell 尺寸各异，客户端 pixel_size = world_height/cellH 就会随段变化，
+ * 切段瞬间角色身高抽一下。段序 = 传入顺序，帧在图集里连续排布（行主序，可跨行）。
+ */
+export async function videosToSpriteSheet(
+  clips: { name: ClipName; mp4: VideoBlob }[],
+  opts: SpriteSheetOptions = {},
+): Promise<{ atlas: ImageBlob; meta: SpriteSheetMeta }> {
+  if (clips.length === 0) throw new Error('sprite sheet: no clips');
+  const fps = opts.fps ?? 8;
   const cellH = opts.cellH ?? 256;
   const cutout = opts.cutout ?? new ChromaKeyCutoutAdapter();
+  const dropLast = opts.dropLastFrame !== false;
 
-  let frames = await extractFrames(mp4, fps, cellH);
-  if (opts.dropLastFrame !== false && frames.length > 2) frames = frames.slice(0, -1);
-  const keyed = await Promise.all(frames.map((f) => cutout.removeBackground(f)));
-  // 抠绿后两侧透明，裁到并集内容盒再打包 —— 图集去掉大片空白，省移动端显存。
-  const cropped = unionCropFrames(keyed);
-  const packed = packAtlas(cropped, fps);
+  const perClip = await Promise.all(
+    clips.map((c) => keyedFramesOf(c.mp4, fps, cellH, cutout, dropLast)),
+  );
+
+  const ranges: Partial<Record<ClipName, ClipRange>> = {};
+  let cursor = 0;
+  clips.forEach((c, i) => {
+    const n = perClip[i]!.length;
+    if (n === 0) throw new Error(`sprite sheet: clip ${c.name} 抽不到帧`);
+    ranges[c.name] = { start: cursor, count: n };
+    cursor += n;
+  });
+
+  // 全段合流后统一裁剪 —— 共用盒（见函数注释）。
+  const cropped = unionCropFrames(perClip.flat());
+  const packed = packAtlas(cropped, fps, ranges);
+  return finishAtlas(packed, opts);
+}
+
+/** PNG 图集按 opts 转 WebP（默认转）。 */
+async function finishAtlas(
+  packed: { atlas: ImageBlob; meta: SpriteSheetMeta },
+  opts: SpriteSheetOptions,
+): Promise<{ atlas: ImageBlob; meta: SpriteSheetMeta }> {
   if (opts.webp === false) return packed;
   // PNG→WebP：q90 带 alpha 实测与 PNG 肉眼无差，体积 ~1/6.6。Godot Image.load_webp 原生可读。
-  const atlas = await encodeWebp(packed.atlas, opts.webpQuality ?? 90);
-  return { atlas, meta: packed.meta };
+  return { atlas: await encodeWebp(packed.atlas, opts.webpQuality ?? 90), meta: packed.meta };
 }
 
 /** PNG 图集 → WebP（cwebp，保 alpha）。cwebp 由 Dockerfile 的 webp 包提供。 */
