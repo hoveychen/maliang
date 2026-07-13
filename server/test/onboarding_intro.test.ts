@@ -38,7 +38,7 @@ test('onboarding/intro: extract name and synthesize confirm tts', async () => {
     assert.equal(r2.name, '');
     assert.equal(r2.confirmTtsAsset ?? '', '');
 
-    // 空转写/空音频：直接空结果
+    // 空转写：直接空结果
     const empty = await app.inject({
       method: 'POST',
       url: '/onboarding/intro',
@@ -47,15 +47,16 @@ test('onboarding/intro: extract name and synthesize confirm tts', async () => {
     });
     assert.equal((empty.json() as { transcript: string }).transcript, '');
 
-    // 服务端 ASR 路径：送 PCM（mock ASR 固定转写「你好呀」→ 提取不到名字）
-    const pcm = await app.inject({
+    // 服务端 ASR 已退役：只送音频（无 transcript）不再被识别，返回空结果而不是转写。
+    // 识别一律在客户端端侧完成，本路由只认成品文本。
+    const audioOnly = await app.inject({
       method: 'POST',
       url: '/onboarding/intro',
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify({ pcmBase64: Buffer.from([0, 0, 0, 0]).toString('base64'), rate: 16000 }),
     });
-    const r4 = pcm.json() as { transcript: string; name: string };
-    assert.equal(r4.transcript, '你好呀');
+    const r4 = audioOnly.json() as { transcript: string; name: string };
+    assert.equal(r4.transcript, '', '只送音频不再产出转写（服务端不识别）');
     assert.equal(r4.name, '');
   } finally {
     await app.close();

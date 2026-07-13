@@ -16,10 +16,8 @@ export interface Config {
   moderationTextModel: string;
   minimaxApiKey: string | undefined;
   minimaxTtsModel: string;
-  /** ASR/TTS 共同的基础路由；VOICE_ASR_PROVIDER / VOICE_TTS_PROVIDER 可分别覆盖。 */
+  /** TTS 的基础路由；VOICE_TTS_PROVIDER 可覆盖。（识别在客户端端侧，服务端无 ASR 路由。） */
   voiceProvider: VoiceProvider;
-  /** ASR 路由：auto=有本地模型用 local → mock。 */
-  voiceAsrProvider: VoiceProvider;
   /** TTS 路由：auto=有 MiniMax key 用 minimax → 本地模型 local → mock。 */
   voiceTtsProvider: TTSProvider;
   /** 本地语音模型目录（scripts/fetch-voice-models.sh 拉取）。 */
@@ -60,7 +58,6 @@ export function loadConfig(): Config {
     // turbo 实测整句 1.0-1.9s、¥0.013/条；hd 音质更高、约 1.75 倍价
     minimaxTtsModel: process.env.MINIMAX_TTS_MODEL ?? 'speech-2.6-turbo',
     voiceProvider: base,
-    voiceAsrProvider: parseVoiceProvider(process.env.VOICE_ASR_PROVIDER, 'VOICE_ASR_PROVIDER', base),
     voiceTtsProvider: parseTtsProvider(process.env.VOICE_TTS_PROVIDER, base),
     voiceModelsDir: process.env.VOICE_MODELS_DIR ?? 'models',
     voiceTtsVoice: process.env.VOICE_TTS_VOICE,

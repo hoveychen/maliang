@@ -51,6 +51,8 @@ UNIT_TESTS=(
   test_onboarding_vad
   test_voice_vad
   test_voice_capture
+  test_voice_confirm
+  test_confirm_bar
   test_game_audio
   test_sdf_static_baker
   test_paper_idle
@@ -195,7 +197,10 @@ run_macos_asr_test() {
   if [ ! -d "$fw" ]; then
     echo "== $name SKIP（GDExtension 未构建：$fw 不存在）=="; return
   fi
-  local model_dir="$ROOT/server/models/sherpa-onnx-streaming-zipformer-multi-zh-hans-2023-12-12"
+  # 模型允许外部指路：worktree 里没有 server/models（那是主 checkout 的下载物，
+  # 且 .gitignore 的 "server/models/" 带尾斜杠不匹配软链——软链过来会被 git add 吞进仓库）。
+  # 在 worktree 跑回测时：MALIANG_ASR_MODEL_DIR=<主 checkout>/server/models/<模型目录> 即可。
+  local model_dir="${MALIANG_ASR_MODEL_DIR:-$ROOT/server/models/sherpa-onnx-streaming-zipformer-multi-zh-hans-2023-12-12}"
   if [ ! -f "$model_dir/tokens.txt" ]; then
     echo "== $name SKIP（缺模型：$model_dir/tokens.txt 不存在）=="; return
   fi

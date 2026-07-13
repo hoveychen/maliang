@@ -142,24 +142,8 @@ func full_url() -> String:
 ## 服务端是否确认二进制位置流(world_state.posBin 回执)。确认前上行仍走 JSON——防打到不懂二进制的老服务端。
 var _posbin_ok := false
 
-func send_voice(world_id: String, character_id: String, audio_b64: String, fmt := "audio/wav") -> void:
-	_send({ "type": "voice_input", "worldId": world_id, "characterId": character_id, "audio": audio_b64, "format": fmt })
-
-## 边录边传：录音开始即开会话，录音中持续发分片，松手发 voice_end 收尾。
-func send_voice_start(world_id: String, character_id: String) -> void:
-	_send({ "type": "voice_start", "worldId": world_id, "characterId": character_id })
-
-func send_voice_chunk(audio_b64: String) -> void:
-	_send({ "type": "voice_chunk", "audio": audio_b64 })
-
-func send_voice_end() -> void:
-	_send({ "type": "voice_end" })
-
-## 误触取消（按住说话太短就松手）：服务端丢弃本次会话，不回任何包。
-func send_voice_cancel() -> void:
-	_send({ "type": "voice_cancel" })
-
-## 端侧 ASR：平板本地已识别，只上传文本（跳过服务端 ASR）。
+## 语音上行只有这一个口：端侧 ASR（Android 插件 / macOS GDExtension）识别好文本再送，
+## 音频永不上传。服务端 ASR（voice_input 整段 / voice_start+chunk+end 流式）已整条退役。
 func send_voice_transcript(world_id: String, character_id: String, transcript: String) -> void:
 	_send({ "type": "voice_transcript", "worldId": world_id, "characterId": character_id, "transcript": transcript })
 
