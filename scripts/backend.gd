@@ -31,8 +31,8 @@ signal failed(reason: String)
 # 奖赏系统：world_info 后的状态同步 / 委托完成盖章升花
 signal world_state(data: Dictionary)
 signal task_complete(data: Dictionary)
-## 村民的心愿漏话候选（服务端按玩家已发现的玩法算，进世界/换场景/发现新玩法后重发）。
-signal npc_wishes(wishes: Array)
+## 村民的心愿漏话候选 + 玩家已发现的玩法（服务端持久口径，进世界/换场景/发现新玩法后重发）。
+signal npc_wishes(wishes: Array, discovered: Array)
 signal praise_tts(data: Dictionary)
 ## tts_request 降级流（客户端 edge-tts 失败求服务端合成）：tts_start 带 mime，随后 tts_chunk/tts_end 同一通道
 signal tts_start(mime: String)
@@ -393,7 +393,7 @@ func _dispatch(data: Dictionary) -> void:
 		"task_complete":
 			task_complete.emit(data)
 		"npc_wishes":
-			npc_wishes.emit(data.get("wishes", []))
+			npc_wishes.emit(data.get("wishes", []), data.get("discovered", []))
 		"praise_tts":
 			praise_tts.emit(data)
 		"tts_start":

@@ -81,6 +81,18 @@ test('发现玩法后重发：那个心愿的话从此没人再念叨', async ()
   }
 });
 
+test('下发 discovered 持久口径：仙子重启后不该再念叨已经会用的引路', async () => {
+  const store = seedWorld();
+  store.addDiscovered('w1', ANON_PLAYER, 'guide_to');
+  const { sent, socket, rest } = harness(store);
+
+  await handleWsMessage(socket, JSON.stringify({ type: 'world_info', worldId: 'w1', playerId: ANON_PLAYER }), ...rest);
+
+  const push = sent.find((m) => m['type'] === 'npc_wishes')!;
+  assert.deepEqual(push['discovered'], ['guide_to'],
+    '客户端的 _guide_used 只记「本次进世界」，重启就忘——持久口径必须由服务端下发');
+});
+
 test('玩法全发现后回落纯氛围自语——不再勾任何玩法，但世界还有活气', async () => {
   const store = seedWorld();
   for (const a of WISH_ABILITIES) store.addDiscovered('w1', ANON_PLAYER, a);

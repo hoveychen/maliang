@@ -1111,9 +1111,13 @@ func _update_npc_wishes(delta: float) -> void:
 	npc_wish_voice.update(delta, npcs, player["logical"], engaged)
 
 ## 服务端下发的漏话候选（进世界/换场景/发现新玩法后重发）：整份替换，旧台词立即作废。
-func _on_npc_wishes(wishes: Array) -> void:
+## discovered 是【持久】口径：_guide_used 本来只记「本次进世界」，重启就忘——
+## 那样小朋友明明早会用引路了，仙子重启后还在念叨，「已发现的不再提」就成了空话。
+func _on_npc_wishes(wishes: Array, discovered: Array) -> void:
 	if npc_wish_voice != null:
 		npc_wish_voice.set_wishes(wishes)
+	if discovered.has("guide_to"):
+		_guide_used = true
 
 ## 音符气泡：小仙子出声时挂在头顶（氛围闲聊与 POI 提醒共用）。
 func _update_fairy_bubble(fairy: Dictionary) -> void:

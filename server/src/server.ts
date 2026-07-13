@@ -1328,7 +1328,10 @@ function pushWishes(
         lines: wish ? wish.leaks : IDLE_DOING,
       };
     });
-  socket.send(JSON.stringify({ type: 'npc_wishes', worldId, sceneId, wishes }));
+  // discovered 一并下发：仙子的引路提示门禁（world.gd 的 _guide_used）本来只记「本次进世界」，
+  // 重启就忘 → 明明用过引路了她还在念叨，正好砸了「已发现的不再提」这条承诺。
+  // 持久口径在服务端，客户端据此初始化。
+  socket.send(JSON.stringify({ type: 'npc_wishes', worldId, sceneId, wishes, discovered }));
 }
 
 /**
