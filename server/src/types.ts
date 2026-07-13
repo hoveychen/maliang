@@ -26,6 +26,45 @@ export const BASE_ABILITIES = ['move_to', 'follow', 'stop_follow', 'do_action', 
 export const LOCOMOTION_ABILITIES = ['move_to', 'follow', 'stop_follow', 'chat_with', 'deliver_message'];
 
 /**
+ * 引路（guide_to/guide_stop）—— 小仙子专属，见 docs/fairy-guide-design.md。
+ *
+ * 刻意**不**放进 LOCOMOTION_ABILITIES：那一组是「她走不了、给了也兑现不了」的能力，会被 effectiveAbilities
+ * 从她的 prompt 里剔掉。引路恰恰相反——它是她唯一能兑现的位移，因为走路的是**小朋友**：她只在前面飞、
+ * 回头等（客户端 _fairy_guide 状态机），不碰 BehaviorExecutor，故不受那三层封锁的影响。
+ */
+export const GUIDE_ABILITIES = ['guide_to', 'guide_stop'];
+
+/** 跨场景引路的跳数上限（老板 2026-07-13 拍板）：3-5 岁小朋友扛不住 3-4 跳 portal 的长途跋涉。 */
+export const MAX_GUIDE_LEGS = 2;
+
+/** 引路的一跳：在 sceneId 里把小朋友带到 portalTile，他自己走进去即到 toScene（既有 _step_portal 触发）。 */
+export interface GuideLeg {
+  sceneId: string;
+  portalTile: TilePos;
+  toScene: string;
+}
+
+/** 引路计划：服务端算好「去哪、怎么走」，客户端的引路状态机照着领路。 */
+export interface GuidePlan {
+  /** 找人还是找地方——决定到达时的收尾（找人：让他打招呼；找地方：仙子说「到啦」）。 */
+  targetKind: 'character' | 'location';
+  targetName: string;
+  targetScene: string;
+  /** character 的坐标只是**下发时的快照**：村民会自己走动，客户端到场后按名字重解析（不钉住他）。 */
+  targetTile: TilePos;
+  /** 逐跳 portal；同场景为空数组。长度受 MAX_GUIDE_LEGS 约束。 */
+  legs: GuideLeg[];
+}
+
+/** 引路候选（喂意图 LLM）：让它知道「小明」是森林里的一个真实角色，而不是编一个出来。 */
+export interface GuideTarget {
+  name: string;
+  kind: 'character' | 'location';
+  sceneId: string;
+  sceneName: string;
+}
+
+/**
  * 喂给意图 LLM 的能力集：基础集 ∪ 角色自带，小仙子再减去所有需要走动的能力。
  *
  * 小仙子是贴身随从——客户端 _run_behavior 对 is_fairy 早返回，移动脚本一律丢弃。把 move_to/follow
@@ -300,6 +339,8 @@ export interface IntentContext {
   worldCharacters?: { id: string; name: string }[];
   /** 世界地点名清单（客户端 world_info 上报的 POI 名）：move_to 的 location_name 优先归一到这些名字。 */
   locations?: string[];
+  /** 可以带小朋友去的人和地方（仅小仙子有 guide_to 时注入）：让 LLM 把「找小明」对上真实角色，别凭空编。 */
+  guideTargets?: GuideTarget[];
   /** 进行中的委托（若有）：让角色记得催/答疑，且不再发起新委托。 */
   activeTask?: ActiveTask;
   /** 可发起的委托候选（无进行中委托时服务端生成）：LLM 觉得时机合适就用自己口吻发起并置 offerTask。 */
@@ -353,6 +394,10 @@ export interface VoiceResponse {
   characterRequest?: string;
   /** create_sticker 意图的贴纸描述：不下发客户端，由 WS 层摘走并异步造贴纸（sticker_pending/item_created 推送）。仅小仙子有此能力。 */
   stickerRequest?: string;
+  /** guide_to 意图算出的引路计划：客户端引路状态机据此领路。带不了（目标不存在/太远）时不下发，只留口头回应。仅小仙子。 */
+  guide?: GuidePlan;
+  /** guide_stop 意图：小朋友说「不去了」→ 取消进行中的引路（客户端另有「停止」气泡入口，双保险）。仅小仙子。 */
+  guideStop?: boolean;
   /** play_game 意图的游戏口语描述（「踢球」「老鹰抓小鸡」）：不下发客户端，由 WS 层摘走→LLM 生成剧本→过 typecheck→开演（stage_begin 广播）。仅小仙子有此能力。 */
   gameRequest?: string;
   /** 主动招呼（进对话对方先开口）：transcript 为空且非玩家发起，客户端据此跳过「没听清」提示。 */

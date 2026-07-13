@@ -167,7 +167,7 @@ export class WorldStore {
       this.#migrateLegacyPlayerPositions();
       this.#migrateLegacyEntityScenes();
       this.#migrateVisitsDevice();
-      this.#migrateFairyAbilities(); // 存量仙子补新增能力（create_sticker / play_game）
+      this.#migrateFairyAbilities(); // 存量仙子补新增能力（create_sticker / play_game / guide_to / guide_stop）
       this.#loadAssets();
       this.#loadSpriteAnims();
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
@@ -187,12 +187,12 @@ export class WorldStore {
   }
 
   /**
-   * 给存量世界的仙子补【后续新增】的能力（create_sticker=fairy-stickers、play_game=realtime-primitives P5）。
+   * 给存量世界的仙子补【后续新增】的能力（create_sticker=fairy-stickers、play_game=realtime-primitives P5、guide_to/guide_stop=fairy-guide）。
    * seedFairy 只在建世界时跑（新世界自带），老库里的仙子从 DB 读能力、缺哪条就不认对应意图（「做个贴纸」「我们来踢球」）。
    * 幂等：把缺的能力补齐，非仙子/已齐全的跳过；只 UPDATE 真改到的行（getCharacter 直读 DB，无内存 Map 需刷新）。
    */
   #migrateFairyAbilities(): void {
-    const REQUIRED = ['create_sticker', 'play_game'];
+    const REQUIRED = ['create_sticker', 'play_game', 'guide_to', 'guide_stop'];
     const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
     const upd = this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?');
     for (const r of rows) {
