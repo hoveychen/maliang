@@ -6518,6 +6518,11 @@ func _update_task_chip() -> void:
 		"visit":
 			task_chip.add_child(_chip_icon(UiAssets.tex("ic_pin")))
 			task_chip.add_child(_chip_label(String(active_task.get("locationName", ""))))
+		"wish":
+			# 心愿委托（wishes.ts）：某个村民盼着一样东西，而他自己不会魔法——
+			# 魔法棒图标就是给小朋友的线索：这事得找会变魔法的（小仙子）。
+			task_chip.add_child(_chip_icon(UiAssets.tex("ic_wand")))
+			task_chip.add_child(_chip_label(String(active_task.get("npcName", ""))))
 	task_chip.add_child(_chip_label("⇒"))
 	task_chip.add_child(_chip_icon(UiAssets.tex(_stamp_icon(String(active_task.get("stampStyle", "star")))))) # 奖励=盖这款集邮章
 	task_chip.visible = true
