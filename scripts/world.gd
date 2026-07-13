@@ -447,6 +447,9 @@ func _setup_environment() -> void:
 	light.shadow_enabled = CHARACTER_SHADOWS       # 默认档；画质设置启动恢复会 override（见 _apply_graphics_key）
 	light.directional_shadow_max_distance = 45.0   # 总设：运行时开阴影即生效（只近处进 shadow pass）
 	BlobShadow.suppress_actor_blob = CHARACTER_SHADOWS
+	# 手机层不吃太阳：手机 shaded 纸面由自带灯照（挂相机随视角走，方向恒定），
+	# 太阳方向随相机环绕相对变化，照上去会忽明忽暗（PaperPhone.attach_light_rig）。
+	light.light_cull_mask &= ~PaperPhone.RENDER_LAYER
 	add_child(light)
 
 	var we := WorldEnvironment.new()
@@ -1301,14 +1304,15 @@ func _setup_hud() -> void:
 	# 开 app = 整机翻转 180° 并展开成双倍宽跨页（PaperPhone 状态机，设计 docs/paper-phone-design.md）。
 	paper_phone = PaperPhone.new()
 	camera.add_child(paper_phone)
+	paper_phone.attach_light_rig() # 自带暖灯挂相机（手机层与世界太阳互相隔离）
 	paper_phone.create_screens(PhoneUi.FRONT_PX, PhoneUi.SPREAD_PX)
-	# AIGC 白卡纸壳贴图（gen_ui_assets phone3d_* 套件）；缺资产时保持程序化白卡纸占位
+	# 白卡纸壳贴图（角部带圆角 alpha 镂空=die-cut 剪影）；缺资产时保持程序化白卡纸占位
 	var shell_front := UiAssets.tex("phone3d_front_shell")
 	if shell_front != null:
-		paper_phone.set_face_texture(PaperPhone.FACE_FRONT, shell_front)
+		paper_phone.set_face_texture(PaperPhone.FACE_FRONT, shell_front, true)
 	var shell_back := UiAssets.tex("phone3d_back_shell")
 	if shell_back != null:
-		paper_phone.set_face_texture(PaperPhone.FACE_BACK, shell_back)
+		paper_phone.set_face_texture(PaperPhone.FACE_BACK, shell_back, true)
 	phone_ui = PhoneUi.new(self)
 	phone_ui.build(paper_phone.front_viewport(), paper_phone.spread_viewport())
 	phone_ui.set_screen_off(true) # 停靠常驻=熄屏黑屏，点亮才见主屏
