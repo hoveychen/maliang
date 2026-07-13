@@ -57,6 +57,7 @@ UNIT_TESTS=(
   test_sdf_static_baker
   test_paper_idle
   test_paper_clips
+  test_anim_clip_pick
   test_player_profile
   test_menu_gate
   test_graphics_settings
