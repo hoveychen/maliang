@@ -5,8 +5,13 @@
 #   - android/                     (.gitignore:3，Godot Android 构建模板 + 插件)
 #   - asr_plugin/src/main/assets/  (.gitignore:22，AAR 里内嵌的 sherpa 模型)
 # 干净 checkout / git worktree 里这些统统不存在。而 Godot 导出时缺了它们【不报错】，
-# 只吐一条 warning，exit code 照样是 0 —— 于是你拿到一个能装能跑、但没有端侧 ASR 的坏包，
-# 而且看不出来。2026-07-12 就出过一个这样的包（270MB vs 正常 331MB，差的正是 encoder onnx）。
+# 只吐一条 warning，exit code 照样是 0。
+#
+# 运行期还有 AsrGuard 兜底（缺 ASR 会全屏阻断拒进游戏），所以坏包不会流到小朋友手里；
+# 但那是装到真机、启动、撞红字之后才知道。这里在【导出当场】就用产物里的 ASR 资产把它拦下。
+#
+# 注意：不拿包体当判据。debug 模板比 release 大 20MB+，体积会随构建类型漂移；
+# 直接数 onnx / tokens.txt / sherpa 库才是「ASR 在不在」的硬证据。
 #
 # 用法：scripts/export-apk.sh [输出路径=build/maliang.apk] [--release]
 set -uo pipefail
@@ -44,9 +49,8 @@ check "tokens.txt"         "$(echo "$listing" | grep -c 'asr-models/.*tokens\.tx
 check "sherpa arm64 库"    "$(echo "$listing" | grep -c 'lib/arm64-v8a/libsherpa')"  3
 
 size=$(stat -f%z "$ROOT/$OUT" 2>/dev/null || stat -c%s "$ROOT/$OUT")
-mb=$((size / 1024 / 1024))
-# 完整包 ~331MB；丢了 ASR 模型会掉到 ~270MB。300MB 是二者之间的一道闸。
-if [ "$mb" -ge 300 ]; then echo "  ✔ 包体: ${mb}MB"; else echo "  ✘ 包体: ${mb}MB —— 低于 300MB，八成丢了 ASR 模型（完整包约 331MB）"; fails=$((fails+1)); fi
+# 包体只报不判：debug 模板比 release 大 20MB+，拿它当闸会误伤 release 包。
+echo "  ℹ 包体: $((size / 1024 / 1024))MiB（仅供参考，不作判据——debug/release 天然差 20MB+）"
 
 echo
 if [ "$fails" -eq 0 ]; then
