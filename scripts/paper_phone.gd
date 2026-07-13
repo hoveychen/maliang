@@ -62,6 +62,7 @@ var _dock_scale := 0.2
 var _dock_fitted := false          ## 停靠位是否已按真实布局贴合过（首帧 Control 布局后才有）
 var _base_rot := DOCK_ROT          ## 基础姿态角（停靠=DOCK_ROT 侧摆、持机=0；微摆叠加其上；初始即停靠）
 var _sway_t := 0.0                 ## 持机微摆相位
+var _drop_shadow: MeshInstance3D   ## 悬浮软影（机身后下方，宽度跟随折叠进度）
 
 # 在 _init 建几何而非 _ready：headless 测试在 SceneTree._initialize 阶段节点尚未进树、
 # _ready 会延迟到首帧，_init 保证 new() 出来即可用（show_front/pick 不依赖树状态）。
@@ -104,6 +105,49 @@ func _build() -> void:
 	_panel_b.add_child(_make_slab())
 	_add_face(FACE_BACK, _panel_b, Vector3(0.0, 0.0, PANEL_T * 0.5 + FACE_EPS), false)
 	_add_face(FACE_SPREAD_R, _panel_b, Vector3(0.0, 0.0, -PANEL_T * 0.5 - FACE_EPS), true)
+	_build_drop_shadow()
+
+## 悬浮软影：持机物没有落地面，"离你很近的一张实体卡"的存在感靠机身后下方
+## 一片软影承担（纸艺观感第二支柱的持机版）。贴图复用 PaperBook 的超椭圆烘法
+## （剪影内实心+轮廓外平滑衰减——纯径向渐变会把浓度全藏在机身正后方看不见）。
+## 挂 root：跟机身一起搬移/缩放/侧摆；spread 视觉中心始终在 root 原点
+## （_apply_pose 的 pivot 平移保证），软影只需随折叠加宽（见 _apply_pose）。
+const SHADOW_CORE := 0.78         ## 影贴图实心核半径占比（衰减带只占外圈 22%——窄圈贴剪影）
+func _build_drop_shadow() -> void:
+	var q := QuadMesh.new()
+	# 实心核对齐机身剪影：quad 取机身/CORE，窄衰减圈正好箍在剪影外一小圈。
+	# 书影贴图（0.62 核+宽衰减）是桌面接触影的糊法，用在持机物上会糊成环境渐变（实测）。
+	q.size = Vector2(PANEL_W / SHADOW_CORE, PANEL_H / SHADOW_CORE)
+	_drop_shadow = MeshInstance3D.new()
+	_drop_shadow.name = "DropShadow"
+	_drop_shadow.mesh = q
+	# 后下方偏移：光从左上前方来（attach_light_rig），影子落右下后方。
+	# 深度别拉远：透视会把软影缩小+拖向灭点，整片藏到机身正后面看不见（实测 -0.5 全灭）。
+	# x 偏移里有 ~0.045 是在抵消灭点漂移（持机位在画面右侧，靠后的影会向画面中心滑）
+	_drop_shadow.position = Vector3(0.085, -0.055, -0.10)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_texture = _make_drop_shadow_texture()
+	m.albedo_color = Color(0.13, 0.12, 0.10, 0.42) # 中性软影（草地/任意场景上都是"影"）
+	_drop_shadow.material_override = m
+	_drop_shadow.layers = RENDER_LAYER
+	_drop_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_drop_shadow)
+
+## 悬浮影贴图：超椭圆（≈圆角矩形）剪影内实心 + 轮廓外窄带平滑衰减。
+## 与 PaperBook._make_shadow_texture 同族，核更大衰减更窄（悬浮 drop shadow
+## 要"贴着边缘的一圈"，不是桌面接触影那种大范围糊散）。
+static func _make_drop_shadow_texture() -> ImageTexture:
+	var img := Image.create(128, 128, false, Image.FORMAT_RGBA8)
+	for y in 128:
+		for x in 128:
+			var p := Vector2(absf(x - 63.5) / 63.5, absf(y - 63.5) / 63.5)
+			var d := pow(pow(p.x, 4.0) + pow(p.y, 4.0), 0.25) # 超椭圆≈圆角矩形
+			var t := clampf((d - SHADOW_CORE) / (1.0 - SHADOW_CORE), 0.0, 1.0)
+			var a := 1.0 - t * t * (3.0 - 2.0 * t)
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
+	return ImageTexture.create_from_image(img)
 
 ## 纸板芯：面板的厚度体（侧面即纸边）。贴面用独立 quad 盖在两大面上。
 ## 圆角矩形棱柱（非 BoxMesh）：直角盒芯会从壳贴图的圆角镂空后面露出灰角，
@@ -411,6 +455,8 @@ func _apply_pose(fold_deg: float, yaw_deg: float) -> void:
 	_pivot.rotation.y = deg_to_rad(yaw_deg)
 	var spread_frac := 1.0 - fold_deg / 180.0 # 0=合拢 → 1=摊平
 	_pivot.position.x = -PANEL_W * 0.5 * spread_frac
+	if _drop_shadow != null:
+		_drop_shadow.scale.x = 1.0 + spread_frac # 摊平双倍宽，软影跟着加宽
 
 func _animate_flip(fold_to: float, yaw_to: float) -> void:
 	_kill_tween()
