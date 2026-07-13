@@ -107,8 +107,8 @@ open(p, "w").write(s)
 print("   asr-models: Frameworks → Resources ✓")
 PY
 
-# 5. 护栏：数模型和库，缺了当场 exit 1（别等装到真机撞红字）
-echo "==> 校验产物"
+# 5. 护栏：数工程里的模型和库，缺了当场 exit 1（别等装到真机撞红字）
+echo "==> 校验工程"
 PROJ_MODELS="$ROOT/build/ios/maliang/addons/maliang_asr_native/bin/asr-models/$ASR_DIR"
 ONNX=$(find "$PROJ_MODELS" -name "*.onnx" 2>/dev/null | wc -l | tr -d ' ')
 [ "$ONNX" = "3" ] || { echo "❌ 模型 onnx 数不对：$ONNX（应为 3）"; exit 1; }
@@ -118,6 +118,28 @@ ONNX=$(find "$PROJ_MODELS" -name "*.onnx" 2>/dev/null | wc -l | tr -d ' ')
 grep -q "asr-models in Resources" "$OUT/project.pbxproj" || { echo "❌ pbxproj 修补没生效"; exit 1; }
 echo "   onnx×$ONNX + tokens.txt + libmaliang_asr.ios.$TARGET.arm64.a ✓"
 
+# 6. 真正的红绿灯：编一遍（不签名），看 **.app 里** 有没有模型和 ASR 符号。
+#    工程里有 ≠ 包里有——上面第 2 条就是栽在这：Xcode 把 Frameworks phase 里的模型目录
+#    静默丢了，工程、导出、构建三处全绿，只有 .app 里是空的。SKIP_VERIFY=1 可跳过。
+if [ "${SKIP_VERIFY:-0}" != "1" ]; then
+  echo "==> 试编真机包并核查 .app（SKIP_VERIFY=1 可跳过）"
+  DD="$ROOT/build/ios/.dd"
+  xcodebuild -project "$OUT" -scheme maliang -configuration "$([ "$MODE" = release ] && echo Release || echo Debug)" \
+    -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$DD" \
+    CODE_SIGNING_ALLOWED=NO build > "$ROOT/build/ios/xcodebuild.log" 2>&1 || {
+      echo "❌ xcodebuild 失败，见 build/ios/xcodebuild.log"; tail -5 "$ROOT/build/ios/xcodebuild.log"; exit 1; }
+  APP="$(find "$DD/Build/Products" -maxdepth 2 -name "maliang.app" | head -1)"
+  [ -n "$APP" ] || { echo "❌ 没找到构建出的 .app"; exit 1; }
+  APP_ONNX=$(find "$APP/asr-models" -name "*.onnx" 2>/dev/null | wc -l | tr -d ' ')
+  [ "$APP_ONNX" = "3" ] || { echo "❌ .app 里 onnx 数不对：$APP_ONNX（应为 3）——模型被静默丢了"; exit 1; }
+  [ -f "$APP/asr-models/$ASR_DIR/tokens.txt" ] || { echo "❌ .app 里缺 tokens.txt"; exit 1; }
+  # 用 grep -c 而不是 grep -q：pipefail 下 grep -q 一命中就退出，会给 nm 一个 SIGPIPE，
+  # 整条管道被判失败——护栏会对着一个好包狂喊坏包（踩过）。
+  ENTRY=$(nm "$APP/maliang" 2>/dev/null | grep -c " _maliang_asr_library_init$" || true)
+  [ "$ENTRY" -ge 1 ] || { echo "❌ .app 二进制里没有 ASR 入口符号——GDExtension 没静态链进去"; exit 1; }
+  echo "   .app：onnx×$APP_ONNX + tokens.txt + _maliang_asr_library_init ✓（$(du -sh "$APP" | cut -f1)）"
+fi
+
 echo
 echo "完成：$OUT"
-echo "  open $OUT   # Xcode 选真机 → Run"
+echo "  open $OUT   # Xcode 选真机 → Run（签名 team 6HU93XQG5B）"
