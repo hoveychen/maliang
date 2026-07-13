@@ -92,6 +92,8 @@ const ABILITY_DESC: Record<string, string> = {
   create_character: 'create_character=按小朋友的想法变出一个新的活伙伴/小动物/小人（小猫/小恐龙/小精灵/小朋友…），params:{"description":"新伙伴的中文描述，尽量保留小朋友的原话细节：长什么样、什么颜色、叫什么名字、什么性格"}',
   create_sticker: 'create_sticker=按小朋友的想法做一张扁平的贴纸/贴画（太阳/花/星星/爱心/彩虹…这类平面小图案，用来贴在地上或角色身上），params:{"description":"贴纸图案的中文描述，尽量保留小朋友的原话细节：什么图案、什么颜色"}',
   play_game: 'play_game=小朋友想玩一个【多人小游戏】（踢球/老鹰抓小鸡/捉迷藏/丢手绢…这类有规则、大家一起动起来的游戏），params:{"game":"游戏的中文口语描述，尽量保留小朋友的原话，如「踢球」「老鹰抓小鸡」"}',
+  guide_to: 'guide_to=带小朋友去某个地方，或带他去找某个人（你飞在前面领路，他自己走），params:{"location_name":"地点名"} 或 {"character_name":"角色名"}',
+  guide_stop: 'guide_stop=小朋友不想去了/让你别带路了 → 停止领路，params:{}',
 };
 
 function stripFences(s: string): string {
@@ -202,6 +204,11 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     const playLine = abilities.includes('play_game')
       ? `\n- 小朋友想「玩一个游戏」（踢球/老鹰抓小鸡/捉迷藏/丢手绢这类有规则、大家一起动起来的多人小游戏，如「我们来踢球吧」「玩老鹰抓小鸡」「一起做个游戏」）→ kind=command，behaviorScript 一条 {"type":"play_game","params":{"game":"游戏的口语描述，尽量保留原话，如『踢球』"}}；replyText 用你的口吻应下（如「好呀，我们来玩！」）。这是要开一局游戏，不是造东西——造物/造角色/造贴纸别混进来。`
       : '';
+    // 引路规则：只有小仙子有 guide_to。她自己不会走路，「带路」是她飞在前面领、小朋友自己走过去。
+    const guideLine = abilities.includes('guide_to')
+      ? `\n- 小朋友想「去某个地方」或「去找某个人」（如「带我去风车那儿」「我想找小明」「小明在哪呀」「我们去海边吧」）→ kind=command，behaviorScript 一条 {"type":"guide_to","params":{"location_name":"地点名"}} 或 {"type":"guide_to","params":{"character_name":"角色名"}}；replyText 用你的口吻应下并招呼他跟上（如「好呀，跟我来！」）。地点名/角色名必须用下面「可以带小朋友去的地方和人」里的名字，那里没有的**不要编**——你带不了，就老实说你不知道那在哪儿（kind=chat）。
+- 小朋友说「不去了」「不用带了」「我不想去了」→ kind=command，behaviorScript 一条 {"type":"guide_stop","params":{}}；replyText 温柔应下（如「好，那我们不去啦」）。`
+      : '';
 
     // ── 静态前缀（跨轮字节稳定，命中 prompt cache）：角色卡 + 能力 + 贴纸词汇 + 输出格式与规则 ──
     const staticSystem = `你是幼儿游戏角色「${ctx.characterName}」（个性：${ctx.personality}）。
@@ -212,7 +219,7 @@ ${abilityLines}
 - chat 时不要 behaviorScript。
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - 小朋友说「告诉X…」「帮我跟X说…」是带话：用 deliver_message（to=X，message=要带的话），不要用 move_to——光走过去话就丢了。
-- follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。${createLine}${stickerLine}${playLine}
+- follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。${createLine}${stickerLine}${playLine}${guideLine}
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
 - 绝不包含暴力、恐怖、成人内容。`;
@@ -223,6 +230,10 @@ ${abilityLines}
       : '';
     const locationLine = ctx.locations && ctx.locations.length > 0
       ? `\n世界里的地点：${ctx.locations.join('、')}。move_to 的 location_name 优先归一到这些名字（说「有风车的地方」就填「风车」）。`
+      : '';
+    // 引路候选（仅小仙子）：带上所在场景名，让她知道「小明在森林」——孩子说「找小明」时不至于当成不存在。
+    const guideTargetLine = ctx.guideTargets && ctx.guideTargets.length > 0
+      ? `\n可以带小朋友去的地方和人：${ctx.guideTargets.map((t) => `${t.name}(${t.sceneName})`).join('、')}。guide_to 的名字只能从这里选。`
       : '';
     const taskLine = ctx.activeTask
       ? `\n进行中的小任务：${describeTask(ctx.activeTask)}（委托人是${ctx.activeTask.npcName}，完成能盖一个小红花集邮章）。小朋友问起就温柔提醒，不要重复发起新任务。`
@@ -244,7 +255,7 @@ ${abilityLines}
     const summaryLine = ctx.sessionSummary
       ? `\n这次见面更早的对话（已压缩成摘要）：${ctx.sessionSummary}`
       : '';
-    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + taskLine + memoryLine + summaryLine;
+    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + guideTargetLine + taskLine + memoryLine + summaryLine;
 
     // 把近 N 轮历史按角色映射成对话消息，让回应有上下文
     const historyMsgs = (ctx.recentHistory ?? []).map((t) => ({

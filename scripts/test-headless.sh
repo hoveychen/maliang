@@ -104,6 +104,7 @@ UNIT_TESTS=(
   test_dialog_camera
   test_phone_menu
   test_paper_phone
+  test_paper_book
   test_asr_guard
   test_interaction_fsm
   test_adaptive_fps_cap
@@ -140,6 +141,9 @@ run_test test_visual_loading       --fixed-fps 10 --quit-after 90
 run_test test_visual_fairy         --fixed-fps 10 --quit-after 100
 run_test test_visual_click_move    --fixed-fps 10 --quit-after 140
 run_test test_sfx_mic_guard        --fixed-fps 10 --quit-after 60
+run_test test_fairy_guide          --fixed-fps 10 --quit-after 115
+run_test test_fairy_guide_portal   --fixed-fps 10 --quit-after 70
+run_test test_fairy_guide_hint     --fixed-fps 10 --quit-after 95
 run_test test_visual_fairy_poi     --fixed-fps 10 --quit-after 130
 run_test test_visual_fairy_poi_hold --fixed-fps 10 --quit-after 90
 run_test test_visual_camera_height --fixed-fps 10 --quit-after 80

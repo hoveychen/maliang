@@ -1,9 +1,11 @@
 import type { ServiceAdapters } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, ChatTurn, VoiceResponse } from './types.ts';
-import { effectiveAbilities } from './types.ts';
+import { effectiveAbilities, DEFAULT_SCENE } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
 import { pickGreeting } from './greetings.ts';
+import { planGuide, listGuideTargets } from './guide.ts';
+import { matchByName } from './names.ts';
 
 const RECENT_TURNS = 6; // 旧路径兜底：调用方没给 session 历史时，回喂持久 chat_turns 的近 N 条（child+npc 各算一条）
 
@@ -63,11 +65,17 @@ export async function respondToTranscript(
 
   // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），带 kind 注入（分组）。
   const memories = store.getMemories(characterId, playerId).map((m) => ({ text: m.text, kind: m.kind }));
+  const abilities = effectiveAbilities(character);
+  // 引路候选只对有 guide_to 的角色（小仙子）算：村民带不了路，白搭 prompt token。
+  const guideTargets = abilities.includes('guide_to')
+    ? listGuideTargets(store, worldId, sceneId ?? character.sceneId ?? DEFAULT_SCENE)
+    : undefined;
   const intent = await adapters.llm.routeIntent(transcript, {
     characterName: character.name,
     personality: character.personality,
     // 基础集 ∪ 角色自带；小仙子减去需要走动的能力——她不会走，给了也兑现不了
-    abilities: effectiveAbilities(character),
+    abilities,
+    guideTargets,
     recentHistory: sessionCtx?.history ?? store.getRecentTurns(characterId, playerId, RECENT_TURNS),
     sessionSummary: sessionCtx?.summary,
     memory: memories,
@@ -121,10 +129,24 @@ export async function respondToTranscript(
       if (desc) response.gameRequest = desc;
       intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'play_game');
     }
+    // guide_to 同理：不是 BehaviorExecutor 的指令（她不吃移动脚本）——摘走，算成 GuidePlan 下发给客户端引路状态机。
+    // 算不出计划（目标不存在/太远）就【不发 guide】，只留 LLM 那句口头回应：绝不能应下「好呀跟我来」却没人动。
+    const guideCmd = intent.behaviorScript.commands.find((c) => c.type === 'guide_to');
+    if (guideCmd) {
+      const plan = planGuide(store, worldId, sceneId ?? character.sceneId ?? DEFAULT_SCENE, guideCmd.params ?? {});
+      if (plan) response.guide = plan;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'guide_to');
+    }
+    // guide_stop：小朋友说「不去了」→ 取消进行中的引路。纯信号，无 params。
+    const guideStopCmd = intent.behaviorScript.commands.find((c) => c.type === 'guide_stop');
+    if (guideStopCmd) {
+      response.guideStop = true;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'guide_stop');
+    }
     if (intent.behaviorScript.commands.length > 0) {
       response.behaviorScript = intent.behaviorScript;
       // 执行者：小朋友点名让别的角色做（「小蓝跟我来」）→ 脚本挂到那个角色；缺省挂正在对话的角色
-      const performer = intent.performerName ? findByName(roster, intent.performerName) : undefined;
+      const performer = intent.performerName ? matchByName(roster, intent.performerName) : undefined;
       if (performer) {
         response.performerId = performer.id;
         const target = store.getCharacter(worldId, performer.id);
@@ -244,19 +266,6 @@ export async function greetCharacter(
   const tts = await adapters.tts.synthesize(line, character.voiceId);
   response.ttsAsset = store.putAsset(tts);
   return response;
-}
-
-/** 花名册按名字找角色：先精确，再互相包含（ASR 可能多字/少字，如「小蓝呀」↔「小蓝」）。 */
-function findByName(
-  roster: { id: string; name: string }[],
-  name: string,
-): { id: string; name: string } | undefined {
-  const n = name.trim();
-  if (!n) return undefined;
-  return (
-    roster.find((c) => c.name === n) ??
-    roster.find((c) => c.name.includes(n) || n.includes(c.name))
-  );
 }
 
 /** 回合收尾：把这轮对话写入 chat_turns（按玩家），并持久化角色状态（behaviorScript 变更）。 */

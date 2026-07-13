@@ -1,18 +1,38 @@
 extends Control
-## 童话书 onboarding：翻页绘本讲故事 + 图标问题 + 自我介绍 + 形象生成。
+## 童话书 onboarding：真 3D 卡纸故事书（PaperBook）翻页讲故事 + 图标问题 + 自我介绍 + 形象生成。
 ## 面向 3 岁小朋友：不依赖文字——大图标演出 + 预制 TTS 旁白（assets/voice/onboarding/）。
 ## 页面由 PAGES 声明式驱动；answers 收集到 PlayerProfile。
 ## kind: story(讲故事,点击/旁白结束后翻页) | question(图标选项) | intro(ASR 自我介绍,P5)
 ##       | generate(形象生成确认,P6)
+##
+## 呈现层（2026-07 重做）：根仍是 Control（全屏输入捕获），3D 节点挂主视口 World3D——
+## 合书开场 → 翻开封面（连同左半摞页）→ 每步真实翻页（PaperBook 弯曲页面/页堆/沟槽凹陷）。
+## 页面 Control 树按原设计尺寸(1040×600)建，塞进跨页 SubViewport 后整体 ×1.5 填满
+## （输入换算由 Control.scale 自动处理）；点击走射线拾取→UV→push_input（PaperPhone 同款）。
+##
 ## intro 页是开放麦：旁白问完自动开麦，交给 VoiceCapture 模块（mic+VAD+端侧/服务端ASR+
 ## 自听防护+BGM门控，与 world.gd 共用同一编排），onboarding 只接信号做状态图标与名字提交。
 ## 话筒图标只做状态指示，不可点。端侧模型未就绪时不开麦（没有服务端识别可回落）。
 
 const VOICE_DIR := "res://assets/voice/onboarding"
-const FLIP_TIME := 0.35
 const WAVE_BARS := 5              ## 声波条数量
 const WAVE_MIN_H := 12.0          ## 声波条静息高度
 const WAVE_MAX_H := 76.0          ## 声波条满幅高度
+
+# ── 3D 舞台参数 ──
+const SPREAD_PX := Vector2i(1560, 900)   ## 跨页视口分辨率（=页面设计尺寸 1040×600 ×1.5）
+const PAGE_DESIGN := Vector2(1040, 600)  ## 页面 Control 树设计尺寸（沿用旧版，零改版式）
+const CAM_FOV := 40.0
+const CAM_DIST := 1.6                    ## 书离相机距离
+const BOOK_FILL := 0.80                  ## 跨页宽占屏比
+const BOOK_NDC := Vector2(0.0, -0.03)    ## 书中心落点（NDC）
+## 摊在桌上的阅读俯角:顶边绕横轴向里翻(远)、底边向外翻(近)——正常人看桌上
+## 书本的透视,近大远小、底边宽顶边窄(老板两轮校准:先"要正对别侧摆"再
+## "上侧往里翻";最初正角度=书顶朝相机像立在展架上,是反的)。
+const BOOK_TILT := Vector3(-0.52, 0.0, 0.0)
+const TURN_TIME := 0.55                  ## 翻一页时长
+const OPEN_TIME := 1.1                   ## 翻开封面时长
+const CLOSED_BEAT := 0.8                 ## 开场合书停顿
 
 ## 问题选项 value 直接入档案；art/icon 为 assets/ui 的 AIGC 素材名（UiAssets，替代 emoji）。
 const PAGES := [
@@ -48,7 +68,9 @@ const PAGES := [
 var answers: Dictionary = {}
 var page_idx := -1
 var _page: Control = null          ## 当前页容器（翻页时旧页被收走）
-var _book: PanelContainer
+var _book: PaperBook               ## 3D 卡纸故事书载体
+var _cam: Camera3D
+var _page_root: Control            ## 跨页视口里的页面容器（1040×600 设计系，×1.5 填满视口）
 var _voice: AudioStreamPlayer
 var game_audio: GameAudio
 var _flipping := false
@@ -76,8 +98,7 @@ var _prefetch_tex: Texture2D = null
 var _prefetch_anchors: Dictionary = {}  ## /player-sprite 返回体带的贴纸锚点（headTop/handL/handR），随档案落盘
 
 func _ready() -> void:
-	_setup_background()
-	_setup_book()
+	_setup_stage3d()
 	_voice = AudioStreamPlayer.new()
 	add_child(_voice)
 	game_audio = GameAudio.new()
@@ -145,32 +166,63 @@ func _on_capture_cancelled() -> void:
 	if _intro_status != null:
 		_intro_status.texture = UiAssets.tex("ic_mic")
 
-func _setup_background() -> void:
-	# 水彩天空插画铺满（AIGC bg_onboarding，替代渐变）
-	var bg := TextureRect.new()
-	bg.texture = UiAssets.tex("bg_onboarding")
-	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
-
-func _setup_book() -> void:
-	# 真·童话书：摊开的精装书照片级纹理（AIGC book_open_bg），
-	# 内容边距对准两页纸面区域（皮质封面边框留在外侧）。
-	_book = PanelContainer.new()
-	var style := StyleBoxTexture.new()
-	style.texture = UiAssets.tex("book_open_bg")
-	style.content_margin_left = 84.0
-	style.content_margin_right = 84.0
-	style.content_margin_top = 56.0
-	style.content_margin_bottom = 68.0
-	_book.add_theme_stylebox_override("panel", style)
-	_book.set_anchors_preset(Control.PRESET_CENTER)
-	_book.offset_left = -520.0
-	_book.offset_right = 520.0
-	_book.offset_top = -300.0
-	_book.offset_bottom = 300.0
+## 3D 舞台：相机 + 暖光 + 摊在木桌上的卡纸故事书（合书开场）。根是 Control，
+## 3D 节点挂进主视口的 World3D（2D 画布叠在 3D 之上，本 Control 不画东西只收输入）。
+func _setup_stage3d() -> void:
+	_cam = Camera3D.new()
+	_cam.name = "StageCam"
+	_cam.fov = CAM_FOV
+	add_child(_cam)
+	_cam.make_current()
+	# 暖平行光（左上前方）+ 环境光：纸艺观感的第一根支柱是真实光照下的素色材质。
+	# 不开实时阴影（老平板 GPU 陷阱），接触阴影用假影贴图（PaperBook.create_desk）。
+	var sun := DirectionalLight3D.new()
+	sun.name = "WarmSun"
+	sun.rotation = Vector3(-0.95, -0.35, 0.0)
+	sun.light_color = Color(1.0, 0.965, 0.90)
+	sun.light_energy = 1.05
+	sun.shadow_enabled = false
+	add_child(sun)
+	var env := WorldEnvironment.new()
+	env.name = "StageEnv"
+	var e := Environment.new()
+	e.background_mode = Environment.BG_COLOR
+	e.background_color = Color(0.93, 0.87, 0.78) # 桌面外兜底暖色（正常被木桌盖满）
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = Color(0.86, 0.82, 0.78)
+	e.ambient_light_energy = 0.75
+	env.environment = e
+	add_child(env)
+	# 书：合书姿态趴在木桌上入场，翻开封面见 _next_page 首页特例
+	_book = PaperBook.new()
+	_book.name = "PaperBook"
 	add_child(_book)
+	_book.rotation = BOOK_TILT
+	_book.set_open_frac(0.0)
+	_book.set_cover_texture(UiAssets.tex("book_cover"))
+	_book.create_desk(UiAssets.tex("desk_wood"))
+	_book.create_spread(SPREAD_PX)
+	# 跨页视口内容：纸面底色 + 页面容器（1040×600 设计系整体 ×1.5 = 1560×900 恰满幅）
+	var paper := ColorRect.new()
+	paper.color = Color(0.985, 0.972, 0.938) # 白卡纸
+	paper.size = Vector2(SPREAD_PX)
+	_book.spread_viewport().add_child(paper)
+	_page_root = Control.new()
+	_page_root.name = "PageRoot"
+	_page_root.size = PAGE_DESIGN
+	_page_root.scale = Vector2(SPREAD_PX) / PAGE_DESIGN
+	_book.spread_viewport().add_child(_page_root)
+	_fit_stage()
+	get_viewport().size_changed.connect(_fit_stage)
+
+## 书（连同木桌）贴合相机视野（进场与窗口变化时）。
+func _fit_stage() -> void:
+	_book.fit_to_camera(_cam, BOOK_FILL, BOOK_NDC, CAM_DIST)
+
+## 全屏输入：射线拾取 → 转发进跨页视口（命中书页时吞掉事件）。
+func _gui_input(ev: InputEvent) -> void:
+	if _book != null and _book.route_gui_event(_cam, ev):
+		accept_event()
 
 # ── 翻页与页面渲染 ─────────────────────────────────────────────────────────
 
@@ -181,51 +233,58 @@ func _next_page() -> void:
 		_finish()
 		return
 	page_idx += 1
-	_flip_to(_build_page(PAGES[page_idx]))
+	_show_page(_build_page(PAGES[page_idx]))
 
-## 书页翻转：旧页横向压扁（绕左脊）→ 新页展开。
-func _flip_to(next_page: Control) -> void:
+## 展示新页：首页=合书停一拍→翻开封面；其后=真实翻页（旧页快照卷过书脊）。
+func _show_page(next_page: Control) -> void:
 	_flipping = true
-	game_audio.play_sfx("page")
 	var old := _page
 	_page = next_page
-	if old != null:
-		var tw := create_tween()
-		tw.tween_property(old, "scale:x", 0.0, FLIP_TIME).set_ease(Tween.EASE_IN)
-		tw.tween_callback(old.queue_free)
-	next_page.scale.x = 0.0
-	_book.add_child(next_page)
-	var tw2 := create_tween()
-	tw2.tween_interval(FLIP_TIME if old != null else 0.0)
-	tw2.tween_property(next_page, "scale:x", 1.0, FLIP_TIME).set_ease(Tween.EASE_OUT)
-	tw2.tween_callback(func() -> void:
-		_flipping = false
-		_on_page_shown(PAGES[page_idx]))
+	var swap := func() -> void:
+		if old != null:
+			old.queue_free()
+		_page_root.add_child(next_page)
+	if page_idx == 0:
+		swap.call()
+		await get_tree().create_timer(CLOSED_BEAT).timeout
+		game_audio.play_sfx("page")
+		await _book.play_open(OPEN_TIME)
+	else:
+		game_audio.play_sfx("page")
+		var prog := float(page_idx) / float(maxi(PAGES.size() - 1, 1))
+		await _book.turn_page(swap, prog, TURN_TIME)
+	_flipping = false
+	_on_page_shown(PAGES[page_idx])
 
+## 页面根是 plain Control（不接管子节点定位）：story 的全出血插画直接铺满页根，
+## 交互内容走居中 VBox 叠层——两者互不打架。
 func _build_page(p: Dictionary) -> Control:
+	var page := Control.new()
+	page.set_anchors_preset(Control.PRESET_FULL_RECT)
+	if String(p["kind"]) == "story":
+		_build_story(page, p)
+		return page
 	var box := VBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 30)
-	box.pivot_offset = Vector2(0.0, 300.0) # 绕左脊翻
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	page.add_child(box)
 	match String(p["kind"]):
-		"story": _build_story(box, p)
 		"question": _build_question(box, p)
 		"intro": _build_intro(box, p)
 		"generate": _build_generate(box, p)
-	return box
+	return page
 
-func _build_story(box: VBoxContainer, p: Dictionary) -> void:
-	# 绘本插画铺满跨页舞台；fairy 页在插画光斑中央叠小仙子立绘
-	var stage := Control.new()
-	stage.custom_minimum_size = Vector2(800.0, 390.0)
-	stage.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+func _build_story(page: Control, p: Dictionary) -> void:
+	# 绘本插画全出血铺满跨页（书脊沟槽的凹陷变形直接压过画面）；
+	# fairy 页在插画光斑中央叠小仙子立绘；▶ 悬浮在页脚。
 	var art := TextureRect.new()
 	art.texture = UiAssets.tex(String(p.get("art", "story_forest")))
 	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	art.clip_contents = true
 	art.set_anchors_preset(Control.PRESET_FULL_RECT)
-	stage.add_child(art)
+	page.add_child(art)
 	if p.get("fairy", false):
 		var img := TextureRect.new()
 		img.texture = load("res://assets/fairy.png")
@@ -236,22 +295,32 @@ func _build_story(box: VBoxContainer, p: Dictionary) -> void:
 		img.offset_right = 140.0
 		img.offset_top = -96.0
 		img.offset_bottom = 96.0
-		stage.add_child(img)
-	box.add_child(stage)
+		art.add_child(img)
 	var hint := UiAssets.icon_button("ic_next", 72.0)
-	hint.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	hint.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	hint.offset_left = -36.0
+	hint.offset_right = 36.0
+	hint.offset_top = -88.0
+	hint.offset_bottom = -16.0
 	hint.pressed.connect(_next_page)
-	box.add_child(hint)
+	page.add_child(hint)
 
 func _build_question(box: VBoxContainer, p: Dictionary) -> void:
 	var q := UiAssets.icon_rect("ic_question", 88.0)
 	box.add_child(q)
+	# 选项拆成左右页两组、中间空出书脊沟槽——真书不会把内容印进装订沟
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 36)
 	row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	for opt in (p["options"] as Array):
-		row.add_child(_option_button(p, opt as Dictionary))
+	var opts := p["options"] as Array
+	var half := ceili(opts.size() / 2.0)
+	for i in opts.size():
+		if i == half:
+			var gutter := Control.new()
+			gutter.custom_minimum_size = Vector2(110.0, 0.0) # 与 separation×2 合计≈180px 避开沟槽
+			row.add_child(gutter)
+		row.add_child(_option_button(p, opts[i] as Dictionary))
 	box.add_child(row)
 
 ## 图标大按钮：AIGC 贴纸图标 或 纯色圆角块（颜色题用色块，天然不依赖图片）。
@@ -497,6 +566,7 @@ func _on_page_shown(p: Dictionary) -> void:
 		_start_avatar_prefetch() # 答案已齐：说话确认的同时后台生形象（生图 ~1min 重叠掉）
 
 func _process(delta: float) -> void:
+	# （无悬浮微摆：书是摊在桌上的实体,晃动反而破坏"躺在桌面"的落地感）
 	# duck（音量微降）留宿主：旁白在播 或 正在录音时压低，给人声让路。
 	# BGM 静音（比 duck 更狠，断外放回灌）由 VoiceCapture 内部门控——聆听窗一开即静音，
 	# 只在旁白/人声出声时放行（修正旧口径只在 recording 才静音、漏掉开麦等待窗的问题）。

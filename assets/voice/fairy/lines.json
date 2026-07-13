@@ -120,6 +120,66 @@
       "trigger": "cooldown_end",
       "cooldown": 5,
       "text": "休息好啦！我们继续一起玩吧！"
+    },
+    {
+      "id": "fairy_guide_nudge_1",
+      "trigger": "guide_nudge",
+      "cooldown": 5,
+      "text": "这边这边，快跟我来呀！"
+    },
+    {
+      "id": "fairy_guide_nudge_2",
+      "trigger": "guide_nudge",
+      "cooldown": 5,
+      "text": "跟上呀小朋友，就在前面啦！"
+    },
+    {
+      "id": "fairy_guide_nudge_3",
+      "trigger": "guide_nudge",
+      "cooldown": 5,
+      "text": "我在这儿等你哦，快过来～"
+    },
+    {
+      "id": "fairy_guide_arrive_1",
+      "trigger": "guide_arrive",
+      "cooldown": 3,
+      "text": "到啦到啦！就是这里～"
+    },
+    {
+      "id": "fairy_guide_arrive_2",
+      "trigger": "guide_arrive",
+      "cooldown": 3,
+      "text": "我们到咯，你看！"
+    },
+    {
+      "id": "fairy_guide_cancel_1",
+      "trigger": "guide_cancel",
+      "cooldown": 3,
+      "text": "好呀，那我们就不去啦。"
+    },
+    {
+      "id": "fairy_guide_timeout_1",
+      "trigger": "guide_timeout",
+      "cooldown": 3,
+      "text": "路好像有点远，我们下次再去吧～"
+    },
+    {
+      "id": "fairy_guide_hint_1",
+      "trigger": "guide_hint",
+      "cooldown": 90,
+      "text": "想去哪儿玩呀？告诉我，我带你去！"
+    },
+    {
+      "id": "fairy_guide_hint_2",
+      "trigger": "guide_hint",
+      "cooldown": 90,
+      "text": "你要是想找谁，跟我说一声，我就带你去找他～"
+    },
+    {
+      "id": "fairy_guide_hint_3",
+      "trigger": "guide_hint",
+      "cooldown": 90,
+      "text": "这个世界大着呢，想去哪儿我都能带你去哦。"
     }
   ]
 }

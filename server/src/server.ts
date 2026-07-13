@@ -133,7 +133,7 @@ export function seedFairy(worldId: string): Character {
     behaviorScript: { commands: [{ type: 'wait', params: { duration: 1 } }], loop: true },
     position: WORLD_CENTER_TILE,
     sceneId: DEFAULT_SCENE,
-    abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop', 'create_sticker', 'play_game'],
+    abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop', 'create_sticker', 'play_game', 'guide_to', 'guide_stop'],
     relationships: {},
   };
 }
