@@ -57,3 +57,4 @@ gdextension_asr/.sconsign.dblite
 
 # 端侧 ASR GDExtension 产物(主checkout为真身,worktree用symlink;不带尾斜杠连symlink一起忽略)
 libmaliang_asr.*.framework
+gdextension_asr/sherpa-onnx-ios/
