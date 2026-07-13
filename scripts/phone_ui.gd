@@ -45,6 +45,9 @@ var _phone_pager_dragging := false  ## 拖拽中（松手贴合最近页）
 var _phone_ui_t := 0.0              ## banner 刷新节流计时
 var _screen_cover: Control          ## 熄屏画面（停靠=AOD 黑底暗时钟/点亮隐藏）
 var _aod_clock: Label               ## 熄屏大时钟（随 refresh_banner 走字）
+var _aod_notice: HBoxContainer      ## 熄屏通知条（有欠盖的章时浮出）
+var _aod_notice_label: Label        ## 熄屏通知里的欠章数
+var _flowers_badge: Label           ## 小红花 app 图标右上角的欠章红点
 
 # —— 跨页 app 视图 ——
 var _phone_app_title: Label         ## 打开的 app 标题
@@ -52,10 +55,14 @@ var _phone_open_app := ""           ## 当前打开的 app id（空=停在主屏
 var _album_pages: Dictionary = {}   ## app id → Control 页面
 
 # —— 小红花/集邮页 ——
-var _flower_cells: Array = []       ## 3×3 花格（按 flowers 点亮）
-var _stamp_dots: Array = []         ## 盖章进度点（按 stampProgress 点亮）
+var _flower_field: FlowerField      ## 左页花田（3×3 土坑，自绘）
+var _stamp_card: StampCard          ## 右页盖章卡（三槽，自绘）
+var _ink_drops: InkDrops            ## 墨滴层（三章化墨越过中缝去左页种花）
 var _stamps_total_label: Label      ## 累计盖章数
 var _hearts_label: Label            ## 收到的爱心计数（玩家互动送❤，只增不减）
+var _ceremony_playing := false      ## 盖章/种花仪式进行中（此时别拿钱包覆盖画面）
+var _slam_now := false              ## 小朋友点了卡（等待中的 HOVER 拍据此立刻砸下）
+var _ceremony_abort := false        ## 演到一半关了手机：中止且不提交，下次重演
 
 # —— 回家页 ——
 var _home_btn: Button               ## "回家"按钮（测试锚点）
@@ -198,6 +205,31 @@ func _build_front(vp: SubViewport) -> void:
 	var aod_star := UiAssets.icon_rect("st_star", 64.0)
 	aod_star.modulate = Color(1.0, 1.0, 1.0, 0.28) # 暗夜里一颗淡星
 	aod_box.add_child(aod_star)
+	# 熄屏通知：有欠盖的章时，锁屏上浮出一条「你有 N 个章还没盖」——手机停在屏幕角落里，
+	# 小朋友只有看见它亮着东西才知道要去打开（不然章白挣了，仪式永远不开演）。
+	_aod_notice = HBoxContainer.new()
+	_aod_notice.alignment = BoxContainer.ALIGNMENT_CENTER
+	_aod_notice.add_theme_constant_override("separation", 10)
+	_aod_notice.visible = false
+	var notice_card := PanelContainer.new()
+	var nst := StyleBoxFlat.new()
+	nst.bg_color = Color(0.98, 0.36, 0.34, 0.92)   # 通知红
+	nst.set_corner_radius_all(22)
+	nst.content_margin_left = 18.0
+	nst.content_margin_right = 18.0
+	nst.content_margin_top = 8.0
+	nst.content_margin_bottom = 8.0
+	notice_card.add_theme_stylebox_override("panel", nst)
+	var notice_row := HBoxContainer.new()
+	notice_row.add_theme_constant_override("separation", 8)
+	notice_row.add_child(UiAssets.icon_rect("stamp_star", 40.0))
+	_aod_notice_label = Label.new()
+	_aod_notice_label.add_theme_font_size_override("font_size", 34)
+	_aod_notice_label.add_theme_color_override("font_color", Color.WHITE)
+	notice_row.add_child(_aod_notice_label)
+	notice_card.add_child(notice_row)
+	_aod_notice.add_child(notice_card)
+	aod_box.add_child(_aod_notice)
 	vp.add_child(_screen_cover)
 
 ## 跨页 app 视图：返回条（返回键+标题）+ 竖向滚动的页面宿主（flowers/items/settings）。
@@ -336,6 +368,29 @@ func _make_app_icon(app: Array) -> Control:
 	btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	btn.pressed.connect(open_app.bind(id))
 	box.add_child(btn)
+	# 小红花 app 的欠章角标：图标右上角一个红点（iOS 未读数那样），refresh_banner 时刷新
+	if id == "flowers":
+		_flowers_badge = Label.new()
+		_flowers_badge.text = "1"
+		_flowers_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_flowers_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		_flowers_badge.add_theme_font_size_override("font_size", 26)
+		_flowers_badge.add_theme_color_override("font_color", Color.WHITE)
+		var bst := StyleBoxFlat.new()
+		bst.bg_color = Color(0.95, 0.28, 0.26)
+		bst.set_corner_radius_all(18)
+		bst.set_border_width_all(3)
+		bst.border_color = Color(1.0, 1.0, 0.995)
+		_flowers_badge.add_theme_stylebox_override("normal", bst)
+		_flowers_badge.custom_minimum_size = Vector2(34.0, 34.0)
+		_flowers_badge.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		_flowers_badge.offset_left = -18.0
+		_flowers_badge.offset_top = -10.0
+		_flowers_badge.offset_right = 18.0
+		_flowers_badge.offset_bottom = 26.0
+		_flowers_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_flowers_badge.visible = false
+		btn.add_child(_flowers_badge)
 	var cap := Label.new()
 	cap.text = String(app[1])
 	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -475,10 +530,16 @@ func open_app(id: String) -> void:
 	if id == "flowers" or id == "items":
 		refresh_album()
 	app_opened.emit(id)
+	# 小红花页：把小朋友还没见证过的章补演出来（他自己一锤一锤盖上去）
+	if id == "flowers" and has_pending_stamps():
+		play_ceremony(StampCeremony.plan(_w.stamp_seen, _w.wallet, _w.take_stamp_styles()))
 
 ## 返回主屏：收起设置页的确认/预览子部件，发 back_pressed（world 翻回正面）。
+## 仪式演到一半就关：中止且不提交见证游标——下次打开手机重演，小朋友不会平白丢掉一次盖章。
 func close_app() -> void:
 	_phone_open_app = ""
+	if _ceremony_playing:
+		_ceremony_abort = true
 	if _reroll_confirm != null:
 		_reroll_confirm.visible = false
 	if _avatar_preview != null:
@@ -504,6 +565,15 @@ func refresh_banner() -> void:
 		_phone_flowers.text = "x%d" % _w._red_flower_count()
 	if _aod_clock != null:
 		_aod_clock.text = _phone_clock.text # 熄屏画面同步走字
+	# 欠章角标：熄屏通知条 + 小红花 app 图标红点（章挣到了但还没盖 → 得让他知道要开手机）
+	var pending := StampCeremony.pending_count(_w.stamp_seen, _w.wallet)
+	if _aod_notice != null:
+		_aod_notice.visible = pending > 0
+		if _aod_notice_label != null:
+			_aod_notice_label.text = "x%d" % pending
+	if _flowers_badge != null:
+		_flowers_badge.visible = pending > 0
+		_flowers_badge.text = str(pending)
 	if _phone_signal != null:
 		var online: bool = _w.backend != null and _w.backend.is_online()
 		var col := Color(0.30, 0.78, 0.42) if online else Color(0.60, 0.60, 0.60, 0.5)
@@ -574,64 +644,268 @@ func _on_home_pressed() -> void:
 
 ## ── 小红花/集邮 app ─────────────────────────────────────────────────────────
 
-## 集邮册跨页：左页 3×3 小红花大格(按 flowers 点亮)；右页盖章进度(满 3 章换 1 朵)+累计。
+## 集邮册跨页：左页花田（3×3 土坑，长出来的小红花）；右页盖章卡（三个槽，攒满三章种一朵花）。
+## 两块都是自绘控件（FlowerField / StampCard），空位画虚线幽灵圆而不是把图标调灰——
+## 灰疙瘩说的是「坏掉了」，虚线留白说的是「这儿等着被填」（见 docs/stamp-flower-ux-design.md §2）。
 func _build_flowers_page() -> Control:
-	var pages := _make_spread_pages()
-	var left := pages["left"] as VBoxContainer
-	var grid := GridContainer.new()
-	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 28)
-	grid.add_theme_constant_override("v_separation", 28)
-	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_flower_cells.clear()
-	for _i in MAX_FLOWERS:
-		var cell := UiAssets.icon_rect("reward_flower", 100.0)
-		grid.add_child(cell)
-		_flower_cells.append(cell)
-	left.add_child(grid)
-	var right := pages["right"] as VBoxContainer
-	right.add_theme_constant_override("separation", 48)
-	var stamp_row := HBoxContainer.new()
-	stamp_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	stamp_row.add_theme_constant_override("separation", 26)
-	_stamp_dots.clear()
-	for _i in STAMPS_PER_FLOWER:
-		var dot := UiAssets.icon_rect("stamp_star", 84.0)
-		stamp_row.add_child(dot)
-		_stamp_dots.append(dot)
-	right.add_child(stamp_row)
+	var root := Control.new()
+	root.custom_minimum_size = Vector2(0.0, 820.0)
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	_flower_field = FlowerField.new()
+	_flower_field.anchor_left = 0.0
+	_flower_field.anchor_right = 0.455        # 中缝左侧
+	_flower_field.anchor_top = 0.0
+	_flower_field.anchor_bottom = 0.86
+	_flower_field.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(_flower_field)
+
+	_stamp_card = StampCard.new()
+	_stamp_card.anchor_left = 0.545           # 中缝右侧
+	_stamp_card.anchor_right = 1.0
+	_stamp_card.anchor_top = 0.0
+	_stamp_card.anchor_bottom = 0.86
+	_stamp_card.tapped.connect(_on_stamp_card_tapped)
+	root.add_child(_stamp_card)
+
+	# 页脚：累计盖章数 + 收到的爱心（去文字化，图标 + 数字）
+	var foot := HBoxContainer.new()
+	foot.anchor_left = 0.0
+	foot.anchor_right = 1.0
+	foot.anchor_top = 0.88
+	foot.anchor_bottom = 1.0
+	foot.alignment = BoxContainer.ALIGNMENT_CENTER
+	foot.add_theme_constant_override("separation", 48)
+	foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var total_row := HBoxContainer.new()
-	total_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	total_row.add_theme_constant_override("separation", 12)
+	total_row.add_theme_constant_override("separation", 10)
 	total_row.add_child(UiAssets.icon_rect("stamp_star", 46.0))
 	_stamps_total_label = Label.new()
 	UiAssets.style_card_label(_stamps_total_label, 42)
 	total_row.add_child(_stamps_total_label)
-	right.add_child(total_row)
-	# 收到的爱心（玩家互动送❤，hearts_update 钱包同步）：图标 + 数，去文字化
+	foot.add_child(total_row)
 	var hearts_row := HBoxContainer.new()
-	hearts_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	hearts_row.add_theme_constant_override("separation", 12)
+	hearts_row.add_theme_constant_override("separation", 10)
 	hearts_row.add_child(UiAssets.icon_rect("em_heart", 46.0))
 	_hearts_label = Label.new()
 	UiAssets.style_card_label(_hearts_label, 42)
 	hearts_row.add_child(_hearts_label)
-	right.add_child(hearts_row)
-	return pages["row"]
+	foot.add_child(hearts_row)
+	root.add_child(foot)
+
+	# 墨滴层：最后加 = 画在花田/章卡之上，才能从右页的章卡飞越中缝落到左页的土坑里
+	_ink_drops = InkDrops.new()
+	_ink_drops.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(_ink_drops)
+	return root
 
 ## 刷新小红花/集邮 + 物品页（钱包/背包数据变化、开手机、开 app 时都会调）。
+## 仪式在演的时候不要用服务端的钱包去覆盖画面——那会把小朋友正在盖的章一把抹平。
 func refresh_album() -> void:
-	var flowers := int(_w.wallet.get("flowers", 0))
-	for i in _flower_cells.size():
-		(_flower_cells[i] as TextureRect).modulate = Color.WHITE if i < flowers else Color(0.28, 0.28, 0.34)
-	var prog := int(_w.wallet.get("stampProgress", 0))
-	for i in _stamp_dots.size():
-		(_stamp_dots[i] as TextureRect).modulate = Color.WHITE if i < prog else Color(0.28, 0.28, 0.34)
+	if not _ceremony_playing:
+		_sync_album_to_wallet()
 	if _stamps_total_label != null:
 		_stamps_total_label.text = "x%d" % int(_w.wallet.get("stampsTotal", 0))
 	if _hearts_label != null:
 		_hearts_label.text = "x%d" % int(_w.wallet.get("hearts", 0))
 	refresh_items()
+
+## ── 盖章/种花仪式 ──────────────────────────────────────────────────────────
+##
+## 服务端早把账算完了（3 章换 1 花在 persistence.ts settleWallet）；这里演的是小朋友
+## **还没见证过**的那几拍。分镜由 StampCeremony.plan(seen, wallet) 推导，演完
+## world._commit_stamp_seen() 把见证游标推到服务端权威值。
+## 中途关手机 = 中止，**不提交** —— 下次打开重演，小朋友不会平白丢掉一次盖章。
+
+## 小朋友点了盖章卡：有橡皮章招手就砸下去。
+func _on_stamp_card_tapped() -> void:
+	if _stamp_card != null and _stamp_card.has_tool():
+		_slam_now = true
+
+## 橡皮章招手多久没人点就自己砸下（防幼儿盯着看把流程卡死）。回测里置 0 直接砸，别空等。
+var hover_timeout := 1.2
+
+## 有欠盖的章吗（手机角标 / 开 app 时是否起仪式）。
+func has_pending_stamps() -> bool:
+	return StampCeremony.pending_count(_w.stamp_seen, _w.wallet) > 0
+
+func _has_beat(beats: Array, kind: int) -> bool:
+	for b in beats:
+		if int(b["beat"]) == kind:
+			return true
+	return false
+
+## 仪式在演吗（world 对账据此按兵不动，别把小朋友正在盖的章抹掉）。
+func ceremony_playing() -> bool:
+	return _ceremony_playing
+
+## 等一小会儿（仪式的节拍停顿）。中止时立刻返回，不拖着。
+func _sleep(sec: float) -> void:
+	var t := 0.0
+	while t < sec and not _ceremony_abort:
+		await _w.get_tree().process_frame
+		t += _w.get_process_delta_time()
+
+func play_ceremony(beats: Array) -> void:
+	if _ceremony_playing or beats.is_empty():
+		return
+	_ceremony_playing = true
+	_ceremony_abort = false
+	if _w.fairy_voice != null and _has_beat(beats, StampCeremony.Beat.STAMP):
+		_w.fairy_voice.try_play("stamp_pending")   # 「快！把章狠狠盖上去！」
+	for b in beats:
+		if _ceremony_abort:
+			break
+		match int(b["beat"]):
+			StampCeremony.Beat.STAMP:
+				await _play_stamp(int(b["slot"]), String(b["style"]))
+			StampCeremony.Beat.BLOOM:
+				await _play_bloom(int(b["cell"]))
+			StampCeremony.Beat.PLUCK:
+				await _play_pluck(int(b["cell"]))
+			StampCeremony.Beat.FIELD_FULL:
+				await _play_field_full()
+	_ceremony_playing = false
+	if _ceremony_abort:
+		_sync_album_to_wallet()   # 中止：回到见证游标的状态，下次重演
+		return
+	_w._commit_stamp_seen()       # 演完了才认账
+	_sync_album_to_wallet()
+
+## 盖一个章：橡皮章浮上来招手 → 小朋友点 → 急速砸下 → THUNK + 纸面下陷 + 整台手机后座
+## → 抬起，露出盖歪的墨印。分镜时长见 docs/stamp-flower-ux-design.md §4.1。
+func _play_stamp(slot: int, style: String) -> void:
+	if _stamp_card == null:
+		return
+	_stamp_card.arm_slot(slot, style)
+	_stamp_card.set_tool(slot, 0.0)
+	# HOVER：等小朋友点。1.2s 没点就自己砸——幼儿园的孩子可能只是盯着看，不能卡死在这儿。
+	_slam_now = false
+	var waited := 0.0
+	while waited < hover_timeout and not _slam_now and not _ceremony_abort:
+		await _w.get_tree().process_frame
+		waited += _w.get_process_delta_time()
+	if _ceremony_abort:
+		return
+	_slam_now = false
+
+	# SLAM：0.10s 急速砸下（EASE_IN——加速度全压在最后一刻，才有"砸"感，匀速就是"放"）
+	var down: Tween = _w.create_tween()
+	down.tween_method(func(v: float) -> void: _stamp_card.set_tool(slot, v), 0.0, 1.0, 0.10) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	await down.finished
+	if _ceremony_abort:
+		return
+
+	# IMPACT：闷响 + 纸面被压得下陷回弹 + 整台 3D 手机一记后座 + 星芒炸开
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("thunk")
+	if _w.paper_phone != null:
+		_w.paper_phone.kick(1.0)
+	var hit: Tween = _w.create_tween()
+	hit.set_parallel(true)
+	hit.tween_method(func(v: float) -> void: _stamp_card.set_squash(v), 1.0, 0.0, 0.22) \
+		.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	hit.tween_method(func(v: float) -> void: _stamp_card.set_flash(v), 0.0, 1.0, 0.20)
+	hit.tween_method(func(v: float) -> void: _stamp_card.set_print(slot, v), 0.0, 1.0, 0.18) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# LIFT：抬起（比砸下慢一倍，看清墨印）
+	hit.tween_method(func(v: float) -> void: _stamp_card.set_tool(slot, v), 1.0, 0.0, 0.24) \
+		.set_delay(0.08).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	await hit.finished
+	_stamp_card.set_flash(0.0)
+	_stamp_card.set_squash(0.0)
+	_stamp_card.set_tool(-1, 0.0)
+	await _sleep(0.15)   # 两个章之间喘口气
+
+## 三章种出一朵花：三个章一起发金光 → 墨浮起来凝成三滴 → 划弧越过对折中缝 → 渗进空土坑
+## → 纸茎弹出、叶子展开 → 花绽放 + 叮 + 星星。分镜时长见 design §4.2。
+func _play_bloom(cell: int) -> void:
+	if _flower_field == null or _stamp_card == null:
+		return
+	# GLOW：三个章一起发金光（"要变魔法了"）
+	var glow: Tween = _w.create_tween()
+	glow.tween_method(func(v: float) -> void: _stamp_card.set_glow(v), 0.0, 1.0, 0.25)
+	await glow.finished
+	if _ceremony_abort:
+		return
+
+	# INK_LIFT + FLY：墨从纸上浮起来，划弧越过中缝，落进左页那格空土坑
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("whoosh")
+	if _ink_drops != null:
+		_ink_drops.launch(
+			_stamp_card.position + _stamp_card.slot_center(1),   # 从章卡正中那个槽起飞
+			_flower_field.position + _flower_field.cell_center(cell))
+	var fly: Tween = _w.create_tween()
+	fly.set_parallel(true)
+	fly.tween_method(func(v: float) -> void: _ink_drops.set_progress(v), 0.0, 1.0, 0.55) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	# 墨飞走了，章卡上的墨印就淡掉（墨真的"离开"了纸面，不是凭空消失）
+	for i in STAMPS_PER_FLOWER:
+		fly.tween_method(func(v: float) -> void: _stamp_card.set_print(i, v), 1.0, 0.0, 0.30) \
+			.set_delay(0.06 * float(i))
+	fly.tween_method(func(v: float) -> void: _stamp_card.set_glow(v), 1.0, 0.0, 0.30)
+	await fly.finished
+	_ink_drops.stop()
+	_stamp_card.clear_stamps()
+	if _ceremony_abort:
+		return
+
+	# SPROUT → BLOOM → SPARK：纸茎弹出、花绽放、星星散开
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("bloom")
+	var grow: Tween = _w.create_tween()
+	grow.tween_method(func(v: float) -> void: _flower_field.set_stem(cell, v), 0.0, 1.0, 0.50) \
+		.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	grow.tween_method(func(v: float) -> void: _flower_field.set_bloom(cell, v), 0.0, 1.0, 0.38) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	grow.parallel().tween_method(func(v: float) -> void: _flower_field.set_spark(cell, v), 0.0, 1.0, 0.45)
+	await grow.finished
+	_flower_field.set_spark(cell, 0.0)
+	if _w.fairy_voice != null:
+		_w.fairy_voice.try_play("flower_grown")   # 「三个章，种出一朵小红花啦！」
+	await _sleep(0.25)
+
+## 一朵花被花掉（造角色/造物扣费）：那朵花被摘起、缩小飞走。
+## 花不再是无声消失的数字——小朋友得看见自己的花变成了什么。
+func _play_pluck(cell: int) -> void:
+	if _flower_field == null:
+		return
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("pluck")
+	var t: Tween = _w.create_tween()
+	t.tween_method(func(v: float) -> void: _flower_field.set_bloom(cell, v), 1.0, 0.0, 0.35) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	t.parallel().tween_method(func(v: float) -> void: _flower_field.set_stem(cell, v), 1.0, 0.0, 0.35)
+	await t.finished
+	await _sleep(0.10)
+
+## 花田满 9：章卡攒满也种不出花（服务端 settleWallet 把 progress 停在 3）。
+## 别默默什么都不发生——花田整体脉冲一下 + 仙子提醒「先用掉一朵」。
+func _play_field_full() -> void:
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("oops")
+	if _w.fairy_voice != null:
+		_w.fairy_voice.try_play("field_full")   # 「花田满啦，先用掉一朵吧」
+	if _flower_field != null:
+		var t: Tween = _w.create_tween()
+		t.tween_method(func(v: float) -> void: _flower_field.modulate = Color(1, 1, 1, v), 1.0, 0.55, 0.18)
+		t.tween_method(func(v: float) -> void: _flower_field.modulate = Color(1, 1, 1, v), 0.55, 1.0, 0.30)
+		await t.finished
+	await _sleep(0.20)
+
+## 把花田/章卡直接摆成「见证游标」的状态（无动画）。仪式演完后也调它做最终对齐。
+func _sync_album_to_wallet() -> void:
+	var seen: Dictionary = _w.stamp_seen
+	if _flower_field != null:
+		_flower_field.set_flowers(int(seen.get("flowers", 0)))
+	if _stamp_card != null:
+		var prog := int(seen.get("stampProgress", 0))
+		# 章卡上这几个章分别是第几个章 → 决定用哪款（与服务端发章顺序对齐）
+		_stamp_card.set_progress(prog, int(seen.get("stampsTotal", 0)) - prog)
+		_stamp_card.set_tool(-1, 0.0)
 
 ## ── 物品 app ────────────────────────────────────────────────────────────────
 
