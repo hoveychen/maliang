@@ -4,7 +4,7 @@
 # MaliangAsr 单例——与 Android 的 asr_plugin 同名同接口，客户端零改动（见 docs/macos-asr-feasibility.md）。
 #
 # macOS 动态链接（framework 里自带 sherpa/onnxruntime dylib）；
-# iOS 静态链接（Godot 的 iOS 导出把扩展静态链进 Xcode 工程，见 docs/ios-asr-design.md）。
+# iOS 静态链接（Godot 的 iOS 导出把扩展静态链进 Xcode 工程；导包走 scripts/export-ios.sh）。
 #
 # 依赖：git、python3+scons（pip install scons）、Xcode CLT（clang++）。
 # 前置产物均 gitignore、可由本脚本重新生成：
