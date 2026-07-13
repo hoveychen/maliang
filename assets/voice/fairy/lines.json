@@ -162,6 +162,24 @@
       "trigger": "guide_timeout",
       "cooldown": 3,
       "text": "路好像有点远，我们下次再去吧～"
+    },
+    {
+      "id": "fairy_guide_hint_1",
+      "trigger": "guide_hint",
+      "cooldown": 90,
+      "text": "想去哪儿玩呀？告诉我，我带你去！"
+    },
+    {
+      "id": "fairy_guide_hint_2",
+      "trigger": "guide_hint",
+      "cooldown": 90,
+      "text": "你要是想找谁，跟我说一声，我就带你去找他～"
+    },
+    {
+      "id": "fairy_guide_hint_3",
+      "trigger": "guide_hint",
+      "cooldown": 90,
+      "text": "这个世界大着呢，想去哪儿我都能带你去哦。"
     }
   ]
 }
