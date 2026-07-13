@@ -18,8 +18,20 @@ import type { ClipName, CutoutAdapter, ImageBlob, VideoBlob } from './adapters/t
 const execFileP = promisify(execFile);
 
 export type { ClipName };
-/** 生成/打包顺序，也是图集里的段序。 */
-export const CLIP_NAMES: readonly ClipName[] = ['idle', 'moving', 'talking'] as const;
+/**
+ * 实际生成/打包的段，也是图集里的段序。
+ *
+ * **注意没有 moving** —— 走路观感是客户端程序化做的（world.gd 的踏步弹跳 + 左右摇摆 +
+ * 下摆飘动），不是生成的图集段。实测（舞舞兔，2026-07-14）：Seedance 做不出这些角色的
+ * 行走循环，腿常被裙子/身体挡住，模型做不出迈步就自己改成原地转身摇摆，还把道具换到
+ * 另一只手（角色外观都变了），横向漂 0.87m（换算到游戏里）而上下只颠 0.21m——走路本该
+ * 以上下为主，正好反了。收紧 prompt（禁转身/禁横移/正面行走循环）只把漂移从 49px 降到
+ * 37px，没解决。详见 openrouter_video.ts 的 CLIP_PROMPTS 注释。
+ *
+ * ClipName 仍保留 'moving'：客户端每帧照常按状态请求 "moving" 段，图集里没有就回落播
+ * idle（PaperCharacter._range_of）。哪天真做出可用的行走循环，把它加回这里即可自动生效。
+ */
+export const CLIP_NAMES: readonly ClipName[] = ['idle', 'talking'] as const;
 
 /** 某段在图集里的帧区间（行主序连续下标，可跨行）。 */
 export interface ClipRange {

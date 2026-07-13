@@ -8,10 +8,13 @@ const WorldScript := preload("res://scripts/world.gd")
 var _fails := 0
 
 func _eq(name: String, got: Variant, want: Variant) -> void:
-	if got == want:
+	_ok(name, got == want, "got %s want %s" % [got, want])
+
+func _ok(name: String, cond: bool, detail := "") -> void:
+	if cond:
 		print("  ok %s" % name)
 	else:
-		printerr("  FAIL %s: got %s want %s" % [name, got, want])
+		printerr("  FAIL %s: %s" % [name, detail])
 		_fails += 1
 
 ## 只取段名（丢掉返回的 moving 态）。
@@ -67,6 +70,30 @@ func _init() -> void:
 	_eq("加速再减速全程只切段 2 次（起步+停步）", switches, 2)
 	_eq("起点是 idle", seq[0], "idle")
 	_eq("终点回到 idle", seq[seq.size() - 1], "idle")
+
+	# ── 踏步弹跳（走路观感是程序化的，没有 moving 图集段）──
+	# 站着不能颠；走起来要颠；只往上不往下（否则角色会被压进地里）；一个摇摆周期颠两下
+	# （左右脚各落一次地）。
+	_eq("站着不颠", WorldScript.walk_bob(0.0, 1.234), 0.0)
+	var peak := WorldScript.walk_bob(1.0, PI / 2.0)
+	_ok("走起来会颠", peak > 0.0, "峰值 %f" % peak)
+	var lowest := 1.0
+	var bumps := 0
+	var prev := WorldScript.walk_bob(1.0, -0.05)
+	var rising_prev := false
+	for i in range(200): # 扫一个完整摇摆周期 [0, TAU)
+		var ph := float(i) / 200.0 * TAU
+		var b: float = WorldScript.walk_bob(1.0, ph)
+		lowest = minf(lowest, b)
+		var rising := b > prev
+		if rising_prev and not rising:
+			bumps += 1 # 由升转降 = 一个波峰
+		rising_prev = rising
+		prev = b
+	_ok("弹跳恒不为负（不会把角色压进地里）", lowest >= 0.0, "最低 %f" % lowest)
+	_eq("一个摇摆周期颠两下（左右脚各一次）", bumps, 2)
+	var half := WorldScript.walk_bob(0.5, PI / 2.0)
+	_ok("幅度随走路强度缩放", is_equal_approx(half, peak * 0.5), "%f vs %f/2" % [half, peak])
 
 	if _fails == 0:
 		print("anim_clip_pick tests PASS")

@@ -307,36 +307,34 @@ func play_anim(atlas: Texture2D, meta: Dictionary, world_height: float, phase :=
 ## 切动画段（idle / moving / talking）。世界层每帧按角色状态调，同段重复调是零成本快路径。
 ##
 ## 只改 sheet_start/sheet_frames 两个 uniform——不动几何、不换贴图。这是安全的，因为服务端
-## 三段共用同一个并集裁剪盒（sprite_sheet.ts），cellW/cellH 全段相同；若哪天各段自己裁，
+## 各段共用同一个并集裁剪盒（sprite_sheet.ts），cellW/cellH 全段相同；若哪天各段自己裁，
 ## 这里就必须连 pixel_size/offset 一起重算，角色身高才不会在切段时抽一下。
 ##
-## 图集里没有这一段（v1 老图集只有 idle）→ 保持当前段不动，绝不去采空格子。
+## 图集里没有这一段 → 回落播 idle（_range_of）。**必须回落、不能"保持当前段不动"**：
+## 服务端不生成 moving 段（走路是程序化的，见 world.gd），世界层照样每帧请求 "moving"；
+## 若这里空操作，角色说完话一走动就永远卡在 talking 帧上——_clip 停在 "talking"，
+## 而后续每帧的 set_clip("moving") 都被当成"没这段，不动"，再也回不到 idle。
 func set_clip(name: String) -> void:
 	if _sheet.is_empty() or name == _clip:
 		return
-	var c: Variant = _clips.get(name)
-	if typeof(c) != TYPE_DICTIONARY:
-		return
-	var count := int((c as Dictionary).get("count", 0))
-	if count <= 0:
-		return
-	_clip = name
-	var start := int((c as Dictionary).get("start", 0))
+	_clip = name # 记的是"要什么"，不是"落到了哪段"——下一帧同名请求才能走零成本快路径
+	var r := _range_of(name)
 	for m in [_mat, _xray_mat]:
-		m.set_shader_parameter("sheet_start", start)
-		m.set_shader_parameter("sheet_frames", count)
+		m.set_shader_parameter("sheet_start", r.x)
+		m.set_shader_parameter("sheet_frames", r.y)
 
-## 当前段名（""=还没进动画模式）。供世界层与测试查询。
+## 当前请求的段名（""=还没进动画模式）。图集里没有这段时实际播的是 idle。
 func current_clip() -> String:
 	return _clip
 
-## 段名 → Vector2i(start, count)。段不存在时回落「整张图集」（v1 单段图集即此路径）。
+## 段名 → Vector2i(start, count)。逐级回落：本段 → idle 段 → 整张图集（v1 单段图集即此路径）。
 func _range_of(name: String) -> Vector2i:
-	var c: Variant = _clips.get(name)
-	if typeof(c) == TYPE_DICTIONARY:
-		var count := int((c as Dictionary).get("count", 0))
-		if count > 0:
-			return Vector2i(int((c as Dictionary).get("start", 0)), count)
+	for key in [name, "idle"]:
+		var c: Variant = _clips.get(key)
+		if typeof(c) == TYPE_DICTIONARY:
+			var count := int((c as Dictionary).get("count", 0))
+			if count > 0:
+				return Vector2i(int((c as Dictionary).get("start", 0)), count)
 	return Vector2i(0, int(_sheet.get("frameCount", 0)))
 
 ## 可见世界高度（米）：动画图集按单格 cellH 算，静态整图按贴图高算。

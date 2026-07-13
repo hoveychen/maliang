@@ -70,11 +70,36 @@ func _init() -> void:
 	_eq("切回 idle sheet_start", _sp(pc, "sheet_start"), 0)
 	_eq("切回 idle sheet_frames", _sp(pc, "sheet_frames"), 4)
 
-	# ⑤ 未知段名：保持当前段，绝不去采空格子
-	pc.set_clip("dancing")
-	_eq("未知段名不改当前段", pc.current_clip(), "idle")
-	_eq("未知段名不改 sheet_start", _sp(pc, "sheet_start"), 0)
+	# ⑤ 图集里没有的段 → 回落播 idle（而不是"保持当前段不动"）。
+	#    这不是洁癖：服务端不生成 moving 段（走路是程序化的），世界层却每帧都请求 "moving"。
+	#    若这里保持不动，角色说完话一走动就永远卡在 talking 帧——_clip 停在 "talking"，
+	#    之后每帧的 set_clip("moving") 都被当成"没这段，不动"，再也回不到 idle。
+	pc.set_clip("talking")
+	_eq("先切到 talking", _sp(pc, "sheet_start"), 7)
+	pc.set_clip("dancing") # 图集里没有的段
+	_eq("缺段回落到 idle 的 start", _sp(pc, "sheet_start"), 0)
+	_eq("缺段回落到 idle 的 frames", _sp(pc, "sheet_frames"), 4)
+	_eq("current_clip 记的是请求的段名", pc.current_clip(), "dancing")
 	pc.queue_free()
+
+	# ⑤b 「说完话走起来」的回归：talking → moving(图集里没有) 必须回到 idle 帧，不能卡在 talking。
+	var pc3 := PaperCharacter.new()
+	get_root().add_child(pc3)
+	# 只有 idle+talking 两段的图集（= 服务端实际下发的形状）
+	var two := {
+		"cols": 4, "rows": 2, "frameCount": 7, "fps": 8, "cellW": 20, "cellH": 30,
+		"width": 80, "height": 60,
+		"clips": { "idle": { "start": 0, "count": 4 }, "talking": { "start": 4, "count": 3 } },
+	}
+	pc3.play_anim(atlas, two, 6.0)
+	pc3.set_clip("talking")
+	_eq("对话中播 talking", _sp(pc3, "sheet_start"), 4)
+	pc3.set_clip("moving") # 说完话走起来；图集里没有 moving
+	_eq("走起来 → 回落 idle 帧（不是卡在 talking）", _sp(pc3, "sheet_start"), 0)
+	_eq("走起来 → idle 段帧数", _sp(pc3, "sheet_frames"), 4)
+	pc3.set_clip("idle")
+	_eq("停下 → 仍是 idle 帧", _sp(pc3, "sheet_start"), 0)
+	pc3.queue_free()
 
 	# ⑥ v1 老图集（无 clips）：整张图集当 idle 播；set_clip("moving") 是安全空操作。
 	#    存量角色在服务端回填完成前就是这个状态，绝不能因此播出空白帧。
@@ -88,8 +113,11 @@ func _init() -> void:
 	_eq("v1 图集 sheet_start=0", _sp(pc2, "sheet_start"), 0)
 	_eq("v1 图集 sheet_frames=整张帧数", _sp(pc2, "sheet_frames"), 3)
 	pc2.set_clip("moving")
-	_eq("v1 图集切 moving 是空操作（仍播 idle）", pc2.current_clip(), "idle")
-	_eq("v1 图集切 moving 后 sheet_frames 不变", _sp(pc2, "sheet_frames"), 3)
+	# 播的帧仍是整张图集（= idle）。current_clip() 记的是"请求了什么"，播的帧才是要害。
+	_eq("v1 图集切 moving 后仍播整张图集（start）", _sp(pc2, "sheet_start"), 0)
+	_eq("v1 图集切 moving 后仍播整张图集（frames）", _sp(pc2, "sheet_frames"), 3)
+	pc2.set_clip("talking")
+	_eq("v1 图集切 talking 后也仍播整张图集", _sp(pc2, "sheet_frames"), 3)
 	pc2.queue_free()
 
 	if _fails == 0:
