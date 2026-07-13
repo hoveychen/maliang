@@ -102,6 +102,7 @@ UNIT_TESTS=(
   test_dialog_camera
   test_phone_menu
   test_paper_phone
+  test_paper_book
   test_asr_guard
   test_interaction_fsm
   test_adaptive_fps_cap
