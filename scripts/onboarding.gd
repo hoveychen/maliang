@@ -89,6 +89,7 @@ func _ready() -> void:
 	_vc = VoiceCapture.new()
 	_vc.name = "VoiceCapture"
 	_vc.game_audio = game_audio
+	_vc.confirm_mode = PlayerProfile.confirm_voice() # 与 world 同一开关（全局生效）
 	# 开麦门禁：旁白播放期间不喂（半双工防自听），其余交给 VAD。BGM 让位判据=旁白在播。
 	_vc.should_capture = func() -> bool: return not _voice.playing
 	_vc.is_speaking = func() -> bool: return _voice.playing

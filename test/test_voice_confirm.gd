@@ -76,6 +76,7 @@ func _run_once() -> void:
 	fails += _test_vad_muted_while_confirming()
 	fails += _test_empty_skips_confirm()
 	fails += _test_close_discards()
+	fails += _test_profile_switch()
 	if fails == 0:
 		print("test_voice_confirm: 全部通过")
 	else:
@@ -190,4 +191,18 @@ func _test_close_discards() -> int:
 	f += _check("关麦即作废：不补发 committed/local_final", ev, [])
 	f += _check("确认态已清", vc.is_confirming(), false)
 	vc.queue_free()
+	return f
+
+# ⑧ 开关落档案（手机设置页读写的就是它）：缺省关；开/关往返一致。
+# 注意测完必须恢复原值——confirm_voice 留在 user://profile.json 里会让后续所有 world 测试
+# 都跑进确认模式（committed 被延后到 accept），整套回测会莫名其妙地红。
+func _test_profile_switch() -> int:
+	print("[开关落档案]")
+	var f := 0
+	var orig := PlayerProfile.confirm_voice()
+	PlayerProfile.set_confirm_voice(true)
+	f += _check("开了以后读回 true", PlayerProfile.confirm_voice(), true)
+	PlayerProfile.set_confirm_voice(false)
+	f += _check("关了以后读回 false", PlayerProfile.confirm_voice(), false)
+	PlayerProfile.set_confirm_voice(orig) # 还原，别污染其它测试
 	return f

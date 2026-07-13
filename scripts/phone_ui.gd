@@ -74,6 +74,7 @@ var _avatar_img: TextureRect        ## 预览图
 var _avatar_hash := ""              ## 待确认的新形象资产 hash（✓ 才落档案）
 var _avatar_anchors: Dictionary = {}  ## 与 _avatar_hash 配对的贴纸锚点（✓ 才随档案落盘）
 var _gfx_buttons := {}              ## 画质旋钮控件 {key: Button}
+var _confirm_voice_btn: Button      ## 「说完先听一遍」开关（小龄玩家语音确认模式）
 
 func _init(world) -> void:
 	_w = world
@@ -808,6 +809,38 @@ func _build_settings_page() -> Control:
 	_avatar_preview.add_child(avatar_row)
 	_avatar_preview.visible = false
 	settings_page.add_child(_avatar_preview)
+	# —— 说话分区：小龄玩家的「说完先听一遍」开关（家长照副标题就能自己权衡）——
+	var talk_title := Label.new()
+	talk_title.text = "说话"
+	UiAssets.style_card_label(talk_title, 30)
+	talk_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	settings_page.add_child(talk_title)
+	var confirm_card := VBoxContainer.new()
+	confirm_card.add_theme_constant_override("separation", 2)
+	var confirm_row := HBoxContainer.new()
+	confirm_row.add_theme_constant_override("separation", 8)
+	var confirm_name := Label.new()
+	confirm_name.text = "说完先听一遍"
+	UiAssets.style_card_label(confirm_name, 22)
+	confirm_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	confirm_row.add_child(confirm_name)
+	_confirm_voice_btn = Button.new()
+	_confirm_voice_btn.toggle_mode = true
+	_confirm_voice_btn.add_theme_font_size_override("font_size", 20)
+	_confirm_voice_btn.clip_text = true
+	_confirm_voice_btn.custom_minimum_size = Vector2(96.0, 0.0)
+	UiAssets.style_card_button(_confirm_voice_btn)
+	_confirm_voice_btn.toggled.connect(func(on: bool) -> void: _w._on_confirm_voice_toggled(on))
+	confirm_row.add_child(_confirm_voice_btn)
+	confirm_card.add_child(confirm_row)
+	var confirm_sub := Label.new()
+	confirm_sub.text = "小小孩说话容易说一半。开了以后，说完会把刚才那句放给他听，他点「就是这样」才发出去。"
+	UiAssets.style_card_label(confirm_sub, 18)
+	confirm_sub.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	confirm_sub.modulate = Color(1.0, 1.0, 1.0, 0.75)
+	confirm_card.add_child(confirm_sub)
+	settings_page.add_child(confirm_card)
+	refresh_confirm_voice_button()
 	# —— 右页画质分区：GraphicsSettings 的 9 个旋钮，每个一张卡片。点档位按钮升一档、
 	# 到顶回最省，即时应用 + 存 profile（source=user，应用逻辑在 world）。——
 	var gfx_page := pages["right"] as VBoxContainer
@@ -867,6 +900,14 @@ func _build_settings_page() -> Control:
 	gfx_bench.pressed.connect(func() -> void: _w._on_gfx_rebench())
 	gfx_page.add_child(gfx_bench)
 	return pages["row"]
+
+## 「说完先听一遍」开关按钮：文案+按下态跟随档案里的 confirm_voice。
+func refresh_confirm_voice_button() -> void:
+	if _confirm_voice_btn == null:
+		return
+	var on := PlayerProfile.confirm_voice()
+	_confirm_voice_btn.button_pressed = on
+	_confirm_voice_btn.text = "开" if on else "关"
 
 ## 档位按钮文案（「开」/「高清」/「粗略」…）+ 按下态跟随当前档（档数据在 world._gfx_levels）。
 func refresh_gfx_button(key: String) -> void:

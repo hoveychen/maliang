@@ -79,6 +79,16 @@ static func mark_intro_seen() -> void:
 	p["intro_seen"] = true
 	save_profile(p)
 
+## 语音确认模式（小龄玩家）：说完先回放一遍自己的话，点「就是这样」才发出去。
+## 家长/老师在手机设置里开；缺省关（大孩子说完就发，不打断节奏）。见 VoiceCapture.confirm_mode。
+static func confirm_voice() -> bool:
+	return bool(load_profile().get("confirm_voice", false))
+
+static func set_confirm_voice(on: bool) -> void:
+	var p := load_profile()
+	p["confirm_voice"] = on
+	save_profile(p)
+
 ## 确保档案里有稳定玩家 id：设备端「开始新游戏」时生成的 UUID（面向未来 MMO / QR 换机迁移）。
 ## 首次调用生成并写盘；已有则原样返回。无鉴权——这个 UUID 就是玩家唯一身份。
 static func ensure_player_id() -> String:

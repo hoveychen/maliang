@@ -385,6 +385,7 @@ func _setup_audio() -> void:
 	_vc.game_audio = game_audio
 	_vc.os_name = _os_name
 	_vc.debug_log = OS.is_debug_build() # 录音诊断 [vad] logcat：仅 debug 构建
+	_vc.confirm_mode = PlayerProfile.confirm_voice() # 小龄玩家：说完先听一遍自己的话（手机设置里开）
 	_vc.should_capture = _voice_should_capture
 	_vc.is_speaking = func() -> bool: return _fsm_inputs().speaking()
 	_vc.utterance_begin.connect(_on_capture_begin)
@@ -4811,6 +4812,14 @@ func _on_capture_local_final(text: String) -> void:
 		return
 	_vt_send = Time.get_ticks_msec() # 发转写 → 到 character_response 即纯 LLM 耗时
 	backend.send_voice_transcript(world_id, _selected_id(), t)
+
+## 手机设置「说完先听一遍」：存档案 + 即时生效（下一句话就走确认流程，不必重进世界）。
+func _on_confirm_voice_toggled(on: bool) -> void:
+	PlayerProfile.set_confirm_voice(on)
+	if _vc != null:
+		_vc.confirm_mode = on
+	if phone_ui != null:
+		phone_ui.refresh_confirm_voice_button()
 
 ## 每帧驱动：角色思考/说话时闭麦（半双工防自听），其余时间把麦克风增量喂 VAD。
 ## 当前帧的交互标志位快照 → 喂给显式状态机（见 interaction_fsm.gd）。
