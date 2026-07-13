@@ -178,26 +178,48 @@ func _draw() -> void:
 		var fc := _slot_local(_tool_slot)
 		draw_circle(fc, sr * (0.6 + 1.8 * _flash), Color(FLASH_COL, 0.75 * (1.0 - _flash)))
 
-	# 橡皮章道具：悬停时上下招手，砸下时贴到纸面
+	# 橡皮章道具：悬停时上下招手，砸下时贴到纸面。
+	# 悬停高度别超过槽间距的一半——否则它会飘到上一个槽的墨印身上，看着像"盖在那个章上"。
 	if _tool_slot >= 0:
 		var tc := _slot_local(_tool_slot)
-		var hover := sr * 2.2
-		var bob := sin(_t * 5.0) * sr * 0.10 * (1.0 - _tool_drop)
-		_draw_tool(Vector2(tc.x, tc.y - hover * (1.0 - _tool_drop) + bob), sr)
+		var lift := sr * 1.35 * (1.0 - _tool_drop)
+		var bob := sin(_t * 5.0) * sr * 0.09 * (1.0 - _tool_drop)
+		var at := Vector2(tc.x, tc.y - lift + bob)
+		# 悬空影：离纸越近影子越小越实（"它正在压下来"）
+		var near := 1.0 - lift / (sr * 1.35)
+		draw_set_transform(tc, CARD_TILT, Vector2(1.0, 0.32))
+		draw_circle(Vector2.ZERO, sr * (0.85 - 0.25 * near), Color(0.35, 0.27, 0.16, 0.10 + 0.10 * near))
+		draw_set_transform(c, CARD_TILT, Vector2(1.0, 1.0 - 0.035 * _squash))
+		_draw_tool(at, sr)
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
-## 木柄橡皮章（旋钮 + 柄 + 章面），画在给定的章面中心上。
+## 木柄橡皮章（圆头把手 + 收腰木身 + 橡胶章面），画在给定的章面中心上。
+## 全自绘：三个方块摞起来像把锤子，得有圆头、收腰、章面的湿墨反光，才像幼儿园那种木头印章。
 func _draw_tool(at: Vector2, sr: float) -> void:
-	var w := sr * 1.9
-	var face_h := sr * 0.42
-	var body_h := sr * 0.55
-	var knob_h := sr * 0.36
-	var face := Rect2(at.x - w * 0.5, at.y - face_h * 0.5, w, face_h)
-	draw_rect(Rect2(face.position + Vector2(0.0, face.size.y * 0.55), face.size * Vector2(1.0, 0.35)),
-		Color(0.30, 0.22, 0.12, 0.18))  # 章面落在纸上的暗边
-	draw_rect(face, WOOD_FACE)
-	draw_rect(Rect2(at.x - w * 0.22, face.position.y - body_h, w * 0.44, body_h), WOOD_BODY)
-	draw_rect(Rect2(at.x - w * 0.40, face.position.y - body_h - knob_h, w * 0.80, knob_h), WOOD_KNOB)
+	var w := sr * 1.75
+	var face_h := sr * 0.34
+	var body_h := sr * 0.62
+	var knob_r := sr * 0.42
+	var face_top := at.y - face_h * 0.5
+
+	# 章面（橡胶）：圆角深棕 + 顶上一道湿墨反光
+	var face := Rect2(at.x - w * 0.5, face_top, w, face_h)
+	draw_style_box(_box(WOOD_FACE, WOOD_FACE, 0), face)
+	draw_rect(Rect2(face.position + Vector2(w * 0.08, face_h * 0.18), Vector2(w * 0.84, face_h * 0.16)),
+		Color(1.0, 1.0, 1.0, 0.14))
+	# 木身：上窄下宽的收腰梯形
+	var by := face_top - body_h
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(at.x - w * 0.46, face_top), Vector2(at.x + w * 0.46, face_top),
+		Vector2(at.x + w * 0.26, by), Vector2(at.x - w * 0.26, by)]), WOOD_BODY)
+	# 木身的暗侧（右侧受光反面），一笔就出体积
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(at.x + w * 0.18, face_top), Vector2(at.x + w * 0.46, face_top),
+		Vector2(at.x + w * 0.26, by), Vector2(at.x + w * 0.10, by)]), Color(0.0, 0.0, 0.0, 0.10))
+	# 把手：圆头旋钮 + 细颈
+	draw_rect(Rect2(at.x - w * 0.14, by - knob_r * 0.6, w * 0.28, knob_r * 0.7), WOOD_KNOB)
+	draw_circle(Vector2(at.x, by - knob_r * 0.7), knob_r, WOOD_KNOB)
+	draw_circle(Vector2(at.x - knob_r * 0.30, by - knob_r * 0.95), knob_r * 0.28, Color(1.0, 1.0, 1.0, 0.16))
 
 func _box(bg: Color, border: Color, bw: int) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()

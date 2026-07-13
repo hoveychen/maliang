@@ -111,6 +111,7 @@ func _run(scene: Node) -> void:
 	_check(int(seen.get("stampsTotal", -1)) == 7, "有欠章：见证游标先不动")
 	_check(pui.has_pending_stamps(), "有欠章：手机该亮角标")
 	var beats := StampCeremony.plan(seen, scene.get("wallet"), [])
+	pui.hover_timeout = 0.0  # 回测不空等小朋友点橡皮章
 	_check(beats.size() == 3, "欠 2 章 → 2 拍盖章 + 1 拍开花")
 	await pui.play_ceremony(beats)
 	seen = scene.get("stamp_seen")

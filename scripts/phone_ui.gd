@@ -657,9 +657,19 @@ func _on_stamp_card_tapped() -> void:
 	if _stamp_card != null and _stamp_card.has_tool():
 		_slam_now = true
 
+## 橡皮章招手多久没人点就自己砸下（防幼儿盯着看把流程卡死）。回测里置 0 直接砸，别空等。
+var hover_timeout := 1.2
+
 ## 有欠盖的章吗（手机角标 / 开 app 时是否起仪式）。
 func has_pending_stamps() -> bool:
 	return StampCeremony.pending_count(_w.stamp_seen, _w.wallet) > 0
+
+## 等一小会儿（仪式的节拍停顿）。中止时立刻返回，不拖着。
+func _sleep(sec: float) -> void:
+	var t := 0.0
+	while t < sec and not _ceremony_abort:
+		await _w.get_tree().process_frame
+		t += _w.get_process_delta_time()
 
 func play_ceremony(beats: Array) -> void:
 	if _ceremony_playing or beats.is_empty():
@@ -685,13 +695,51 @@ func play_ceremony(beats: Array) -> void:
 	_w._commit_stamp_seen()       # 演完了才认账
 	_sync_album_to_wallet()
 
-## 盖一个章（P3 接动效/音效/手机后座；此处先把墨印落到位）。
+## 盖一个章：橡皮章浮上来招手 → 小朋友点 → 急速砸下 → THUNK + 纸面下陷 + 整台手机后座
+## → 抬起，露出盖歪的墨印。分镜时长见 docs/stamp-flower-ux-design.md §4.1。
 func _play_stamp(slot: int, style: String) -> void:
 	if _stamp_card == null:
 		return
 	_stamp_card.arm_slot(slot, style)
-	_stamp_card.set_print(slot, 1.0)
+	_stamp_card.set_tool(slot, 0.0)
+	# HOVER：等小朋友点。1.2s 没点就自己砸——幼儿园的孩子可能只是盯着看，不能卡死在这儿。
+	_slam_now = false
+	var waited := 0.0
+	while waited < hover_timeout and not _slam_now and not _ceremony_abort:
+		await _w.get_tree().process_frame
+		waited += _w.get_process_delta_time()
+	if _ceremony_abort:
+		return
+	_slam_now = false
+
+	# SLAM：0.10s 急速砸下（EASE_IN——加速度全压在最后一刻，才有"砸"感，匀速就是"放"）
+	var down: Tween = _w.create_tween()
+	down.tween_method(func(v: float) -> void: _stamp_card.set_tool(slot, v), 0.0, 1.0, 0.10) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	await down.finished
+	if _ceremony_abort:
+		return
+
+	# IMPACT：闷响 + 纸面被压得下陷回弹 + 整台 3D 手机一记后座 + 星芒炸开
+	if _w.game_audio != null:
+		_w.game_audio.play_sfx("thunk")
+	if _w.paper_phone != null:
+		_w.paper_phone.kick(1.0)
+	var hit: Tween = _w.create_tween()
+	hit.set_parallel(true)
+	hit.tween_method(func(v: float) -> void: _stamp_card.set_squash(v), 1.0, 0.0, 0.22) \
+		.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	hit.tween_method(func(v: float) -> void: _stamp_card.set_flash(v), 0.0, 1.0, 0.20)
+	hit.tween_method(func(v: float) -> void: _stamp_card.set_print(slot, v), 0.0, 1.0, 0.18) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# LIFT：抬起（比砸下慢一倍，看清墨印）
+	hit.tween_method(func(v: float) -> void: _stamp_card.set_tool(slot, v), 1.0, 0.0, 0.24) \
+		.set_delay(0.08).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	await hit.finished
+	_stamp_card.set_flash(0.0)
+	_stamp_card.set_squash(0.0)
 	_stamp_card.set_tool(-1, 0.0)
+	await _sleep(0.15)   # 两个章之间喘口气
 
 ## 三章种出一朵花（P4 接墨滴过中缝 + 纸茎弹出）。
 func _play_bloom(cell: int) -> void:

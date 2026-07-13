@@ -33,6 +33,11 @@ const RENDER_LAYER := 1 << 10
 const FLIP_DUR := 0.45            ## 翻转+展开动画时长
 const MOVE_DUR := 0.40            ## 停靠位↔持机位搬移动画时长
 const DOCK_ROT := Vector3(0.10, 0.44, -0.05) ## 停靠侧摆角(rad):脸朝屏幕中心(用户方向)侧身~25°,一眼立体手机
+# 盖章后座（kick）：砸下那一瞬机身一沉 + 轻微侧抖，~0.35s 弹回
+const KICK_DECAY := 3.0            ## 后座衰减速率（1.0 → 0 约 0.33s）
+const KICK_PITCH := 0.10           ## 俯冲角(rad)
+const KICK_ROLL := 0.05            ## 侧抖角(rad)
+const KICK_DROP := 0.012           ## 下沉距离(m)
 
 ## 贴面 id（射线拾取返回、set_face_texture 寻址）
 const FACE_FRONT := "front"        ## A 外面：手机正面壳
@@ -63,6 +68,8 @@ var _dock_fitted := false          ## 停靠位是否已按真实布局贴合过
 var _base_rot := DOCK_ROT          ## 基础姿态角（停靠=DOCK_ROT 侧摆、持机=0；微摆叠加其上；初始即停靠）
 var _sway_t := 0.0                 ## 持机微摆相位
 var _drop_shadow: MeshInstance3D   ## 悬浮软影（机身后下方，宽度跟随折叠进度）
+var _kick := 0.0                   ## 盖章后座余量 1→0（见 kick）
+var _rest_pos := Vector3.ZERO      ## 后座前的静止位（衰减完精确复位）
 
 # 在 _init 建几何而非 _ready：headless 测试在 SceneTree._initialize 阶段节点尚未进树、
 # _ready 会延迟到首帧，_init 保证 new() 出来即可用（show_front/pick 不依赖树状态）。
@@ -73,11 +80,28 @@ func _init() -> void:
 
 ## 持机微摆：纸片"活着"的感觉（Origami King 的 paper-in-motion 极简版）。
 ## 只动整机根节点的 x/z 微旋（pivot 的 y 旋留给翻转姿态），收起时不跑。
+## 叠加一记「后座」：集邮册上狠狠盖章的那一下，整台机身被砸得一沉（见 kick）。
 func _process(delta: float) -> void:
 	if not visible:
 		return
 	_sway_t += delta
-	rotation = _base_rot + Vector3(sin(_sway_t * 0.9 + 1.7) * 0.008, 0.0, sin(_sway_t * 1.4) * 0.012)
+	var sway := Vector3(sin(_sway_t * 0.9 + 1.7) * 0.008, 0.0, sin(_sway_t * 1.4) * 0.012)
+	if _kick <= 0.0001:
+		rotation = _base_rot + sway
+		return
+	# 后座期间才碰 position——平时不写，免得跟 _animate_move 的位移 tween 打架
+	_kick = maxf(0.0, _kick - delta * KICK_DECAY)
+	var k := _kick * _kick   # 平方衰减：砸下那一瞬最狠，回弹快
+	rotation = _base_rot + sway + Vector3(k * KICK_PITCH, 0.0, sin(_kick * 34.0) * k * KICK_ROLL)
+	position = _rest_pos + Vector3(0.0, -k * KICK_DROP, 0.0)
+	if _kick <= 0.0001:
+		position = _rest_pos   # 收干净，别留一丝位移残差
+
+## 盖章砸下去的一记后座：机身俯冲一沉 + 轻微侧抖，指数衰减。手机是挂在相机下的实体，
+## 抖机身比抖屏幕里的 UI 真实得多——「狠狠」主要就是这一下卖出来的。
+func kick(strength := 1.0) -> void:
+	_kick = clampf(strength, 0.0, 1.0)
+	_rest_pos = position   # 记住当下的静止位（掏出/翻转动画中途也能挨这一下）
 
 ## ── 几何 ────────────────────────────────────────────────────────────────────
 
