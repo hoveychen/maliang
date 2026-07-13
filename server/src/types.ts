@@ -370,7 +370,7 @@ export interface MemoryExtractionContext {
   cacheKey?: string;
 }
 
-/** voice_input 编排的返回（推给客户端 character_response）。 */
+/** 语音编排的返回（推给客户端 character_response）。 */
 export interface VoiceResponse {
   characterId: string;
   transcript: string;

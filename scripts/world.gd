@@ -115,12 +115,12 @@ var voice_prof_label: Label
 var _vt_speak_start := 0  ## 开口 _utterance_begin
 var _vt_speak_end := 0    ## 断句 _utterance_commit
 var _vt_asr_done := 0     ## 端侧识别出文本 _on_local_asr_final
-var _vt_send := 0         ## 发 voice_transcript（端侧）/ voice_end（服务端）
+var _vt_send := 0         ## 发 voice_transcript 的时刻
 var _vt_response := 0     ## character_response 到达
 var _vt_tts_out := 0      ## 本轮首个 TTS 音频起播
-var _vt_local := false    ## 本轮是否端侧 ASR（决定 ASR/LLM 拆分口径）
 var banner: Label
 var heard_label: Label   ## 顶部显示 ASR 识别到的文字（"听到：…"，给家长确认）
+var confirm_bar: ConfirmBar ## 说完先听一遍的确认条（仅 confirm_mode 开时出现）
 
 var critter_tex: Texture2D
 var npcs: Array = []              ## [{ node:PaperCharacter, logical:Vector2 }]
@@ -403,15 +403,20 @@ func _setup_audio() -> void:
 	_vc.game_audio = game_audio
 	_vc.os_name = _os_name
 	_vc.debug_log = OS.is_debug_build() # 录音诊断 [vad] logcat：仅 debug 构建
+	_vc.confirm_mode = PlayerProfile.confirm_voice() # 小龄玩家：说完先听一遍自己的话（手机设置里开）
 	_vc.should_capture = _voice_should_capture
 	_vc.is_speaking = func() -> bool: return _fsm_inputs().speaking()
 	_vc.utterance_begin.connect(_on_capture_begin)
-	_vc.chunk.connect(_on_capture_chunk)
 	_vc.committed.connect(_on_capture_committed)
 	_vc.local_final.connect(_on_capture_local_final)
 	_vc.cancelled.connect(_on_capture_cancelled)
 	_vc.asr_ready.connect(_on_capture_ready)
+	_vc.confirm_ready.connect(_on_capture_confirm_ready)
 	add_child(_vc)
+	if confirm_bar != null:
+		confirm_bar.replay_pressed.connect(_vc.replay)
+		confirm_bar.accept_pressed.connect(_vc.accept)
+		confirm_bar.retry_pressed.connect(_vc.retry)
 
 ## 开放麦门禁（每帧）：端侧未就绪不喂（绝不上传）；喊话只走端侧；否则按 FSM mic_open。
 ## cooldown 已折进 FSM（COOLDOWN 态非 mic_open），退避倒计时在 _process 里推进。
@@ -420,7 +425,7 @@ func _voice_should_capture() -> bool:
 		return false
 	var x := _fsm_inputs()
 	if not _talk_pid.is_empty() and not _vc.is_ready():
-		return false # 喊话只走端侧 ASR（文本中继，无服务端语音会话可回落）
+		return false # 喊话靠端侧转写做文本中继：没有可用识别就别开麦
 	return InteractionFsm.mic_open(InteractionFsm.derive(x))
 
 func _setup_environment() -> void:
@@ -1344,6 +1349,18 @@ func _setup_hud() -> void:
 	_style_label(heard_label, 24)
 	heard_label.visible = false
 	layer.add_child(heard_label)
+
+	# 说完先听一遍：确认条（confirm_mode 开时才亮）。摆屏幕下方三分之一——
+	# 别盖住正在对话的角色，孩子的视线本来就在角色脸上。
+	confirm_bar = ConfirmBar.new()
+	confirm_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	confirm_bar.offset_left = -220.0
+	confirm_bar.offset_right = 220.0
+	confirm_bar.offset_top = -240.0
+	confirm_bar.offset_bottom = -60.0
+	confirm_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	confirm_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	layer.add_child(confirm_bar)
 
 	# 思考状态：小字弱化到顶部（给家长看），幼儿看角色头顶的 _think_bubble 动画
 	thinking_label = Label.new()
@@ -4954,44 +4971,39 @@ func _reset_empty_streak() -> void:
 func _on_capture_ready() -> void:
 	pass
 
-## 开口：清零本轮耗时戳；服务端路径（非端侧、非喊话）发 voice_start，喊话/端侧不发。
-func _on_capture_begin(is_local: bool) -> void:
+## 确认模式：识别好了但先别发——VoiceCapture 正在回放那句话，亮确认条等孩子点。
+## 收条在 _on_capture_committed（accept 会补发 committed）与退对话时。
+func _on_capture_confirm_ready(text: String) -> void:
+	thinking_label.visible = false # 说完不等于采纳：这会儿还没人在思考
+	if confirm_bar != null:
+		confirm_bar.show_for(text)
+
+## 开口：清零本轮耗时戳。识别在端侧，开口这一刻不需要通知服务端。
+func _on_capture_begin() -> void:
 	_vt_speak_start = Time.get_ticks_msec()
 	_vt_speak_end = 0
 	_vt_asr_done = 0
 	_vt_send = 0
 	_vt_response = 0
 	_vt_tts_out = 0
-	if not is_local and _talk_pid.is_empty():
-		backend.send_voice_start(world_id, _selected_id())
 
-## 服务端路径分片：流式上传（端侧路径不发此信号；喊话无服务端会话，忽略）。
-func _on_capture_chunk(pcm: PackedByteArray) -> void:
-	if _talk_pid.is_empty():
-		backend.send_voice_chunk(Marshalls.raw_to_base64(pcm))
-
-## 说完：亮思考态、造物投掷；服务端路径发 voice_end，端侧等 local_final。不关麦（继续聆听）。
-func _on_capture_committed(is_local: bool) -> void:
+## 说完：亮思考态、造物投掷，等端侧识别出文本（local_final）。不关麦（继续聆听）。
+func _on_capture_committed() -> void:
+	if confirm_bar != null:
+		confirm_bar.hide_bar() # 采纳了（或本就没开确认模式）：收条
 	# 喊话没有服务端回复要等：不亮「思考中」、不开解卡定时器（端侧 ASR final 秒回）
 	if _talk_pid.is_empty():
 		thinking_label.visible = true
 	banner.visible = false
 	if _in_creation:
 		_throw_voice_answer() # 说完就把「这句话」扔进蛋/炉：孩子看得见自己的回答被用上了
-	if not is_local and _talk_pid.is_empty():
-		backend.send_voice_end()
-	# 语音耗时：断句时刻 + 本轮 ASR 口径；服务端路径此刻即已发出(voice_end)，send 戳就是断句戳
 	_vt_speak_end = Time.get_ticks_msec()
-	_vt_local = is_local
-	if not is_local:
-		_vt_send = _vt_speak_end
 	if _talk_pid.is_empty():
 		_think_timer.start(THINK_TIMEOUT)  # 兜底：响应没回来也会自动解卡
 
-## 太短的误触/中途丢弃：服务端路径要通知后端取消半开会话（端侧丢弃即可，喊话无会话）。
-func _on_capture_cancelled(is_local: bool) -> void:
-	if not is_local and _talk_pid.is_empty():
-		backend.send_voice_cancel()
+## 太短的误触/中途丢弃：端侧丢弃即可，服务端没有半开会话要收。
+func _on_capture_cancelled() -> void:
+	pass
 
 ## 端侧识别出最终文本：空→退避；喊话→文本中继；否则送对话。
 func _on_capture_local_final(text: String) -> void:
@@ -5011,6 +5023,14 @@ func _on_capture_local_final(text: String) -> void:
 		return
 	_vt_send = Time.get_ticks_msec() # 发转写 → 到 character_response 即纯 LLM 耗时
 	backend.send_voice_transcript(world_id, _selected_id(), t)
+
+## 手机设置「说完先听一遍」：存档案 + 即时生效（下一句话就走确认流程，不必重进世界）。
+func _on_confirm_voice_toggled(on: bool) -> void:
+	PlayerProfile.set_confirm_voice(on)
+	if _vc != null:
+		_vc.confirm_mode = on
+	if phone_ui != null:
+		phone_ui.refresh_confirm_voice_button()
 
 ## 每帧驱动：角色思考/说话时闭麦（半双工防自听），其余时间把麦克风增量喂 VAD。
 ## 当前帧的交互标志位快照 → 喂给显式状态机（见 interaction_fsm.gd）。
@@ -5568,12 +5588,8 @@ func _update_voice_prof() -> void:
 	var vad := maxi(0, _vt_speak_end - _vt_speak_start)
 	var llm := maxi(0, _vt_response - _vt_send)
 	var lines: Array[String] = ["语音耗时(ms)", "VAD %d" % vad]
-	if _vt_local:
-		lines.append("ASR %d 端侧" % maxi(0, _vt_asr_done - _vt_speak_end))
-		lines.append("LLM %d" % llm)
-	else:
-		lines.append("ASR server")
-		lines.append("LLM %d 含ASR" % llm)
+	lines.append("ASR %d 端侧" % maxi(0, _vt_asr_done - _vt_speak_end)) # 识别只有端侧一条路
+	lines.append("LLM %d" % llm)
 	if _vt_tts_out != 0:
 		lines.append("TTS %d" % maxi(0, _vt_tts_out - _vt_response))
 	else:

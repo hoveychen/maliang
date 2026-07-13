@@ -25,26 +25,32 @@ pnpm test         # node --test，端到端验证造角色闭环
 
 ## 接真实第三方（M1→真实 / M2）
 
-实现 `ServiceAdapters` 各接口（如 `ClaudeLLMAdapter`、`OpenRouterImageAdapter`、`ChromaKeyCutoutAdapter`、`LocalASRAdapter`），在 `buildServer({ adapters })` 注入即可。密钥走 `.env` / muvee secrets，**绝不提交进仓库**。
+实现 `ServiceAdapters` 各接口（如 `ClaudeLLMAdapter`、`OpenRouterImageAdapter`、`ChromaKeyCutoutAdapter`、`LocalTTSAdapter`），在 `buildServer({ adapters })` 注入即可。密钥走 `.env` / muvee secrets，**绝不提交进仓库**。
 
-## 语音（ASR/TTS）
+## 语音（只有 TTS）
 
-默认走**本地推理**（sherpa-onnx，进程内，无外部服务/密钥）：
+**语音识别不在服务端**：一律由客户端端侧完成（Android 插件 / macOS GDExtension 里的 sherpa-onnx），
+服务端只收 WS `voice_transcript` 的成品文本。服务端 ASR（`voice_input` 整段、`voice_start/chunk/end`
+流式）已于 2026-07-13 整条退役，相关适配器/路由/协议全部删除；老客户端若仍发这些消息，服务端静默忽略。
+
+TTS 默认走**本地推理**（sherpa-onnx，进程内，无外部服务/密钥）：
 
 - TTS：Kokoro v1.1-zh（103 个中文音色，24kHz，默认 `zf_001` 温暖女声）
-- ASR：流式 Zipformer 中文（int8，真流式，`openStream` 边说边识别，finish 尾巴 ~10ms）
 
-首次运行先拉模型（~1GB，gitignore 不入库）：
+首次运行先拉模型（gitignore 不入库）：
 
 ```bash
 scripts/fetch-voice-models.sh          # 落到 server/models/
 ```
 
+注意脚本会同时拉一份 ASR 模型：服务端用不到它，但客户端的打包/回测链（`play-mac.sh`、
+`package-mac-app.sh`、`build-asr-plugin.sh`、`test-headless.sh`）都从 `server/models/` 取它，别删。
+
 TTS 另可走 **MiniMax 云端**（`speech-2.6-turbo`，实测整句 1.0-1.9s、约 ¥0.013/条，音质高于本地 Kokoro）：设 `MINIMAX_API_KEY` 即自动启用（auto 路由优先 minimax），网络故障自动回落本地 Kokoro（若模型在场）。
 
 环境变量：
 
-- `VOICE_ASR_PROVIDER` / `VOICE_TTS_PROVIDER` — 分别路由（未设则用 `VOICE_PROVIDER`，再未设为 `auto`）。取值 `auto`/`local`/`mock`，TTS 另有 `minimax`。auto 落点：ASR = local→mock；TTS = minimax→local→mock。
+- `VOICE_TTS_PROVIDER` — TTS 路由（未设则用 `VOICE_PROVIDER`，再未设为 `auto`）。取值 `auto`/`local`/`mock`/`minimax`。auto 落点：minimax→local→mock。（`VOICE_ASR_PROVIDER` 已随服务端 ASR 退役删除。）
 - `MINIMAX_API_KEY` / `MINIMAX_TTS_MODEL` — MiniMax 语音（默认 `speech-2.6-turbo`，音质冲高换 `speech-2.6-hd` 约 1.75 倍价）。
 - `VOICE_MODELS_DIR` — 本地模型目录，默认 `models`（相对 server 运行目录）。
 - `VOICE_TTS_SPEED` — TTS 语速倍率 0.5-2（目前仅 minimax），默认 1.35（lovely_girl 童声原生 ~3.4 字/s 偏慢，提速后 ~4.6 字/s）。

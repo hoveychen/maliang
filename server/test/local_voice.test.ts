@@ -3,10 +3,9 @@ import assert from 'node:assert/strict';
 import {
   resolveSid,
   floatToPcm16,
-  pcm16ToFloat,
   hasLocalVoiceModels,
 } from '../src/adapters/local.ts';
-import { resolveAsrProvider, resolveTtsProvider } from '../src/adapters/factory.ts';
+import { resolveTtsProvider } from '../src/adapters/factory.ts';
 import { loadConfig, type Config } from '../src/config.ts';
 
 test('resolveSid：音色名 / 数字 sid / 未知回落 undefined', () => {
@@ -19,20 +18,19 @@ test('resolveSid：音色名 / 数字 sid / 未知回落 undefined', () => {
   assert.equal(resolveSid(''), undefined);
 });
 
-test('floatToPcm16 / pcm16ToFloat：往返一致 + 越界钳制 + 奇数尾字节截断', () => {
-  const src = new Float32Array([0, 0.5, -0.5, 1, -1, 0.25]);
-  const bytes = floatToPcm16(src);
-  assert.equal(bytes.byteLength, src.length * 2);
-  const back = pcm16ToFloat(bytes);
-  assert.equal(back.length, src.length);
-  for (let i = 0; i < src.length; i++) {
-    assert.ok(Math.abs(back[i] - src[i]) < 1e-3, `sample ${i}: ${back[i]} vs ${src[i]}`);
-  }
-  // 超出 [-1,1] 的样本钳制到满幅而非回绕
-  const clipped = pcm16ToFloat(floatToPcm16(new Float32Array([2, -2])));
-  assert.ok(clipped[0] > 0.99 && clipped[1] < -0.99);
-  // 奇数长度字节流：截断最后半个样本，不抛错
-  assert.equal(pcm16ToFloat(new Uint8Array(5)).length, 2);
+// TTS 出的 Float32 → PCM16LE 字节（反向的 pcm16ToFloat 随服务端 ASR 一起退役）。
+test('floatToPcm16：小端 16bit + 越界钳制到满幅（不回绕）', () => {
+  const bytes = floatToPcm16(new Float32Array([0, 0.5, -0.5]));
+  assert.equal(bytes.byteLength, 6);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  assert.equal(view.getInt16(0, true), 0);
+  assert.ok(Math.abs(view.getInt16(2, true) - 16384) <= 1);
+  assert.ok(Math.abs(view.getInt16(4, true) + 16384) <= 1);
+  // 超出 [-1,1] 钳制到满幅而非回绕（回绕会把最响的样本翻成反相噪音）
+  const clipped = floatToPcm16(new Float32Array([2, -2]));
+  const cv = new DataView(clipped.buffer, clipped.byteOffset, clipped.byteLength);
+  assert.equal(cv.getInt16(0, true), 32767);
+  assert.equal(cv.getInt16(2, true), -32767);
 });
 
 test('hasLocalVoiceModels：目录缺失 → false', () => {
@@ -57,29 +55,10 @@ function baseConfig(over: Partial<Config>): Config {
   return {
     ...loadConfig(),
     minimaxApiKey: undefined,
-    voiceAsrProvider: 'auto', voiceTtsProvider: 'auto',
+    voiceTtsProvider: 'auto',
     ...over,
   };
 }
-
-test('resolveAsrProvider：显式指定优先于 auto 探测', () => {
-  assert.equal(resolveAsrProvider(baseConfig({ voiceAsrProvider: 'mock' })), 'mock');
-  assert.equal(resolveAsrProvider(baseConfig({ voiceAsrProvider: 'local' })), 'local');
-});
-
-test('resolveAsrProvider：auto 无模型 → mock；有模型 → local', () => {
-  assert.equal(
-    resolveAsrProvider(baseConfig({ voiceModelsDir: '/nonexistent-path-xyz' })),
-    'mock',
-  );
-  // 本地模型已就绪时（开发机跑过 fetch 脚本），auto 应选 local
-  if (hasLocalVoiceModels('models')) {
-    assert.equal(
-      resolveAsrProvider(baseConfig({ voiceModelsDir: 'models' })),
-      'local',
-    );
-  }
-});
 
 test('resolveTtsProvider：有 MiniMax key 时 auto 优先 minimax；显式指定不受影响', () => {
   assert.equal(

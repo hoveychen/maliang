@@ -164,7 +164,7 @@ func _tutorial_approach() -> void:
 		await _narrate("intro_near_ok")
 
 ## 开口说话：教「话筒亮了就能说」这个手势。本地 VAD 检测到开口即算完成，不理解内容、不上传 PCM。
-## 端侧 ASR 未就绪(旧 Android 首次加载)→ 跳过本步（只教走路/靠近），绝不为教学开服务端上传口子。
+## 端侧 ASR 未就绪(旧 Android 首次加载)→ 跳过本步（只教走路/靠近）。
 func _tutorial_speak() -> void:
 	if _skipped:
 		return

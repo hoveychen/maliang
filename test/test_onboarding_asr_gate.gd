@@ -1,10 +1,10 @@
 extends SceneTree
-## Android 上端侧模型未就绪时,onboarding 必须拒绝开麦——绝不回落服务端上传 PCM。
-## initialize() 是异步的(~秒级),此窗口期孩子开口过去会静默走 /onboarding/intro。
-## 桌面无 MaliangAsr 单例,走服务端识别合法,门禁不得误伤。
+## Android 上端侧模型未就绪时,onboarding 必须拒绝开麦——识别只有端侧一条路（服务端 ASR 已退役），
+## initialize() 是异步的(~秒级),此窗口期开麦只会录到无处可去的音频。
+## 桌面/editor 无单例时门禁不得误伤（那里本就没有识别能力，但不该把人挡在游戏外）。
 ##
 ## 重构后编排在 VoiceCapture（ob._vc）里：门禁体现为 onboarding._process 是否调用 _vc.open()
-## （must_wait_for_ready 时不开），以及开口后是否走端侧会话/不攒服务端 PCM。
+## （must_wait_for_ready 时不开），以及开口后是否起端侧会话。
 ## 运行: godot --headless --path . --script res://test/test_onboarding_asr_gate.gd
 
 var _ran := false
@@ -59,14 +59,13 @@ func _run_once() -> void:
 	fails += _check("android/已就绪: 未开口前不录音", ob._vc.is_recording(), false)
 	fails += _check("android/已就绪: 未开口前不开会话", fake.started, false)
 
-	# ── VAD 判定开口 → 开本地会话，不攒服务端 PCM ──
+	# ── VAD 判定开口 → 开端侧会话（PCM 直喂插件，永不上传） ──
 	for i in 20: # 噪声底
 		ob._vc._feed(_pcm(30, 0.0))
 	for i in 20: # 说话
 		ob._vc._feed(_pcm(30, 0.3))
 	fails += _check("开口: 进入录音", ob._vc.is_recording(), true)
-	fails += _check("开口: 走端侧会话", fake.started, true)
-	fails += _check("开口: 端侧不攒服务端 PCM", ob._intro_pcm.is_empty(), true)
+	fails += _check("开口: 起端侧会话", fake.started, true)
 
 	# ── 误触(说太短) → 取消，麦克风继续开着 ──
 	ob._vc._cancel_utterance()
@@ -74,12 +73,13 @@ func _run_once() -> void:
 	fails += _check("误触取消: 麦克风仍开着", ob._vc.is_open(), true)
 	ob.free()
 
-	# ── 桌面 + 无端侧单例 → 门禁不得误伤，允许开麦(走服务端) ──
+	# ── editor/headless（非导出 macOS）无端侧单例 → 门禁不得误伤：仍允许开麦。
+	# 那里没有识别能力（转写恒空），但不能把没建过 GDExtension 的开发机挡在游戏外。──
 	var ob2 := _new_ob()
 	ob2._vc._asr = null
 	ob2._vc.os_name = "macOS"
 	ob2._process(0.016)
-	fails += _check("macOS/无单例: 仍可开麦(服务端合法)", ob2._vc.is_open(), true)
+	fails += _check("macOS editor/无单例: 门禁不误伤，仍开麦", ob2._vc.is_open(), true)
 	ob2.free()
 
 	if fails == 0:
