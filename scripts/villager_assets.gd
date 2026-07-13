@@ -17,28 +17,32 @@ extends RefCounted
 ## prod seed 村民形象换代时这些本地图集不会自动更新，需手动重取。
 
 ## 每个 seed 村民：本地图集路径 + 展示名 + prod spriteAsset（转正对齐用）+ 播放 meta。
-## meta 字段直接喂 PaperCharacter.play_anim（需要 cols/rows/frameCount/fps/cellW/cellH）。
+## meta 字段直接喂 PaperCharacter.play_anim（cols/rows/frameCount/fps/cellW/cellH + clips 段区间）。
+## 图集是 idle+talking 两段（离线 demo NPC 不出声，只会播 idle 段；转正联网后会说话动嘴）。
 const SEED := [
 	{
 		"slug": "wuwu_rabbit",
 		"name": "舞舞兔",
 		"atlas": "res://assets/villagers/wuwu_rabbit.webp",
 		"sprite_asset": "142b170f7f4c8e54",
-		"meta": { "cols": 6, "rows": 6, "frameCount": 31, "fps": 8, "cellW": 166, "cellH": 256 },
+		"meta": { "cols": 8, "rows": 8, "frameCount": 62, "fps": 8, "cellW": 244, "cellH": 256,
+			"clips": { "idle": { "start": 0, "count": 31 }, "talking": { "start": 31, "count": 31 } } },
 	},
 	{
 		"slug": "linghu_fox",
 		"name": "灵狐小围巾",
 		"atlas": "res://assets/villagers/linghu_fox.webp",
 		"sprite_asset": "92e458df1ff0711d",
-		"meta": { "cols": 6, "rows": 6, "frameCount": 31, "fps": 8, "cellW": 220, "cellH": 256 },
+		"meta": { "cols": 8, "rows": 8, "frameCount": 62, "fps": 8, "cellW": 272, "cellH": 256,
+			"clips": { "idle": { "start": 0, "count": 31 }, "talking": { "start": 31, "count": 31 } } },
 	},
 	{
 		"slug": "huahuan_deer",
 		"name": "花环小鹿",
 		"atlas": "res://assets/villagers/huahuan_deer.webp",
 		"sprite_asset": "22ce958273165bbf",
-		"meta": { "cols": 6, "rows": 6, "frameCount": 31, "fps": 8, "cellW": 204, "cellH": 256 },
+		"meta": { "cols": 8, "rows": 8, "frameCount": 62, "fps": 8, "cellW": 204, "cellH": 256,
+			"clips": { "idle": { "start": 0, "count": 31 }, "talking": { "start": 31, "count": 31 } } },
 	},
 ]
 
