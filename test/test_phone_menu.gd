@@ -82,23 +82,42 @@ func _run(scene: Node) -> void:
 	_check(phone.state == PaperPhone.State.FRONT, "返回后回正面态")
 	_check(String(pui.get("_phone_open_app")) == "", "返回后 open_app 清空")
 
-	# 小红花/集邮 app：服务端钱包驱动 3×3 花格点亮 + 盖章进度点
+	# 小红花/集邮 app：花田/章卡画的是**见证游标**（小朋友亲眼见过的），不是服务端钱包——
+	# 欠盖的章要等他开手机亲手盖上去。这里钱包与游标一致（无欠章），画面应等于钱包。
+	# 游标显式落到「刚见证完 7 个章」——否则 world._ready 从本机 profile.json 读到的残留会让
+	# 这段随上次跑测留下的状态飘（同一台机器连跑两次结论不同）。
+	scene.set("stamp_seen", { "flowers": 2, "stampProgress": 1, "stampsTotal": 7 })
 	scene.set("wallet", { "flowers": 2, "stampProgress": 1, "stampsTotal": 7, "hearts": 5 })
-	scene._refresh_album()
-	var fcells: Array = pui.get("_flower_cells")
-	_check(fcells.size() == 9, "小红花 3×3 = 9 格")
+	scene._apply_wallet(scene.get("wallet"))  # 走对账：无欠章 → 立刻认账 → 游标=钱包
+	var seen: Dictionary = scene.get("stamp_seen")
+	_check(int(seen.get("flowers", -1)) == 2 and int(seen.get("stampsTotal", -1)) == 7,
+		"无欠章：见证游标立刻对齐钱包")
+	var field: FlowerField = pui.get("_flower_field")
+	var card: StampCard = pui.get("_stamp_card")
+	_check(field != null and card != null, "花田/章卡控件就位")
 	var lit := 0
-	for c in fcells:
-		if (c as TextureRect).modulate == Color.WHITE:
+	for i in 9:
+		if field.bloom_of(i) > 0.5:
 			lit += 1
-	_check(lit == 2, "flowers=2 → 点亮 2 格花")
-	var dots: Array = pui.get("_stamp_dots")
-	var dlit := 0
-	for d in dots:
-		if (d as TextureRect).modulate == Color.WHITE:
-			dlit += 1
-	_check(dlit == 1, "stampProgress=1 → 点亮 1 个盖章进度点")
+	_check(lit == 2, "flowers=2 → 花田长出 2 朵")
+	_check(not card.has_tool(), "无欠章：橡皮章不出来")
 	_check(scene._red_flower_count() == 2, "banner 小红花数=钱包 flowers")
+
+	# 欠 2 个章（服务端已算完账，小朋友还没见证）：画面停在游标上，等他开手机盖。
+	# 钱包按服务端的算术给：7+2=9 个章，第 9 个把第三格盖满 → 立刻兑成第 3 朵花、progress 归零。
+	scene.set("wallet", { "flowers": 3, "stampProgress": 0, "stampsTotal": 9, "hearts": 5 })
+	scene._apply_wallet(scene.get("wallet"))
+	seen = scene.get("stamp_seen")
+	_check(int(seen.get("stampsTotal", -1)) == 7, "有欠章：见证游标先不动")
+	_check(pui.has_pending_stamps(), "有欠章：手机该亮角标")
+	var beats := StampCeremony.plan(seen, scene.get("wallet"), [])
+	_check(beats.size() == 3, "欠 2 章 → 2 拍盖章 + 1 拍开花")
+	await pui.play_ceremony(beats)
+	seen = scene.get("stamp_seen")
+	_check(int(seen.get("stampsTotal", -1)) == 9 and int(seen.get("flowers", -1)) == 3,
+		"仪式演完：见证游标推到钱包（长出第 3 朵花）")
+	_check(not pui.has_pending_stamps(), "仪式演完：角标灭")
+	StampCeremony.save_seen(StampCeremony.empty_seen())  # 别把本次测试的游标留给别的测试
 	var hearts_label: Label = pui.get("_hearts_label")
 	_check(hearts_label != null and hearts_label.text == "x5", "集邮册爱心行=钱包 hearts（player-interaction 移植）")
 

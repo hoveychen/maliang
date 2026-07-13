@@ -17,8 +17,13 @@ func _tick() -> void:
 	match frame:
 		8:
 			(scene.get("album_button") as Button).emit_signal("pressed") # 开手机→近身相机+弹入
+		36:
+			# 摆一个「花田长了 4 朵、章卡攒了 2 个章、还欠 1 个章没盖」的状态：离线世界钱包全 0，
+			# 不塞只能看见一张空册子。**必须晚于离线兜底那次 _apply_wallet**，否则被冲掉。
+			scene.set("stamp_seen", { "flowers": 4, "stampProgress": 2, "stampsTotal": 14 })
+			scene.set("wallet", { "flowers": 5, "stampProgress": 0, "stampsTotal": 15, "hearts": 3 })
 		40:
-			scene.call("_open_app", "flowers") # 翻转+展开跨页
+			scene.call("_open_app", "flowers") # 翻转+展开跨页（欠 1 章 → 橡皮章招手等着盖）
 		80:
 			(scene.get("phone_ui") as PhoneUi).close_app() # 返回正面
 		100:

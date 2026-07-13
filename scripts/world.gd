@@ -176,6 +176,10 @@ var _pending_leave: Dictionary = {}
 # 奖赏系统：进行中委托 + 小红花钱包（服务端权威，world_state/task_complete 同步；见 docs/reward-flower-design.md）
 var active_task: Dictionary = {}   ## 进行中委托（空=无），见 _set_active_task
 var wallet: Dictionary = { "flowers": 0, "stampProgress": 0, "stampsTotal": 0 } ## 小红花钱包
+## 见证游标：小朋友**亲眼见过**的钱包状态（存 profile.json）。服务端算完的账要等他打开手机
+## 亲手把章盖上才认——差额就是欠盖的章。见 StampCeremony / docs/stamp-flower-ux-design.md §3。
+var stamp_seen: Dictionary = StampCeremony.empty_seen()
+var _stamp_styles: Array = []      ## 在线期间 task_complete 带来的真章款式（先进先出，补演用）
 var task_chip: HBoxContainer       ## 右上角委托提示（目标图标+短名 ⇒ 盖章奖励图标）
 # 专门的「创造视图」（造角色/造物共用）：一进创造就退出普通对话构图，相机推近仙子特写、
 # 背景压暗，屏幕中央弹 2×2 大图标卡（方案 A）。平时隐藏。
@@ -341,6 +345,7 @@ const EDGE_REPROBE_SEC := 60.0
 
 func _ready() -> void:
 	critter_tex = load("res://assets/critter.png")
+	stamp_seen = StampCeremony.load_seen()  # 上次见证到哪儿（欠盖的章等他开手机补演）
 	_setup_environment()
 	chunk_manager = ChunkManager.new()
 	chunk_manager.name = "ChunkManager"
@@ -6469,7 +6474,40 @@ func _restore_player_pos(p: Variant) -> void:
 func _apply_wallet(w: Variant) -> void:
 	if typeof(w) == TYPE_DICTIONARY:
 		wallet = w
+	_reconcile_stamps()
 	_refresh_album()
+
+## ── 盖章见证游标（docs/stamp-flower-ux-design.md §3）─────────────────────────
+##
+## 服务端一收到完成事件就把账算完了，客户端拿到的永远是结算后的钱包。小朋友要「亲手把章
+## 盖上去」，就得记住自己见证到哪儿——stamp_seen 落在 profile.json 里，钱包比它多出来的章
+## 就是欠盖的，攒着等小朋友打开手机的小红花页，一锤一锤补演。
+
+## 钱包变动后对账：能立刻认的就认（初始送花/admin 补账/别的静默调整），
+## 该演的（盖章/开花/摘花）留给小红花页的仪式，这里只亮角标。
+func _reconcile_stamps() -> void:
+	var beats := StampCeremony.plan(stamp_seen, wallet, _stamp_styles)
+	if beats.is_empty():
+		_commit_stamp_seen()
+		return
+	_update_phone_badge()
+
+## 演完了（或无需演出）：见证游标推到服务端权威值并落盘。
+func _commit_stamp_seen() -> void:
+	stamp_seen = StampCeremony.snapshot(wallet)
+	_stamp_styles.clear()
+	StampCeremony.save_seen(stamp_seen)
+	_update_phone_badge()
+
+## 取在线期间收到的真章款式（task_complete 带来的）。只有「攒的款式数正好等于欠盖的章数」
+## 时才用——否则说明中间混进了离线/别处挣的章，序号对不上，宁可整批走确定性兜底也不错位。
+func take_stamp_styles() -> Array:
+	var pending := StampCeremony.pending_count(stamp_seen, wallet)
+	return _stamp_styles.duplicate() if _stamp_styles.size() == pending else []
+
+## 手机上的欠章角标（P5 实现：手机按钮红点 + app 图标角标）。
+func _update_phone_badge() -> void:
+	pass
 
 ## 只在「换了一个新委托」时出声。character_response 每次带 task 都会调到这里
 ## （含进行中委托的重申），逐次响就成了噪音。
@@ -6531,14 +6569,17 @@ func _update_task_chip() -> void:
 func _stamp_icon(style: String) -> String:
 	return "stamp_%s" % style if STAMP_STYLES.has(style) else "stamp_star"
 
-## 委托完成：盖 1 章（满 3 升 1 花）、更新钱包、收起 chip、庆祝演出。
+## 委托完成：得 1 个章（服务端已算完账；小红花要小朋友自己打开手机盖满三个章才种得出来）。
+## 章的款式先记下来，等他开手机补演时用真款式（离线挣的走确定性兜底，见 take_stamp_styles）。
 func _on_task_complete(data: Dictionary) -> void:
+	var style := String(data.get("stampStyle", ""))
+	if not style.is_empty():
+		_stamp_styles.append(style)
 	_apply_wallet(data.get("wallet"))
 	_set_active_task(null)
-	var flower_gained := bool(data.get("flowerGained", false))
-	banner.text = "哇！集满盖章换到一朵小红花啦！" if flower_gained else "太棒啦！得到一个新盖章！"
+	banner.text = "太棒啦！得到一个新盖章！打开手机盖上去～"
 	banner.visible = true
-	_celebrate_reward(flower_gained, data.get("task", {}))
+	_celebrate_reward(false, data.get("task", {}))
 
 ## 得奖语音表扬（委托人音色）：正在出声就不打断——表扬是锦上添花。
 ## 老路径服务端合成给 ttsAsset；clientTts 给 text+voiceId 本地合成。

@@ -101,13 +101,18 @@ func _tick() -> void:
 			_check("visit_done sent near location", String(ev.get("kind", "")), "visit_done")
 			scene.call("_set_active_task", null)
 		68:
-			# task_complete（升花）：集满盖章换到 1 朵小红花 → 计数+1、横幅报喜
+			# task_complete（服务端已升花）：钱包计数照样跟着涨（服务端权威），但世界里的横幅
+			# **不再报喜说小红花到手**——花是小朋友回手机把第三个章盖上才种出来的，
+			# 提前在世界里宣布「换到一朵小红花啦」就把仪式的高潮剧透了。
+			# 见 docs/stamp-flower-ux-design.md §4.2。
 			scene.call("_on_task_complete", { "task": _task("visit", { "locationName": "池塘" }),
 				"stampStyle": "medal", "flowerGained": true,
 				"wallet": { "flowers": 3, "stampProgress": 0, "stampsTotal": 6 } })
 			_check("flower count up on flowerGained", scene.call("_red_flower_count"), 3)
 			var banner := scene.get("banner") as Label
-			_check("banner announces flower", banner.text.contains("小红花"), true)
+			_check("banner 只报盖章、不剧透小红花", banner.text.contains("盖章") and not banner.text.contains("小红花"), true)
+			# 章的款式进了待盖队列，等他开手机用真款式补演
+			_check("真 stampStyle 入队", (scene.get("_stamp_styles") as Array).has("medal"), true)
 		70:
 			# 心愿委托（wishes.ts 的 type='wish'）：chip 必须显示许愿人 + 魔法棒
 			# （村民自己不会魔法 → 图标就是「去找会变魔法的」这条线索）。
