@@ -200,6 +200,30 @@ export function createMockAdapters(): ServiceAdapters {
             emotion: 'happy',
           };
         }
+        // 停止引路（仅小仙子）：放在 guide_to 前——「不去了」也含「去」，先判否定。
+        if (ctx.abilities.includes('guide_stop') && /(不去了|不用带|别带|不想去)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好，那我们不去啦。',
+            behaviorScript: { commands: [{ type: 'guide_stop', params: {} }], loop: false },
+            emotion: 'happy',
+          };
+        }
+        // 引路意图（仅小仙子）：「带我去X」「我想找X」。名字从 guideTargets 里认（LLM 版由 prompt 约束）。
+        if (ctx.abilities.includes('guide_to') && /(带我去|带我找|我想去|我要去|我想找|在哪)/.test(transcript)) {
+          const hit = (ctx.guideTargets ?? []).find((t) => transcript.includes(t.name));
+          if (hit) {
+            const params = hit.kind === 'character' ? { character_name: hit.name } : { location_name: hit.name };
+            return {
+              kind: 'command',
+              replyText: '好呀，跟我来！',
+              behaviorScript: { commands: [{ type: 'guide_to', params }], loop: false },
+              emotion: 'happy',
+            };
+          }
+          // 目标不在候选里：老实说不知道，不硬应下（对齐 prompt 里的「不要编」规则）
+          return { kind: 'chat', replyText: '我也不知道那在哪儿呀。', emotion: 'think' };
+        }
         // 造物意图（仅拥有 create_prop 能力的角色，如小神仙）：「变/造/做 一个X」
         if (ctx.abilities.includes('create_prop') && /(变出|变一|造一|做一个|做个)/.test(transcript)) {
           return {
