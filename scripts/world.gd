@@ -6510,9 +6510,16 @@ func take_stamp_styles() -> Array:
 	var pending := StampCeremony.pending_count(stamp_seen, wallet)
 	return _stamp_styles.duplicate() if _stamp_styles.size() == pending else []
 
-## 手机上的欠章角标（P5 实现：手机按钮红点 + app 图标角标）。
+## 欠章角标：熄屏锁屏上的通知条 + 小红花 app 图标红点（refresh_banner 里按 pending 数刷）。
+## 停靠态屏幕是熄的、60s 才低频渲一帧——挣到章得**立刻**在锁屏上看见，所以这里踢一帧重渲，
+## 不然小朋友要盯着黑屏等最多一分钟才知道自己有章没盖。
 func _update_phone_badge() -> void:
-	pass
+	if phone_ui == null or paper_phone == null:
+		return
+	phone_ui.refresh_banner()
+	if paper_phone.state == PaperPhone.State.DOCKED and paper_phone.visible:
+		_phone_dock_t = 60.0
+		paper_phone.refresh_dock_screen()
 
 ## 只在「换了一个新委托」时出声。character_response 每次带 task 都会调到这里
 ## （含进行中委托的重申），逐次响就成了噪音。

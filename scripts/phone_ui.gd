@@ -45,6 +45,9 @@ var _phone_pager_dragging := false  ## 拖拽中（松手贴合最近页）
 var _phone_ui_t := 0.0              ## banner 刷新节流计时
 var _screen_cover: Control          ## 熄屏画面（停靠=AOD 黑底暗时钟/点亮隐藏）
 var _aod_clock: Label               ## 熄屏大时钟（随 refresh_banner 走字）
+var _aod_notice: HBoxContainer      ## 熄屏通知条（有欠盖的章时浮出）
+var _aod_notice_label: Label        ## 熄屏通知里的欠章数
+var _flowers_badge: Label           ## 小红花 app 图标右上角的欠章红点
 
 # —— 跨页 app 视图 ——
 var _phone_app_title: Label         ## 打开的 app 标题
@@ -202,6 +205,31 @@ func _build_front(vp: SubViewport) -> void:
 	var aod_star := UiAssets.icon_rect("st_star", 64.0)
 	aod_star.modulate = Color(1.0, 1.0, 1.0, 0.28) # 暗夜里一颗淡星
 	aod_box.add_child(aod_star)
+	# 熄屏通知：有欠盖的章时，锁屏上浮出一条「你有 N 个章还没盖」——手机停在屏幕角落里，
+	# 小朋友只有看见它亮着东西才知道要去打开（不然章白挣了，仪式永远不开演）。
+	_aod_notice = HBoxContainer.new()
+	_aod_notice.alignment = BoxContainer.ALIGNMENT_CENTER
+	_aod_notice.add_theme_constant_override("separation", 10)
+	_aod_notice.visible = false
+	var notice_card := PanelContainer.new()
+	var nst := StyleBoxFlat.new()
+	nst.bg_color = Color(0.98, 0.36, 0.34, 0.92)   # 通知红
+	nst.set_corner_radius_all(22)
+	nst.content_margin_left = 18.0
+	nst.content_margin_right = 18.0
+	nst.content_margin_top = 8.0
+	nst.content_margin_bottom = 8.0
+	notice_card.add_theme_stylebox_override("panel", nst)
+	var notice_row := HBoxContainer.new()
+	notice_row.add_theme_constant_override("separation", 8)
+	notice_row.add_child(UiAssets.icon_rect("stamp_star", 40.0))
+	_aod_notice_label = Label.new()
+	_aod_notice_label.add_theme_font_size_override("font_size", 34)
+	_aod_notice_label.add_theme_color_override("font_color", Color.WHITE)
+	notice_row.add_child(_aod_notice_label)
+	notice_card.add_child(notice_row)
+	_aod_notice.add_child(notice_card)
+	aod_box.add_child(_aod_notice)
 	vp.add_child(_screen_cover)
 
 ## 跨页 app 视图：返回条（返回键+标题）+ 竖向滚动的页面宿主（flowers/items/settings）。
@@ -340,6 +368,29 @@ func _make_app_icon(app: Array) -> Control:
 	btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	btn.pressed.connect(open_app.bind(id))
 	box.add_child(btn)
+	# 小红花 app 的欠章角标：图标右上角一个红点（iOS 未读数那样），refresh_banner 时刷新
+	if id == "flowers":
+		_flowers_badge = Label.new()
+		_flowers_badge.text = "1"
+		_flowers_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_flowers_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		_flowers_badge.add_theme_font_size_override("font_size", 26)
+		_flowers_badge.add_theme_color_override("font_color", Color.WHITE)
+		var bst := StyleBoxFlat.new()
+		bst.bg_color = Color(0.95, 0.28, 0.26)
+		bst.set_corner_radius_all(18)
+		bst.set_border_width_all(3)
+		bst.border_color = Color(1.0, 1.0, 0.995)
+		_flowers_badge.add_theme_stylebox_override("normal", bst)
+		_flowers_badge.custom_minimum_size = Vector2(34.0, 34.0)
+		_flowers_badge.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		_flowers_badge.offset_left = -18.0
+		_flowers_badge.offset_top = -10.0
+		_flowers_badge.offset_right = 18.0
+		_flowers_badge.offset_bottom = 26.0
+		_flowers_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_flowers_badge.visible = false
+		btn.add_child(_flowers_badge)
 	var cap := Label.new()
 	cap.text = String(app[1])
 	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -514,6 +565,15 @@ func refresh_banner() -> void:
 		_phone_flowers.text = "x%d" % _w._red_flower_count()
 	if _aod_clock != null:
 		_aod_clock.text = _phone_clock.text # 熄屏画面同步走字
+	# 欠章角标：熄屏通知条 + 小红花 app 图标红点（章挣到了但还没盖 → 得让他知道要开手机）
+	var pending := StampCeremony.pending_count(_w.stamp_seen, _w.wallet)
+	if _aod_notice != null:
+		_aod_notice.visible = pending > 0
+		if _aod_notice_label != null:
+			_aod_notice_label.text = "x%d" % pending
+	if _flowers_badge != null:
+		_flowers_badge.visible = pending > 0
+		_flowers_badge.text = str(pending)
 	if _phone_signal != null:
 		var online: bool = _w.backend != null and _w.backend.is_online()
 		var col := Color(0.30, 0.78, 0.42) if online else Color(0.60, 0.60, 0.60, 0.5)
@@ -670,6 +730,12 @@ var hover_timeout := 1.2
 func has_pending_stamps() -> bool:
 	return StampCeremony.pending_count(_w.stamp_seen, _w.wallet) > 0
 
+func _has_beat(beats: Array, kind: int) -> bool:
+	for b in beats:
+		if int(b["beat"]) == kind:
+			return true
+	return false
+
 ## 仪式在演吗（world 对账据此按兵不动，别把小朋友正在盖的章抹掉）。
 func ceremony_playing() -> bool:
 	return _ceremony_playing
@@ -686,6 +752,8 @@ func play_ceremony(beats: Array) -> void:
 		return
 	_ceremony_playing = true
 	_ceremony_abort = false
+	if _w.fairy_voice != null and _has_beat(beats, StampCeremony.Beat.STAMP):
+		_w.fairy_voice.try_play("stamp_pending")   # 「快！把章狠狠盖上去！」
 	for b in beats:
 		if _ceremony_abort:
 			break

@@ -95,7 +95,7 @@
       "id": "fairy_reward_2",
       "trigger": "reward",
       "cooldown": 5,
-      "text": "耶！得到一张新贴纸！"
+      "text": "耶！得到一个新盖章！"
     },
     {
       "id": "fairy_reward_3",
@@ -180,6 +180,36 @@
       "trigger": "guide_hint",
       "cooldown": 90,
       "text": "山那边、水那边…我都好想再去看看呢。"
+    },
+    {
+      "id": "fairy_stamp_pending_1",
+      "trigger": "stamp_pending",
+      "cooldown": 8,
+      "text": "快！把章狠狠盖上去！"
+    },
+    {
+      "id": "fairy_stamp_pending_2",
+      "trigger": "stamp_pending",
+      "cooldown": 8,
+      "text": "点一下小章章，盖到空格子里！"
+    },
+    {
+      "id": "fairy_flower_grown_1",
+      "trigger": "flower_grown",
+      "cooldown": 5,
+      "text": "哇！三个章，种出一朵小红花啦！"
+    },
+    {
+      "id": "fairy_flower_grown_2",
+      "trigger": "flower_grown",
+      "cooldown": 5,
+      "text": "小红花长出来啦，你好厉害呀！"
+    },
+    {
+      "id": "fairy_field_full_1",
+      "trigger": "field_full",
+      "cooldown": 20,
+      "text": "花田装满啦，先用掉一朵，再种新的哦！"
     }
   ]
 }

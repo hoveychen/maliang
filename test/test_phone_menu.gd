@@ -119,6 +119,11 @@ func _run(scene: Node) -> void:
 	seen = scene.get("stamp_seen")
 	_check(int(seen.get("stampsTotal", -1)) == 7, "有欠章：见证游标先不动")
 	_check(pui.has_pending_stamps(), "有欠章：手机该亮角标")
+	# 角标真的亮起来了吗（章挣到了但没盖，小朋友得看见手机上有东西）
+	var badge: Label = pui.get("_flowers_badge")
+	var notice: HBoxContainer = pui.get("_aod_notice")
+	_check(badge != null and badge.visible and badge.text == "2", "小红花 app 图标红点=2")
+	_check(notice != null and notice.visible, "熄屏锁屏浮出欠章通知")
 	var beats := StampCeremony.plan(seen, scene.get("wallet"), [])
 	pui.hover_timeout = 0.0  # 回测不空等小朋友点橡皮章
 	_check(beats.size() == 3, "欠 2 章 → 2 拍盖章 + 1 拍开花")
