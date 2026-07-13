@@ -61,6 +61,12 @@ func is_speaking() -> bool:
 			return true
 	return _synthesizing
 
+## 某个村民此刻是否正在漏话（per-character）。驱动 talking 动画段——漏话是这里唯一
+## 「非对话对象也会出声」的来源，不接上的话村民漏话时嘴不动。
+func is_character_speaking(cid: String) -> bool:
+	var pl := _players.get(cid) as AudioStreamPlayer3D
+	return pl != null and is_instance_valid(pl) and pl.playing
+
 ## 每帧由宿主调用。npcs = world.npcs（[{id, node, logical, ...}]），player_pos = 玩家逻辑坐标。
 ## engaged = 玩家正在交互/录音/思考/听角色说话（此时全员闭嘴，别插话）。
 func update(delta: float, npcs: Array, player_pos: Vector2, engaged: bool) -> void:

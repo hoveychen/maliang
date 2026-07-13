@@ -57,8 +57,12 @@ var modulate := Color.WHITE:
 var _mat: ShaderMaterial
 ## 穿透 pass 材质：被建筑/树/地形挡住时画半透明剪影浮在遮挡物上（见 paper_xray.gdshader）。
 var _xray_mat: ShaderMaterial
-## idle 动画图集 meta（空=静态整图）；非空时几何按单格 cellW×cellH 算、shader 分格播放。
+## 动画图集 meta（空=静态整图）；非空时几何按单格 cellW×cellH 算、shader 分格播放。
 var _sheet: Dictionary = {}
+## 段名 → {start, count}（服务端 meta.clips）。空 = 老的单段图集（v1），整张图集就是 idle。
+var _clips: Dictionary = {}
+## 当前播放的段名。
+var _clip := ""
 
 func _init() -> void:
 	if _shader == null:
@@ -77,7 +81,7 @@ func _init() -> void:
 	mesh = q
 	material_override = _mat
 
-## 脚下伪影半径（setup/play_idle 记录，refresh_ground_shadow 复用）；wants_ground_shadow
+## 脚下伪影半径（setup/play_anim 记录，refresh_ground_shadow 复用）；wants_ground_shadow
 ## 落地角色为真、悬浮角色（仙子/飞行）由 world 置假——切「角色实时阴影」时据此挂/摘 blob。
 var _blob_radius := 0.6
 var wants_ground_shadow := true
@@ -272,18 +276,26 @@ func set_paper_fold(f1: Vector4, a1: float, f2: Vector4, a2: float, pleat: float
 		sm.set_shader_parameter("pleat_amp", pleat)
 		sm.set_shader_parameter("crumple_amp", crumple)
 
-## 从静态立绘切到 idle 动画图集。meta 为服务端 SpriteSheetMeta（cols/rows/frameCount/fps/cellW/cellH）。
+## 从静态立绘切到动画图集。meta 为服务端 SpriteSheetMeta
+## （cols/rows/frameCount/fps/cellW/cellH，+ 可选 clips{段名:{start,count}}）。
 ## world_height：期望世界高度（米），与切换前静态立绘保持一致，观感不跳。phase：相位偏移（秒）。
-func play_idle(atlas: Texture2D, meta: Dictionary, world_height: float, phase := 0.0) -> void:
+## 落地即播 idle 段；之后由 world.gd 按角色状态 set_clip 切 moving/talking。
+func play_anim(atlas: Texture2D, meta: Dictionary, world_height: float, phase := 0.0) -> void:
 	var ch := float(meta.get("cellH", 0))
 	var cw := float(meta.get("cellW", 0))
 	if atlas == null or ch <= 0.0 or cw <= 0.0:
 		return
 	_sheet = meta
+	var clips: Variant = meta.get("clips")
+	_clips = clips if typeof(clips) == TYPE_DICTIONARY else {}
+	_clip = "idle"
+	# 起手播 idle 段：v2 图集从 clips.idle 取区间；v1 单段图集就是整张图（start=0, 全部帧）。
+	var r := _range_of("idle")
 	for m in [_mat, _xray_mat]:
 		m.set_shader_parameter("sheet_cols", int(meta.get("cols", 1)))
 		m.set_shader_parameter("sheet_rows", int(meta.get("rows", 1)))
-		m.set_shader_parameter("sheet_frames", int(meta.get("frameCount", 0)))
+		m.set_shader_parameter("sheet_start", int(r.x))
+		m.set_shader_parameter("sheet_frames", int(r.y))
 		m.set_shader_parameter("sheet_fps", float(meta.get("fps", 8)))
 		m.set_shader_parameter("sheet_phase", phase)
 	pixel_size = world_height / ch  # setter 会触发 _refresh_geometry（此时 _sheet 已置）
@@ -291,6 +303,39 @@ func play_idle(atlas: Texture2D, meta: Dictionary, world_height: float, phase :=
 	texture = atlas
 	_blob_radius = clampf(cw * pixel_size * 0.38, 0.4, 1.4)
 	BlobShadow.attach(self, _blob_radius)
+
+## 切动画段（idle / moving / talking）。世界层每帧按角色状态调，同段重复调是零成本快路径。
+##
+## 只改 sheet_start/sheet_frames 两个 uniform——不动几何、不换贴图。这是安全的，因为服务端
+## 各段共用同一个并集裁剪盒（sprite_sheet.ts），cellW/cellH 全段相同；若哪天各段自己裁，
+## 这里就必须连 pixel_size/offset 一起重算，角色身高才不会在切段时抽一下。
+##
+## 图集里没有这一段 → 回落播 idle（_range_of）。**必须回落、不能"保持当前段不动"**：
+## 服务端不生成 moving 段（走路是程序化的，见 world.gd），世界层照样每帧请求 "moving"；
+## 若这里空操作，角色说完话一走动就永远卡在 talking 帧上——_clip 停在 "talking"，
+## 而后续每帧的 set_clip("moving") 都被当成"没这段，不动"，再也回不到 idle。
+func set_clip(name: String) -> void:
+	if _sheet.is_empty() or name == _clip:
+		return
+	_clip = name # 记的是"要什么"，不是"落到了哪段"——下一帧同名请求才能走零成本快路径
+	var r := _range_of(name)
+	for m in [_mat, _xray_mat]:
+		m.set_shader_parameter("sheet_start", r.x)
+		m.set_shader_parameter("sheet_frames", r.y)
+
+## 当前请求的段名（""=还没进动画模式）。图集里没有这段时实际播的是 idle。
+func current_clip() -> String:
+	return _clip
+
+## 段名 → Vector2i(start, count)。逐级回落：本段 → idle 段 → 整张图集（v1 单段图集即此路径）。
+func _range_of(name: String) -> Vector2i:
+	for key in [name, "idle"]:
+		var c: Variant = _clips.get(key)
+		if typeof(c) == TYPE_DICTIONARY:
+			var count := int((c as Dictionary).get("count", 0))
+			if count > 0:
+				return Vector2i(int((c as Dictionary).get("start", 0)), count)
+	return Vector2i(0, int(_sheet.get("frameCount", 0)))
 
 ## 可见世界高度（米）：动画图集按单格 cellH 算，静态整图按贴图高算。
 ## 头顶挂饰定位/相机构图都按这个——整张图集高度是 rows×cellH，会把动画角色算高 rows 倍。

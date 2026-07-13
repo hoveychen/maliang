@@ -22,7 +22,7 @@ func _init() -> void:
 	var npc := PaperCharacter.new()
 	root.add_child(npc)
 	npc.setup(tex, Color.WHITE, "图集角色")
-	npc.play_idle(tex, { "cols": 2, "rows": 1, "frameCount": 2, "fps": 8, "cellW": 50, "cellH": 60 }, 1.2)
+	npc.play_anim(tex, { "cols": 2, "rows": 1, "frameCount": 2, "fps": 8, "cellW": 50, "cellH": 60 }, 1.2)
 
 	# cell0 内理论值：headTop=首个不透明行(y=6)中心(x=20) → (20/49, 6/59)=(0.408, 0.102)；
 	# hand 行=int(0.55*59)=32,身体 x∈[10,30],inset=0.05*50=2.5 → handL=(12.5/49)=0.255、handR=(27.5/49)=0.561。

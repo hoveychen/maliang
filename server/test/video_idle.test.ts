@@ -63,9 +63,17 @@ test('compositeOnGreen: 横立绘也铺成 16:9（按宽算高）', () => {
   assert.ok(Math.abs(png.width / png.height - 16 / 9) < 0.02);
 });
 
-test('mock video adapter: 返回 mp4 视频 blob', async () => {
+test('mock video adapter: 每段各返回一段 mp4，且三段字节互不相同', async () => {
   const adapters = createMockAdapters();
-  const v = await adapters.video.generateIdleAnimation(transparentSprite(64, 64));
-  assert.equal(v.mime, 'video/mp4');
-  assert.ok(v.bytes.length > 0);
+  const sprite = transparentSprite(64, 64);
+  const clips = await Promise.all(
+    (['idle', 'moving', 'talking'] as const).map((c) => adapters.video.generateClip(sprite, c)),
+  );
+  for (const v of clips) {
+    assert.equal(v.mime, 'video/mp4');
+    assert.ok(v.bytes.length > 0);
+  }
+  // 资产库内容寻址：三段若字节相同会塌成同一个 hash，clipVideos 就分不出段来。
+  const distinct = new Set(clips.map((v) => Buffer.from(v.bytes).toString('hex')));
+  assert.equal(distinct.size, 3, '三段 stub 应互不相同');
 });

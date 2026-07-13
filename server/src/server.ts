@@ -71,7 +71,7 @@ interface DeviceReport {
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
 import { detectCharacterAnchors } from './anchors.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
-import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
+import { generateCharacterAnimation, triggerCharacterAnimation, backfillCharacterAnimations, repackFromStoredClips, type ToSpriteSheet } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
@@ -329,7 +329,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (anchors) fairy.appearance.anchors = anchors;
     store.saveCharacter(fairy);
     // 试点：静态立绘先返回，idle 动画后台异步补（客户端轮询 /sprite-anim/:hash）
-    triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
+    triggerCharacterAnimation(adapters, store, hash, toSpriteSheet);
     return { id: fairy.id, spriteAsset: hash, regenerated: true };
   });
 
@@ -622,7 +622,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
           // 裁后是全新 hash（无动画记录）→ 触发一次按新分辨率重生成
           if (!regenTriggered.has(hash)) {
             regenTriggered.add(hash);
-            triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
+            triggerCharacterAnimation(adapters, store, hash, toSpriteSheet);
           }
         }
         characters.push({ id: c.id, name: c.name, prev, spriteAsset: hash, changed });
@@ -640,7 +640,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
     const gen = await generateSprite(adapters, desc, store);
     // 试点：玩家形象静态先返回，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
-    triggerIdleAnimation(adapters, store, gen.hash, toSpriteSheet);
+    triggerCharacterAnimation(adapters, store, gen.hash, toSpriteSheet);
     // anchors 随返回体进设备档案（玩家档案在 user://profile.json，服务端够不着，见设计 §2.3）
     return { spriteAsset: gen.hash, anchors: gen.anchors ?? undefined };
   });
@@ -762,8 +762,52 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (existing?.status === 'pending' || (existing?.status === 'ready' && !force)) {
       return { spriteHash: req.params.hash, status: existing.status, triggered: false };
     }
-    void generateIdleAnimation(adapters, store, req.params.hash, toSpriteSheet);
+    void generateCharacterAnimation(adapters, store, req.params.hash, toSpriteSheet);
     return { spriteHash: req.params.hash, status: 'pending', triggered: true };
+  });
+
+  // 从已存原片重打图集：不碰视频生成 = 零成本。
+  //
+  // 用法：想换图集参数（例如把抽帧从 8fps 提到原片的原生帧率、或改 cellH）时，改
+  // sprite_sheet.ts 的默认值 → 部署 → 打这个端点。三段原片是生成当时一并入库的
+  // （SpriteAnimRecord.clipVideos），所以重打是纯本地 ffmpeg，不用重新向 Seedance 买。
+  // 刻意不开放 fps/cellH 查询参数：参数只有一个来源（代码里的默认值），否则线上会出现
+  // 一批「用某次请求的临时参数打出来的」图集，谁也说不清它是按什么打的。
+  //
+  // 没有原片（v1 老记录）→ 409，调用方该走 /generate（要花钱）。
+  app.post<{ Params: { hash: string } }>('/admin/sprite-anim/:hash/repack', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const ok = await repackFromStoredClips(store, req.params.hash, toSpriteSheet);
+    if (!ok) {
+      return reply.code(409).send({ error: 'no stored clip videos; use /generate instead' });
+    }
+    const rec = store.getSpriteAnim(req.params.hash);
+    return { spriteHash: req.params.hash, animAsset: rec?.animAsset, meta: rec?.meta };
+  });
+
+  // 批量重打：遍历所有存有原片的立绘，逐个 repack。串行（ffmpeg 吃 CPU，并发会把容器压垮）。
+  // fire-and-forget：立即返回待处理条数，进度看日志。
+  app.post('/admin/sprite-anim/repack-all', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const hashes = store.listSpriteAnimsWithClips();
+    void (async () => {
+      let done = 0;
+      for (const h of hashes) {
+        try {
+          if (await repackFromStoredClips(store, h, toSpriteSheet)) done++;
+        } catch (err) {
+          console.warn(`repack 失败 sprite=${h}:`, err instanceof Error ? err.message : err);
+        }
+      }
+      console.log(`repack-all 完成：${done}/${hashes.length}`);
+    })();
+    return { pending: hashes.length };
   });
 
   // 只读状态后台（P6）：/debug/state 出 JSON 全量快照，/debug 出单页 dashboard 渲染它。
@@ -1078,7 +1122,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
 
   // 存量回填：把造角色流程上线前预种的村民补上 idle 动画（fire-and-forget，只在真实进程开，不阻塞启动）。
   if (deps.backfillOnBoot) {
-    const n = backfillIdleAnimations(adapters, store, toSpriteSheet);
+    const n = backfillCharacterAnimations(adapters, store, toSpriteSheet);
     if (n > 0) app.log.info(`idle 动画存量回填：触发 ${n} 个角色`);
     // 音色回填：voiceId 不在 edge 目录里的老角色按 id 稳定哈希落主力池，仙子固定 Xiaoyi（幂等，同步很快）。
     const nv = backfillVoices(store);
@@ -1675,7 +1719,7 @@ export async function createCharacterAsync(
     }
     // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     if (character.appearance.spriteAsset) {
-      triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
+      triggerCharacterAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
     }
     await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_character', clientTts, sceneId ?? DEFAULT_SCENE);
   } catch (err) {

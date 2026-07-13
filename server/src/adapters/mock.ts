@@ -1,4 +1,4 @@
-import type { ServiceAdapters, ImageBlob, AudioBlob, VideoBlob } from './types.ts';
+import type { ServiceAdapters, ImageBlob, AudioBlob, VideoBlob, ClipName } from './types.ts';
 import { fallbackVoice } from '../voice_catalog.ts';
 import {
   BASE_ABILITIES,
@@ -73,9 +73,15 @@ function audioStub(): AudioBlob {
   return { bytes: Uint8Array.from([0x52, 0x49, 0x46, 0x46]), mime: 'audio/wav' };
 }
 
-function videoStub(): VideoBlob {
-  // 极小的占位视频（mock idle 动画）。真实由 Seedance 产出 mp4。
-  return { bytes: Uint8Array.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]), mime: 'video/mp4' };
+function videoStub(clip: ClipName): VideoBlob {
+  // 极小的占位视频（mock 动画段）。真实由 Seedance 产出 mp4。
+  // 末字节按段名区分：资产库是内容寻址的，三段字节若相同会塌成同一个 hash，
+  // 就测不出「每段的原片都各自入库」了。
+  const tag = { idle: 0x69, moving: 0x6d, talking: 0x74 }[clip];
+  return {
+    bytes: Uint8Array.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, tag]),
+    mime: 'video/mp4',
+  };
 }
 
 // mock generateScreenplay 用的两段最小剧本源码（已知对着 stage_sdk.d.ts 过 typecheck；
@@ -462,8 +468,8 @@ export function createMockAdapters(): ServiceAdapters {
       },
     },
     video: {
-      async generateIdleAnimation(_sprite: ImageBlob): Promise<VideoBlob> {
-        return videoStub();
+      async generateClip(_sprite: ImageBlob, clip: ClipName): Promise<VideoBlob> {
+        return videoStub(clip);
       },
     },
     orientation: {

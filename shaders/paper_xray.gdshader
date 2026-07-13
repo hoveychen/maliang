@@ -25,9 +25,10 @@ uniform float pleat_amp = 0.0;
 uniform float pleat_freq = 4.0;
 uniform float crumple_amp = 0.0;
 
-// 与主 pass 相同的 sprite-sheet 分格参数（保证剪影与当前动画格同步）
+// 与主 pass 相同的 sprite-sheet 分格参数（保证剪影与当前动画格、当前段同步）
 uniform int sheet_cols = 1;
 uniform int sheet_rows = 1;
+uniform int sheet_start = 0;
 uniform int sheet_frames = 0;
 uniform float sheet_fps = 8.0;
 uniform float sheet_phase = 0.0;
@@ -45,7 +46,7 @@ vec2 sheet_uv(vec2 base) {
 	if (sheet_frames <= 0) {
 		return base;
 	}
-	int f = int(mod(floor((TIME + sheet_phase) * sheet_fps), float(sheet_frames)));
+	int f = sheet_start + int(mod(floor((TIME + sheet_phase) * sheet_fps), float(sheet_frames)));
 	int col = f % sheet_cols;
 	int row = f / sheet_cols;
 	vec2 grid = vec2(float(sheet_cols), float(sheet_rows));

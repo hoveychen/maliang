@@ -3,7 +3,7 @@ extends RefCounted
 ## 打包的 seed 村民资产：从 prod 默认世界抽 3 个 village 村民的 idle 动画图集（WebP），随包分发。
 ##
 ## 用途：world 的离线/intro 模式下，把 _setup_npcs 的 demo NPC 从染色 critter 占位换成真立绘
-## （play_idle 动画）。做法与 loading 仙子图集同源（见 memory loading-fairy-idle-atlas）：进世界/
+## （play_anim 动画）。做法与 loading 仙子图集同源（见 memory loading-fairy-idle-atlas）：进世界/
 ## 联网之前也要能动，所以图集本地打包、不走运行时 api.fetch_sprite_anim。
 ##
 ## 与转正（P3）的关系：demo NPC 用这里的 slug 作 id（demo_ 前缀 → _LOCAL_ONLY_IDS 本地专属、绝不上报）；
@@ -17,7 +17,7 @@ extends RefCounted
 ## prod seed 村民形象换代时这些本地图集不会自动更新，需手动重取。
 
 ## 每个 seed 村民：本地图集路径 + 展示名 + prod spriteAsset（转正对齐用）+ 播放 meta。
-## meta 字段直接喂 PaperCharacter.play_idle（需要 cols/rows/frameCount/fps/cellW/cellH）。
+## meta 字段直接喂 PaperCharacter.play_anim（需要 cols/rows/frameCount/fps/cellW/cellH）。
 const SEED := [
 	{
 		"slug": "wuwu_rabbit",
