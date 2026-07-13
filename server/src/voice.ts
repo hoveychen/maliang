@@ -3,6 +3,7 @@ import type { WorldStore } from './persistence.ts';
 import type { Character, ChatTurn, VoiceResponse } from './types.ts';
 import { effectiveAbilities, DEFAULT_SCENE } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
+import { wishFor } from './wishes.ts';
 import { pickGreeting } from './greetings.ts';
 import { planGuide, listGuideTargets } from './guide.ts';
 import { matchByName } from './names.ts';
@@ -62,6 +63,15 @@ export async function respondToTranscript(
   // 委托：进行中的给 LLM 提醒；没有进行中的生成候选让 LLM 挑时机发起（模板池确定性生成，按当前场景挑目标）
   const activeTask = store.getActiveTask(worldId, playerId) ?? undefined;
   const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, playerId, store, Math.random, sceneId) ?? undefined;
+  // 这个角色当下的心愿背景：它刚在旁边自言自语漏过这件事，小朋友多半就是为这个凑上来的——
+  // 注入后它被搭话时能自然接上自己的念想。仙子不认领心愿（她是兑现心愿的人，不是许愿的人）。
+  const wishContext = character.isFairy
+    ? undefined
+    : wishFor(
+        characterId,
+        store.getDiscovered(worldId, playerId),
+        store.getWallet(worldId, playerId).flowers > 0, // 买不起就不勾（与漏话/委托候选同一口径）
+      )?.context;
 
   // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），带 kind 注入（分组）。
   const memories = store.getMemories(characterId, playerId).map((m) => ({ text: m.text, kind: m.kind }));
@@ -83,6 +93,7 @@ export async function respondToTranscript(
     locations: store.getLocations(worldId, sceneId),
     activeTask,
     taskCandidate,
+    wishContext,
     // 稳定缓存键：绑 world×角色×玩家，做 OpenRouter sticky routing 命中 prompt cache（同一对话连续命中）。
     cacheKey: `${worldId}:${characterId}:${playerId}`,
   });

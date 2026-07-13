@@ -29,7 +29,7 @@
       "id": "fairy_idle_3",
       "trigger": "idle",
       "cooldown": 60,
-      "text": "要不要去找小伙伴一起玩呀？"
+      "text": "唔…今天大家都在忙些什么呢。"
     },
     {
       "id": "fairy_idle_4",
@@ -167,19 +167,19 @@
       "id": "fairy_guide_hint_1",
       "trigger": "guide_hint",
       "cooldown": 90,
-      "text": "想去哪儿玩呀？告诉我，我带你去！"
+      "text": "我认得好多好玩的地方哦…可惜没人陪我一起去。"
     },
     {
       "id": "fairy_guide_hint_2",
       "trigger": "guide_hint",
       "cooldown": 90,
-      "text": "你要是想找谁，跟我说一声，我就带你去找他～"
+      "text": "一个人飞来飞去的…要是有人跟我一块儿去探险就好啦。"
     },
     {
       "id": "fairy_guide_hint_3",
       "trigger": "guide_hint",
       "cooldown": 90,
-      "text": "这个世界大着呢，想去哪儿我都能带你去哦。"
+      "text": "山那边、水那边…我都好想再去看看呢。"
     }
   ]
 }

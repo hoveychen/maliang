@@ -8,6 +8,7 @@ import { respondToTranscript } from '../src/voice.ts';
 import { handleWsMessage, newVoiceSession, createPropAsync, createCharacterAsync } from '../src/server.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 import { pickTaskCandidate, completeTaskOnEvent, describeTask, praiseLine, flowerDeniedLine } from '../src/tasks.ts';
+import { WISH_ABILITIES } from '../src/wishes.ts';
 import { ANON_PLAYER, INITIAL_FLOWERS, type ActiveTask, type Character, type IntentContext, type IntentResult } from '../src/types.ts';
 
 function seedChar(store: WorldStore, worldId: string, id: string, name: string, isFairy = false): Character {
@@ -38,6 +39,9 @@ function seedWorld(): WorldStore {
   seedChar(store, 'w1', 'blue', '小蓝');
   seedChar(store, 'w1', 'fairy', '小神仙', true);
   store.setLocations('w1', ['池塘', '大山']);
+  // 心愿委托优先于跑腿委托（见 wishes.ts）。本文件测的是【跑腿委托】那一层，
+  // 所以先把玩法全标记为已发现 = 心愿池已空的「常规循环」阶段。心愿本身见 wish_task.test.ts。
+  for (const a of WISH_ABILITIES) store.addDiscovered('w1', ANON_PLAYER, a);
   return store;
 }
 
@@ -68,7 +72,8 @@ test('pickTaskCandidate：有进行中委托/委托人是小神仙/世界空 →
   const empty = new WorldStore();
   empty.createWorld('w2');
   seedChar(empty, 'w2', 'solo', '独苗');
-  assert.equal(pickTaskCandidate('w2', 'solo', ANON_PLAYER, empty), null, '没有其他村民/地点出不了任何类型');
+  for (const a of WISH_ABILITIES) empty.addDiscovered('w2', ANON_PLAYER, a); // 心愿池已空才轮到跑腿委托
+  assert.equal(pickTaskCandidate('w2', 'solo', ANON_PLAYER, empty), null, '没有其他村民/地点出不了任何跑腿类型');
 });
 
 test('respondToTranscript：LLM offerTask → 委托设为进行中并随回应下发', async () => {

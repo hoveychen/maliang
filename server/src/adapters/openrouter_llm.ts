@@ -240,6 +240,13 @@ ${abilityLines}
       : ctx.taskCandidate
         ? `\n当下没有进行中的任务。时机合适时（小朋友问「有什么要帮忙的」，或聊天里自然接得上），你可以发起这个小委托：${describeTask(ctx.taskCandidate)}，完成能盖一个集邮章、集满三个换一朵小红花。若这句回应里发起了它，输出 "offerTask": true 并用你的口吻把请求说出来；不合适就别硬塞。`
         : '';
+    // 心愿背景（仅村民）：它刚在旁边自言自语漏过这个念想，小朋友多半就是为这个凑上来的。
+    // 纪律与漏话一致——说自己的念想，不说「你可以让小仙子帮我」。那是广告，会把「小朋友自己发现」
+    // 变成「被派了个活」。他自己想到要帮忙，才是这套机制的全部意义。
+    const wishLine = ctx.wishContext
+      ? `\n你自己的一个念想：${ctx.wishContext}\n小朋友要是问起、或者话赶话聊到了，就用你的口吻说说这个念想（你有多想要、想着它的时候什么心情）。` +
+        `\n但【绝不要】开口求他帮忙、也不要提「小仙子能变出来」——你只是在说自己的心事。他愿不愿意帮、想到去找谁帮，都由他自己决定。`
+      : '';
     // 记忆按 kind 分组注入（memoryLine 分组注入）
     const mem = ctx.memory ?? [];
     let memoryLine = '';
@@ -255,7 +262,7 @@ ${abilityLines}
     const summaryLine = ctx.sessionSummary
       ? `\n这次见面更早的对话（已压缩成摘要）：${ctx.sessionSummary}`
       : '';
-    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + guideTargetLine + taskLine + memoryLine + summaryLine;
+    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + guideTargetLine + wishLine + taskLine + memoryLine + summaryLine;
 
     // 把近 N 轮历史按角色映射成对话消息，让回应有上下文
     const historyMsgs = (ctx.recentHistory ?? []).map((t) => ({

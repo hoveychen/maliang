@@ -87,7 +87,8 @@ import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale } from './creatio
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
-import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { completeTaskOnEvent, completeWishOnAbility, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { wishFor, IDLE_DOING } from './wishes.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
@@ -1295,6 +1296,78 @@ async function pushPraiseTts(
   await pushLineTts(socket, adapters, store, praiseLine(task, settle), npc?.voiceId ?? 'cn-child-default', clientTts);
 }
 
+/**
+ * 下发当前场景每个村民的漏话候选（心愿池随 discovered 变化，所以按玩家算、不能挂在 Character 上）。
+ *
+ * 下发的是【整个 leaks 数组】而不是一句：客户端自己轮换着播，省掉「播一句问一次」的往返。
+ * 播不播、什么时候播、离多远播多响，全是客户端的事（漏话是环境音，见 npc_wish_voice.gd）。
+ * 仙子不在列——她的台词是构建期预制 WAV（离线可用、零成本），走 FairyVoice 那条路。
+ */
+function pushWishes(
+  socket: { send: (data: string) => void },
+  store: WorldStore,
+  worldId: string,
+  playerId: string,
+  sceneId: string,
+): void {
+  const discovered = store.getDiscovered(worldId, playerId);
+  const canAfford = store.getWallet(worldId, playerId).flowers > 0; // 买不起就不勾（见 WishDef.costsFlower）
+  const wishes = store
+    .listCharacters(worldId, sceneId)
+    .filter((c) => !c.isFairy)
+    .map((c) => {
+      const wish = wishFor(c.id, discovered, canAfford);
+      return {
+        characterId: c.id,
+        voiceId: c.voiceId,
+        // 心愿池空（玩法全发现/都买不起）→ 给纯氛围自语，让世界还有活气，但不再勾任何玩法
+        lines: wish ? wish.leaks : IDLE_DOING,
+      };
+    });
+  // discovered 一并下发：仙子的引路提示门禁（world.gd 的 _guide_used）本来只记「本次进世界」，
+  // 重启就忘 → 明明用过引路了她还在念叨，正好砸了「已发现的不再提」这条承诺。
+  // 持久口径在服务端，客户端据此初始化。
+  socket.send(JSON.stringify({ type: 'npc_wishes', worldId, sceneId, wishes, discovered }));
+}
+
+/**
+ * 一个玩法【真正成功】了（造出了东西 / 开了一局游戏 / 仙子答应带路）——心愿闭环的唯一入口。
+ *
+ * 两件事：
+ * ① 记进 discovered：此后全世界再没人漏这个心愿的话（「已发现的不再提」，见 wishes.ts）。
+ * ② 若进行中的委托正是盼着它的那个心愿 → 盖章 + 让【许愿的那个村民】用自己的音色道谢。
+ *    这一步是满足感的闭环：小朋友帮了忙，得有人认出来并激动。少了它，漏话就只是句怪话。
+ *
+ * 复用 task_complete 报文 = 客户端零改动就有现成的盖章庆祝演出。
+ */
+async function fulfillAbility(
+  socket: { send: (data: string) => void },
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  worldId: string,
+  playerId: string,
+  ability: string,
+  clientTts = false,
+  sceneId = DEFAULT_SCENE,
+): Promise<void> {
+  store.addDiscovered(worldId, playerId, ability);
+  const done = completeWishOnAbility(worldId, playerId, ability, store);
+  if (done) {
+    socket.send(JSON.stringify({
+      type: 'task_complete',
+      task: done.task,
+      stampStyle: done.task.stampStyle,
+      flowerGained: done.flowerGained,
+      wallet: done.wallet,
+    }));
+    await pushPraiseTts(socket, adapters, store, worldId, done.task, done, clientTts);
+  }
+  // 无条件重发漏话：心愿池此刻至少有两种变法——① 刚发现的玩法出池（「已发现的不再提」），
+  // ② 造物刚花掉最后一朵花，costsFlower 的心愿集体买不起了（见 WishDef.costsFlower）。
+  // ②不伴随 discovered 变化，所以不能只在「首次发现」时重发。
+  pushWishes(socket, store, worldId, playerId, sceneId);
+}
+
 /** 造物/造角色余额检查：至少 1 朵小红花才放行。 */
 function hasFlower(store: WorldStore, worldId: string, playerId: string): boolean {
   return store.getWallet(worldId, playerId).flowers >= 1;
@@ -1416,6 +1489,8 @@ export async function startGameAsync(
   if (!run) { await say(BUSY_LINE); return; }
   // 不 await 终局：演出要演几分钟，stage_begin 已广播给全场，这里只管把它跑起来。
   void run.catch(() => {});
+  // 真开演了才算「发现了能一起玩游戏」——前面每个 return 都是没开成，不能算。
+  await fulfillAbility(socket, adapters, store, worldId, session.playerId, 'play_game', session.clientTts, session.currentScene);
 }
 
 async function pushLineTts(
@@ -1452,6 +1527,7 @@ export async function createPropAsync(
   store: WorldStore,
   clientTts = false,
   creatorId = '', // 造物的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
+  sceneId = DEFAULT_SCENE, // 造完要按玩家所在场景重发漏话（心愿池随 discovered/钱包变）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
@@ -1488,6 +1564,8 @@ export async function createPropAsync(
       wallet: store.getWallet(worldId, playerId),
       bag: store.getBag(worldId, playerId),
     }));
+    // 造物成功 = 发现了「能造东西」这个玩法；若有村民正盼着它 → 盖章 + 它用自己的音色道谢
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_prop', clientTts, sceneId);
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
   } finally {
@@ -1509,6 +1587,7 @@ export async function createStickerAsync(
   store: WorldStore,
   clientTts = false,
   creatorId = '', // 造贴纸的角色（小仙子）：给了就在造完后记一条 creation 记忆
+  sceneId = DEFAULT_SCENE, // 造完要按玩家所在场景重发漏话
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'sticker', clientTts);
@@ -1540,6 +1619,7 @@ export async function createStickerAsync(
       wallet: store.getWallet(worldId, playerId),
       bag: store.getBag(worldId, playerId),
     }));
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_sticker', clientTts, sceneId);
   } catch (err) {
     socket.send(JSON.stringify({ type: 'sticker_failed', reason: String(err) }));
   } finally {
@@ -1597,6 +1677,7 @@ export async function createCharacterAsync(
     if (character.appearance.spriteAsset) {
       triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
     }
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_character', clientTts, sceneId ?? DEFAULT_SCENE);
   } catch (err) {
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
@@ -1685,9 +1766,9 @@ export async function advanceCreation(
   // done 时按目标分派到对应的异步造：造贴纸 createStickerAsync，造物 createPropAsync，造角色 createCharacterAsync。
   // 造贴纸/造物都进背包（私有，不广播；摆放走放置模式 terrain_patch 自带实体定义），只有造角色要降生广播。
   const finishCreate = (desc: string) => isSticker
-    ? createStickerAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId)
+    ? createStickerAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId, session.currentScene)
     : isProp
-      ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId)
+      ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId, session.currentScene)
       : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId, spawn);
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
   // 超轮兜底（适配器无关）：已追问满上限还没 done，就用现有属性直接造——绝不无限追问。
@@ -2176,6 +2257,8 @@ export async function handleWsMessage(
     }));
     // 中途加入：世界正在演出时补发 stage_begin，让新连接锁交互并接住后续舞台命令/位置流。
     stages?.snapshotFor(worldId, (m) => socket.send(JSON.stringify(m)));
+    // 村民的漏话候选（按这个玩家的 discovered 算）——客户端据此自己调度、按距离衰减地播
+    pushWishes(socket, store, worldId, session.playerId, session.currentScene);
     return;
   }
 
@@ -2325,6 +2408,9 @@ export async function handleWsMessage(
         await startGameAsync(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.gameRequest, response.replyText, adapters, store, hub, stages);
         return;
       }
+      // 仙子答应带路 = 发现了「引路」玩法（宽松口径：应下就算，不等走到——
+      // 中途反悔的 3 岁小朋友不该被剥夺盖章）。若有村民正盼着去哪儿 → 心愿达成。
+      if (response.guide) await fulfillAbility(socket, adapters, store, msg.worldId ?? '', session.playerId, 'guide_to', session.clientTts, session.currentScene);
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -2568,6 +2654,7 @@ export async function handleWsMessage(
       items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
       playerPos: session.playerId ? store.getPlayerTile(worldId, sceneId, session.playerId) : undefined,
     }));
+    pushWishes(socket, store, worldId, session.playerId, sceneId); // 换场景 = 换了一批村民
     return;
   }
 
