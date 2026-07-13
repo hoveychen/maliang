@@ -20,7 +20,8 @@ const PAGE_W := 0.85              ## 单页宽（跨页 1.7:1，对齐 story 插
 const PAGE_STACK_T := 0.105      ## 页堆总厚（左+右恒等于它；厚书才有"书册边缘"与深沟槽）
 const STACK_BASE_FRAC := 0.35     ## 两侧页堆基线占比（走进度的只有中间 30%，两边始终厚）
 const COVER_T := 0.030            ## 精装封面板厚
-const COVER_MARGIN := 0.045       ## 封面板比页面多出的裙边
+const COVER_MARGIN := 0.026       ## 封面板比页面多出的裙边（真书裙边很窄，宽了像相框）
+const ENDPAPER_RIM := 0.016       ## 翻开时内侧布面只露的一圈细边（其余被环衬纸盖住）
 const BIND_Z := 0.010             ## 书脊装订点高度（纸面在书脊处下潜到这里）
 const SEGS := 20                  ## 页面剖面分段数（弯曲网格与拾取共用）
 const SPINE_W := PAGE_STACK_T + COVER_T + 0.014  ## 书脊板宽=合书时的书侧高
@@ -178,17 +179,104 @@ func _build() -> void:
 	set_open_frac(1.0)
 
 const CLOTH_COLOR := Color(0.545, 0.170, 0.195)  ## 精装布面深绯红（与 book_cover 封面同色系）
+const ENDPAPER_COLOR := Color(0.955, 0.925, 0.865) ## 环衬纸暖奶白
+
+var _cloth_mat: StandardMaterial3D    ## 三块封面板共用的布面材质（细织纹）
 
 func _make_board(bname: String, w: float, pos: Vector3) -> MeshInstance3D:
+	if _cloth_mat == null:
+		_cloth_mat = _paper_mat(CLOTH_COLOR)
+		_cloth_mat.albedo_texture = _make_cloth_texture()
+		_cloth_mat.uv1_scale = Vector3(6.0, 6.0, 1.0)
 	var box := BoxMesh.new()
 	box.size = Vector3(w, PAGE_H + COVER_MARGIN * 2.0, COVER_T)
 	var mi := MeshInstance3D.new()
 	mi.name = bname
 	mi.mesh = box
 	mi.position = pos
-	mi.material_override = _paper_mat(CLOTH_COLOR)
+	mi.material_override = _cloth_mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# 内侧环衬纸（真精装书翻开看到的是奶白衬页，布面只露一圈细边——
+	# 大面积布色正是"红色相框"观感的元凶）
+	var ep := QuadMesh.new()
+	ep.size = Vector2(w - ENDPAPER_RIM * 2.0, PAGE_H + (COVER_MARGIN - ENDPAPER_RIM) * 2.0)
+	var epi := MeshInstance3D.new()
+	epi.name = "Endpaper"
+	epi.mesh = ep
+	epi.position = Vector3(0.0, 0.0, COVER_T * 0.5 + FACE_EPS * 0.5)
+	epi.material_override = _paper_mat(ENDPAPER_COLOR)
+	epi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.add_child(epi)
 	return mi
+
+## 布面织纹：程序化经纬细纹 + 微噪点（灰阶，albedo_color 上色）。
+static func _make_cloth_texture() -> ImageTexture:
+	var img := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for y in 64:
+		for x in 64:
+			var weave := 0.94 + 0.045 * (sin(float(x) * TAU / 4.0) + sin(float(y) * TAU / 4.0)) * 0.5
+			var v := clampf(weave + rng.randf_range(-0.02, 0.02), 0.85, 1.0)
+			img.set_pixel(x, y, Color(v, v, v))
+	return ImageTexture.create_from_image(img)
+
+var _shadow: MeshInstance3D           ## 书下的柔和接触阴影（create_desk 后有效）
+
+## 木桌 + 接触阴影：书要"躺在桌上"才不是悬浮贴纸——落影是业界纸艺观感的
+## 第二根支柱（不开实时阴影，老平板 GPU 陷阱；用径向渐变假影贴图）。
+func create_desk(desk_tex: Texture2D) -> void:
+	var dq := QuadMesh.new()
+	dq.size = Vector2(18.0, 14.0)
+	var desk := MeshInstance3D.new()
+	desk.name = "Desk"
+	desk.mesh = dq
+	desk.position = Vector3(0.0, 0.0, -0.006)
+	var dm := _paper_mat(Color.WHITE)
+	dm.cull_mode = BaseMaterial3D.CULL_BACK
+	if desk_tex != null:
+		dm.albedo_texture = desk_tex
+		dm.uv1_scale = Vector3(5.0, 5.0, 1.0)
+	else:
+		dm.albedo_color = Color(0.87, 0.72, 0.52)
+	desk.material_override = dm
+	desk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(desk)
+	var sq := QuadMesh.new()
+	sq.size = Vector2((PAGE_W + COVER_MARGIN) * 2.0 + SPINE_W + 0.62, PAGE_H + COVER_MARGIN * 2.0 + 0.55)
+	_shadow = MeshInstance3D.new()
+	_shadow.name = "ContactShadow"
+	_shadow.mesh = sq
+	_shadow.position = Vector3(0.05, -0.06, -0.003) # 偏右下（光从左上来）
+	var sm := StandardMaterial3D.new()
+	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sm.albedo_texture = _make_shadow_texture()
+	sm.albedo_color = Color(0.30, 0.22, 0.16, 0.55) # 暖调软影
+	_shadow.material_override = sm
+	_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# 挂根而非 pivot：pivot 位移是为了把合书折到 +x 的几何搬回中央，
+	# 书的"视觉位置"始终在原点——影子也始终在原点，跟随 pivot 反而会跑偏
+	add_child(_shadow)
+	_update_shadow()
+
+## 接触影贴图：书底下实心平台 + 轮廓外平滑衰减（浓度要压在书的剪影边缘之外
+## 才看得见——纯径向渐变会把浓度全藏在书底下）。用超椭圆距离贴合书的矩形轮廓。
+static func _make_shadow_texture() -> ImageTexture:
+	var img := Image.create(128, 128, false, Image.FORMAT_RGBA8)
+	for y in 128:
+		for x in 128:
+			var p := Vector2(absf(x - 63.5) / 63.5, absf(y - 63.5) / 63.5)
+			var d := pow(pow(p.x, 4.0) + pow(p.y, 4.0), 0.25) # 超椭圆≈圆角矩形
+			var t := clampf((d - 0.62) / (1.0 - 0.62), 0.0, 1.0)
+			var a := 1.0 - t * t * (3.0 - 2.0 * t)
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
+	return ImageTexture.create_from_image(img)
+
+## 影子宽度跟随开合（合书≈半宽）。
+func _update_shadow() -> void:
+	if _shadow != null:
+		_shadow.scale = Vector3(lerpf(0.56, 1.0, _open_frac), 1.0, 1.0)
 
 ## 封面插画：贴在前封面板外侧面（合书时朝相机；翻开后朝下藏起）。
 func set_cover_texture(tex: Texture2D) -> void:
@@ -212,13 +300,15 @@ func set_cover_texture(tex: Texture2D) -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_board_front.add_child(mi)
 
-## 纸面材质：unshaded 保证亮度稳定（沟槽立体感靠顶点色，见 profile_shade）；
-## 双面渲染省掉绕序心智负担（几何量小，代价可忽略）。
+## 纸/布材质：吃光的哑光材质——业界纸艺观感的关键是真实光照下的素色材质
+## （Tearaway/Paper Mario 路数），材质本身接近平涂，立体感全靠光。
+## 粗糙度拉满、零高光；双面渲染省掉绕序心智负担（几何量小，代价可忽略）。
 static func _paper_mat(albedo: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.albedo_color = albedo
+	m.roughness = 1.0
+	m.metallic_specular = 0.0
 	return m
 
 ## 页缘贴图：程序化"一页页"细线（沿 v 重复的深浅纸线），贴页堆侧壁。
@@ -334,6 +424,7 @@ func set_open_frac(f: float) -> void:
 	var dim := lerpf(0.5, 1.0, _open_frac)
 	_page_mat_l.albedo_color = Color(dim, dim, dim)
 	_page_mat_r.albedo_color = Color(dim, dim, dim)
+	_update_shadow()
 
 func open_frac() -> float:
 	return _open_frac

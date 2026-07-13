@@ -433,6 +433,13 @@
       "targetW": 880,
       "targetH": 1024,
       "prompt": "front cover artwork of a hardcover children's fairytale storybook, deep warm crimson cloth background with an ornate golden decorative frame border, a cute tiny fairy with sparkling translucent wings floating in the center surrounded by golden stars and magic sparkles, flat rich storybook cover composition, straight-on view filling the whole frame"
+    },
+    {
+      "id": "desk_wood",
+      "kind": "illustration",
+      "targetW": 1600,
+      "targetH": 1000,
+      "prompt": "warm honey-colored wooden table surface seen from directly above, gentle soft wood grain, cozy and warm, uniform even texture filling the whole frame, no objects"
     }
   ]
 }
