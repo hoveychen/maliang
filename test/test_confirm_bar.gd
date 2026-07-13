@@ -1,9 +1,11 @@
 extends SceneTree
-## 确认条在两个宿主里的接线（world + onboarding 共用 ConfirmBar，一个开关全局生效）。
+## 确认条在 world 里的接线，以及 onboarding 【不】进确认模式的护栏。
 ## 不走真 ASR：直接发 VoiceCapture 的信号，验证宿主对信号的反应——
 ##   confirm_ready → 亮条（world 还要把「思考中」收掉：说完≠采纳，这会儿没人在思考）
 ##   committed     → 收条（accept 会补发 committed；没开确认模式时它本来就一直发）
 ## 三个键点下去要真的打到 VoiceCapture 的 replay/accept/retry 上（接线断了 UI 就是死的）。
+## onboarding 名字页刻意不进确认模式：那里本来就有一层更直接的确认（服务端念出识别到的名字
+## 「你叫XX，对不对呀」），再叠一层回放录音只会更啰嗦（老板 2026-07-13 定）。
 ## 运行: godot --headless --path . --script res://test/test_confirm_bar.gd
 
 var _ran := false
@@ -24,7 +26,7 @@ func _run_once() -> void:
 	_ran = true
 	var fails := 0
 	fails += _test_world()
-	fails += _test_onboarding()
+	fails += _test_onboarding_opts_out()
 	fails += _test_buttons_wired()
 	if fails == 0:
 		print("test_confirm_bar: 全部通过")
@@ -54,25 +56,23 @@ func _test_world() -> int:
 	scene.queue_free()
 	return f
 
-func _test_onboarding() -> int:
-	print("[onboarding 接线]")
+# onboarding 名字页【不】跟随开关：哪怕手机设置里开着确认模式，名字页也不能进——
+# 它自己已经有一层「你叫XX对不对呀」的复述确认，叠上回放就是两层，太啰嗦。
+func _test_onboarding_opts_out() -> int:
+	print("[onboarding 不进确认模式]")
 	var f := 0
+	var orig := PlayerProfile.confirm_voice()
+	PlayerProfile.set_confirm_voice(true) # 开关开着——名字页也必须不理它
 	var ob: Control = load("res://scripts/onboarding.gd").new()
 	root.add_child(ob)
-	# intro 页的 UI 是懒构建的（_build_intro）：直接建一遍，确认条就在里面
-	var box := VBoxContainer.new()
-	ob.add_child(box)
-	ob._build_intro(box, {})
 	ob._voice.stop()
-	var bar: Control = ob.get("_confirm_bar")
 	var vc: Object = ob.get("_vc")
-	f += _check("确认条已建", bar != null, true)
-	f += _check("初始隐藏", bar.visible, false)
-	vc.confirm_ready.emit("我叫朵朵")
-	f += _check("confirm_ready → 亮确认条", bar.visible, true)
-	f += _check("显示识别到的名字", bar._text_label.text, "我叫朵朵")
-	f += _check("此时还没进提交态（说完≠采纳）", ob.get("_intro_submitting"), false)
+	f += _check("开关开着，名字页仍不进确认模式", vc.confirm_mode, false)
+	# 说完就该直接提交（committed 不被扣住）——名字页的一次性采集流程不变
+	vc.committed.emit()
+	f += _check("committed 直达：进提交态（不等回放确认）", ob.get("_intro_submitting"), true)
 	ob.free()
+	PlayerProfile.set_confirm_voice(orig) # 还原，别污染其它测试
 	return f
 
 ## 三个键真的连到了 VoiceCapture 上——按钮画得再好，信号没接就是死的。

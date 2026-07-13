@@ -834,7 +834,7 @@ func _build_settings_page() -> Control:
 	confirm_row.add_child(_confirm_voice_btn)
 	confirm_card.add_child(confirm_row)
 	var confirm_sub := Label.new()
-	confirm_sub.text = "小小孩说话容易说一半。开了以后，说完会把刚才那句放给他听，他点「就是这样」才发出去。"
+	confirm_sub.text = "小小孩说话容易说一半。开了以后，跟小伙伴说完话，会把刚才那句放给他听，他点「就是这样」才发出去。"
 	UiAssets.style_card_label(confirm_sub, 18)
 	confirm_sub.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	confirm_sub.modulate = Color(1.0, 1.0, 1.0, 0.75)

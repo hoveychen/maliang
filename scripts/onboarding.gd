@@ -83,7 +83,6 @@ var _vc: VoiceCapture              ## 开放麦编排（mic+VAD+端侧/服务端
 var _intro_tries := 0
 var _intro_status: TextureRect = null ## 录音状态演出（ic_mic/ic_mic_rec/ic_wait/em_happy）
 var _intro_confirm: Control = null ## ✓/✗ 确认行（服务端念完「你叫X对不对呀」后出现）
-var _confirm_bar: ConfirmBar = null ## 说完先听一遍的确认条（仅 confirm_mode 开时出现）
 var _pending := {}                 ## 待确认 {name, nickname, transcript}
 var _intro_submitting := false     ## 已提交、等识别/确认：不再开麦
 var _intro_wave: Control = null    ## 声波条（随 VAD 电平起伏）
@@ -111,7 +110,9 @@ func _ready() -> void:
 	_vc = VoiceCapture.new()
 	_vc.name = "VoiceCapture"
 	_vc.game_audio = game_audio
-	_vc.confirm_mode = PlayerProfile.confirm_voice() # 与 world 同一开关（全局生效）
+	# 名字页【不】进确认模式（即便手机设置里开了）：这里本来就有一层更直接的确认——
+	# 服务端念出识别到的名字「你叫XX，对不对呀」，孩子点 ✓/✗。再叠一层回放录音只会更啰嗦。
+	# 确认模式只服务 world 的开放式对话（那里没有任何复述，孩子无从判断自己说清没有）。
 	# 开麦门禁：旁白播放期间不喂（半双工防自听），其余交给 VAD。BGM 让位判据=旁白在播。
 	_vc.should_capture = func() -> bool: return not _voice.playing
 	_vc.is_speaking = func() -> bool: return _voice.playing
@@ -120,7 +121,6 @@ func _ready() -> void:
 	_vc.local_final.connect(_on_capture_local_final)
 	_vc.cancelled.connect(_on_capture_cancelled)
 	_vc.asr_ready.connect(_on_capture_ready)
-	_vc.confirm_ready.connect(_on_capture_confirm_ready)
 	add_child(_vc)
 	_next_page()
 
@@ -141,17 +141,8 @@ func _on_capture_begin() -> void:
 	if _intro_status != null:
 		_intro_status.texture = UiAssets.tex("ic_mic_rec")
 
-## 确认模式：识别好了但先别提交——VoiceCapture 正在回放那句话，亮确认条等孩子点。
-## 此时 committed 还没发（说完≠采纳），所以麦没关、也没进提交态。
-func _on_capture_confirm_ready(text: String) -> void:
-	if _confirm_bar != null:
-		_confirm_bar.show_for(text)
-
 ## 说完：一次性采集，关麦 + 图标转「处理中」，等端侧识别出文本（local_final）。
-## 确认模式下这一步推迟到孩子点「就是这样」之后（accept 补发 committed）。
 func _on_capture_committed() -> void:
-	if _confirm_bar != null:
-		_confirm_bar.hide_bar()
 	_intro_submitting = true
 	_vc.close()
 	if _intro_status != null:
@@ -387,14 +378,6 @@ func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
 		(_intro_confirm as HBoxContainer).add_child(b)
 	box.add_child(_intro_confirm)
 	_intro_confirm.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-
-	# 说完先听一遍：确认条（confirm_mode 开时才亮，与 world 同一组件、同一开关）
-	_confirm_bar = ConfirmBar.new()
-	_confirm_bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_confirm_bar.replay_pressed.connect(func() -> void: _vc.replay())
-	_confirm_bar.accept_pressed.connect(func() -> void: _vc.accept())
-	_confirm_bar.retry_pressed.connect(func() -> void: _vc.retry())
-	box.add_child(_confirm_bar)
 
 func _is_intro_page() -> bool:
 	return page_idx >= 0 and page_idx < PAGES.size() and String(PAGES[page_idx]["kind"]) == "intro"
