@@ -10,15 +10,15 @@ func _init() -> void:
 	b.sent.connect(func(m: Dictionary) -> void: captured.append(m))
 
 	# 未设 player_id：不注入
-	b.send_voice_start("w1", "c1")
+	b.send_voice_transcript("w1", "c1", "你好")
 	fails += _check("无 player_id 不注入", (captured[-1] as Dictionary).has("playerId"), false)
 
-	# 设 player_id：后续消息统一注入
+	# 设 player_id：后续消息统一注入（语音上行只剩 voice_transcript 一个口）
 	b.player_id = "pid-abc"
-	b.send_voice_start("w1", "c1")
-	fails += _check("voice_start 注入 playerId", (captured[-1] as Dictionary).get("playerId", ""), "pid-abc")
-	b.send_voice_chunk("AAAA")
-	fails += _check("voice_chunk 注入 playerId", (captured[-1] as Dictionary).get("playerId", ""), "pid-abc")
+	b.send_voice_transcript("w1", "c1", "你好")
+	fails += _check("voice_transcript 注入 playerId", (captured[-1] as Dictionary).get("playerId", ""), "pid-abc")
+	b.send_greeting("w1", "c1")
+	fails += _check("其它消息同样注入 playerId", (captured[-1] as Dictionary).get("playerId", ""), "pid-abc")
 
 	# world_info 带 profile + 显式场景
 	b.send_world_info("w1", ["风车"], { "name": "朵朵", "spriteAsset": "h1" }, "forest")

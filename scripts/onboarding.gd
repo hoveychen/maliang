@@ -6,7 +6,7 @@ extends Control
 ##       | generate(形象生成确认,P6)
 ## intro 页是开放麦：旁白问完自动开麦，交给 VoiceCapture 模块（mic+VAD+端侧/服务端ASR+
 ## 自听防护+BGM门控，与 world.gd 共用同一编排），onboarding 只接信号做状态图标与名字提交。
-## 话筒图标只做状态指示，不可点。端侧模型未就绪时不开麦，绝不回落服务端上传 PCM。
+## 话筒图标只做状态指示，不可点。端侧模型未就绪时不开麦（没有服务端识别可回落）。
 
 const VOICE_DIR := "res://assets/voice/onboarding"
 const FLIP_TIME := 0.35
@@ -58,7 +58,6 @@ var _story_auto_t := 0.0           ## story 页自动翻页倒计时（旁白结
 const INTRO_MAX_TRIES := 3         ## 重问上限；仍没听到就先叫「小朋友」，进游戏后还能改
 var api: Api
 var _vc: VoiceCapture              ## 开放麦编排（mic+VAD+端侧/服务端ASR+自听防护+BGM门控），见 voice_capture.gd
-var _intro_pcm := PackedByteArray()## 服务端路径：攒整段，committed 时一次性 POST /onboarding/intro
 var _intro_tries := 0
 var _intro_status: TextureRect = null ## 录音状态演出（ic_mic/ic_mic_rec/ic_wait/em_happy）
 var _intro_confirm: Control = null ## ✓/✗ 确认行
@@ -94,7 +93,6 @@ func _ready() -> void:
 	_vc.should_capture = func() -> bool: return not _voice.playing
 	_vc.is_speaking = func() -> bool: return _voice.playing
 	_vc.utterance_begin.connect(_on_capture_begin)
-	_vc.chunk.connect(_on_capture_chunk)
 	_vc.committed.connect(_on_capture_committed)
 	_vc.local_final.connect(_on_capture_local_final)
 	_vc.cancelled.connect(_on_capture_cancelled)
@@ -114,31 +112,24 @@ func _on_capture_ready() -> void:
 	if _intro_status != null and not _vc.is_recording():
 		_intro_status.texture = UiAssets.tex("ic_mic")
 
-## 开口：亮录音图标；清零服务端整段累加器（本段若走服务端，chunk 会往里攒）。
-func _on_capture_begin(_is_local: bool) -> void:
-	_intro_pcm = PackedByteArray()
+## 开口：亮录音图标。
+func _on_capture_begin() -> void:
 	if _intro_status != null:
 		_intro_status.texture = UiAssets.tex("ic_mic_rec")
 
-## 服务端路径分片：攒整段，committed 时一次性 POST（端侧路径不发此信号）。
-func _on_capture_chunk(pcm: PackedByteArray) -> void:
-	_intro_pcm.append_array(pcm)
-
-## 说完：一次性采集，关麦 + 图标转「处理中」。服务端路径就地 POST；端侧等 local_final。
-func _on_capture_committed(is_local: bool) -> void:
+## 说完：一次性采集，关麦 + 图标转「处理中」，等端侧识别出文本（local_final）。
+func _on_capture_committed() -> void:
 	_intro_submitting = true
 	_vc.close()
 	if _intro_status != null:
 		_intro_status.texture = UiAssets.tex("ic_wait")
-	if not is_local:
-		_submit_intro("", _intro_pcm)
 
-## 端侧识别出最终文本：提交为名字。
+## 端侧识别出最终文本：提交为名字（空文本 → _submit_intro 内部重问）。
 func _on_capture_local_final(text: String) -> void:
-	_submit_intro(text.strip_edges(), PackedByteArray())
+	_submit_intro(text.strip_edges())
 
 ## 误触（说太短）：图标回「在听」，麦克风继续开着（VoiceCapture 内部保持聆听）。
-func _on_capture_cancelled(_is_local: bool) -> void:
+func _on_capture_cancelled() -> void:
 	if _intro_status != null:
 		_intro_status.texture = UiAssets.tex("ic_mic")
 
@@ -335,18 +326,13 @@ func _step_wave(delta: float) -> void:
 		bar.custom_minimum_size = Vector2(16.0, h)
 
 
-## 提交自我介绍：转写（端侧）或 PCM（服务端识别）→ 名字 + 确认音频。
-func _submit_intro(transcript: String, pcm: PackedByteArray) -> void:
-	var body := {}
-	if not transcript.is_empty():
-		body["transcript"] = transcript
-	elif not pcm.is_empty():
-		body["pcmBase64"] = Marshalls.raw_to_base64(pcm)
-		body["rate"] = 16000
-	else:
+## 提交自我介绍：端侧转写 → 名字 + 确认音频。
+## 端侧识别好的转写 → 服务端提名字/称呼（音频永不上传：服务端已无 ASR）。空转写就地重问。
+func _submit_intro(transcript: String) -> void:
+	if transcript.is_empty():
 		_intro_retry()
 		return
-	var res := await api.post_json("/onboarding/intro", body)
+	var res := await api.post_json("/onboarding/intro", { "transcript": transcript })
 	var name := String(res.get("name", ""))
 	if name.is_empty():
 		_intro_retry()

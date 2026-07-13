@@ -1,9 +1,12 @@
 class_name VoiceCapture
 extends Node
-## 开放麦编排：把 MicRecorder + VoiceVad + 端侧/服务端 ASR + 自听防护 + BGM 门控 这套
-## 「旁白/角色说完 → 开麦 → VAD 断句 → 端侧识别或服务端上传」的编排循环收敛到一处。
+## 开放麦编排：把 MicRecorder + VoiceVad + 端侧 ASR + 自听防护 + BGM 门控 这套
+## 「旁白/角色说完 → 开麦 → VAD 断句 → 端侧识别」的编排循环收敛到一处。
 ## 此前 world.gd 与 onboarding.gd 各手抄一份，口径漂移（BGM 静音只在 world 修对，onboarding
 ## 漏了开麦等待窗），本模块是单一真相。设计见 docs/voice-capture-module-design.md。
+##
+## 识别只有端侧一条路（服务端 ASR 于 2026-07-13 整条退役）：PCM 直喂 MaliangAsr 插件，
+## 出 local_final 文本；音频永远不离开设备。
 ##
 ## 宿主用法（像 GameAudio 一样 add_child）：
 ##   var vc := VoiceCapture.new(); vc.game_audio = game_audio; add_child(vc)
@@ -12,25 +15,22 @@ extends Node
 ##   vc.open()   # 进对话 / 旁白说完进入聆听窗
 ##   vc.close()  # 退对话 / 提交后
 ##   # 宿主 _process 每帧： vc.step(delta)
-## 并接信号决定识别产物去向（world=WS 流式，onboarding=攒整段单发 POST）。
+## 并接 local_final 决定转写去向（world=送对话/喊话中继，onboarding=提名字）。
 ##
 ## 分工：本模块吃「机械核」——单例接线、就绪门禁、mic drain+VAD、自听防护(unmute_grace+
 ## sfx_bleeding)、分片、端侧会话生命周期、VAD 事件分发、**set_music_muted 门控**。
 ## 宿主留「业务策略」——sink（信号）、开麦门禁（should_capture）、以及 set_ducked（音量微降，
 ## 各宿主口径不同且非 ASR 关键，故不并入，避免改动 world 既有行为）。
 
-## VAD 判定开口：宿主亮录音态 UI、起耗时打点。is_local=本段是否走端侧会话（begin 定格）：
-## 服务端路径宿主据此发 voice_start（端侧/喊话不发）。
-signal utterance_begin(is_local: bool)
-## 服务端 sink：一片 PCM 就绪（端侧路径不发，内部直喂插件）。宿主流式上传或攒整段。
-signal chunk(pcm: PackedByteArray)
-## 端侧识别出最终文本（端侧路径专有终局）。宿主判空/退避/中继/送对话。
+## VAD 判定开口：宿主亮录音态 UI、起耗时打点。
+signal utterance_begin()
+## 端侧识别出最终文本（唯一终局）。宿主判空/退避/中继/送对话。
+## 本机没有可用端侧 ASR 时（editor/headless 缺模型）此信号根本不会来——不伪造空转写。
 signal local_final(text: String)
-## 说完（静音断句/硬顶）：残片已 flush。两路都发（宿主亮思考/收尾 UI）。
-## is_local=本段是否走端侧：服务端路径宿主据此发 voice_end / POST 整段；端侧等 local_final。
-signal committed(is_local: bool)
-## 太短的误触 / 中途闭麦：静默丢弃本段。is_local=本段是否走端侧：服务端路径宿主据此发 voice_cancel。
-signal cancelled(is_local: bool)
+## 说完（静音断句/硬顶）：残片已 flush，正在等识别结果。宿主亮思考/收尾 UI。
+signal committed()
+## 太短的误触 / 中途闭麦：静默丢弃本段，不产生转写。
+signal cancelled()
 ## 端侧模型异步加载完成（宿主用于日志/状态图标）。名不用 ready：与 Node 内置信号撞名。
 signal asr_ready
 
@@ -46,11 +46,11 @@ var debug_log := false                                 ## 录音诊断 logcat（
 
 ## ── 内部状态 ───────────────────────────────────────────────────────────────
 var _mic: MicRecorder = null
-var _asr: Object = null            ## 端侧 ASR（Android MaliangAsr 单例），null=服务端识别
+var _asr: Object = null            ## 端侧 ASR（MaliangAsr 单例）；null=本机无可用端侧识别
 var _vad: VoiceVad = null          ## 开麦期间非 null（close 置空）
 var _open := false                 ## 聆听窗是否打开（open→close 之间；BGM 静音据此）
 var _recording := false            ## VAD 已判定开口、正在收录一段
-var _local_session := false        ## 本段路由是否走端侧会话（begin 定格）
+var _asr_session := false          ## 本段是否已开端侧识别会话（begin 定格；无 ASR 时为假）
 var _pending_pcm := PackedByteArray()  ## 未 flush 的分片（攒够 150ms 再喂/发）
 var _chunk_accum := 0.0            ## 分片计时
 var _unmute_t := 0.0               ## 闭麦恢复期剩余秒数
@@ -64,11 +64,12 @@ func _ready() -> void:
 	if _asr == null: # 测试可预注入 fake，跳过单例接线
 		_setup_local_asr()
 
-## 端侧 ASR（Android 插件 MaliangAsr）：有则异步加载模型；桌面/编辑器无单例走服务端识别。
+## 端侧 ASR（MaliangAsr 单例，Android 插件 / macOS GDExtension）：有则异步加载模型。
+## editor/headless 从源码跑时单例在、但模型不随包（除非 MALIANG_ASR_MODEL_DIR 指路），
+## initialize() 会 asr_error → _asr 置空 = 本机无识别（语音不工作但不崩，见 _on_local_error）。
 func _setup_local_asr() -> void:
 	if not Engine.has_singleton("MaliangAsr"):
-		# Android/导出 macOS 没有单例 = 导出漏带端侧 ASR（坏包），硬报错拒进游戏；
-		# editor/headless 从源码跑无模型随包，合法走服务端识别（is_template 为假不致命）。
+		# Android/导出 macOS 没有单例 = 导出漏带端侧 ASR（坏包），硬报错拒进游戏。
 		if AsrGuard.is_fatal(os_name, false, OS.has_feature("template")):
 			AsrGuard.block(get_tree(), AsrGuard.MSG_MISSING)
 		return
@@ -91,7 +92,7 @@ func _exit_tree() -> void:
 
 # ── 查询 ────────────────────────────────────────────────────────────────────
 
-## 端侧 ASR 是否可用于本次 utterance。Android 未就绪即禁止开麦（绝不回落服务端）。
+## 端侧 ASR 是否可用于本次 utterance。Android 未就绪即禁止开麦（没有服务端可回落）。
 func is_ready() -> bool:
 	return _asr != null and _asr.isReady()
 
@@ -106,7 +107,7 @@ func is_open() -> bool:
 func level() -> float:
 	return _vad.level if _vad != null else 0.0
 
-## 端侧模型未就绪、Android 上必须等（不开麦、绝不回落上传）。宿主 should_capture 可复用。
+## 端侧模型未就绪、Android 上必须等（不开麦；没有服务端识别可回落）。宿主 should_capture 可复用。
 func must_wait_for_ready() -> bool:
 	return AsrGuard.must_wait_for_ready(os_name, is_ready(), OS.has_feature("template"))
 
@@ -209,7 +210,8 @@ func _feed(pcm: PackedByteArray) -> void:
 						ev.get("reason", "?"), ev.get("speech_ms", 0), ev.get("silence_ms", 0)])
 				_cancel_utterance()
 
-## 开口：路由定格（端侧就绪走本地，否则服务端），预录头块先送（首音节不丢）。
+## 开口：端侧就绪则开识别会话，预录头块先送（首音节不丢）。
+## 无可用 ASR 时照常录（VAD 事件不依赖 ASR），只是 PCM 无处可送——见 _flush。
 func _utterance_begin(head: PackedByteArray) -> void:
 	if _recording:
 		return
@@ -218,13 +220,13 @@ func _utterance_begin(head: PackedByteArray) -> void:
 		game_audio.play_sfx("mic_on")
 	_pending_pcm = head.duplicate()
 	_chunk_accum = 0.0
-	_local_session = is_ready()
-	if _local_session:
+	_asr_session = is_ready()
+	if _asr_session:
 		_asr.startSession()
-	utterance_begin.emit(_local_session)
+	utterance_begin.emit()
 	_flush()
 
-## 说完（静音断句/硬顶）：残片发出，触发识别/回复。
+## 说完（静音断句/硬顶）：残片发出，触发识别。
 func _utterance_commit() -> void:
 	if not _recording:
 		return
@@ -232,39 +234,38 @@ func _utterance_commit() -> void:
 	if game_audio != null:
 		game_audio.play_sfx("mic_off")
 	_flush()
-	var was_local := _local_session
-	if _local_session:
+	if _asr_session:
 		_asr.stopSession() # final_result 信号回来后走 local_final
-	committed.emit(was_local)
+	committed.emit()
+	# 注意：本机没有可用端侧 ASR 时（editor/headless 缺模型）不会有 local_final 回来——
+	# 没有识别能力就是没有结果，不伪造空转写。宿主自己的思考超时会兜底解卡（world 的
+	# THINK_TIMEOUT）。生产真机上端侧 ASR 是硬依赖（AsrGuard 拦住坏包），不会走到这一步。
 
-## 中途丢弃当前这段但保持聆听（宿主主动取消，如服务端识别失败让孩子重说）。不关麦。
+## 中途丢弃当前这段但保持聆听（宿主主动取消，如识别失败让孩子重说）。不关麦。
 func cancel() -> void:
 	_cancel_utterance()
 
-## 太短的误触 / 中途闭麦：静默丢弃本段，双 ASR 路径都不产生回复。
+## 太短的误触 / 中途闭麦：静默丢弃本段，不产生转写。
 func _cancel_utterance() -> void:
 	if not _recording:
 		return
 	_recording = false
 	_pending_pcm = PackedByteArray()
-	var was_local := _local_session
-	if _local_session:
-		_local_session = false # 弃会话即可：插件下次 startSession 自动释放旧流
-	cancelled.emit(was_local)
+	_asr_session = false # 弃会话即可：插件下次 startSession 自动释放旧流
+	cancelled.emit()
 
+## 分片去向：端侧会话开着就直喂插件；没有会话（本机无 ASR）就丢弃——音频不上传、不外流。
 func _flush() -> void:
 	if _pending_pcm.is_empty():
 		return
-	if _local_session:
-		_asr.feedPcm(_pending_pcm) # 端侧：原始 PCM 直喂插件，不上传
-	else:
-		chunk.emit(_pending_pcm)   # 服务端：宿主流式上传 / 攒整段
+	if _asr_session:
+		_asr.feedPcm(_pending_pcm) # 原始 PCM 直喂插件，永不离开设备
 	_pending_pcm = PackedByteArray()
 
 # ── 端侧 ASR 信号 ───────────────────────────────────────────────────────────
 
 func _on_local_final(text: String) -> void:
-	_local_session = false
+	_asr_session = false
 	local_final.emit(text)
 
 func _on_local_ready() -> void:
@@ -273,10 +274,12 @@ func _on_local_ready() -> void:
 	asr_ready.emit()
 
 func _on_local_error(msg: String) -> void:
-	_local_session = false
-	# Android/导出 macOS 上端侧 ASR 是硬依赖：失败即模型问题，硬报错，绝不静默回落。
+	_asr_session = false
+	# Android/导出 macOS 上端侧 ASR 是硬依赖：失败即模型问题，硬报错拒进游戏。
 	if AsrGuard.is_fatal(os_name, false, OS.has_feature("template")):
 		AsrGuard.block(get_tree(), AsrGuard.MSG_INIT_FAILED % msg)
 		return
-	push_warning("端侧 ASR 出错，本次运行回落服务端识别: %s" % msg)
+	# editor/headless：多半是模型没随包（没设 MALIANG_ASR_MODEL_DIR）。没有服务端可回落了——
+	# 本次运行就是没有识别能力：麦照开、VAD 照跑，但转写恒为空（见 _utterance_commit）。
+	push_warning("端侧 ASR 不可用，本次运行没有语音识别: %s" % msg)
 	_asr = null

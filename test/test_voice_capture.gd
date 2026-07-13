@@ -2,8 +2,8 @@ extends SceneTree
 ## VoiceCapture 模块单测：注入合成 PCM 走真实 VAD 链路（_feed），验证
 ##  1) BGM 静音门控——**聆听窗一开就静音，不必等到 recording**（问题①的回归护栏：
 ##     旧 onboarding 口径 set_music_muted(_intro_recording) 漏了开麦等待窗）；
-##  2) 端侧路径：开口→startSession+feedPcm，说完→stopSession；
-##  3) 服务端路径（无端侧单例）：开口→chunk 信号，说完→committed 信号；
+##  2) 端侧路径：开口→startSession+feedPcm，说完→stopSession（识别唯一的一条路）；
+##  3) 无可用 ASR（editor/headless 缺模型）：VAD 照跑，但音频不喂给任何人、也不产生转写；
 ##  4) 太短→cancelled，不产生 commit。
 ## 运行: godot --headless --path . --script res://test/test_voice_capture.gd
 
@@ -46,7 +46,7 @@ func _run_once() -> void:
 	var fails := 0
 	fails += _test_bgm_gating()
 	fails += _test_local_path()
-	fails += _test_server_path()
+	fails += _test_no_asr_path()
 	fails += _test_short_cancel()
 	fails += _test_sfx_guard()
 	if fails == 0:
@@ -128,18 +128,20 @@ func _test_local_path() -> int:
 	vc.queue_free()
 	return f
 
-# ③ 服务端路径：无端侧单例，走 chunk / committed 信号。
-func _test_server_path() -> int:
-	print("[服务端路径]")
+# ③ 无可用端侧 ASR（editor/headless 缺模型）：服务端 ASR 已退役，没有回落路径。
+# 录音链路必须照常跑完（VAD 事件不依赖 ASR），但音频无处可去、也不产生转写——
+# 关键：绝不能悄悄把 PCM 送去别处（这正是本次退役要根除的第二条路径）。
+func _test_no_asr_path() -> int:
+	print("[无可用 ASR]")
 	var f := 0
 	var vc := _make(null, null)
 	vc.should_capture = func() -> bool: return true
-	var chunks := []
 	var begins := [0]
 	var commits := [0]
-	vc.chunk.connect(func(pcm: PackedByteArray) -> void: chunks.append(pcm))
-	vc.utterance_begin.connect(func(_is_local: bool) -> void: begins[0] += 1)
-	vc.committed.connect(func(_is_local: bool) -> void: commits[0] += 1)
+	var finals := []
+	vc.utterance_begin.connect(func() -> void: begins[0] += 1)
+	vc.committed.connect(func() -> void: commits[0] += 1)
+	vc.local_final.connect(func(t: String) -> void: finals.append(t))
 	vc.open()
 
 	for i in 20:
@@ -147,12 +149,12 @@ func _test_server_path() -> int:
 	for i in 20:
 		vc._feed(_pcm(30, 0.3))
 	f += _check("开口发 utterance_begin", begins[0], 1)
-	f += _check("服务端路径发 chunk", chunks.size() > 0, true)
-	f += _check("未走端侧（is_ready 假）", vc.is_ready(), false)
+	f += _check("无端侧会话（is_ready 假）", vc.is_ready(), false)
 
 	for i in 40:
 		vc._feed(_pcm(30, 0.0))
 	f += _check("断句发 committed", commits[0], 1)
+	f += _check("无 ASR 时不产生转写（不伪造空结果）", finals, [])
 
 	vc.close()
 	vc.queue_free()
@@ -166,8 +168,8 @@ func _test_short_cancel() -> int:
 	vc.should_capture = func() -> bool: return true
 	var commits := [0]
 	var cancels := [0]
-	vc.committed.connect(func(_is_local: bool) -> void: commits[0] += 1)
-	vc.cancelled.connect(func(_is_local: bool) -> void: cancels[0] += 1)
+	vc.committed.connect(func() -> void: commits[0] += 1)
+	vc.cancelled.connect(func() -> void: cancels[0] += 1)
 	vc.open()
 
 	for i in 20:

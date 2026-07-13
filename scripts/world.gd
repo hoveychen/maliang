@@ -115,10 +115,9 @@ var voice_prof_label: Label
 var _vt_speak_start := 0  ## 开口 _utterance_begin
 var _vt_speak_end := 0    ## 断句 _utterance_commit
 var _vt_asr_done := 0     ## 端侧识别出文本 _on_local_asr_final
-var _vt_send := 0         ## 发 voice_transcript（端侧）/ voice_end（服务端）
+var _vt_send := 0         ## 发 voice_transcript 的时刻
 var _vt_response := 0     ## character_response 到达
 var _vt_tts_out := 0      ## 本轮首个 TTS 音频起播
-var _vt_local := false    ## 本轮是否端侧 ASR（决定 ASR/LLM 拆分口径）
 var banner: Label
 var heard_label: Label   ## 顶部显示 ASR 识别到的文字（"听到：…"，给家长确认）
 
@@ -389,7 +388,6 @@ func _setup_audio() -> void:
 	_vc.should_capture = _voice_should_capture
 	_vc.is_speaking = func() -> bool: return _fsm_inputs().speaking()
 	_vc.utterance_begin.connect(_on_capture_begin)
-	_vc.chunk.connect(_on_capture_chunk)
 	_vc.committed.connect(_on_capture_committed)
 	_vc.local_final.connect(_on_capture_local_final)
 	_vc.cancelled.connect(_on_capture_cancelled)
@@ -403,7 +401,7 @@ func _voice_should_capture() -> bool:
 		return false
 	var x := _fsm_inputs()
 	if not _talk_pid.is_empty() and not _vc.is_ready():
-		return false # 喊话只走端侧 ASR（文本中继，无服务端语音会话可回落）
+		return false # 喊话靠端侧转写做文本中继：没有可用识别就别开麦
 	return InteractionFsm.mic_open(InteractionFsm.derive(x))
 
 func _setup_environment() -> void:
@@ -4770,44 +4768,30 @@ func _reset_empty_streak() -> void:
 func _on_capture_ready() -> void:
 	pass
 
-## 开口：清零本轮耗时戳；服务端路径（非端侧、非喊话）发 voice_start，喊话/端侧不发。
-func _on_capture_begin(is_local: bool) -> void:
+## 开口：清零本轮耗时戳。识别在端侧，开口这一刻不需要通知服务端。
+func _on_capture_begin() -> void:
 	_vt_speak_start = Time.get_ticks_msec()
 	_vt_speak_end = 0
 	_vt_asr_done = 0
 	_vt_send = 0
 	_vt_response = 0
 	_vt_tts_out = 0
-	if not is_local and _talk_pid.is_empty():
-		backend.send_voice_start(world_id, _selected_id())
 
-## 服务端路径分片：流式上传（端侧路径不发此信号；喊话无服务端会话，忽略）。
-func _on_capture_chunk(pcm: PackedByteArray) -> void:
-	if _talk_pid.is_empty():
-		backend.send_voice_chunk(Marshalls.raw_to_base64(pcm))
-
-## 说完：亮思考态、造物投掷；服务端路径发 voice_end，端侧等 local_final。不关麦（继续聆听）。
-func _on_capture_committed(is_local: bool) -> void:
+## 说完：亮思考态、造物投掷，等端侧识别出文本（local_final）。不关麦（继续聆听）。
+func _on_capture_committed() -> void:
 	# 喊话没有服务端回复要等：不亮「思考中」、不开解卡定时器（端侧 ASR final 秒回）
 	if _talk_pid.is_empty():
 		thinking_label.visible = true
 	banner.visible = false
 	if _in_creation:
 		_throw_voice_answer() # 说完就把「这句话」扔进蛋/炉：孩子看得见自己的回答被用上了
-	if not is_local and _talk_pid.is_empty():
-		backend.send_voice_end()
-	# 语音耗时：断句时刻 + 本轮 ASR 口径；服务端路径此刻即已发出(voice_end)，send 戳就是断句戳
 	_vt_speak_end = Time.get_ticks_msec()
-	_vt_local = is_local
-	if not is_local:
-		_vt_send = _vt_speak_end
 	if _talk_pid.is_empty():
 		_think_timer.start(THINK_TIMEOUT)  # 兜底：响应没回来也会自动解卡
 
-## 太短的误触/中途丢弃：服务端路径要通知后端取消半开会话（端侧丢弃即可，喊话无会话）。
-func _on_capture_cancelled(is_local: bool) -> void:
-	if not is_local and _talk_pid.is_empty():
-		backend.send_voice_cancel()
+## 太短的误触/中途丢弃：端侧丢弃即可，服务端没有半开会话要收。
+func _on_capture_cancelled() -> void:
+	pass
 
 ## 端侧识别出最终文本：空→退避；喊话→文本中继；否则送对话。
 func _on_capture_local_final(text: String) -> void:
@@ -5378,12 +5362,8 @@ func _update_voice_prof() -> void:
 	var vad := maxi(0, _vt_speak_end - _vt_speak_start)
 	var llm := maxi(0, _vt_response - _vt_send)
 	var lines: Array[String] = ["语音耗时(ms)", "VAD %d" % vad]
-	if _vt_local:
-		lines.append("ASR %d 端侧" % maxi(0, _vt_asr_done - _vt_speak_end))
-		lines.append("LLM %d" % llm)
-	else:
-		lines.append("ASR server")
-		lines.append("LLM %d 含ASR" % llm)
+	lines.append("ASR %d 端侧" % maxi(0, _vt_asr_done - _vt_speak_end)) # 识别只有端侧一条路
+	lines.append("LLM %d" % llm)
 	if _vt_tts_out != 0:
 		lines.append("TTS %d" % maxi(0, _vt_tts_out - _vt_response))
 	else:
