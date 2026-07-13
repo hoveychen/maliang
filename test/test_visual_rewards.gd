@@ -108,6 +108,23 @@ func _tick() -> void:
 			_check("flower count up on flowerGained", scene.call("_red_flower_count"), 3)
 			var banner := scene.get("banner") as Label
 			_check("banner announces flower", banner.text.contains("小红花"), true)
+		70:
+			# 心愿委托（wishes.ts 的 type='wish'）：chip 必须显示许愿人 + 魔法棒
+			# （村民自己不会魔法 → 图标就是「去找会变魔法的」这条线索）。
+			# 回归防线：这个 match 没有默认分支，漏一个 type 不会崩，只会渲出一个
+			# 残缺的 chip（靶子+箭头+盖章，中间空的）——静默的丑，测试不看就发现不了。
+			scene.call("_set_active_task", _task("wish", { "wishAbility": "create_prop" }))
+			var wchip := scene.get("task_chip") as HBoxContainer
+			var wtext := ""
+			var wicons := 0
+			for c in wchip.get_children():
+				if c is Label:
+					wtext += (c as Label).text
+				elif c is TextureRect:
+					wicons += 1
+			_check("wish chip visible", wchip.visible, true)
+			_check("wish chip 点名许愿人", wtext.contains("灵狐小围巾"), true)
+			_check("wish chip 有魔法棒+靶子+盖章三个图标", wicons >= 3, true)
 		72:
 			if fails == 0:
 				print("visual_rewards PASS")
