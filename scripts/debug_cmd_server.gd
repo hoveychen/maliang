@@ -54,7 +54,7 @@ static func parse_command(line: String) -> Dictionary:
 			if not dict.has("x") or not dict.has("y"):
 				return {"ok": false, "error": "tap needs x,y"}
 			return {"ok": true, "op": "tap", "x": float(dict["x"]), "y": float(dict["y"])}
-		"state", "screencap", "accept", "replay", "retry":
+		"inject", "state", "screencap", "accept", "replay", "retry":
 			return {"ok": true, "op": op}
 		_:
 			return {"ok": false, "error": "unknown op: %s" % op}
@@ -134,6 +134,8 @@ func _reply(obj: Dictionary) -> void:
 func _execute(cmd: Dictionary) -> Dictionary:
 	var op := String(cmd["op"])
 	match op:
+		"inject":
+			return _do_inject()
 		"say":
 			return _do_say(String(cmd["text"]))
 		"tap":
@@ -152,6 +154,17 @@ func _vc() -> VoiceCapture:
 	if _world == null:
 		return null
 	return _world.get("_vc") as VoiceCapture
+
+## inject：运行时把 _vc 的端侧 ASR 换成 ScriptedAsr（真机 handshake 入口——不依赖推 user:// 标志）。
+## 换完 e2e 脚本才能用 say 排预排文本；未换时 say 会因 _asr 不认 enqueue 而报错。
+func _do_inject() -> Dictionary:
+	var vc := _vc()
+	if vc == null:
+		return {"ok": false, "error": "no VoiceCapture on world"}
+	var s := vc.use_scripted_asr()
+	if s == null:
+		return {"ok": false, "error": "inject 失败（非 debug 构建？）"}
+	return {"ok": true, "op": "inject", "injected": true, "ready": vc.is_ready()}
 
 ## say：排一句预排文本进 ScriptedAsr + 喂 静→响→静 合成 PCM 驱 VAD 断句。
 ## 到底录不录由真实门禁（is_open + should_capture）决定——门禁是被测对象，不绕过（§3.2）。

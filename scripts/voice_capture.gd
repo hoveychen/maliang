@@ -111,13 +111,34 @@ func _setup_local_asr() -> void:
 func _exit_tree() -> void:
 	# 场景切走：关麦 + 断插件信号，别留开着的麦 / 未关的本地会话到节点释放为止。
 	close()
-	# _asr 可能是真单例（有这些信号）、null、或测试注入的 fake（无信号）——has_signal 先挡。
-	if _asr != null:
-		for pair in [["final_result", _on_local_final], ["asr_ready", _on_local_ready], ["asr_error", _on_local_error]]:
-			var sig := String(pair[0])
-			var cb := pair[1] as Callable
-			if _asr.has_signal(sig) and _asr.is_connected(sig, cb):
-				_asr.disconnect(sig, cb)
+	_disconnect_asr()
+
+## 断开当前 _asr（真单例/替身）被本模块接的信号，避免换 ASR / 释放时留双份回调。
+## _asr 可能是真单例（有这些信号）、null、或测试注入的 fake（无信号）——has_signal 先挡。
+func _disconnect_asr() -> void:
+	if _asr == null:
+		return
+	for pair in [["final_result", _on_local_final], ["asr_ready", _on_local_ready], ["asr_error", _on_local_error]]:
+		var sig := String(pair[0])
+		var cb := pair[1] as Callable
+		if _asr.has_signal(sig) and _asr.is_connected(sig, cb):
+			_asr.disconnect(sig, cb)
+
+## e2e harness（docs/voice-e2e-harness-design.md）：运行时把端侧 ASR 换成 ScriptedAsr 替身。
+## 真机上 user:// 标志无法 adb push（app 私有目录），故注入改由 debug TCP 命令 handshake 在
+## 运行时触发（见 DebugCmdServer 的 inject 命令），而非依赖 _setup_local_asr 的文件标志。
+## 仅 debug 构建生效；release 一行不跑——绝不进孩子的包。返回注入的替身（供断言），失败返回 null。
+func use_scripted_asr() -> ScriptedAsr:
+	if not OS.is_debug_build():
+		return null
+	_disconnect_asr() # 先断真单例/旧替身的信号
+	var s := ScriptedAsr.new()
+	_asr = s
+	_asr.connect("final_result", _on_local_final)
+	_asr.connect("asr_ready", _on_local_ready)
+	_asr.connect("asr_error", _on_local_error)
+	_asr.initialize()
+	return s
 
 # ── 查询 ────────────────────────────────────────────────────────────────────
 

@@ -192,6 +192,7 @@ run_test test_visual_settings      --fixed-fps 10 --quit-after 80
 run_test test_graphics_toggles     --fixed-fps 10 --quit-after 40
 run_test test_benchmark_scene      --fixed-fps 60 --quit-after 400
 run_test test_benchmark_greedy     --fixed-fps 10 --quit-after 60
+run_test test_harness_wire         --fixed-fps 30 --quit-after 120
 run_test test_device_profile_boot
 run_test test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
 run_test test_visual_scene_switch   --fixed-fps 10 --quit-after 60
