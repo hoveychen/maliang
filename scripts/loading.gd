@@ -169,6 +169,7 @@ func _build_overlay() -> void:
 	_portal.custom_minimum_size = Vector2(PORTAL_W, PORTAL_H)
 	_portal.pivot_offset = Vector2(PORTAL_W * 0.5, PORTAL_H * 0.5) # 自转/缩放绕门心
 	_portal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_portal.modulate.a = 0.0 # loading 期间隐藏——门不是一开始就杵在那儿，是收锋墨点绽出来的（见 _on_world_ready）
 	layer.add_child(_portal)
 
 	# 调试状态浮层（仅 debug 构建，与世界里的 FPS/坐标调试信息同门控 OS.is_debug_build()）：
@@ -364,6 +365,22 @@ func _layout_ink_drop() -> void:
 	_ink_drop.offset_bottom = _ink_drop.offset_top + _ink_drop.custom_minimum_size.y
 	_ink_drop.scale = Vector2(swell, swell)
 
+## 收锋墨点纹理：一坨圆墨点（径向实心+软边，边缘略洇不规则）。墨点绽成传送门的起点。
+func _make_blot_texture(size: int) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var ink := Color(0.13, 0.11, 0.10)
+	var c := float(size) * 0.5
+	for y in size:
+		for x in size:
+			var dx := float(x) - c
+			var dy := float(y) - c
+			var r := sqrt(dx * dx + dy * dy) / c            # 0 心→1 边
+			# 边缘略不规则（墨洇）：按角度轻微起伏半径阈值
+			var wob := 0.06 * sin(atan2(dy, dx) * 5.0)
+			var a := smoothstep(0.92 + wob, 0.62 + wob, r) * 0.96
+			img.set_pixel(x, y, Color(ink.r, ink.g, ink.b, a))
+	return ImageTexture.create_from_image(img)
+
 ## 墨珠纹理：一颗上尖下圆的墨滴（顶端连笔尖、底端聚一点高光）。墨色偏暖黑，无外部素材。
 func _make_drop_texture(size: int) -> ImageTexture:
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
@@ -482,8 +499,46 @@ func _on_world_ready() -> void:
 	land.tween_property(self, "_prog", 1.0, LAND_TIME).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	await land.finished
 
-	# ② 仙子被吸入门：缩到门心并淡出。_transitioning 接管门（位置/缩放交给 tween）。
+	# ①.5 收锋墨点绽成传送门：点点一笔画到头，收锋在笔画末端顿出一个黑墨点，墨点再"活过来"
+	# 绽成传送门（画什么什么活过来，兑现点点笔灵人设）。_transitioning 接管门/仙子的逐帧布局。
 	_transitioning = true
+	var vp0 := _fade_root.size
+	var base_y := vp0.y * 0.40
+	var tip := Vector2((vp0.x - FLY_MARGIN - FAIRY_W * 0.5) - FAIRY_W * 0.18, base_y + FAIRY_H * 0.58)
+	# 收锋墨点：笔画末端顿出来（BACK 过冲＝按下去的顿笔）
+	var blot := TextureRect.new()
+	blot.texture = _make_blot_texture(96)
+	blot.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	blot.stretch_mode = TextureRect.STRETCH_SCALE
+	blot.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	blot.custom_minimum_size = Vector2(72.0, 72.0)
+	blot.pivot_offset = Vector2(36.0, 36.0)
+	blot.offset_left = tip.x - 36.0
+	blot.offset_top = tip.y - 36.0
+	blot.offset_right = tip.x + 36.0
+	blot.offset_bottom = tip.y + 36.0
+	blot.scale = Vector2.ZERO
+	blot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade_root.add_child(blot)
+	_ink_drop.modulate.a = 0.0 # 停滞墨珠若在，收起让位给收锋
+	var pop := create_tween()
+	pop.tween_property(blot, "scale", Vector2(1.15, 1.15), 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	await pop.finished
+	# 门摆到墨点处，从墨点长出来（scale 0.35→1 + 淡入），墨点同时晕开淡出（墨"化"成门）
+	_portal.offset_left = tip.x - PORTAL_W * 0.5
+	_portal.offset_top = tip.y - PORTAL_H * 0.5
+	_portal.offset_right = tip.x + PORTAL_W * 0.5
+	_portal.offset_bottom = tip.y + PORTAL_H * 0.5
+	_portal.scale = Vector2(0.35, 0.35)
+	var bloom := create_tween().set_parallel(true)
+	bloom.tween_property(_portal, "modulate:a", 1.0, 0.30)
+	bloom.tween_property(_portal, "scale", Vector2(1.0, 1.0), 0.38).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	bloom.tween_property(blot, "scale", Vector2(1.7, 1.7), 0.32)
+	bloom.tween_property(blot, "modulate:a", 0.0, 0.32)
+	await bloom.finished
+	blot.queue_free()
+
+	# ② 仙子被吸入门：缩到门心并淡出。（门此刻在墨点处，下一步 recenter 会把它移到屏幕中央）
 	var suck := create_tween().set_parallel(true)
 	suck.tween_property(_fairy, "scale", Vector2(0.05, 0.05), 0.26).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 	suck.tween_property(_fairy, "modulate:a", 0.0, 0.26)
