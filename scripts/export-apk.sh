@@ -32,6 +32,18 @@ echo "== Godot: $("$GODOT" --version | head -1)"
 # 导出前先拦一道：源头缺了就别浪费十分钟导一个坏包
 [ -d "$ROOT/android" ] || { echo "✘ android/ 不存在——这是 gitignored 的构建模板，worktree 里没有。请在主 checkout 导出。"; exit 1; }
 
+# 导出前拦一道并发：同一项目上并发的 Godot 会互相干扰导出的文件系统扫描，导致
+# "Project export ... failed / _fs_changed" 反复失败。实测真凶是另一个会话在同一 checkout 跑
+# scripts/test-headless.sh（每条测试都起一个 headless Godot），不是本脚本的 bug——导出得独占项目。
+# 检测到就直接拦下、让你先停掉那个会话或等它跑完，别浪费十分钟导一个被打断的包。
+others="$(pgrep -f "Godot.*--headless.*--path" 2>/dev/null | grep -vx "$$" || true)"
+if [ -n "$others" ]; then
+  echo "✘ 检测到同一机器上还有别的 headless Godot 在跑（PID: $(echo "$others" | tr '\n' ' ')）。"
+  echo "  多半是另一个会话在跑 test-headless.sh；并发会让导出反复 _fs_changed 失败。"
+  echo "  导出需独占项目——请先停掉它（或等它跑完）再导。"
+  exit 1
+fi
+
 echo "== 导出 $MODE → $OUT"
 "$GODOT" --headless --path "$ROOT" "$MODE" "Android" "$ROOT/$OUT" 2>&1 | grep -viE "^Godot Engine|^$" | tail -5
 
