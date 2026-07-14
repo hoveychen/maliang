@@ -1810,6 +1810,7 @@ export async function createPropAsync(
     }
     const def = creationItemDef(worldId, randomUUID(), validated.spec);
     if (recipient) def.recipient = recipient; // A2：给谁做的落库（供 A1 试用/B3 起名/交付话术读取）
+    def.creatorPlayerId = playerId; // B3 起名所有权：造物一落地被客户端自动摆放出背包后，靠这个认「自己造的」
     store.upsertItem(def);
     store.bagAdd(worldId, playerId, def.id);
     created = true;
@@ -1870,6 +1871,7 @@ export async function createStickerAsync(
     const assetHash = await generateIconAsset(adapters, prompt, store);
     const def = creationStickerDef(worldId, randomUUID(), name, assetHash);
     if (recipient) def.recipient = recipient; // A2：给谁做的落库
+    def.creatorPlayerId = playerId; // B3 起名所有权（贴纸留背包，但摆到边缘/角色后同样认造物者）
     store.upsertItem(def);
     store.bagAdd(worldId, playerId, def.id);
     created = true;
@@ -1940,6 +1942,7 @@ export async function createBuildAsync(
     }
     const spec: ComposedSpec = { blueprintId, parts };
     const def = creationBuildDef(worldId, randomUUID(), bp.name, spec);
+    def.creatorPlayerId = playerId; // B3 起名所有权：积木造物落地后被自动摆放出背包，靠这个认「自己造的」
     store.upsertItem(def);
     store.bagAdd(worldId, playerId, def.id);
     created = true;
@@ -3194,15 +3197,18 @@ export async function handleWsMessage(
   if (msg.type === 'name_creation') {
     const worldId = msg.worldId ?? '';
     const itemId = String(msg.itemId ?? '');
-    // 所有权：只能给自己背包里的东西起名（内置物/别人的造物一律拒）。
-    if (!itemId || (store.getBag(worldId, session.playerId)[itemId] ?? 0) < 1) {
-      socket.send(JSON.stringify({ type: 'error', error: 'item not in bag' }));
-      return;
-    }
-    const def = store.getItemDef(worldId, itemId);
+    const def = itemId ? store.getItemDef(worldId, itemId) : undefined;
     if (!def || def.worldId === null) {
       // 造物才有名字可起（内置物 worldId===null）——理论上背包里的内置贴纸也可能命中，一并拒。
       socket.send(JSON.stringify({ type: 'error', error: 'item not nameable' }));
+      return;
+    }
+    // 所有权：给自己的造物起名——「在背包里」，或造物一落地就被客户端自动摆放出背包（真机路径，
+    // bagTake），此时靠造物者判本人。别人造的、又不在自己背包 → 越权拒。
+    const inBag = (store.getBag(worldId, session.playerId)[itemId] ?? 0) >= 1;
+    const isCreator = def.creatorPlayerId != null && def.creatorPlayerId === session.playerId;
+    if (!inBag && !isCreator) {
+      socket.send(JSON.stringify({ type: 'error', error: 'item not yours' }));
       return;
     }
     // 录音：优先 base64 音频（客户端 confirm_mode 打包好的 WAV），否则收已存在的 assetHash（复播/幂等）。

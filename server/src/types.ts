@@ -282,6 +282,12 @@ export interface ItemDef {
   /** A2「给谁做的」：这件造物是给谁用的（docs/kids-thinking-made-for-whom.md），供 A1 试用/B3 起名/交付话术读取。 */
   recipient?: RecipientRef;
   /**
+   * 造物者（哪个 player 语音造出来的）。B3 起名的所有权判据：造物一落地就被客户端自动摆放到世界、
+   * 移出背包（bagTake），此时 name_creation 若只认「在背包」就会把刚造好的东西拒之门外（真机实证）。
+   * 记下造物者后，name_creation 放行「在背包 OR 造物者是本人」。缺省 = 无（内置物/存量造物）。
+   */
+  creatorPlayerId?: string;
+  /**
    * B3 起名（reuse-name，docs/kids-thinking-reuse-name.md）：孩子给这件造物起的名字。
    *  nameVoiceAsset = 孩子那句录音的 assetHash（WAV），背包点小喇叭回放他【自己的声音】；
    *  nameText = 端侧 ASR 文本，仅供大人/日志/搜索，不展示给不识字的孩子。

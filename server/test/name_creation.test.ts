@@ -37,7 +37,51 @@ function seedBagItem(store: WorldStore, playerId: string, id: string, name: stri
   return def;
 }
 
+/** 造一件已摆放到世界、【不在背包】但由该 player 造的物件——复现真机造物自动摆放后的起名。 */
+function seedPlacedCreation(store: WorldStore, creatorPlayerId: string, id: string, name: string): ItemDef {
+  const def: ItemDef = {
+    id, worldId: 'default', name, renderRef: 'sdf_inline',
+    footprintW: 1, footprintH: 1, blocking: true, pathOk: true, wander: 0,
+    creatorPlayerId,
+  };
+  store.upsertItem(def);
+  // 关键：不 bagAdd —— 造物已被客户端自动摆放到世界（server bagTake 移出背包），不在背包里。
+  return def;
+}
+
 const AUDIO = Buffer.from('fake-wav-bytes').toString('base64');
+
+test('name_creation：给自己造的、已摆放到世界（不在背包）的物件起名 → 落库（真机造物自动摆放后起名的真身）', async () => {
+  const { store, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    session.playerId = 'kid-1';
+    seedPlacedCreation(store, 'kid-1', 'ladder-2', '梯子');
+    const sent = await ws(store, session, { type: 'name_creation', worldId: 'default', itemId: 'ladder-2', audio: AUDIO, text: '爬爬梯' });
+    const updated = sent.find((m) => m.type === 'item_updated');
+    assert.ok(updated, `应回 item_updated（造物者是本人应放行），实际：${sent.map((m) => m.type).join(',')}`);
+    const fromStore = store.getItemDef('default', 'ladder-2')!;
+    assert.ok(fromStore.nameVoiceAsset && fromStore.nameVoiceAsset.length > 0, 'nameVoiceAsset 应落库');
+    assert.equal(fromStore.nameText, '爬爬梯', 'nameText 应落库');
+  } finally {
+    await close();
+  }
+});
+
+test('name_creation：给别人造的、已摆放物件起名 → 拒（造物者不符且不在自己背包，越权仍挡）', async () => {
+  const { store, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    session.playerId = 'kid-1';
+    seedPlacedCreation(store, 'kid-2', 'other-2', '别人造的梯子');
+    const sent = await ws(store, session, { type: 'name_creation', worldId: 'default', itemId: 'other-2', audio: AUDIO, text: '偷起名' });
+    assert.ok(sent.some((m) => m.type === 'error'), '越权起名应回 error');
+    assert.equal(sent.some((m) => m.type === 'item_updated'), false, '不回 item_updated');
+    assert.equal(store.getItemDef('default', 'other-2')!.nameVoiceAsset, undefined, '别人的造物没被改');
+  } finally {
+    await close();
+  }
+});
 
 test('name_creation：回填自己背包里造物的 nameVoiceAsset + nameText → item_updated', async () => {
   const { store, close } = await seeded();
