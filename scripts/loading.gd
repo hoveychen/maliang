@@ -43,7 +43,7 @@ var _fade_root: Control    ## 淡出目标（背景+三点挂它下面，改 mod
 var _portal: TextureRect   ## 航道终点的传送门（挂 CanvasLayer 上、盖过 _fade_root，单独转场）
 var _fairy: TextureRect
 var _fairy_atlas: AtlasTexture ## 点点动画图集的取帧窗口（每帧移 region 播 idle 动画）
-var _trail: Line2D             ## 点点飞过留下的墨迹（＝进度条：她画到哪儿，就是加载到哪儿）
+var _trail: InkStroke          ## 点点飞过留下的墨迹（＝进度条：她画到哪儿，就是加载到哪儿）
 var _trail_base_y := 0.0       ## 墨迹基线 Y（不随点点上下起伏抖动，是稳的一道笔画）
 var _fairy_cx := 0.0           ## 点点框心 X（_layout_fairy 每帧写，墨迹终点取它）
 var _ink_drop: TextureRect     ## 笔尖将滴未滴的墨珠（慢网停滞时浮现：墨快用完了在续墨）
@@ -87,25 +87,13 @@ func _build_overlay() -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_fade_root.add_child(bg)
 
-	# 点点飞过留下的墨迹＝进度条：一道墨黑笔画，从航道起点画到她当前位置。
-	# 在 bg 之后、点点之前入树 → 画在她身后（她像正拖着笔尖画出这条线）。
-	# Line2D 挂 Control 下按画布坐标渲染；点点母题就是墨点尾迹，这里把它连成一笔。
-	_trail = Line2D.new()
-	_trail.width = 18.0
-	_trail.default_color = Color.WHITE # 墨色/飞白烘进纹理，这里留白让纹理色透出
-	_trail.joint_mode = Line2D.LINE_JOINT_ROUND
-	_trail.begin_cap_mode = Line2D.LINE_CAP_ROUND
-	_trail.end_cap_mode = Line2D.LINE_CAP_ROUND
-	# 干笔墨纹理沿笔画平铺：飞白断墨（快扫处墨不满）+ 上下毛糙笔锋。TILE 每 tex.width 重复一次。
-	_trail.texture = _make_ink_texture(64, 28)
-	_trail.texture_mode = Line2D.LINE_TEXTURE_TILE
-	# 起笔细、行笔粗（毛笔起收笔），用宽度曲线做出笔锋
-	var wcurve := Curve.new()
-	wcurve.add_point(Vector2(0.0, 0.35))
-	wcurve.add_point(Vector2(0.12, 1.0))
-	wcurve.add_point(Vector2(1.0, 0.9))
-	_trail.width_curve = wcurve
-	_fade_root.add_child(_trail) # Line2D 是 Node2D，本就不吃鼠标，无需 mouse_filter
+	# 点点飞过留下的墨迹＝进度条：一道水墨笔画，从航道起点画到她当前位置。
+	# 自绘（InkStroke，非 Line2D+平铺纹理——那会周期性对齐成"马路中线"，像小路不像墨）：
+	# 一束笔毛叠出浓淡+羽化软边，非周期噪声断墨=真飞白。在 bg 之后、点点之前入树→画在她身后。
+	_trail = InkStroke.new()
+	_trail.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_trail.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade_root.add_child(_trail)
 
 	# 笔尖将滴未滴的墨珠：慢网停滞时浮现（墨快用完，笔尖攒着一滴不落）。平时透明。
 	_ink_drop = TextureRect.new()
@@ -186,28 +174,6 @@ func _build_overlay() -> void:
 		_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_status_label.text = "启动中…"
 		_fade_root.add_child(_status_label) # 挂 _fade_root：随过场一起淡出
-
-## 干笔墨纹理（毛笔飞白）：沿笔画方向(U)偶有飞白断墨——快扫时墨不满纸，露出几道白；
-## 跨笔画方向(V)上下边缘毛糙、夹几根分叉的笔毛缝。烘进墨色，Line2D 以 TILE 平铺。
-## 飞白位置用固定函数（不随帧变），画好的墨就"干"在那儿不闪。
-func _make_ink_texture(w: int, h: int) -> ImageTexture:
-	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
-	var ink := Color(0.15, 0.13, 0.12) # 墨黑（微暖，非纯黑）
-	for x in w:
-		var u := float(x) / float(w)
-		# 沿笔画的飞白：两三道干裂（低频正弦压出谷底），谷底墨稀→透出纸白
-		var dry := 0.6 + 0.4 * sin(u * TAU * 2.0 + 0.7)     # 0.2..1.0 起伏
-		dry = smoothstep(0.28, 0.62, dry)                    # 拉开对比：谷更空、脊更实
-		for y in h:
-			var v := float(y) / float(h - 1)
-			# 上下笔锋渐隐（中间实、边缘虚）+ 两根固定笔毛缝
-			var edge := 1.0 - pow(abs(v - 0.5) * 2.0, 2.2)   # 0 边→1 中
-			var hair := 1.0
-			if absf(v - 0.34) < 0.03 or absf(v - 0.68) < 0.04:
-				hair = 0.35                                   # 笔毛分叉的两道浅缝
-			var a := clampf(edge * dry * hair, 0.0, 1.0) * 0.94
-			img.set_pixel(x, y, Color(ink.r, ink.g, ink.b, a))
-	return ImageTexture.create_from_image(img)
 
 ## 程序化生成发光漩涡传送门：紧亮的高斯环带（r≈0.80）+ 门心径向辉光填充 + 角向螺旋
 ## （自转即漩涡流动）。门心留半透发光（青→白），既能透出飞入的仙子，放大时又用魔法光
@@ -324,8 +290,8 @@ func _layout_fairy() -> void:
 	_fairy_cx = x + FAIRY_W * 0.5           # 墨迹画到她身下的笔尖处（框心 x）
 	_trail_base_y = base_y + FAIRY_H * 0.58 # 稳的一道基线：取她身体中下部，不随 bob 抖
 
-## 墨迹进度条：从航道起点画到点点当前位置的一道手绘墨笔。沿途小幅正弦抖动＝手绘感，
-## 每 ~26px 采一个点。点点飞到哪，墨就画到哪——加载进度天然可视化成「她画出的一条线」。
+## 墨迹进度条：从航道起点画到点点当前位置的一道水墨笔画。采中心点喂给 InkStroke 自绘。
+## 基线只留很淡的起伏——书法笔画大体是直的，之前低频大波让它看着像蜿蜒的小路。
 func _layout_trail() -> void:
 	if _trail == null or _fade_root == null:
 		return
@@ -335,15 +301,17 @@ func _layout_trail() -> void:
 	if _stalled:
 		end_x += sin(_t * 22.0) * 4.0
 	var pts := PackedVector2Array()
-	var seg := 26.0
+	var seg := 22.0
 	var x := start_x
 	while x < end_x:
-		# 沿途手绘抖动：低频波（整体起伏）+ 固定相位（画好的部分不再动，像干了的墨）
-		var wob := sin(x * 0.03) * 5.0 + sin(x * 0.11) * 2.0
-		pts.append(Vector2(x, _trail_base_y + wob))
+		pts.append(Vector2(x, _trail_base_y + _trail_wob(x)))
 		x += seg
-	pts.append(Vector2(end_x, _trail_base_y + sin(end_x * 0.03) * 5.0 + sin(end_x * 0.11) * 2.0))
-	_trail.points = pts
+	pts.append(Vector2(end_x, _trail_base_y + _trail_wob(end_x)))
+	_trail.set_stroke(pts)
+
+## 笔画基线的轻微起伏（书法运笔的手抖，不是小路的蜿蜒）：幅度压到 ±3px 上下。
+func _trail_wob(x: float) -> float:
+	return sin(x * 0.018) * 3.0 + sin(x * 0.07) * 1.2
 
 ## 笔尖墨珠：慢网停滞时在笔尖挂一滴将滴未滴的墨（墨快用完了在续墨），轻微膨胀+下坠但从不落下。
 ## 挂在墨迹当前终点(笔尖)下方；停滞时淡入+呼吸，恢复推进立刻淡出。
@@ -567,3 +535,77 @@ func _on_world_ready() -> void:
 	out.tween_property(_portal, "modulate:a", 0.0, 0.3)
 	await out.finished
 	queue_free() # 过场移除，世界成为唯一场景
+
+## 自绘水墨笔画：把一条中心折线渲成毛笔笔触。**不用 Line2D+平铺纹理**——那会把飞白/笔毛缝
+## 周期性对齐成"马路中线"，看着像蜿蜒小路不像墨（老板实测打回）。
+##
+## 做法照真毛笔＝一束笔毛：跨笔画方向铺 HAIRS 根平行细线，中间密两侧疏（叠加出浓淡+羽化软边）；
+## 每根笔毛沿笔画方向按**非周期哈希**断墨（飞白不再对齐成规则虚线，快扫处墨不满纸露出纸白）；
+## 起笔尖、行笔粗、收笔留湿头。断墨位置只由 (笔毛号, x) 决定→画好的墨"干"在那儿不随帧闪。
+class InkStroke extends Control:
+	var _pts := PackedVector2Array()
+	const HAIRS := 15            ## 笔毛根数
+	const HALF_W := 12.0         ## 笔画半宽（中心到边缘）
+	const INK := Color(0.13, 0.11, 0.10)  ## 墨色（微暖黑）
+
+	func set_stroke(pts: PackedVector2Array) -> void:
+		_pts = pts
+		queue_redraw()
+
+	## 非周期"干湿"：0=干(飞白露白) 1=湿(墨满)。用位置哈希做成看不出周期的噪声。
+	func _wet(hair: int, s: float) -> float:
+		var n := sin(s * 0.09 + hair * 1.7) * 43.0 + sin(s * 0.037 - hair * 2.3) * 17.0
+		n = n - floor(n)                       # frac → 0..1 伪随机
+		var base := 0.45 + 0.55 * n
+		# 叠一道慢变化让整段有"这截墨多那截墨少"的呼吸
+		base *= 0.7 + 0.3 * sin(s * 0.012 + hair * 0.5)
+		return clampf(base, 0.0, 1.0)
+
+	func _draw() -> void:
+		if _pts.size() < 2:
+			return
+		# 沿笔画累计弧长 s（给干湿/压力做"沿笔画"坐标）+ 每点法线（近水平，法线≈竖直，按切线求）
+		var n := _pts.size()
+		var slen := PackedFloat32Array(); slen.resize(n)
+		slen[0] = 0.0
+		for i in range(1, n):
+			slen[i] = slen[i - 1] + _pts[i].distance_to(_pts[i - 1])
+		var total := maxf(slen[n - 1], 1.0)
+		var normals := PackedVector2Array(); normals.resize(n)
+		for i in n:
+			var a := _pts[maxi(i - 1, 0)]
+			var b := _pts[mini(i + 1, n - 1)]
+			var tang := (b - a).normalized()
+			if tang == Vector2.ZERO:
+				tang = Vector2.RIGHT
+			normals[i] = Vector2(-tang.y, tang.x)   # 垂直于切线
+		# 逐笔毛画：每根是若干"有墨"子段（draw_polyline），中间飞白处断开
+		for h in HAIRS:
+			var hv := (float(h) / float(HAIRS - 1)) * 2.0 - 1.0   # -1..1 跨笔画位置
+			var edge := 1.0 - absf(hv)                             # 中心1 边缘0
+			var hair_a := (0.10 + 0.5 * edge) * 0.95               # 中心深、边缘淡→羽化+浓淡
+			var run := PackedVector2Array()
+			for i in n:
+				var s := slen[i]
+				var sn := s / total                                # 0..1 沿笔画
+				# 压力：起笔尖(小)→迅速铺开→收笔略收；边缘笔毛整体更靠内
+				var pressure := smoothstep(0.0, 0.06, sn) * (1.0 - 0.25 * smoothstep(0.82, 1.0, sn))
+				var off := hv * HALF_W * pressure
+				var wet := _wet(h, s) * pressure
+				# 边缘笔毛更容易断（飞白多）；越干越可能断墨
+				var thr := 0.28 + 0.32 * (1.0 - edge)
+				if wet > thr:
+					run.append(_pts[i] + normals[i] * off)
+				else:
+					_flush_run(run, hair_a)                        # 遇飞白→收一段
+					run = PackedVector2Array()
+			_flush_run(run, hair_a)
+		# 收笔湿头：末端一小坨浓墨（毛笔抬起前的驻墨）
+		var tip := _pts[n - 1]
+		draw_circle(tip, HALF_W * 0.55, Color(INK.r, INK.g, INK.b, 0.9))
+
+	func _flush_run(run: PackedVector2Array, a: float) -> void:
+		if run.size() >= 2:
+			draw_polyline(run, Color(INK.r, INK.g, INK.b, a), 2.6, true)
+		elif run.size() == 1:
+			draw_circle(run[0], 1.4, Color(INK.r, INK.g, INK.b, a))
