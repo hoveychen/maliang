@@ -86,6 +86,25 @@ func set_terrain_low_detail(on: bool) -> void:
 	if _water_mat != null:
 		_water_mat.set_shader_parameter("low_detail", on)
 
+## 纸艺风（画质页样式键）在地形/水面上的参数档。物品档见 BendMat.PAPER_PROPS。
+## 地形无折面化（平面 quad）；水面的 bands 量化深度分层而非光照（见 water_surface.gdshader）。
+const PAPER_GROUND := {"paper_bands": 3.0, "paper_edge": 0.7, "paper_grain": 0.6, "paper_tone": 0.4}
+const PAPER_WATER := {"paper_bands": 4.0, "paper_grain": 0.4, "paper_tone": 0.3}
+
+## 与 low_detail 同款懒建记忆态；初值认 BendMat 的调试强制位（MALIANG_PAPERCRAFT=1）。
+var _papercraft := BendMat.papercraft_on()
+
+## 画质：纸艺风开/关（地形+水面）。调用方（world._apply_graphics_key）先切 BendMat
+## 再把 BendMat.papercraft_on() 的解析结果传进来——调试强制位的语义只在 BendMat 一处。
+func set_papercraft(on: bool) -> void:
+	_papercraft = on
+	for pair in [[_ground_mat, PAPER_GROUND], [_water_mat, PAPER_WATER]]:
+		var m: ShaderMaterial = pair[0]
+		if m == null:
+			continue
+		for k: String in pair[1]:
+			m.set_shader_parameter(k, pair[1][k] if _papercraft else 0.0)
+
 ## 设万物基底层并（若材质已建）即时下发。数据源见 _refresh_base_layer()。
 func set_base_layer(layer: int) -> void:
 	_base_layer = layer
@@ -175,6 +194,7 @@ func _make_slot() -> Dictionary:
 		_water_mat = _make_water_mat()
 		set_terrain_low_detail(_terrain_low_detail)  # 懒建材质沿用当前档（见 setter 注释）
 		set_base_layer(_base_layer)                  # 同上：懒建材质补上当前基底层
+		set_papercraft(_papercraft)                  # 同上：懒建材质补上纸艺风
 	var root := Node3D.new()
 	add_child(root)
 	var tile := MeshInstance3D.new()
@@ -208,11 +228,6 @@ static func _make_ground_mat() -> ShaderMaterial:
 	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
 	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
 	m.set_shader_parameter("curvature", BendMat.CURVATURE)
-	if BendMat.papercraft_on():
-		m.set_shader_parameter("paper_bands", 3.0)
-		m.set_shader_parameter("paper_edge", 0.7)
-		m.set_shader_parameter("paper_grain", 0.6)
-		m.set_shader_parameter("paper_tone", 0.4)
 	return m
 
 ## 半透明水面材质（shaders/water_surface.gdshader）：水彩水贴图双层滚动 + 深度调色。
@@ -226,10 +241,6 @@ static func _make_water_mat() -> ShaderMaterial:
 	m.set_shader_parameter("deep_color", TerrainAtlas.WATER_DEEP)
 	m.set_shader_parameter("foam_color", TerrainAtlas.WATER_FOAM)
 	m.set_shader_parameter("curvature", BendMat.CURVATURE)
-	if BendMat.papercraft_on():
-		m.set_shader_parameter("paper_bands", 4.0)
-		m.set_shader_parameter("paper_grain", 0.4)
-		m.set_shader_parameter("paper_tone", 0.3)
 	return m
 
 ## 地形数组换了之后重建全图区块（enter_scene 换场景时调用）。

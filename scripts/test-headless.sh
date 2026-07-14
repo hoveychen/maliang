@@ -69,6 +69,7 @@ UNIT_TESTS=(
   test_menu_gate
   test_cjk_font
   test_graphics_settings
+  test_papercraft_toggle
   test_frame_sampler
   test_backend_player_id
   test_backend_reconnect
