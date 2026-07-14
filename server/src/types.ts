@@ -221,8 +221,12 @@ export interface ItemDef {
    *   'sticker:<name>' 贴纸图（assets/stickers/<name>.webp，边缘竖片，docs/sticker-items-design.md）
    */
   renderRef: string;
-  /** sdf_inline 时的 SDF spec（结构见 sdf_prop.ts）。 */
-  spec?: import('./sdf_prop.ts').SdfPropSpec;
+  /**
+   * spec 按 renderRef 分发：
+   *   'sdf_inline' → SDF spec（结构见 sdf_prop.ts，语音造物）
+   *   'composed:'  → 组合物零件树（结构见 build_blueprints.ts，积木式造物 B1）
+   */
+  spec?: import('./sdf_prop.ts').SdfPropSpec | import('./build_blueprints.ts').ComposedSpec;
   /** 占地（tile），锚点居中展开（奇数边）；1×1 / 3×3。 */
   footprintW: number;
   footprintH: number;
@@ -546,8 +550,11 @@ export interface CreationAttrs {
   motion?: string;      // 会不会动：安静/会转/会飘/会跳（造物用，映射 SDF locomotion/spin）
 }
 
-/** 引导式创造的目标：造新角色 / 造新物件 / 造贴纸。会话状态机据此分派 guide 与生成接口。 */
-export type CreationGoal = 'character' | 'prop' | 'sticker';
+/**
+ * 引导式创造的目标：造新角色 / 造新物件 / 造贴纸 / 积木式拼装（B1）。会话状态机据此分派 guide 与生成接口。
+ * 'build' 与 'prop' 共用会话骨架（同一条 session.creation，goal 区分），但走 guideBuild/createBuildAsync。
+ */
+export type CreationGoal = 'character' | 'prop' | 'sticker' | 'build';
 
 /** 引导式创造会话状态：连接级（一个孩子一条连接），挂在 VoiceSession 上。 */
 export interface CreationState {
@@ -562,6 +569,32 @@ export interface CreationState {
   // 仙子最近帮这个小朋友造过的东西（kind='creation' 记忆，开会话时填入）：
   // 注入 guide prompt，支持「帮我造刚才的小动物，但是会飞的」这类指代。
   recentCreations?: string[];
+  // goal==='build' 时的积木拼装状态（拼哪副蓝图 + 各槽填了什么）。turnCount/dialog 复用本对象（同一条会话）。
+  build?: BuildState;
+}
+
+/**
+ * 积木式造物（B1，docs/kids-thinking-build-from-parts.md）会话的拼装状态：附在 CreationState 上（goal==='build' 时非空）。
+ * 与 CreationState.attrs 并列——造角色/造物累积「属性」，积木拼装累积「哪个槽坐了哪个零件」。
+ */
+export interface BuildState {
+  blueprintId: string;               // 在拼哪副整体蓝图（WholeBlueprint.id）
+  filled: Record<string, string>;    // 已填的槽：slotId → partId（坐进骨架的零件）
+  askedSlots: string[];              // 已按功能问过的槽（mock 确定性推进；LLM 靠 dialog 自带上下文）
+}
+
+/**
+ * guideBuild 一轮的产物：要么继续按功能追问某个槽（question+slotId+兼容零件 optionIds），
+ * 要么必填槽全满去落成（done），要么小朋友反悔（cancelled）。与 GuideCreationResult 平行。
+ */
+export interface GuideBuildResult {
+  replyText: string;                 // 点点这轮说的话（TTS 念出）
+  done: boolean;
+  cancelled?: boolean;               // 小朋友说不拼了（「算了/不拼了」）：清会话、绝不落成、不扣花
+  question?: string;                 // done=false：按 functionHint 生成的功能问句（铁律：绝不含零件名）
+  slotId?: string;                   // done=false：本轮问的是哪个槽（客户端据此点亮发光）
+  optionIds?: string[];              // done=false：该槽兼容零件 partId（partsForSlot）
+  filled?: { slotId: string; partId: string }; // 从本轮输入解析出的「填了哪个槽哪个零件」增量
 }
 
 /** 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。 */
@@ -587,7 +620,9 @@ export interface GuideCreationResult {
   updatedAttrs?: Partial<CreationAttrs>; // 从本轮输入解析出的属性更新（含 traits 增量）
 }
 
-/** 引导式创造会话的初始空状态（缺省造角色，兼容存量调用点）。 */
-export function newCreationState(goal: CreationGoal = 'character'): CreationState {
-  return { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0, dialog: [] };
+/** 引导式创造会话的初始空状态（缺省造角色，兼容存量调用点）。goal==='build' 时须带 blueprintId 初始化拼装状态。 */
+export function newCreationState(goal: CreationGoal = 'character', blueprintId?: string): CreationState {
+  const state: CreationState = { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0, dialog: [] };
+  if (goal === 'build' && blueprintId) state.build = { blueprintId, filled: {}, askedSlots: [] };
+  return state;
 }

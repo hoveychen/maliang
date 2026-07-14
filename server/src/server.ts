@@ -77,7 +77,9 @@ import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
-import { BUILTIN_ITEMS, creationItemDef, creationStickerDef, getBuiltinItem, validateTerrainItems } from './items.ts';
+import { BUILTIN_ITEMS, creationItemDef, creationStickerDef, creationBuildDef, getBuiltinItem, validateTerrainItems } from './items.ts';
+import { matchBlueprint, findBlueprint, type ComposedPart, type ComposedSpec } from './build_blueprints.ts';
+import { findPart } from './part_library.ts';
 import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrain_edit.ts';
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
@@ -1463,16 +1465,24 @@ async function openCreationSession(
   leadIn = '', // 入口那轮 routeIntent 生成的仙子应答句（缺陷 ②：此前被丢弃）
   goal: CreationGoal = 'character',
   spawn?: SpawnCtx, // 造角色的降生上下文（落在发起者身边 + 广播给同场景的人）
+  blueprintId?: string, // goal==='build' 时：拼哪副蓝图（matchBlueprint 命中的整体）
 ): Promise<void> {
   if (!hasFlower(store, worldId, session.playerId)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, goal === 'character' ? 'character' : goal, session.clientTts);
+    // 拼装（build）与造物（prop）共用 prop_denied 拒绝 UX（都进背包、都要攒花）。
+    const denyKind = goal === 'character' ? 'character' : goal === 'sticker' ? 'sticker' : 'prop';
+    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, denyKind, session.clientTts);
     return;
   }
-  session.creation = newCreationState(goal);
+  session.creation = newCreationState(goal, blueprintId);
   // 仙子最近帮这个小朋友造过的东西：注入 guide，「帮我造刚才的小动物」这类指代能对上
   const creations = store.getMemories(fairyId, session.playerId).filter((m) => m.kind === 'creation');
   if (creations.length > 0) session.creation.recentCreations = creations.slice(-5).map((m) => m.text);
-  await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn, spawn);
+  // 积木拼装走 advanceBuild（按功能追问填槽）；造角色/物/贴纸走 advanceCreation（追问属性）。
+  if (goal === 'build') {
+    await advanceBuild(socket, session, worldId, fairyId, request, adapters, store, leadIn);
+  } else {
+    await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn, spawn);
+  }
 }
 
 /**
@@ -1668,6 +1678,72 @@ export async function createStickerAsync(
     socket.send(JSON.stringify({ type: 'sticker_failed', reason: String(err) }));
   } finally {
     if (!created) store.refundFlower(worldId, playerId); // 造失败/被审核挡：退还
+  }
+}
+
+/** 积木式造物落成（B1，docs/kids-thinking-build-from-parts.md §3.1/§4.3）：与 createStickerAsync 平行，
+ *  但产物是组合物零件树（renderRef='composed:'）而非生成图——零件全来自预置库，无需生图/审核。
+ *  扣花 → prop_pending（复用造物占位 UX）→ 按 blueprintId + 已填槽拼出 ComposedSpec → creationBuildDef
+ *  → upsertItem + bagAdd → item_created（进背包，摆放走放置模式）。0 花拦截推 prop_denied，任何失败退还那朵花。
+ *  落成扣费时机与「确认要造的那一刻」一致（拼装期零件免费，预置库无限量）。 */
+export async function createBuildAsync(
+  socket: { send: (data: string) => void },
+  worldId: string,
+  playerId: string,
+  blueprintId: string,
+  filled: Record<string, string>, // slotId → partId（会话累积的已填槽）
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  clientTts = false,
+  creatorId = '', // 拼装引导的角色（小仙子）：给了就在落成后记一条 creation 记忆
+  sceneId = DEFAULT_SCENE, // 造完要按玩家所在场景重发漏话
+): Promise<void> {
+  if (!store.spendFlower(worldId, playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
+    return;
+  }
+  // 开造即报：复用造物 prop_pending，客户端据此退对话、就地立占位符。
+  socket.send(JSON.stringify({ type: 'prop_pending', worldId, wallet: store.getWallet(worldId, playerId) }));
+  let created = false;
+  try {
+    const bp = findBlueprint(blueprintId);
+    if (!bp) {
+      socket.send(JSON.stringify({ type: 'prop_failed', reason: 'unknown blueprint' }));
+      return;
+    }
+    // 按蓝图槽序收拢已填零件（跳过没填的选填槽/丢失的零件），冗余 partRenderRef 供客户端直接画子 quad。
+    const parts: ComposedPart[] = [];
+    for (const slot of bp.slots) {
+      const partId = filled[slot.slotId];
+      if (!partId) continue;
+      const part = findPart(partId);
+      if (!part) continue;
+      parts.push({ slotId: slot.slotId, partId, partRenderRef: part.renderRef });
+    }
+    if (parts.length === 0) {
+      socket.send(JSON.stringify({ type: 'prop_failed', reason: 'empty build' }));
+      return;
+    }
+    const spec: ComposedSpec = { blueprintId, parts };
+    const def = creationBuildDef(worldId, randomUUID(), bp.name, spec);
+    store.upsertItem(def);
+    store.bagAdd(worldId, playerId, def.id);
+    created = true;
+    if (creatorId) {
+      store.addMemory(creatorId, { text: `帮小朋友拼出「${def.name}」（${parts.length}个零件）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
+    }
+    socket.send(JSON.stringify({
+      type: 'item_created',
+      worldId,
+      item: def,
+      wallet: store.getWallet(worldId, playerId),
+      bag: store.getBag(worldId, playerId),
+    }));
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_prop', clientTts, sceneId);
+  } catch (err) {
+    socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
+  } finally {
+    if (!created) store.refundFlower(worldId, playerId); // 落成失败：退还，别让孩子白花一朵
   }
 }
 
@@ -1901,6 +1977,114 @@ export async function advanceCreation(
     replyText: spoken,
     question: r.question ?? r.replyText, // 纯问句：客户端拿它做选项卡标题，不带前置话语
     category: r.category,
+    options,
+    ttsAsset,
+    voiceId: fairyVoice,
+  }));
+}
+
+/**
+ * 引导式积木拼装推进（B1，docs/kids-thinking-build-from-parts.md §3.4）：与 advanceCreation 平行，
+ * 但走 guideBuild（按未填必填槽的功能提问）→ 累积「哪个槽填了哪个零件」→ done→createBuildAsync 落成。
+ * 结果类型（GuideBuildResult：filled/slotId）与 GuideCreationResult（updatedAttrs/category）不同，故独立成函数。
+ * 兜底同 advanceCreation：guide 挂了/超轮就用已填零件直接落成，绝不把孩子卡在半开会话里。
+ * childInput = 孩子这轮输入（点的零件 name 或语音功能词）；leadIn 只入口那轮传（升级造物→拼装那句应答）。
+ */
+export async function advanceBuild(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  fairyId: string,
+  childInput: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  leadIn = '',
+): Promise<void> {
+  const state = session.creation;
+  if (!state || !state.build) return;
+  const build = state.build;
+  const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
+  const finish = () => createBuildAsync(
+    socket, worldId, session.playerId, build.blueprintId, build.filled,
+    adapters, store, session.clientTts, fairyId, session.currentScene,
+  );
+  const bp = findBlueprint(build.blueprintId);
+  // 蓝图丢失（不该发生）：用已填零件兜底落成
+  if (!bp) {
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finish();
+    return;
+  }
+  // 超轮兜底：追问满上限还没 done，就用现有零件直接落成——绝不无限追问。
+  if (state.turnCount >= CREATION_MAX_TURNS) {
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finish();
+    return;
+  }
+  let r;
+  try {
+    r = await adapters.llm.guideBuild(state, childInput);
+  } catch (err) {
+    console.warn(`guideBuild 失败，用现有零件兜底落成：${String(err)}`);
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finish();
+    return;
+  }
+  // 小朋友反悔（「算了/不拼了」）：清会话 + 通知客户端收占位符，绝不落成、不扣花。
+  if (r.cancelled) {
+    session.creation = null;
+    let ttsAsset = '';
+    if (!session.clientTts) {
+      try {
+        ttsAsset = store.putAsset(await adapters.tts.synthesize(r.replyText, fairyVoice));
+      } catch (err) {
+        console.warn(`取消安抚语 TTS 失败（不阻塞，客户端仍会收视图）：${String(err)}`);
+      }
+    }
+    socket.send(JSON.stringify({
+      type: 'creation_cancelled',
+      goal: 'build',
+      replyText: r.replyText,
+      ttsAsset,
+      voiceId: fairyVoice,
+    }));
+    return;
+  }
+  // 累积本轮增量：填槽（点选路径可能已在 WS 层直填，这里对已填是幂等覆写）+ 记问过的槽。
+  if (r.filled) build.filled[r.filled.slotId] = r.filled.partId;
+  if (r.slotId) build.askedSlots.push(r.slotId);
+  state.dialog.push({ role: 'child', text: childInput, ts: 0 });
+  if (!r.done) state.dialog.push({ role: 'npc', text: r.question ?? r.replyText, ts: 0 });
+  state.turnCount += 1;
+  if (r.done) {
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finish();
+    return;
+  }
+  // 追问：合成点点功能问句 TTS（失败不阻塞）+ 下发 build_prompt（当前槽 + 兼容零件盘，客户端点亮该槽发光）。
+  const options = (r.optionIds ?? [])
+    .map((id) => findPart(id))
+    .filter((p): p is NonNullable<typeof p> => !!p)
+    .map((p) => ({ id: p.id, label: p.name, renderRef: p.renderRef }));
+  const spoken = leadIn ? `${leadIn}${r.replyText}` : r.replyText;
+  let ttsAsset = '';
+  if (!session.clientTts) {
+    try {
+      ttsAsset = store.putAsset(await adapters.tts.synthesize(spoken, fairyVoice));
+    } catch (err) {
+      console.warn(`拼装追问 TTS 失败（不阻塞，客户端可显示文字）：${String(err)}`);
+    }
+  }
+  socket.send(JSON.stringify({
+    type: 'build_prompt',
+    blueprintId: build.blueprintId,
+    replyText: spoken,
+    question: r.question ?? r.replyText, // 纯功能问句：客户端拿它做选项卡标题，不带前置话语
+    slotId: r.slotId,                    // 当前要填的槽：客户端点亮它发光
     options,
     ttsAsset,
     voiceId: fairyVoice,
@@ -2363,6 +2547,21 @@ export async function handleWsMessage(
     try {
       // 点选 → 用该选项的中文 label 当输入；否则用语音转写文本。
       const optId = typeof msg.optionId === 'string' ? msg.optionId : '';
+      // 积木拼装（build）：点选传的是零件 partId → 直接坐进正在问的槽（服务端权威填槽，不靠 LLM 解析），
+      // 再把零件中文名当输入喂 advanceBuild 推进对话（guideBuild 见槽已填即跳到下一个）。
+      if (session.creation.goal === 'build') {
+        const build = session.creation.build;
+        const part = optId ? findPart(optId) : undefined;
+        const askedSlot = build?.askedSlots.at(-1);
+        if (build && part && askedSlot && !build.filled[askedSlot]) build.filled[askedSlot] = part.id;
+        const childInput = (optId ? (part?.name ?? optId) : (msg.spokenText ?? '')).trim();
+        if (!childInput) {
+          socket.send(JSON.stringify({ type: 'voice_failed', reason: '拼装答复为空' }));
+          return;
+        }
+        await advanceBuild(socket, session, msg.worldId ?? '', msg.characterId ?? '', childInput, adapters, store, '');
+        return;
+      }
       // 点选 → 该选项中文 label 当输入；造贴纸查贴纸图标库，造物查物品图标库，造角色查角色图标库。
       const lookup = session.creation.goal === 'sticker' ? findStickerOption : session.creation.goal === 'prop' ? findPropOption : findOption;
       const picked = optId ? lookup(optId) : undefined;
@@ -2411,9 +2610,13 @@ export async function handleWsMessage(
         socket.send(JSON.stringify({ type: 'voice_failed', reason: '转写文本为空' }));
         return;
       }
-      // 造角色引导会话进行中：这句话当造角色答复，不走 routeIntent。
+      // 造角色/物/贴纸/拼装引导会话进行中：这句话当会话答复，不走 routeIntent。积木拼装走 advanceBuild。
       if (session.creation?.active) {
-        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', spawnCtx());
+        if (session.creation.goal === 'build') {
+          await advanceBuild(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '');
+        } else {
+          await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', spawnCtx());
+        }
         return;
       }
     // 流式 TTS 钩子：character_response 先行（文字/行为脚本提前到达），音频分片随合成推送。
@@ -2440,7 +2643,14 @@ export async function handleWsMessage(
         return;
       }
       if (response.propRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
+        // 造物入口升级：孩子要的东西有蓝图（小车/房子/火车/雪人）→ 从「许愿造一个」升级成「亲手拼一个」（积木式造物 B1）。
+        // 无蓝图则回落现有整体造物（优雅降级）。docs/kids-thinking-build-from-parts.md §4.1。
+        const bp = matchBlueprint(response.propRequest);
+        if (bp) {
+          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'build', spawnCtx(), bp.id);
+        } else {
+          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
+        }
         return;
       }
       if (response.stickerRequest) {

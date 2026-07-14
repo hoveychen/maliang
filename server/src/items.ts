@@ -14,6 +14,7 @@
 import type { ItemDef, } from './types.ts';
 import { GRID_TILES } from './types.ts';
 import type { SdfPropSpec } from './sdf_prop.ts';
+import type { ComposedSpec } from './build_blueprints.ts';
 import { scaleToSize } from './creation_options.ts';
 import { T_PATH, T_WATER, TerrainFormatError, argYawDeg, type Terrain } from './terrain.ts';
 
@@ -285,6 +286,27 @@ export function creationStickerDef(worldId: string, id: string, name: string, as
     pathOk: true,
     wander: 0,
     mount: 'edge',
+  };
+}
+
+/**
+ * 积木式造物的实体行（B1，docs/kids-thinking-build-from-parts.md §3.1）：renderRef='composed:'，
+ * spec 存「骨架 + 零件树」（ComposedSpec），永久保留可拆改结构，绝不拍平成一张图。
+ * 摆放/拾取/背包全走 items 现成通路（万物皆物品）；客户端 ComposedProp 渲染器（P4）读 spec 画多片子 quad。
+ * footprint 先给 1×1（P4 客户端按蓝图定最终占地）；组合物挡路、可压路面（与造物 createPropAsync 同档）。
+ */
+export function creationBuildDef(worldId: string, id: string, name: string, spec: ComposedSpec): ItemDef {
+  return {
+    id,
+    worldId,
+    name: name || '拼装作品',
+    renderRef: 'composed:',
+    spec,
+    footprintW: 1,
+    footprintH: 1,
+    blocking: true,
+    pathOk: true,
+    wander: 0,
   };
 }
 

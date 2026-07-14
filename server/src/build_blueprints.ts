@@ -100,11 +100,55 @@ export const BUILD_BLUEPRINTS: readonly WholeBlueprint[] = [
   },
 ];
 
+/** 组合物里的一个零件坐位：某个槽填了哪个零件（partRenderRef 冗余进来供客户端直接画子 quad，免二次查库）。 */
+export interface ComposedPart {
+  slotId: string;
+  partId: string;
+  partRenderRef: string;
+}
+
+/**
+ * 组合物的持久化形状——`ItemDef.spec` 在 `renderRef='composed:'` 时取此形（docs/kids-thinking-build-from-parts.md §3.1）。
+ * 成品永久存成「骨架 + 一棵零件树」而非拍平成一张图：轮子事后还能换、车厢还能挪去拼别的，
+ * 架构思维的「可拆可复用」才落地（B3 的复用/改装直接编辑本 spec 生成新 ItemDef，无需新机制）。
+ */
+export interface ComposedSpec {
+  blueprintId: string;
+  parts: ComposedPart[];
+}
+
 const BLUEPRINT_BY_ID = new Map(BUILD_BLUEPRINTS.map((b) => [b.id, b]));
 
 /** 按 id 查蓝图（未知 undefined）。 */
 export function findBlueprint(id: string): WholeBlueprint | undefined {
   return BLUEPRINT_BY_ID.get(id);
+}
+
+/**
+ * 蓝图别名词——`create_prop` 入口据此判断孩子想造的东西是否「有蓝图可拼」（有则把造物升级成积木拼装）。
+ * name 本身（'小车'/'小房子'…）已在 matchBlueprint 里先查；这里只补 name 之外的常见叫法。
+ * 刻意不收单字（「车」「房」）：太容易误命中，只在孩子明确说出整词时才升级到拼装。
+ */
+const BLUEPRINT_KEYWORDS: Record<string, readonly string[]> = {
+  car: ['汽车', '小汽车', '车子'],
+  house: ['房子', '屋子', '小屋'],
+  train: ['火车'],
+  snowman: ['雪人'],
+};
+
+/**
+ * 把 create_prop 的口语描述匹配到一副蓝图（无匹配 undefined → 回落现有整体造物，优雅降级）。
+ * 先查蓝图中文名整词命中，再查别名词；命中即把「许愿造一个东西」升级成「亲手拼一个东西」。
+ */
+export function matchBlueprint(request: string): WholeBlueprint | undefined {
+  const text = request ?? '';
+  if (!text) return undefined;
+  for (const bp of BUILD_BLUEPRINTS) {
+    if (text.includes(bp.name)) return bp;
+    const kws = BLUEPRINT_KEYWORDS[bp.id] ?? [];
+    if (kws.some((k) => text.includes(k))) return bp;
+  }
+  return undefined;
 }
 
 /** 一副蓝图的必填槽（全满才可落成）。 */

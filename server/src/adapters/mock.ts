@@ -7,6 +7,7 @@ import {
   type CreationCategory,
   type CreationState,
   type ExtractedMemory,
+  type GuideBuildResult,
   type GuideCreationResult,
   type IntentContext,
   type IntentResult,
@@ -19,6 +20,8 @@ import { CREATION_OPTIONS, optionsByCategory, sizeToScale, inferSizeFromText } f
 import type { CreatureSize } from '../creation_options.ts';
 import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
 import { STICKER_CREATION_OPTIONS, STICKER_CREATION_ASK, stickerOptionsByCategory, composeStickerDesc, stickerIconPrompt } from '../sticker_creation_options.ts';
+import { findBlueprint, requiredSlots } from '../build_blueprints.ts';
+import { partsForSlot } from '../part_library.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
 
 // 1x1 透明 PNG，作为生图占位。（须是合法 PNG：Godot 客户端会真解码，CRC 错会拒收；
@@ -399,6 +402,50 @@ export function createMockAdapters(): ServiceAdapters {
         const next: CreationCategory = !attrs.kind ? 'kind' : 'color';
         const optionIds = stickerOptionsByCategory(next).slice(0, 4).map((o) => o.id);
         return { replyText: STICKER_CREATION_ASK[next], done: false, question: STICKER_CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
+      },
+      async guideBuild(state: CreationState, childInput: string): Promise<GuideBuildResult> {
+        if (CANCEL_WORDS.test(childInput)) return { replyText: CANCEL_LINE, done: false, cancelled: true };
+        const build = state.build;
+        const bp = build ? findBlueprint(build.blueprintId) : undefined;
+        // 蓝图丢了（不该发生）：兜底 done，绝不把孩子卡在半开会话里
+        if (!build || !bp) return { replyText: '我们下次再拼好不好？', done: true };
+        // 确定性推进：正在问的槽 = 上一轮问过的最后一个槽（advanceBuild 会在本函数返回后把 slotId 记进 askedSlots）。
+        const filled = { ...build.filled };
+        let filledDelta: { slotId: string; partId: string } | undefined;
+        const askedSlot = build.askedSlots.at(-1);
+        if (askedSlot && !filled[askedSlot]) {
+          const slot = bp.slots.find((s) => s.slotId === askedSlot);
+          if (slot) {
+            const compatible = partsForSlot(slot.accept);
+            // 输入含某兼容零件的中文名（点选路径传的是 name）→ 填它；否则含该零件语义类（category，如「轮子」，
+            // 语音路径孩子答功能词）→ 填该类第一个兼容零件；都不含则不填、继续追问同一个槽。
+            const match =
+              compatible.find((p) => childInput.includes(p.name)) ??
+              compatible.find((p) => childInput.includes(p.category));
+            if (match) {
+              filled[askedSlot] = match.id;
+              filledDelta = { slotId: askedSlot, partId: match.id };
+            }
+          }
+        }
+        // 早停 / 必填槽全满 / 超轮 → 落成
+        const early = /(就这样|好了|够了|够啦|可以了|拼好了|完成了)/.test(childInput);
+        const missing = requiredSlots(bp).filter((s) => !filled[s.slotId]);
+        const forced = state.turnCount >= 5;
+        if (early || missing.length === 0 || forced) {
+          return { replyText: `好啦，我们的${bp.name}拼好啦！`, done: true, filled: filledDelta };
+        }
+        // 追问下一个未填必填槽的 functionHint（只问功能，选项是该槽兼容零件）
+        const next = missing[0];
+        const optionIds = partsForSlot(next.accept).map((p) => p.id);
+        return {
+          replyText: `${next.functionHint}？`,
+          done: false,
+          question: next.functionHint,
+          slotId: next.slotId,
+          optionIds,
+          filled: filledDelta,
+        };
       },
       async designSticker(intentText: string): Promise<{ name: string; prompt: string }> {
         // mock：确定性从中文描述里认图案 label → 贴纸名 + 英文扁平贴纸生图 prompt（真实接 LLM 自由理解）
