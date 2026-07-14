@@ -46,6 +46,9 @@ var _fairy_atlas: AtlasTexture ## 点点动画图集的取帧窗口（每帧移 
 var _trail: Line2D             ## 点点飞过留下的墨迹（＝进度条：她画到哪儿，就是加载到哪儿）
 var _trail_base_y := 0.0       ## 墨迹基线 Y（不随点点上下起伏抖动，是稳的一道笔画）
 var _fairy_cx := 0.0           ## 点点框心 X（_layout_fairy 每帧写，墨迹终点取它）
+var _ink_drop: TextureRect     ## 笔尖将滴未滴的墨珠（慢网停滞时浮现：墨快用完了在续墨）
+var _stall_t := 0.0            ## 真进度停滞累计秒（慢爬而非跟进）：越久越"墨快用完"
+var _stalled := false          ## 本帧是否停滞（笔尖蹭飞白 + 墨珠据此显隐）
 var _status_label: Label   ## 调试浮层：当前加载阶段文案+进度百分比（仅 debug 构建，release 不建，见 _build_overlay）
 var _dots: Array[ColorRect] = []
 var _t := 0.0
@@ -103,6 +106,18 @@ func _build_overlay() -> void:
 	wcurve.add_point(Vector2(1.0, 0.9))
 	_trail.width_curve = wcurve
 	_fade_root.add_child(_trail) # Line2D 是 Node2D，本就不吃鼠标，无需 mouse_filter
+
+	# 笔尖将滴未滴的墨珠：慢网停滞时浮现（墨快用完，笔尖攒着一滴不落）。平时透明。
+	_ink_drop = TextureRect.new()
+	_ink_drop.texture = _make_drop_texture(40)
+	_ink_drop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_ink_drop.stretch_mode = TextureRect.STRETCH_SCALE
+	_ink_drop.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_ink_drop.custom_minimum_size = Vector2(34.0, 46.0)
+	_ink_drop.pivot_offset = Vector2(17.0, 4.0) # 绕顶端(连着笔尖处)缩放，像从笔尖垂下来
+	_ink_drop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ink_drop.modulate.a = 0.0
+	_fade_root.add_child(_ink_drop)
 
 	# 横飞的小仙子（bob + 呼吸 + 随就绪进度从左飞到右，见 _process）——把等待可视化成
 	# 「小仙子布置世界，飞到尽头就绪」，让慢网也有进度感、且揭幕严格等仙子飞到头。
@@ -233,6 +248,7 @@ func _process(delta: float) -> void:
 	if not _transitioning: # 转场后仙子交给吸入 tween，别再被逐帧布局覆盖 scale/位置
 		_layout_fairy()
 		_layout_trail()
+		_layout_ink_drop()
 	_layout_portal()
 	# 三点顺序脉动（相位错开），alpha 在 0.35~1.0 之间呼吸
 	for i in range(_dots.size()):
@@ -258,8 +274,12 @@ func _advance_progress(delta: float) -> void:
 		real = _world.ready_progress()
 	if real > _prog:
 		_prog = move_toward(_prog, real, PROG_FOLLOW * delta)
+		_stall_t = 0.0            # 真进度在推进：不算停滞，墨够用
 	else:
 		_prog = move_toward(_prog, CREEP_CEIL, PROG_CREEP * delta)
+		_stall_t += delta         # 真进度停滞、只在慢爬：越久越像"墨快用完"
+	# 停滞 >0.5s 才算（避开里程碑之间的正常小间隙）；落地/转场期不停滞
+	_stalled = _stall_t > 0.5 and not _landing and not _transitioning
 
 ## 刷新调试状态浮层（仅 debug 构建存在）：显示世界当前引导阶段文案 + 显示进度百分比。
 func _update_status_label() -> void:
@@ -310,6 +330,9 @@ func _layout_trail() -> void:
 		return
 	var start_x := FLY_MARGIN + 12.0
 	var end_x := maxf(_fairy_cx - FAIRY_W * 0.18, start_x) # 收到她框心稍靠后，像墨从笔尖淌出
+	# 停滞时笔尖原地小幅高频抖动＝蹭飞白（墨快用完，在纸上蹭着找墨）
+	if _stalled:
+		end_x += sin(_t * 22.0) * 4.0
 	var pts := PackedVector2Array()
 	var seg := 26.0
 	var x := start_x
@@ -320,6 +343,48 @@ func _layout_trail() -> void:
 		x += seg
 	pts.append(Vector2(end_x, _trail_base_y + sin(end_x * 0.03) * 5.0 + sin(end_x * 0.11) * 2.0))
 	_trail.points = pts
+
+## 笔尖墨珠：慢网停滞时在笔尖挂一滴将滴未滴的墨（墨快用完了在续墨），轻微膨胀+下坠但从不落下。
+## 挂在墨迹当前终点(笔尖)下方；停滞时淡入+呼吸，恢复推进立刻淡出。
+func _layout_ink_drop() -> void:
+	if _ink_drop == null:
+		return
+	var target_a := 1.0 if _stalled else 0.0
+	_ink_drop.modulate.a = move_toward(_ink_drop.modulate.a, target_a, 4.0 * get_process_delta_time())
+	if _ink_drop.modulate.a <= 0.001:
+		return
+	# 挂在笔尖(墨迹终点)正下方；停滞越久墨珠越沉一点(将滴未滴)，配一层轻呼吸
+	var tip_x := maxf(_fairy_cx - FAIRY_W * 0.18, FLY_MARGIN + 12.0)
+	var swell := 0.9 + 0.12 * sin(_t * 3.2)                    # 呼吸
+	var sag := clampf(_stall_t - 0.5, 0.0, 2.0) / 2.0 * 8.0    # 越久坠得越低(封顶 8px)
+	var w := _ink_drop.custom_minimum_size.x
+	_ink_drop.offset_left = tip_x - w * 0.5
+	_ink_drop.offset_right = tip_x + w * 0.5
+	_ink_drop.offset_top = _trail_base_y + 6.0 + sag
+	_ink_drop.offset_bottom = _ink_drop.offset_top + _ink_drop.custom_minimum_size.y
+	_ink_drop.scale = Vector2(swell, swell)
+
+## 墨珠纹理：一颗上尖下圆的墨滴（顶端连笔尖、底端聚一点高光）。墨色偏暖黑，无外部素材。
+func _make_drop_texture(size: int) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var ink := Color(0.14, 0.12, 0.11)
+	var cx := float(size) * 0.5
+	for y in size:
+		var v := float(y) / float(size - 1)          # 0 顶 → 1 底
+		# 上尖下圆：半宽随 v 从很窄张到最宽(v≈0.7)再收
+		var halfw := (0.10 + 0.42 * sin(clampf(v, 0.0, 1.0) * PI * 0.9)) * float(size)
+		for x in size:
+			var d := absf(float(x) - cx)
+			var a := 0.0
+			if d < halfw:
+				a = smoothstep(halfw, halfw - 3.0, d)  # 软边
+			if a <= 0.0:
+				continue
+			# 左上一点高光(湿墨反光)
+			var hl := clampf(1.0 - Vector2(float(x) - cx * 0.7, float(y) - size * 0.55).length() / (size * 0.22), 0.0, 1.0)
+			var col := ink.lerp(Color(0.55, 0.52, 0.5), hl * 0.5)
+			img.set_pixel(x, y, Color(col.r, col.g, col.b, a * 0.95))
+	return ImageTexture.create_from_image(img)
 
 ## 播 idle 动画：按 _t 与 fps 取当前帧，移动 AtlasTexture 的 region 到对应网格格子。
 func _update_fairy_frame() -> void:
