@@ -29,8 +29,8 @@ func _tick() -> void:
 		8:
 			scene.call("_open_app", "settings")
 			var g := _gfx()
-			_check("画质旋钮 9 个", g.size(), 9)
-			for k: String in GraphicsSettings.KEYS:
+			_check("画质旋钮 = 全键数(9性能+1样式)", g.size(), GraphicsSettings.all_keys().size())
+			for k: String in GraphicsSettings.all_keys():
 				if not g.has(k):
 					_check("缺旋钮 %s" % k, false, true)
 			_check("默认全最高：角色阴影按下", (g["actor_shadows"] as Button).button_pressed, true)
@@ -68,15 +68,24 @@ func _tick() -> void:
 			], [0, 0, 0])
 			# 再点一次 xray：0→1 升回开（验证循环回绕）
 			(_gfx()["xray"] as Button).button_pressed = true
+		19:
+			# 样式键：纸艺风开 → BendMat/chunk 记忆态 + 存档；bench 重定档不冲掉画风
+			(_gfx()["papercraft"] as Button).button_pressed = true
 		20:
 			_check("xray 回绕开 → 静态态 true", PaperCharacter._xray_enabled, true)
 			_check("xray 存档回 1", GraphicsSettings.load_all()["xray"], 1)
+			_check("纸艺风开 → BendMat 态 true", BendMat.papercraft_on(), true)
+			_check("纸艺风开 → chunk 记忆态 true", scene.get("chunk_manager").get("_papercraft"), true)
+			_check("纸艺风存档 papercraft=1", GraphicsSettings.load_all()["papercraft"], 1)
+			GraphicsSettings.save_all(GraphicsSettings.all_max(), "bench")  # 模拟 benchmark 重定档
+			_check("bench 重定档保留纸艺风", GraphicsSettings.load_all()["papercraft"], 1)
 			scene.call("_on_gfx_restore_auto")  # 恢复自动：清掉 user override
 		21:
 			_check("恢复自动 → 不再是 user override", GraphicsSettings.is_user_override(), false)
 			_check("恢复自动 → 无存档（交回 benchmark/backend）", GraphicsSettings.has_saved(), false)
 			_check("恢复自动 → 场景回默认(地面阴影重开)", scene.get("chunk_manager").get("_ground_shadows"), true)
 			_check("恢复自动 → 按钮跟着回最高档", (_gfx()["hi_res"] as Button).text, "高清")
+			_check("恢复自动 → 样式键回默认关", BendMat.papercraft_on(), false)
 		22:
 			if _backup.is_empty():
 				PlayerProfile.clear()
@@ -94,7 +103,7 @@ func _subtitles_present() -> bool:
 	var found := {}
 	for n in scene.find_children("*", "Label", true, false):
 		found[(n as Label).text] = true
-	for k: String in GraphicsSettings.KEYS:
+	for k: String in GraphicsSettings.all_keys():
 		if not found.has(String(GraphicsSettings.SUBTITLES[k])):
 			printerr("  缺 subtitle: %s" % k)
 			return false
