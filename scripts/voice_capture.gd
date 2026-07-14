@@ -87,6 +87,16 @@ func _ready() -> void:
 ## editor/headless 从源码跑时单例在、但模型不随包（除非 MALIANG_ASR_MODEL_DIR 指路），
 ## initialize() 会 asr_error → _asr 置空 = 本机无识别（语音不工作但不崩，见 _on_local_error）。
 func _setup_local_asr() -> void:
+	# e2e 注入（docs/voice-e2e-harness-design.md）：debug 构建 + user://asr_harness 标志 →
+	# 改注 ScriptedAsr 替身（不识别音频，说完吐预排文本），绕过真单例/真模型，供真机自动回归。
+	# 默认（无标志）一行不动、照走真实单例路径——回归护栏；OS.is_debug_build 门控，绝不进 release。
+	if OS.is_debug_build() and FileAccess.file_exists("user://asr_harness"):
+		_asr = ScriptedAsr.new()
+		_asr.connect("final_result", _on_local_final)
+		_asr.connect("asr_ready", _on_local_ready)
+		_asr.connect("asr_error", _on_local_error)
+		_asr.initialize()
+		return
 	if not Engine.has_singleton("MaliangAsr"):
 		# Android/导出 macOS 没有单例 = 导出漏带端侧 ASR（坏包），硬报错拒进游戏。
 		if AsrGuard.is_fatal(os_name, false, OS.has_feature("template")):
@@ -101,13 +111,34 @@ func _setup_local_asr() -> void:
 func _exit_tree() -> void:
 	# 场景切走：关麦 + 断插件信号，别留开着的麦 / 未关的本地会话到节点释放为止。
 	close()
-	# _asr 可能是真单例（有这些信号）、null、或测试注入的 fake（无信号）——has_signal 先挡。
-	if _asr != null:
-		for pair in [["final_result", _on_local_final], ["asr_ready", _on_local_ready], ["asr_error", _on_local_error]]:
-			var sig := String(pair[0])
-			var cb := pair[1] as Callable
-			if _asr.has_signal(sig) and _asr.is_connected(sig, cb):
-				_asr.disconnect(sig, cb)
+	_disconnect_asr()
+
+## 断开当前 _asr（真单例/替身）被本模块接的信号，避免换 ASR / 释放时留双份回调。
+## _asr 可能是真单例（有这些信号）、null、或测试注入的 fake（无信号）——has_signal 先挡。
+func _disconnect_asr() -> void:
+	if _asr == null:
+		return
+	for pair in [["final_result", _on_local_final], ["asr_ready", _on_local_ready], ["asr_error", _on_local_error]]:
+		var sig := String(pair[0])
+		var cb := pair[1] as Callable
+		if _asr.has_signal(sig) and _asr.is_connected(sig, cb):
+			_asr.disconnect(sig, cb)
+
+## e2e harness（docs/voice-e2e-harness-design.md）：运行时把端侧 ASR 换成 ScriptedAsr 替身。
+## 真机上 user:// 标志无法 adb push（app 私有目录），故注入改由 debug TCP 命令 handshake 在
+## 运行时触发（见 DebugCmdServer 的 inject 命令），而非依赖 _setup_local_asr 的文件标志。
+## 仅 debug 构建生效；release 一行不跑——绝不进孩子的包。返回注入的替身（供断言），失败返回 null。
+func use_scripted_asr() -> ScriptedAsr:
+	if not OS.is_debug_build():
+		return null
+	_disconnect_asr() # 先断真单例/旧替身的信号
+	var s := ScriptedAsr.new()
+	_asr = s
+	_asr.connect("final_result", _on_local_final)
+	_asr.connect("asr_ready", _on_local_ready)
+	_asr.connect("asr_error", _on_local_error)
+	_asr.initialize()
+	return s
 
 # ── 查询 ────────────────────────────────────────────────────────────────────
 

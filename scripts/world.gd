@@ -467,6 +467,10 @@ func _setup_audio() -> void:
 		confirm_bar.replay_pressed.connect(_vc.replay)
 		confirm_bar.accept_pressed.connect(_vc.accept)
 		confirm_bar.retry_pressed.connect(_vc.retry)
+	# 端侧语音 e2e 注入 harness 的控制通道（docs/voice-e2e-harness-design.md §4.3）：
+	# 仅 debug 构建开本地 TCP 命令口，release 一行不跑（同 perf_sweep/[vad] logcat 门控）。
+	if OS.is_debug_build():
+		add_child(DebugCmdServer.make(self))
 
 ## 开放麦门禁（每帧）：端侧未就绪不喂（绝不上传）；喊话只走端侧；否则按 FSM mic_open。
 ## cooldown 已折进 FSM（COOLDOWN 态非 mic_open），退避倒计时在 _process 里推进。
