@@ -88,11 +88,14 @@ func _build_overlay() -> void:
 	# 在 bg 之后、点点之前入树 → 画在她身后（她像正拖着笔尖画出这条线）。
 	# Line2D 挂 Control 下按画布坐标渲染；点点母题就是墨点尾迹，这里把它连成一笔。
 	_trail = Line2D.new()
-	_trail.width = 12.0
-	_trail.default_color = Color(0.16, 0.14, 0.13, 0.92) # 墨黑（微暖，非纯黑）
+	_trail.width = 18.0
+	_trail.default_color = Color.WHITE # 墨色/飞白烘进纹理，这里留白让纹理色透出
 	_trail.joint_mode = Line2D.LINE_JOINT_ROUND
 	_trail.begin_cap_mode = Line2D.LINE_CAP_ROUND
 	_trail.end_cap_mode = Line2D.LINE_CAP_ROUND
+	# 干笔墨纹理沿笔画平铺：飞白断墨（快扫处墨不满）+ 上下毛糙笔锋。TILE 每 tex.width 重复一次。
+	_trail.texture = _make_ink_texture(64, 28)
+	_trail.texture_mode = Line2D.LINE_TEXTURE_TILE
 	# 起笔细、行笔粗（毛笔起收笔），用宽度曲线做出笔锋
 	var wcurve := Curve.new()
 	wcurve.add_point(Vector2(0.0, 0.35))
@@ -167,6 +170,28 @@ func _build_overlay() -> void:
 		_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_status_label.text = "启动中…"
 		_fade_root.add_child(_status_label) # 挂 _fade_root：随过场一起淡出
+
+## 干笔墨纹理（毛笔飞白）：沿笔画方向(U)偶有飞白断墨——快扫时墨不满纸，露出几道白；
+## 跨笔画方向(V)上下边缘毛糙、夹几根分叉的笔毛缝。烘进墨色，Line2D 以 TILE 平铺。
+## 飞白位置用固定函数（不随帧变），画好的墨就"干"在那儿不闪。
+func _make_ink_texture(w: int, h: int) -> ImageTexture:
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var ink := Color(0.15, 0.13, 0.12) # 墨黑（微暖，非纯黑）
+	for x in w:
+		var u := float(x) / float(w)
+		# 沿笔画的飞白：两三道干裂（低频正弦压出谷底），谷底墨稀→透出纸白
+		var dry := 0.6 + 0.4 * sin(u * TAU * 2.0 + 0.7)     # 0.2..1.0 起伏
+		dry = smoothstep(0.28, 0.62, dry)                    # 拉开对比：谷更空、脊更实
+		for y in h:
+			var v := float(y) / float(h - 1)
+			# 上下笔锋渐隐（中间实、边缘虚）+ 两根固定笔毛缝
+			var edge := 1.0 - pow(abs(v - 0.5) * 2.0, 2.2)   # 0 边→1 中
+			var hair := 1.0
+			if absf(v - 0.34) < 0.03 or absf(v - 0.68) < 0.04:
+				hair = 0.35                                   # 笔毛分叉的两道浅缝
+			var a := clampf(edge * dry * hair, 0.0, 1.0) * 0.94
+			img.set_pixel(x, y, Color(ink.r, ink.g, ink.b, a))
+	return ImageTexture.create_from_image(img)
 
 ## 程序化生成发光漩涡传送门：紧亮的高斯环带（r≈0.80）+ 门心径向辉光填充 + 角向螺旋
 ## （自转即漩涡流动）。门心留半透发光（青→白），既能透出飞入的仙子，放大时又用魔法光
