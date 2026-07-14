@@ -39,6 +39,10 @@ signal task_complete(data: Dictionary)
 ## 村民的心愿漏话候选 + 玩家已发现的玩法（服务端持久口径，进世界/换场景/发现新玩法后重发）。
 signal npc_wishes(wishes: Array, discovered: Array)
 signal praise_tts(data: Dictionary)
+## 试用·还差一点（A1）：造物类心愿造成功后开「试用」——村民抱怨差一点，出变大/变小箭头调体型。
+signal wish_trial(data: Dictionary)      ## {npcId, itemRef, refineDir, fromSize, complaint, voiceId, fairyHint}
+signal wish_retry(data: Dictionary)      ## 调反(未达上限)：仙子升级问句 {npcId, itemRef, refineDir, tries, fairyHint}
+signal character_resized(data: Dictionary) ## 角色体型改了(服务端重渲染广播){characterId, size, scale}
 ## tts_request 降级流（客户端 edge-tts 失败求服务端合成）：tts_start 带 mime，随后 tts_chunk/tts_end 同一通道
 signal tts_start(mime: String)
 signal tts_failed
@@ -303,6 +307,11 @@ func send_sticker_buy(world_id: String, item_id: String) -> void:
 func send_character_attach(world_id: String, character_id: String, slot: String, item_id: String) -> void:
 	_send({ "type": "character_attach", "worldId": world_id, "characterId": character_id, "slot": slot, "itemId": item_id })
 
+## 试用·还差一点（A1）：小朋友把造出来那件东西的体型调成 new_size（small/medium/big）。
+## 服务端应用体型+广播重渲染，并判定试用是否满意（对/达上限盖章，反且未达上限仙子再问一句）。
+func send_wish_refine(world_id: String, item_ref: String, new_size: String) -> void:
+	_send({ "type": "wish_refine", "worldId": world_id, "itemRef": item_ref, "newSize": new_size })
+
 func _send(obj: Dictionary) -> void:
 	# 统一注入玩家身份：每条出站消息带 playerId（设备端 UUID），服务端按玩家归属记忆/Visit。
 	if not player_id.is_empty() and not obj.has("playerId"):
@@ -398,6 +407,12 @@ func _dispatch(data: Dictionary) -> void:
 			npc_wishes.emit(data.get("wishes", []), data.get("discovered", []))
 		"praise_tts":
 			praise_tts.emit(data)
+		"wish_trial":
+			wish_trial.emit(data)
+		"wish_retry":
+			wish_retry.emit(data)
+		"character_resized":
+			character_resized.emit(data)
 		"tts_start":
 			tts_start.emit(String(data.get("ttsMime", "")))
 		"tts_failed":

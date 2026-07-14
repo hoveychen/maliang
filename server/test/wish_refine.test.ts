@@ -11,7 +11,12 @@ import { refineDirFor, REFINE_MAX_TRIES } from '../src/refinements.ts';
 import { handleWsMessage, newVoiceSession } from '../src/server.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
-import { ANON_PLAYER, type ActiveTask, type Character } from '../src/types.ts';
+import { WorldHub } from '../src/world_hub.ts';
+import { creationItemDef } from '../src/items.ts';
+import { fallbackSdfPropSpec } from '../src/sdf_prop.ts';
+import { emptyTerrain, encodeTerrain, REQUIRED_GRID } from '../src/terrain.ts';
+import { sizeToScale } from '../src/creation_options.ts';
+import { ANON_PLAYER, DEFAULT_SCENE, type ActiveTask, type Character } from '../src/types.ts';
 
 function seedWorld(): WorldStore {
   const store = new WorldStore();
@@ -147,4 +152,95 @@ test('WS wish_refine：调反(未达上限) → wish_retry，仙子再问一句'
   assert.ok(retry, '调反 → wish_retry');
   assert.equal(retry!['fairyHint'], 'refine_hint_2', '升一级问句');
   assert.equal(store.getActiveTask('w1', ANON_PLAYER)!.refineTries, 1);
+});
+
+// ── P7：wish_refine 除判定外还【应用体型 + 广播重渲染】（老板拍板：服务端改尺寸）──
+const G = REQUIRED_GRID;
+
+/** 真 hub + 两条连接：观察定向/世界广播。 */
+function rig() {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  const hub = new WorldHub();
+  const conn = (connKey: string, playerId: string) => {
+    const sent: Record<string, unknown>[] = [];
+    const session = newVoiceSession();
+    const socket = { send: (s: string) => sent.push(JSON.parse(s)) };
+    const say = (msg: object) =>
+      handleWsMessage(socket, JSON.stringify({ worldId: 'w1', playerId, ...msg }), createMockAdapters(), store, new RateLimiter(1000, 1000), connKey, session, hub);
+    return { sent, say, ofType: (t: string) => sent.filter((m) => m['type'] === t) };
+  };
+  return { store, conn };
+}
+
+test('WS wish_refine（角色）：改 appearance.size/scale + 向同场景广播 character_resized', async () => {
+  const { store, conn } = rig();
+  // 造出来的新伙伴（refine 目标）落在 village，初始 big。
+  const buddy: Character = {
+    id: 'buddy', worldId: 'w1', isFairy: false, name: '小龙', personality: 'p', voiceId: 'v-buddy',
+    appearance: { visualDescription: '', spriteAsset: '', scale: sizeToScale('big'), size: 'big' },
+    memory: [], chatHistory: [], state: 'idle', behaviorScript: { commands: [], loop: false },
+    position: { tileX: 5, tileY: 5 }, abilities: [], relationships: {}, sceneId: DEFAULT_SCENE,
+  };
+  store.addCharacter(buddy);
+  // pa 的试用：造出来是 big（该变小），refineItemRef 指向 buddy。
+  store.setActiveTask('w1', 'pa', {
+    id: 't1', type: 'wish', npcId: 'buddy', npcName: '小龙', stampStyle: 'smile',
+    wishAbility: 'create_character', wishStage: 'tried', refineItemRef: 'buddy',
+    refineDir: 'smaller', refineFromSize: 'big', refineTries: 0,
+  });
+  const a = conn('cA', 'pa');
+  const b = conn('cB', 'pb');
+  await a.say({ type: 'world_info', sceneId: DEFAULT_SCENE });
+  await b.say({ type: 'world_info', sceneId: DEFAULT_SCENE });
+  b.sent.length = 0;
+
+  await a.say({ type: 'wish_refine', itemRef: 'buddy', newSize: 'medium' }); // big→medium=变小=对
+
+  const ch = store.getCharacter('w1', 'buddy')!;
+  assert.equal(ch.appearance.size, 'medium', '体型改为 medium');
+  assert.equal(ch.appearance.scale, sizeToScale('medium'), 'scale 同步 1.0');
+  const resized = b.ofType('character_resized');
+  assert.equal(resized.length, 1, '同场景的 B 收到 character_resized');
+  assert.equal(resized[0]['characterId'], 'buddy');
+  assert.equal(resized[0]['size'], 'medium');
+  assert.equal(resized[0]['scale'], sizeToScale('medium'));
+  assert.ok(a.ofType('task_complete').length === 1, '方向对 → 盖章');
+});
+
+test('WS wish_refine（造物）：改 def.spec.scale + terrain_patch 携带更新后的 def（只改倍率不换资产）', async () => {
+  const { store, conn } = rig();
+  // village 场景带矩阵，(10,10) 摆一件造物 prop-1（big，spec.scale=1.4）。
+  store.upsertScene({
+    worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h',
+    gridTiles: G, terrainVersion: 1, pois: [], portals: [],
+  });
+  const spec = { ...fallbackSdfPropSpec('小车'), scale: sizeToScale('big') };
+  const def = creationItemDef('w1', 'prop-1', spec);
+  store.upsertItem(def);
+  const t = emptyTerrain();
+  t.palette = ['prop-1'];
+  t.itemRef[10 * G + 10] = 1;
+  store.setSceneTerrain('w1', DEFAULT_SCENE, encodeTerrain(t), 1);
+  store.setActiveTask('w1', 'pa', {
+    id: 't2', type: 'wish', npcId: 'npc1', npcName: '小兔', stampStyle: 'smile',
+    wishAbility: 'create_prop', wishStage: 'tried', refineItemRef: 'prop-1',
+    refineDir: 'smaller', refineFromSize: 'big', refineTries: 0,
+  });
+  const a = conn('cA', 'pa');
+  await a.say({ type: 'world_info', sceneId: DEFAULT_SCENE });
+  a.sent.length = 0;
+
+  await a.say({ type: 'wish_refine', itemRef: 'prop-1', newSize: 'medium' }); // big→medium=变小=对
+
+  const scale = (store.getItemDef('w1', 'prop-1')!.spec as { scale: number }).scale;
+  assert.equal(scale, sizeToScale('medium'), 'def.spec.scale 改成 1.0');
+  const patch = a.ofType('terrain_patch');
+  assert.ok(patch.length >= 1, '发 terrain_patch 触发重渲染');
+  const items = (patch[patch.length - 1]['items'] as { id: string; spec: { scale: number }; renderRef: string }[]);
+  const carried = items.find((d) => d.id === 'prop-1');
+  assert.ok(carried, 'patch.items 强制携带更新后的 def');
+  assert.equal(carried!.spec.scale, sizeToScale('medium'), '客户端收到的 def 是新 scale');
+  assert.equal(carried!.renderRef, 'sdf_inline', '仍是同一造物、不换资产哈希（renderRef 不变）');
+  assert.ok(a.ofType('task_complete').length === 1, '方向对 → 盖章');
 });

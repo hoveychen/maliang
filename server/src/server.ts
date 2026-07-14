@@ -2284,6 +2284,72 @@ function tileEdgeItemIdAt(store: WorldStore, worldId: string, sceneId: string, x
   }
 }
 
+/** 反查：某实体 id 当前挂在场景哪个 tile（体型调整要按 tile 重发编辑触发重渲染）。找不到回 null。 */
+function findItemTile(store: WorldStore, worldId: string, sceneId: string, itemId: string): { x: number; y: number; yawDeg: number } | null {
+  const rec = store.getSceneTerrain(worldId, sceneId);
+  if (!rec) return null;
+  try {
+    const t = decodeTerrain(rec.bytes);
+    const ref = t.palette.indexOf(itemId) + 1;
+    if (ref === 0) return null;
+    for (let i = 0; i < t.itemRef.length; i++) {
+      if (t.itemRef[i] === ref) {
+        return { x: i % t.gridW, y: Math.floor(i / t.gridW), yawDeg: (t.itemArg[i]! * 360) / 256 };
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md §4.2）：把小朋友调的那一下体型【应用】到世界并广播重渲染。
+ * 老板拍板方案=服务端改尺寸+广播（不是客户端自改）。两条路径，按 refineItemRef 指向什么分发：
+ *  - 造物（SDF item）：改 def.spec.scale=sizeToScale(newSize) → re-upsert → 定位它所在 tile → 复用
+ *    editSceneTerrain（version+1 + terrain_patch 广播 + forceInclude 该 def）让客户端覆写目录后按新 scale 重绘。
+ *    还在背包没落地（找不到 tile）就只改 def——下次摆出来自然是新尺寸。
+ *  - 角色：改 appearance.size/scale → 落库 → character_resized 定向广播 → 客户端重算 pixel_size。
+ * 只改倍率、不重新生图、不动资产哈希（size 是纯标量轴，§3.1）。
+ */
+function applyRefineResize(
+  store: WorldStore,
+  hub: WorldHub | undefined,
+  worldId: string,
+  currentScene: string,
+  itemRef: string,
+  newSize: CreatureSize,
+): void {
+  const scale = sizeToScale(newSize);
+  const def = store.getItemDef(worldId, itemRef);
+  if (def) {
+    // 造物：spec.scale 是体型倍率（sdf_prop.ts），改它零成本、瞬时可见、不换资产。
+    const spec = def.spec as { scale?: number } | undefined;
+    if (spec && typeof spec === 'object') spec.scale = scale;
+    store.upsertItem(def);
+    const loc = findItemTile(store, worldId, currentScene, itemRef);
+    if (loc) {
+      // 复用 tile 编辑路径：重发同一 tile 的同一引用（矩阵无实质变化）只为 version+1 触发重铺，
+      // forceInclude 把改过 scale 的 def 塞进 patch.items，客户端覆写目录 → rebuild_tiles 按新 scale 重绘。
+      try {
+        editSceneTerrain(store, hub, worldId, currentScene, [{ x: loc.x, y: loc.y, item: { id: itemRef, yawDeg: loc.yawDeg } }], [itemRef]);
+      } catch {
+        // 校验意外失败：def 已更新，下次全量对齐或重摆时会按新 scale 渲染，不阻断试用判定。
+      }
+    }
+    return;
+  }
+  const char = store.getCharacter(worldId, itemRef);
+  if (char) {
+    char.appearance.size = newSize;
+    char.appearance.scale = scale;
+    store.saveCharacter(char);
+    hub?.broadcastScene(worldId, char.sceneId ?? DEFAULT_SCENE, {
+      type: 'character_resized', worldId, sceneId: char.sceneId ?? DEFAULT_SCENE, characterId: itemRef, size: newSize, scale,
+    });
+  }
+}
+
 /**
  * 处理位置上报(JSON positions_report 与二进制帧共用)。空间权威在客户端,服务端记最后 tile 供读回,
  * 并把携 x,y 的条目按【同世界同场景】转发插值 + 喂 near 求值。下行 positions_relay 双格式编码一次:
@@ -2648,13 +2714,15 @@ export async function handleWsMessage(
     return;
   }
 
-  // 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md §4.1）：小朋友把造出来那件东西的体型调了一次。
-  // 方向对/达上限 → 盖章 + 村民用自己音色道谢（现成结算）；方向反且未达上限 → 仙子再问一句更具体的问句。
-  // 体型的实际重渲染走现成广播（客户端 P7），这里只做「试用是否满意」的判定与结算。
+  // 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md §4.1/§4.2）：小朋友把造出来那件东西的体型调了一次。
+  // ①【应用体型 + 广播重渲染】（老板拍板：服务端改尺寸）——不管这一下调对没调对，孩子按下的这一下都要看得见。
+  // ② 判定试用是否满意：方向对/达上限 → 盖章 + 村民用自己音色道谢；方向反且未达上限 → 仙子再问一句更具体的问句。
   if (msg.type === 'wish_refine') {
     const worldId = msg.worldId ?? '';
     const itemRef = String(msg.itemRef ?? '');
     const newSize = (String(msg.newSize ?? 'medium')) as CreatureSize;
+    // 先按当前场景把体型落到世界（造物走 terrain_patch 重铺、角色走 character_resized）。
+    applyRefineResize(store, hub, worldId, session.currentScene, itemRef, newSize);
     const r = completeWishRefine(worldId, session.playerId, itemRef, newSize, store);
     if (!r) return; // 没有对应试用（不该发生）：静默
     if (r.satisfied) {
