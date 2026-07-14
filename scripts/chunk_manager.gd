@@ -226,6 +226,10 @@ static func _make_water_mat() -> ShaderMaterial:
 	m.set_shader_parameter("deep_color", TerrainAtlas.WATER_DEEP)
 	m.set_shader_parameter("foam_color", TerrainAtlas.WATER_FOAM)
 	m.set_shader_parameter("curvature", BendMat.CURVATURE)
+	if BendMat.papercraft_on():
+		m.set_shader_parameter("paper_bands", 4.0)
+		m.set_shader_parameter("paper_grain", 0.4)
+		m.set_shader_parameter("paper_tone", 0.3)
 	return m
 
 ## 地形数组换了之后重建全图区块（enter_scene 换场景时调用）。
