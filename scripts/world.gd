@@ -409,24 +409,19 @@ func _ready() -> void:
 	add_child(ProcProf.Sentinel.make(false))
 	# 画质档启动应用（节点已就绪：_sun / chunk_manager / _env）。档位从哪来见
 	# GraphicsSettings：用户设置页 / 本机 benchmark / 后端按 GPU 下发；没定过档的新机器
-	# 在移动端落保守起步档。这里不再做任何自适应定档——那是 benchmark 场景的事。
+	# 在移动端落保守起步档。这里不再做任何自适应定档——benchmark 只嵌在 intro 注魔幕里跑。
 	_apply_saved_graphics()
 	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
 	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
 		Engine.max_fps = 0  # 扫频要真实帧时，解除 menu 设的移动端限帧
 		add_child(PerfSweep.make(self, _env))
-	# 画质 benchmark（新机器定档）：世界的渲染负载到这里已经全部就位，而后端/麦克风/引导
-	# 与渲染无关且会引入噪声（网络等待、TTS 播放）——benchmark 模式到此为止。
-	if Benchmark.pending:
-		add_child(Benchmark.make(self))
-		return
 	_setup_backend()
 	api = Api.new()
 	api.name = "Api"
 	add_child(api)
 	_setup_audio()
 	# 分流：intro 由上游（menu/onboarding）按 IntroDirector.should_run（无画质档 / 未看过建造演出）
-	# 置 pending——与 Benchmark.pending 同款显式开关，避免每个 headless 测试都误入 intro。见分流矩阵。
+	# 置 pending——显式开关，避免每个 headless 测试都误入 intro。画质定档也在这条路里（注魔幕）。见分流矩阵。
 	if IntroDirector.pending:
 		IntroDirector.pending = false # 消费掉：一次就够
 		_intro_active = true
@@ -601,11 +596,12 @@ func _on_gfx_restore_auto() -> void:
 	GraphicsSettings.clear()
 	_apply_saved_graphics()
 
-## 设置页「重新检测画质」：丢掉现有档（含用户 override），重进世界跑一次 benchmark 定档。
-## 换了系统版本、机器发烫、或孩子觉得卡了都可以重来一次。
+## 设置页「重新检测画质」：丢掉现有档（含用户 override），重进世界走首启故事路跑一次 benchmark 定档。
+## 换了系统版本、机器发烫、或孩子觉得卡了都可以重来一次。清了画质档后 should_run 自然为真——benchmark
+## 已经只嵌在 intro 注魔幕里，所以这里置 IntroDirector.pending（返回用户 intro_seen=true → 跳教学、只演建造+定档）。
 func _on_gfx_rebench() -> void:
 	GraphicsSettings.clear()
-	Benchmark.pending = true
+	IntroDirector.pending = true
 	Loading.next_scene = "res://main.tscn"
 	get_tree().change_scene_to_file("res://loading.tscn")
 
