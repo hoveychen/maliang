@@ -256,13 +256,26 @@ func _build_spread(vp: SubViewport) -> void:
 		bg.color = UiAssets.CARD_BG
 		bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 		vp.add_child(bg)
+	# 内屏黑框：像合拢正面那圈黑机身边——展开跨页也套一圈黑色圆角边框，读成"设备内屏"
+	# 而非一张平纸。画在纸底之上、内容之下：只描边不填心的圆角 StyleBox，环住整个 2W 宽
+	# 跨页（单 viewport 左右半采样到两页 → 一圈边框正好绕满，中缝处无边不多竖线）。
+	var bezel := Panel.new()
+	bezel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bezel.mouse_filter = Control.MOUSE_FILTER_IGNORE  # 纯装饰，别拦点击
+	var bez := StyleBoxFlat.new()
+	bez.draw_center = false
+	bez.border_color = Color(0.09, 0.08, 0.07)  # 近黑，与正面机身同色系
+	bez.set_border_width_all(16)  # 窄边框（老板定：黑框细一点）
+	bez.set_corner_radius_all(46)
+	bezel.add_theme_stylebox_override("panel", bez)
+	vp.add_child(bezel)
 	var pad := MarginContainer.new()
 	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# 纯纸跨页无边框装饰，留呼吸边距即可
-	pad.add_theme_constant_override("margin_left", 48)
-	pad.add_theme_constant_override("margin_right", 48)
-	pad.add_theme_constant_override("margin_top", 36)
-	pad.add_theme_constant_override("margin_bottom", 48)
+	# 内容缩进：让出黑框那一圈 + 呼吸边距
+	pad.add_theme_constant_override("margin_left", 46)
+	pad.add_theme_constant_override("margin_right", 46)
+	pad.add_theme_constant_override("margin_top", 38)
+	pad.add_theme_constant_override("margin_bottom", 44)
 	vp.add_child(pad)
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
