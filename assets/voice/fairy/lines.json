@@ -324,6 +324,30 @@
       "trigger": "refine_hint_2",
       "cooldown": 20,
       "text": "唔……要不要试试把它变一变大小呀？你来选哦！"
+    },
+    {
+      "id": "fairy_name_ask_1",
+      "trigger": "name_ask",
+      "cooldown": 30,
+      "text": "做好啦！你想给它起个什么名字呀？说给点点听听。"
+    },
+    {
+      "id": "fairy_name_ask_2",
+      "trigger": "name_ask",
+      "cooldown": 30,
+      "text": "它是你变出来的哦！你想叫它什么呢？"
+    },
+    {
+      "id": "fairy_reuse_hint_1",
+      "trigger": "reuse_hint",
+      "cooldown": 45,
+      "text": "咦，你包里好像有能用上的东西哦，要不要翻出来看看呀？"
+    },
+    {
+      "id": "fairy_reuse_hint_2",
+      "trigger": "reuse_hint",
+      "cooldown": 45,
+      "text": "点点记得你造过一个差不多的呢，就在小册子里哦！"
     }
   ]
 }

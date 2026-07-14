@@ -281,6 +281,14 @@ export interface ItemDef {
   mount?: 'tile' | 'edge';
   /** A2「给谁做的」：这件造物是给谁用的（docs/kids-thinking-made-for-whom.md），供 A1 试用/B3 起名/交付话术读取。 */
   recipient?: RecipientRef;
+  /**
+   * B3 起名（reuse-name，docs/kids-thinking-reuse-name.md）：孩子给这件造物起的名字。
+   *  nameVoiceAsset = 孩子那句录音的 assetHash（WAV），背包点小喇叭回放他【自己的声音】；
+   *  nameText = 端侧 ASR 文本，仅供大人/日志/搜索，不展示给不识字的孩子。
+   * 现有 name（LLM 文本名）保留作回落——起名可选，不起就沿用它。
+   */
+  nameVoiceAsset?: string;
+  nameText?: string;
 }
 
 /** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */
