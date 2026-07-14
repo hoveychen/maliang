@@ -155,6 +155,13 @@ func _build() -> void:
 	_page_mat_r = _paper_mat(Color(0.97, 0.95, 0.90))
 	_page_mat_l.vertex_color_use_as_albedo = true
 	_page_mat_r.vertex_color_use_as_albedo = true
+	# 读者面（左右页顶面）设 unshaded：页面是平的、立体感靠烘进顶点色的沟槽 AO
+	# （profile_shade），本不需要实时光照。而左页网格是 sx=-1 的 X 镜像，shaded 下
+	# Godot(Forward Mobile) 会把镜像页渲染得比右页明显暗（实测：即便左右页世界法线、
+	# 朝向、材质完全一致，补法线也压不平，只有 unshaded 能让两页对称）。封面/布面/
+	# 书脊/木桌仍走真实光照，书整体的 3D 精装观感不变。
+	_page_mat_l.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_page_mat_r.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_edge_mat = _paper_mat(Color.WHITE)
 	_edge_mat.albedo_texture = _make_edge_texture()
 	# 左页堆挂前封面铰链（合书时随铰链链翻叠到右堆顶）；本地系补回铰链偏移，
