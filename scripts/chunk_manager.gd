@@ -366,6 +366,8 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 					building_shadows.append([inst.position, ext.x, ext.y])
 			elif rref == "sdf_inline" or rref.begins_with("sdf_res:"):
 				_spawn_static_sdf(deco, def, rref, pos, yaw, hk)
+			elif rref.begins_with("composed:"):
+				_spawn_composed(deco, def, pos)
 			elif rref.is_empty():
 				push_warning("[items] 未知物品实体 %s（catalog 未载入?），跳过渲染" % id)
 			else:
@@ -409,6 +411,17 @@ func _spawn_static_sdf(parent: Node3D, def: Dictionary, rref: String, pos: Vecto
 	prop.visible = _props_shown  # 沿用画质开关态（chunk 重铺不打回默认）
 	parent.add_child(prop)
 	prop.enable_wander(float(def.get("wander", 0.0)), seed_v)
+
+## 组合物（积木式造物，renderRef 'composed:'）：读 spec 的零件树，画骨架 + 每零件一片子 quad。
+## 纸片扁平、正对相机——不套 yaw（纸艺四支柱：正对俯角、禁 yaw 侧摆），底边落在地面。
+func _spawn_composed(parent: Node3D, def: Dictionary, pos: Vector3) -> void:
+	var spec: Variant = def.get("spec", null)
+	if typeof(spec) != TYPE_DICTIONARY:
+		return
+	var cp := ComposedProp.from_spec(spec)
+	cp.position = pos + Vector3(0.0, ComposedProp.HEIGHT * 0.5, 0.0) # 居中骨架抬半高，底边贴地
+	cp.visible = _props_shown
+	parent.add_child(cp)
 
 ## 散布缩放抖动（迁自旧散布逻辑，逐 tile hash 确定性；朝向抖动已烘进矩阵 arg）。
 static func _jitter_scale(key: String, hk: int) -> float:

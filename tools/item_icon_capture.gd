@@ -245,6 +245,12 @@ func _make_node(def: Dictionary, rref: String, key: String, cat: String) -> Node
 		return _prep_sdf(SdfProp.from_spec(spec))
 	if rref.begins_with("sdf_res:"):
 		return _prep_sdf(SdfProp.from_json_file("res://assets/sdf_props/%s.json" % key))
+	if rref.begins_with("composed:"):
+		# 组合物（积木式造物）：零件树 quad 拍平定妆照（图标拍平无所谓，世界里实体永远是零件树）
+		var spec: Variant = def.get("spec", null)
+		if typeof(spec) != TYPE_DICTIONARY:
+			return null
+		return ComposedProp.from_spec(spec)
 	if cat == "baked" or cat == "scatter" or cat == "node":
 		var resrc := PackRegistry.load_resource(key)
 		if resrc == null:

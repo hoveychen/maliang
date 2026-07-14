@@ -200,7 +200,14 @@ var _creation_cancel_btn: Button   ## 右上角圆叉：随时退出创造（蛋
 var _creation_step := 0            ## 已走过的轮数（点亮的圆点数）
 var _creation_cam := false         ## 创造视图相机特写态（推近仙子；退出创造复位）
 var _in_creation := false          ## 正在引导式创造（造角色或造物；期间语音/点选都是这次会话的答复）
-var _creation_goal := "character"  ## 这次引导在造什么（服务端 creation_prompt.goal）：character→降生蛋，prop→魔法熔炉
+var _creation_goal := "character"  ## 这次引导在造什么（服务端 creation_prompt.goal）：character→降生蛋，prop→魔法熔炉，build→拼装台
+# ── 积木式造物（build，docs/kids-thinking-build-from-parts.md）拼装台状态 ──
+var _build_blueprint_id := ""      ## 正在拼哪副蓝图（build_prompt.blueprintId）
+var _build_slot := ""              ## 当前要填的槽（build_prompt.slotId）——拼装台点亮它发光；与服务端 askedSlots.at(-1) 一致
+var _build_filled := {}            ## 已填槽 slotId → {partId, partRenderRef}（客户端累积，喂拼装台预览）
+var _build_option_refs := {}       ## 本轮零件盘 partId → renderRef（点选后更新预览取用）
+var _build_preview: ComposedProp = null  ## 浮在仙子身旁的拼装台预览（骨架 + 已填零件 + 当前槽发光）
+const BUILD_PREVIEW_OFFSET := Vector3(2.2, 1.6, 0.0)  ## 拼装台相对仙子的偏移：侧旁 + 略上（与仙子同框）
 var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
 var album_button: Button           ## 左下角手机启动器按钮（AIGC 手机图标）
@@ -3457,6 +3464,7 @@ func _exit_interaction() -> void:
 		_in_creation = false # 退出与小仙子的交互：取消未完成的造角色会话
 		_hide_creation_cards()
 		_clear_creation_placeholder() # 造还没开工：引导期立的蛋/炉跟着收，别留在地上空烧
+		_clear_build_preview() # 拼装台同理：走开即收，别把半拼的骨架留在仙子身旁
 		if online:
 			backend.send_creation_cancel()
 	_vc.close() # 关麦（录音中则先静默取消，不留半开会话）
@@ -3503,6 +3511,7 @@ func _setup_backend() -> void:
 	backend.gen_progress.connect(_on_gen_progress)
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.creation_prompt.connect(_on_creation_prompt)
+	backend.build_prompt.connect(_on_build_prompt)
 	backend.creation_cancelled.connect(_on_creation_cancelled)
 	backend.prop_pending.connect(_on_prop_pending)
 	backend.item_created.connect(_on_item_created)
@@ -4554,6 +4563,12 @@ func _on_prop_pending(data: Dictionary) -> void:
 	if selected != null:
 		_exit_interaction()
 	thinking_label.visible = false
+	# 积木拼装落成：拼装台已是成品预览，不立熔炉——收起拼装台，成品随 item_created 落地。
+	if _creation_goal == "build":
+		_clear_build_preview()
+		banner.text = "拼好啦！"
+		banner.visible = true
+		return
 	_spawn_placeholder(PLACEHOLDER_FORGE_ID, PlaceholderSpecs.FORGE)
 	banner.text = "魔法熔炉烧起来啦！"
 	banner.visible = true
@@ -5314,6 +5329,65 @@ func _on_creation_prompt(data: Dictionary) -> void:
 		# clientTts：仙子问句本地 edge 合成（幼儿不识字，念不出来就降级服务端）
 		_speak_line(String(data.get("replyText", data.get("question", ""))), String(data.get("voiceId", "")))
 
+## 积木式造物追问一轮（build）：与 creation_prompt 平行，多一个「拼装台」——骨架浮在仙子身旁，
+## 当前要填的槽（slotId）发光，零件盘复用 2×2 大卡（占位阶段无图→文字标签）。点零件→填槽→飞入。
+## 点点不会走路（硬约束）：拼装台只是浮在她身旁的预览，全程不碰 BehaviorExecutor、不夺玩家操控。
+func _on_build_prompt(data: Dictionary) -> void:
+	if _think_timer != null:
+		_think_timer.stop()
+	thinking_label.visible = false
+	_creation_goal = "build"
+	_build_blueprint_id = String(data.get("blueprintId", ""))
+	_build_slot = String(data.get("slotId", "")) # 当前要填的槽：拼装台点亮它发光
+	_enter_creation_view() # 首轮：退出普通对话构图、相机推近仙子特写、点亮创造视图
+	_raise_build_preview() # 骨架浮在仙子身旁（幂等：已立起则复用）
+	_update_build_preview() # 画已填零件 + 当前槽发光
+	_creation_q.text = String(data.get("question", data.get("replyText", ""))) # 功能问句字幕（幼儿不识字，靠 TTS）
+	_creation_q.visible = true
+	_advance_creation_dots()
+	# 零件盘：记 partId→renderRef（点选后更新预览用），复用创造大卡渲染（options 同 {id,label} 形状）
+	_build_option_refs.clear()
+	for opt in data.get("options", []):
+		if typeof(opt) == TYPE_DICTIONARY:
+			_build_option_refs[String((opt as Dictionary).get("id", ""))] = String((opt as Dictionary).get("renderRef", ""))
+	_build_creation_cards(data.get("options", []))
+	var asset := String(data.get("ttsAsset", ""))
+	if not asset.is_empty():
+		_play_tts(asset) # 点点把功能问句念出来（幼儿不识字）
+	else:
+		_speak_line(String(data.get("replyText", data.get("question", ""))), String(data.get("voiceId", "")))
+
+## 拼装台预览：ComposedProp 浮在仙子身旁（放不下也不崩，后续路径容忍缺席）。幂等。
+func _raise_build_preview() -> void:
+	if _build_preview != null and is_instance_valid(_build_preview):
+		return
+	var cp := ComposedProp.new()
+	var fairy := _find_fairy()
+	var fnode: Node3D = fairy.get("node") if not fairy.is_empty() else null
+	if fnode != null and is_instance_valid(fnode) and fnode.get_parent() != null:
+		fnode.get_parent().add_child(cp)
+		cp.position = fnode.position + BUILD_PREVIEW_OFFSET # 侧旁略上，与仙子特写同框
+	else:
+		add_child(cp) # 兜底：仙子节点缺席也别崩
+	_build_preview = cp
+
+## 刷新拼装台：按已填槽重画骨架 + 零件，当前要填的槽发光（幂等重建，每轮 build_prompt 调）。
+func _update_build_preview() -> void:
+	if _build_preview == null or not is_instance_valid(_build_preview):
+		return
+	_build_preview.set_filled(_build_blueprint_id, _build_filled)
+	_build_preview.set_glow_slot(_build_slot)
+
+## 收起拼装台（取消/走开/拼好开工）：清预览 + 重置拼装状态。
+func _clear_build_preview() -> void:
+	if _build_preview != null and is_instance_valid(_build_preview):
+		_build_preview.queue_free()
+	_build_preview = null
+	_build_blueprint_id = ""
+	_build_slot = ""
+	_build_filled = {}
+	_build_option_refs.clear()
+
 ## 服务端判定小朋友说了「算了/不要了」：收创造视图 + 收蛋/炉，并退出对话回到自由跑动
 ## （老板拍板：取消 = 退出这个状态，别把孩子留在仙子面前干站着）。
 func _on_creation_cancelled(data: Dictionary) -> void:
@@ -5337,6 +5411,7 @@ func _end_creation_locally() -> void:
 	_in_creation = false
 	_hide_creation_cards()
 	_clear_creation_placeholder()
+	_clear_build_preview() # 拼装台一并收（服务端判的取消/点右上角叉共用此路径）
 	thinking_label.visible = false
 
 ## 填充居中 2×2 大卡：图标就绪(iconAsset 非空)显示图标，否则先显示中文 label。点一下即答复小仙子。
@@ -5377,6 +5452,21 @@ func _on_creation_card(option_id: String, card: Button = null) -> void:
 	if not _in_creation or selected == null:
 		return
 	game_audio.play_sfx("bell")
+	# 积木拼装：点选权威填当前槽——记 filled + 即时在拼装台把零件坐进槽（THUNK 一下），再等下一轮问句。
+	# 服务端同样把 optionId(partId) 坐进 askedSlots.at(-1)（即本轮 _build_slot），两边一致。
+	if _creation_goal == "build":
+		if not _build_slot.is_empty():
+			_build_filled[_build_slot] = {
+				"partId": option_id,
+				"partRenderRef": String(_build_option_refs.get(option_id, "part:" + option_id)),
+			}
+		_build_slot = "" # 填完这槽：施法中期间不发光，等下一轮 build_prompt 点亮新槽
+		_update_build_preview() # 零件即时显现（THUNK 感由 bell 音效兜住）
+		backend.send_creation_reply(world_id, _selected_id(), option_id)
+		for c in _creation_cards.get_children():
+			c.queue_free()
+		_creation_q.text = "拼上啦…"
+		return
 	if card != null and is_instance_valid(card):
 		_throw_into_placeholder(card.global_position, card.size, card.icon, card.text)
 	backend.send_creation_reply(world_id, _selected_id(), option_id)
