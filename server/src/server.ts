@@ -84,14 +84,14 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type ItemDef, type Player, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWishRefine, flowerDeniedLine, praiseLine } from './tasks.ts';
 import { pickComplaint, REFINE_HINT, REFINE_HINT_2 } from './refinements.ts';
-import { wishFor, IDLE_DOING } from './wishes.ts';
+import { wishFor, IDLE_DOING, reuseHint } from './wishes.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
@@ -1239,10 +1239,15 @@ export interface VoiceSession {
    * 绝不能被误判为死连接踢掉（它们也没自动重连兜底）。
    */
   pingCapable: boolean;
+  /**
+   * B3 复用提示去重（reuse-name §3.1）：本会话已提过的「`${itemId}:${ability}` 配对」。
+   * 点点只在「背包旧物 × 眼前需求」命中且本会话没提过时点一句——记在这里，避免同一旧物反复念。
+   */
+  reuseHinted: Set<string>;
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { worldId: '', characterId: '', playerId: '', visit: null, creation: null, clientTts: false, posBin: false, currentScene: DEFAULT_SCENE, lastSeenMs: Date.now(), pingCapable: false };
+  return { worldId: '', characterId: '', playerId: '', visit: null, creation: null, clientTts: false, posBin: false, currentScene: DEFAULT_SCENE, lastSeenMs: Date.now(), pingCapable: false, reuseHinted: new Set() };
 }
 
 /** 服务端 ASR 退役后被废弃的 WS 消息类型：收到即静默丢弃（见 handleWsMessage 末尾）。 */
@@ -1358,14 +1363,17 @@ function pushWishes(
   worldId: string,
   playerId: string,
   sceneId: string,
+  session?: VoiceSession, // 传了才算复用提示（要它的本会话去重集；同一连接的 world_info/换场景才传）
 ): void {
   const discovered = store.getDiscovered(worldId, playerId);
   const canAfford = store.getWallet(worldId, playerId).flowers > 0; // 买不起就不勾（见 WishDef.costsFlower）
+  const activeAbilities = new Set<string>(); // 眼前「有需求」的活跃能力（村民在漏的心愿 + 已认领委托）
   const wishes = store
     .listCharacters(worldId, sceneId)
     .filter((c) => !c.isFairy)
     .map((c) => {
       const wish = wishFor(c.id, discovered, canAfford);
+      if (wish) activeAbilities.add(wish.ability);
       return {
         characterId: c.id,
         voiceId: c.voiceId,
@@ -1373,10 +1381,30 @@ function pushWishes(
         lines: wish ? wish.leaks : IDLE_DOING,
       };
     });
+  // 已认领的心愿委托也算一个活跃需求（村民已被搭话、心愿变委托，但漏话池可能已因 discovered 刷掉那句）。
+  const task = store.getActiveTask(worldId, playerId);
+  if (task?.type === 'wish' && task.wishAbility) activeAbilities.add(task.wishAbility);
+
+  // 复用提示（reuse-name §3.1）：三条件全满足才挂——① 背包有 kind 命中旧物 ② 眼前有需求语境 ③ 本会话没提过。
+  // 判定是纯函数 reuseHint；命中就记进 session 去重集（避免同一旧物反复念），并挂到 npc_wishes 下发。
+  // 冷却/不叠声由客户端 ambient 通道兜（同 wish-leak 门禁，见 world.gd）。
+  let hint: { itemId: string; itemName: string } | undefined;
+  if (session) {
+    const resolve = store.itemResolver(worldId);
+    const bag = Object.entries(store.getBag(worldId, playerId))
+      .filter(([, n]) => n > 0)
+      .map(([id]) => resolve(id))
+      .filter((d): d is ItemDef => !!d);
+    const h = reuseHint([...activeAbilities], bag, session.reuseHinted);
+    if (h) {
+      session.reuseHinted.add(`${h.itemId}:${h.ability}`);
+      hint = { itemId: h.itemId, itemName: h.itemName };
+    }
+  }
   // discovered 一并下发：仙子的引路提示门禁（world.gd 的 _guide_used）本来只记「本次进世界」，
   // 重启就忘 → 明明用过引路了她还在念叨，正好砸了「已发现的不再提」这条承诺。
   // 持久口径在服务端，客户端据此初始化。
-  socket.send(JSON.stringify({ type: 'npc_wishes', worldId, sceneId, wishes, discovered }));
+  socket.send(JSON.stringify({ type: 'npc_wishes', worldId, sceneId, wishes, discovered, reuseHint: hint }));
 }
 
 /**
@@ -2766,7 +2794,8 @@ export async function handleWsMessage(
     // 中途加入：世界正在演出时补发 stage_begin，让新连接锁交互并接住后续舞台命令/位置流。
     stages?.snapshotFor(worldId, (m) => socket.send(JSON.stringify(m)));
     // 村民的漏话候选（按这个玩家的 discovered 算）——客户端据此自己调度、按距离衰减地播
-    pushWishes(socket, store, worldId, session.playerId, session.currentScene);
+    // 带 session：进世界这一刻是「有需求语境」，顺带算复用提示（背包旧物 × 村民心愿命中才挂）。
+    pushWishes(socket, store, worldId, session.playerId, session.currentScene, session);
     return;
   }
 
@@ -3302,7 +3331,8 @@ export async function handleWsMessage(
       items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
       playerPos: session.playerId ? store.getPlayerTile(worldId, sceneId, session.playerId) : undefined,
     }));
-    pushWishes(socket, store, worldId, session.playerId, sceneId); // 换场景 = 换了一批村民
+    // 换场景 = 换了一批村民；带 session 顺带算复用提示（同 world_info，有需求语境才挂）。
+    pushWishes(socket, store, worldId, session.playerId, sceneId, session);
     return;
   }
 

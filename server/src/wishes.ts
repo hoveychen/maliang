@@ -8,6 +8,8 @@
 //
 // 词库是静态的（形状照抄 greetings.ts）：零 LLM 成本、确定性、可单测、可预制 TTS。
 
+import type { ItemDef } from './types.ts';
+
 /** 一个心愿：勾哪个玩法、怎么漏、怎么想、兑现了怎么谢。 */
 export interface WishDef {
   /** 勾的玩法能力（与 ABILITY_DESC / BASE_ABILITIES 同名）。 */
@@ -163,4 +165,56 @@ export function pickLeak(
 /** 心愿达成时的道谢词。rng 可注入。 */
 export function pickThanks(wish: WishDef, rng: () => number = Math.random): string {
   return wish.thanks[Math.floor(rng() * wish.thanks.length)]!;
+}
+
+// ── 语境化复用提示（reuse hint，docs/kids-thinking-reuse-name.md §2.1 / §3.1）─────────────
+// 纪律照抄漏话：点点只在【背包旧物正好能满足眼前需求】时点一句，需求不匹配就不响——绝不周期性瞎念。
+// 判定是纯函数、可脱离 LLM 单测；冷却/门禁由客户端 ambient 通道兜（同 wish-leak，不叠声）。
+
+/** 命中的复用提示：这件背包旧物正好能满足眼前的需求。 */
+export interface ReuseHint {
+  /** 旧物 id（客户端据此开背包摆放）。 */
+  itemId: string;
+  /** 旧物名字（优先孩子起的 nameText，回落 LLM 文本名）——供点点念/客户端展示。 */
+  itemName: string;
+  /** 命中的需求能力（本会话去重 key 的一半：同一旧物×不同需求可各提一次）。 */
+  ability: string;
+}
+
+/**
+ * 需求能力 → 能满足它的背包造物 kind。
+ * 只有造物类玩法在背包里留得下东西：create_prop→'prop'、create_sticker→'sticker'。
+ * create_character（产物是角色，不进包）/ play_game / guide_to 没有背包物品，一律不匹配（返回 null）。
+ */
+function abilityToItemKind(ability: string): 'prop' | 'sticker' | null {
+  if (ability === 'create_prop') return 'prop';
+  if (ability === 'create_sticker') return 'sticker';
+  return null;
+}
+
+/** 背包物品的 kind：mount:'edge' 薄片 = 贴纸，其余（tile / 缺省）= 造物（照抄 items.ts 的 edge 判定）。 */
+function itemKind(def: ItemDef): 'prop' | 'sticker' {
+  return def.mount === 'edge' ? 'sticker' : 'prop';
+}
+
+/**
+ * 语境化复用提示（纯函数，见 §3.1）：眼前若有一个「有需求」的活跃能力，且背包里某件旧物的 kind 正好对上，
+ * 就返回那件旧物的 {itemId,itemName,ability}；对不上、或本会话该配对已提过 → null（不响）。
+ *
+ * @param activeAbilities 当前活跃需求能力（村民在漏的心愿 + 已认领的委托 wishAbility）。
+ * @param bag             该玩家背包里已解析出的 ItemDef（调用方用 itemResolver 解 getBag 的 key）。
+ * @param alreadyHinted   本会话已提过的「`${itemId}:${ability}` 配对」集合，命中过就不再念（去重）。
+ */
+export function reuseHint(
+  activeAbilities: readonly string[],
+  bag: readonly ItemDef[],
+  alreadyHinted: ReadonlySet<string>,
+): ReuseHint | null {
+  for (const ability of activeAbilities) {
+    const kind = abilityToItemKind(ability);
+    if (!kind) continue;
+    const match = bag.find((d) => itemKind(d) === kind && !alreadyHinted.has(`${d.id}:${ability}`));
+    if (match) return { itemId: match.id, itemName: match.nameText || match.name, ability };
+  }
+  return null;
 }
