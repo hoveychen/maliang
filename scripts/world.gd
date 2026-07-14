@@ -63,9 +63,9 @@ const VILLAGER_BASE_HEIGHT := 6.0 ## 村民/角色世界高度基准（中号体
 const BODY_SCALE_MIN := 0.4       ## 体型倍率防御 clamp 下限（挡服务端坏数据）
 const BODY_SCALE_MAX := 2.0       ## 体型倍率防御 clamp 上限
 const FAIRY_HOVER := 2.4          ## 小仙子悬浮基准高度（米，脚底离地）
-const FOG_DEPTH_BEGIN := 40.0     ## 深度雾起点（焦点在平地时；随 _cur_focus_y 整体补偿）
-const FOG_DEPTH_END := 95.0       ## 小世界(span 150)：~95 外渐隐进天空，藏住远端循环，保留无限地平线感
-const SKY_HORIZON_COLOR := Color(0.76, 0.89, 0.98) ## 天空地平线色 = 雾色（远地渐隐进天空的无缝衔接）；泛白淡蓝（Pokopia 式低对比）
+const FOG_DEPTH_BEGIN := 52.0     ## 深度雾起点（焦点在平地时；随 _cur_focus_y 整体补偿）；后移让中景摆脱奶白罩
+const FOG_DEPTH_END := 95.0       ## 小世界(span 150)：~95 外渐隐进天空，藏住远端循环，保留无限地平线感（不可后移，环面循环会穿帮）
+const SKY_HORIZON_COLOR := Color(0.80, 0.86, 1.0) ## 天空地平线色 = 雾色（远地渐隐进天空的无缝衔接）；偏粉蓝而非奶白（Pokopia 式远景往蓝去）
 const SKY_ZENITH_COLOR := Color(0.46, 0.69, 0.95)  ## 天顶色（可见天空带上缘的深一档蓝）；粉彩淡蓝
 const SKY_WIND := Vector2(0.006, 0.0015)           ## 云漂移速度（uv/秒），非零 = 天空是动的
 # 纸片动作演出（_update_paper_motion）
@@ -491,8 +491,8 @@ func _setup_environment() -> void:
 	light.name = "Sun"
 	_sun = light
 	light.rotation_degrees = Vector3(-55.0, -40.0, 0.0)
-	light.light_color = Color(1.0, 0.96, 0.86) # 暖阳（Pokopia 式午后柔光）
-	light.light_energy = 1.25
+	light.light_color = Color(1.0, 0.94, 0.80) # 暖阳（比旧值更暖：与冷环境光拉开色相分离）
+	light.light_energy = 1.45
 	# 贴片影方向唯一从这盏光推导：照射方向(-Z 轴)的水平投影 = 影子拖向的背光侧方向，
 	# 写进 BlobShadow 供散布/建筑影用，保证影方向与场景明暗同一个太阳（不会两套方向打架）。
 	var sun_fwd := -light.basis.z
@@ -515,9 +515,10 @@ func _setup_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = _make_day_sky()
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	# 暖白环境光抬亮阴影（低对比高亮度）：暗部不发蓝灰、留一点暖调
-	env.ambient_light_color = Color(0.85, 0.86, 0.81)
-	env.ambient_light_energy = 0.72
+	# 冷调环境光（Pokopia 式色相分离）：背光面/暗部只吃环境光，偏蓝紫的冷调让
+	# 暗部与暖阳亮部拉开色相而非单纯压暗——老 Mali 不开 shadow pass 也能有「影子感」。
+	env.ambient_light_color = Color(0.62, 0.70, 0.92)
+	env.ambient_light_energy = 0.64
 	# 深度雾：远处地面渐隐到天空地平线色 → chunk 边界雾化进天空、自然无限地平线
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
