@@ -46,6 +46,7 @@ var _fairy_atlas: AtlasTexture ## 点点动画图集的取帧窗口（每帧移 
 var _trail: InkStroke          ## 点点飞过留下的墨迹（＝进度条：她画到哪儿，就是加载到哪儿）
 var _trail_base_y := 0.0       ## 墨迹基线 Y（不随点点上下起伏抖动，是稳的一道笔画）
 var _fairy_cx := 0.0           ## 点点框心 X（_layout_fairy 每帧写，墨迹终点取它）
+var _trail_max_x := 0.0        ## 墨迹已画到的最靠右 X（只增不减：画上去的墨不会退，笔尖左右摆也不缩尾）
 var _ink_drop: TextureRect     ## 笔尖将滴未滴的墨珠（慢网停滞时浮现：墨快用完了在续墨）
 var _stall_t := 0.0            ## 真进度停滞累计秒（慢爬而非跟进）：越久越"墨快用完"
 var _stalled := false          ## 本帧是否停滞（笔尖蹭飞白 + 墨珠据此显隐）
@@ -296,12 +297,14 @@ func _layout_trail() -> void:
 	if _trail == null or _fade_root == null:
 		return
 	var start_x := FLY_MARGIN + 12.0
-	var end_x := maxf(_fairy_cx - FAIRY_W * 0.18, start_x) # 收到她框心稍靠后，像墨从笔尖淌出
-	# 停滞时笔尖原地小幅高频抖动＝蹭飞白（墨快用完，在纸上蹭着找墨）
+	# 只增不减：笔尖 flit 左右摆时墨迹不缩尾（画上去的墨不会退）。落地冲刺(_prog→1)也一路只涨。
+	_trail_max_x = maxf(_trail_max_x, _fairy_cx - FAIRY_W * 0.18)
+	var end_x := maxf(_trail_max_x, start_x)
+	# 停滞时笔尖原地小幅高频抖动＝蹭飞白（墨快用完，在纸上蹭着找墨；只在尾巴抖，不改已画部分）
 	if _stalled:
 		end_x += sin(_t * 22.0) * 4.0
 	var pts := PackedVector2Array()
-	var seg := 22.0
+	var seg := 14.0   # 采样更密：逐小段连续画，段间才衔接得上（老板反馈"一段一段没衔接"）
 	var x := start_x
 	while x < end_x:
 		pts.append(Vector2(x, _trail_base_y + _trail_wob(x)))
@@ -552,19 +555,15 @@ class InkStroke extends Control:
 		_pts = pts
 		queue_redraw()
 
-	## 非周期"干湿"：0=干(飞白露白) 1=湿(墨满)。用位置哈希做成看不出周期的噪声。
-	func _wet(hair: int, s: float) -> float:
-		var n := sin(s * 0.09 + hair * 1.7) * 43.0 + sin(s * 0.037 - hair * 2.3) * 17.0
-		n = n - floor(n)                       # frac → 0..1 伪随机
-		var base := 0.45 + 0.55 * n
-		# 叠一道慢变化让整段有"这截墨多那截墨少"的呼吸
-		base *= 0.7 + 0.3 * sin(s * 0.012 + hair * 0.5)
-		return clampf(base, 0.0, 1.0)
+	## 平滑"墨量"密度：低频，随位置缓变（别高频抖成碎块）。0=干 1=湿。每根笔毛相位错开。
+	func _density(hair: int, s: float) -> float:
+		var n := 0.5 + 0.5 * (sin(s * 0.018 + hair * 1.3) * 0.6 + sin(s * 0.006 - hair * 0.7) * 0.4)
+		return clampf(n, 0.0, 1.0)
 
 	func _draw() -> void:
 		if _pts.size() < 2:
 			return
-		# 沿笔画累计弧长 s（给干湿/压力做"沿笔画"坐标）+ 每点法线（近水平，法线≈竖直，按切线求）
+		# 沿笔画累计弧长 s + 每点法线（近水平，法线≈竖直）
 		var n := _pts.size()
 		var slen := PackedFloat32Array(); slen.resize(n)
 		slen[0] = 0.0
@@ -578,34 +577,30 @@ class InkStroke extends Control:
 			var tang := (b - a).normalized()
 			if tang == Vector2.ZERO:
 				tang = Vector2.RIGHT
-			normals[i] = Vector2(-tang.y, tang.x)   # 垂直于切线
-		# 逐笔毛画：每根是若干"有墨"子段（draw_polyline），中间飞白处断开
+			normals[i] = Vector2(-tang.y, tang.x)
+		# 逐笔毛：**每根连续画**(不再遇飞白硬断→不再一段一段)。逐小段给平滑 alpha：
+		# 干处变淡、湿处变浓，但从不断开。中心笔毛给 alpha 下限＝始终连着的墨脊。
 		for h in HAIRS:
 			var hv := (float(h) / float(HAIRS - 1)) * 2.0 - 1.0   # -1..1 跨笔画位置
 			var edge := 1.0 - absf(hv)                             # 中心1 边缘0
-			var hair_a := (0.10 + 0.5 * edge) * 0.95               # 中心深、边缘淡→羽化+浓淡
-			var run := PackedVector2Array()
+			var base_a := 0.09 + 0.34 * edge                       # 中心深、边缘淡→羽化
+			var prev := Vector2.ZERO
+			var prev_pres := 0.0
+			var has_prev := false
 			for i in n:
 				var s := slen[i]
-				var sn := s / total                                # 0..1 沿笔画
-				# 压力：起笔尖(小)→迅速铺开→收笔略收；边缘笔毛整体更靠内
-				var pressure := smoothstep(0.0, 0.06, sn) * (1.0 - 0.25 * smoothstep(0.82, 1.0, sn))
+				var sn := s / total
+				# 压力：起笔尖→迅速铺开→收笔略收
+				var pressure := smoothstep(0.0, 0.05, sn) * (1.0 - 0.22 * smoothstep(0.84, 1.0, sn))
 				var off := hv * HALF_W * pressure
-				var wet := _wet(h, s) * pressure
-				# 边缘笔毛更容易断（飞白多）；越干越可能断墨
-				var thr := 0.28 + 0.32 * (1.0 - edge)
-				if wet > thr:
-					run.append(_pts[i] + normals[i] * off)
-				else:
-					_flush_run(run, hair_a)                        # 遇飞白→收一段
-					run = PackedVector2Array()
-			_flush_run(run, hair_a)
+				# 存在度：中心(edge→1)给 0.55 下限＝墨脊不断；边缘(edge→0)可淡到近无＝飞白只在边缘
+				var pres := lerpf(_density(h, s), 1.0, edge * 0.55) * pressure
+				var p := _pts[i] + normals[i] * off
+				if has_prev:
+					var seg_a := base_a * (prev_pres + pres) * 0.5   # 段 alpha=两端存在度均值→平滑过渡
+					if seg_a > 0.015:                                 # 近乎透明的边缘干段跳过(省 draw，不留可见缝)
+						draw_line(prev, p, Color(INK.r, INK.g, INK.b, minf(seg_a, 0.85)), 2.6, true)
+				prev = p; prev_pres = pres; has_prev = true
 		# 收笔湿头：末端一小坨浓墨（毛笔抬起前的驻墨）
 		var tip := _pts[n - 1]
-		draw_circle(tip, HALF_W * 0.55, Color(INK.r, INK.g, INK.b, 0.9))
-
-	func _flush_run(run: PackedVector2Array, a: float) -> void:
-		if run.size() >= 2:
-			draw_polyline(run, Color(INK.r, INK.g, INK.b, a), 2.6, true)
-		elif run.size() == 1:
-			draw_circle(run[0], 1.4, Color(INK.r, INK.g, INK.b, a))
+		draw_circle(tip, HALF_W * 0.5, Color(INK.r, INK.g, INK.b, 0.85))
