@@ -275,8 +275,7 @@ var _executors: Array = []        ## 活跃的 BehaviorExecutor
 var _stage: StageAgent            ## 舞台协议大脑（剧本系统，见 stage_agent.gd）；_setup_backend 接线
 var _hud: HudFactory              ## 舞台 HUD 工厂（计分/倒计时/toast，见 hud_factory.gd）；_setup_hud 建
 var _stage_active := false        ## 观演/游戏态：期间吞玩家输入，StageAgent 全权调度演出
-var _bench_freeze := false         ## intro benchmark 全程：锁玩家输入 + 仙子注魔定格（相机/主角不动）
-var _bench_still := false           ## intro benchmark 采样窗(window)内：冻结村民动态；warmup 间隙放行让世界"成形"
+var _bench_freeze := false         ## benchmark 全程：锁玩家输入 + 仙子注魔定格（相机/主角不动；仙子是 billboard，定格不改帧成本，纯为旁白干净）
 var _stage_drives: Array = []     ## 进行中的完成型舞台命令 { ex:BehaviorExecutor, done:Callable }
 var _stage_holds: Array = []      ## 设置型持续驱动的执行器（follow/flee）：收场统一 cancel（永不自完成）
 var _stage_speaks: Array = []     ## 进行中的舞台念白 { done:Callable, deadline:float, started:bool }
@@ -2225,8 +2224,8 @@ func _step_remote_actors(_delta: float) -> void:
 			_exit_player_talk()
 
 func _step_executors(delta: float) -> void:
-	if _bench_still:
-		return # benchmark 采样窗(window)内：村民停走定格保持负载恒定；warmup 间隙放行让世界"成形"有动静
+	# benchmark 采样期【不再】冻结村民：让 wander（A* 寻路 + 走动 CPU）全程计入 p95，
+	# 这才是弱机真实卡顿的来源。冻结静态场景无逐帧 CPU 尖峰、p95 假性达标 → 测出全最高。
 	for ex in _executors:
 		ex.step(delta)
 	# 单趟分拣（旧版两次 filter 每帧各分配一个数组+Callable，无人完成时纯浪费）
@@ -4237,19 +4236,68 @@ var _intro_active := false
 func intro_active() -> bool:
 	return _intro_active
 
-## intro 内嵌 benchmark 全程冻结（Benchmark embedded 模式 _ready/finish 开关，见设计 D5）：锁玩家
-## 移动输入（相机/主角不动）+ 仙子注魔定格（含闭嘴，语音让位注魔旁白）。整段 benchmark 都开着，
-## 保证不管在采样窗内还是间隙，玩家/相机/仙子都不动——这是可复现帧的地基。
+## benchmark 全程（Benchmark _ready/finish 开关）：锁玩家移动输入（相机/主角不动，防小朋友测试时
+## 拖动世界干扰负载）+ 仙子注魔定格（含闭嘴，语音让位注魔旁白）。村民【不】冻结——见 _step_executors：
+## 采样期村民照常 wander，A* 寻路 + 走动 CPU 计入 p95，才测得准（设计 docs/benchmark-story-ramp-design.md）。
 func set_bench_freeze(on: bool) -> void:
 	_bench_freeze = on
-	if not on:
-		_bench_still = false # 收尾一并解除采样窗静止，避免残留
 
-## 采样窗(window)内冻结村民动态（Benchmark._process 按 FrameSampler.is_warming 逐帧开关）：计入 p95 的
-## window 段静止 → 负载恒定；warmup 间隙(帧被丢弃)放行村民微动，让世界在采样窗【间隙】"有动静地成形"
-## （设计 D5：采样窗内静止、采样窗之间播建造动静）。仙子的定格/输入锁由 _bench_freeze 全程管，不受此开关。
-func set_bench_still(on: bool) -> void:
-	_bench_still = on
+## benchmark 压测负载：环绕焦点生一个会 wander 的村民（压渲染 + 寻路 CPU）。与 _setup_npcs 同款
+## （真村民图集 + 注册占用 + ambient wander），只是 id 前缀 bench_ 便于成批退场。idx/total 决定它在
+## 环上的角位与动画相位，分批生（P2 分幕）也位置稳定、互不遮挡。
+func bench_spawn_one(idx: int, total: int) -> void:
+	var seed: Array = VillagerAssets.SEED
+	var ang := TAU * float(idx) / float(maxi(total, 1))
+	var radius := 4.0 + 2.0 * float(idx % 3)  # 三圈同心，拉开深度，别互相完全遮挡
+	var lg := WorldGrid.wrap_pos(focus_logical + Vector2(cos(ang), sin(ang)) * radius)
+	var v: Dictionary = seed[idx % seed.size()]
+	var npc := PaperCharacter.new()
+	add_child(npc)
+	var did := "bench_%d" % idx
+	npc.setup(critter_tex, Color.WHITE, did)  # 先 critter 跑通 setup（归一尺寸+暗斑），再切图集动画
+	var atlas := load(String(v["atlas"])) as Texture2D
+	if atlas != null:
+		var phase := float(idx) / float(maxi(total, 1)) * 3.9  # 错开相位，避免整齐同帧的机械感
+		npc.play_anim(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
+	npcs.append({ "node": npc, "logical": lg, "id": did })
+	OccupancyMap.char_register(did, lg, 2)
+	_start_ambient_wander(npcs[npcs.size() - 1])  # 会 wander = 压寻路 CPU（静态负载测不出这笔）
+
+## 一次生齐 count 个压测负载（独立 benchmark 场景走这条；intro 分幕用 bench_spawn_one 逐个生）。
+func bench_spawn_load(count: int) -> void:
+	for i in count:
+		bench_spawn_one(i, count)
+
+## intro 建造·起手极简：藏起散布植被 + 地面斜阳影，让「大地长出来、小树冒出来」有从无到有的过程。
+## chunk_manager 会记住 _props_shown/_ground_shadows，后续新铺的区块也继承隐藏。
+func intro_hide_scenery() -> void:
+	if chunk_manager != null:
+		chunk_manager.set_props_shown(false)
+		chunk_manager.set_ground_shadows(false)
+
+## intro 建造·揭示：树木灌木 + 地面影冒出来（回到当前画质档该有的样子）。benchmark 之后各旋钮会按定档
+## 结果再 _apply_graphics_key 覆盖，这里只负责让「建造」这一刻可见。
+func intro_show_scenery() -> void:
+	if chunk_manager != null:
+		chunk_manager.set_props_shown(int(_gfx_levels.get("prop_anim", 1)) > 0)
+		chunk_manager.set_ground_shadows(int(_gfx_levels.get("ground_shadows", 1)) > 0)
+
+## 压测负载退场：取消驱动它的 ambient 执行器（按引用同一性，别让 step 撞上已释放节点）、注销占用、
+## 释放节点、出 npcs 数组。bench_ 前缀成批识别。
+func bench_despawn_load() -> void:
+	for i in range(npcs.size() - 1, -1, -1):
+		var n: Dictionary = npcs[i]
+		if not String(n.get("id", "")).begins_with("bench_"):
+			continue
+		for j in range(_executors.size() - 1, -1, -1):
+			if (_executors[j] as BehaviorExecutor).drives(n):
+				(_executors[j] as BehaviorExecutor).cancel()
+				_executors.remove_at(j)
+		OccupancyMap.char_unregister(String(n.get("id", "")))
+		var node: Variant = n.get("node")
+		if node is Node and is_instance_valid(node):
+			(node as Node).queue_free()
+		npcs.remove_at(i)
 
 # ── intro 教学「开口说话」步（P4）───────────────────────────────────────────
 # 只用本地 VAD 检测「孩子开口」这个手势——不建 ASR 会话、不上传任何 PCM、不理解内容
