@@ -258,6 +258,21 @@ func _snapshot() -> Dictionary:
 		snap["pending_reuse"] = String((reuse as Dictionary).get("itemName", "")) if typeof(reuse) == TYPE_DICTIONARY else ""
 		# 招呼态（P3 验招呼链）：最近一次「对方先开口」的招呼词（收到 character_response(greeting) 时记）。
 		snap["last_greeting"] = String(w.get("_last_greeting") if w.get("_last_greeting") != null else "")
+		# NPC 诊断（空村根因排查）：客户端 npcs 里到底有哪些角色——真村民 spawn 出来没有。
+		var npcs: Variant = w.get("npcs")
+		if typeof(npcs) == TYPE_ARRAY:
+			snap["npc_count"] = (npcs as Array).size()
+			var ids := PackedStringArray()
+			for n in (npcs as Array):
+				var nd := n as Dictionary
+				var tag := String(nd.get("id", "?"))
+				if bool(nd.get("is_fairy", false)):
+					tag += "(fairy)"
+				var node: Variant = nd.get("node")
+				if not is_instance_valid(node):
+					tag += "(dead)"
+				ids.append(tag)
+			snap["npc_ids"] = ids
 	var vc := _vc()
 	if vc != null:
 		snap["vc_open"] = vc.is_open()
