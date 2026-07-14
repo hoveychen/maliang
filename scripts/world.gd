@@ -565,9 +565,10 @@ func _apply_graphics_key(key: String, lv: int) -> void:
 			chunk_manager.set_terrain_low_detail(not on)
 		"xray":  # 角色被遮挡时的 X 光穿透剪影（每角色每帧一个全 quad 深度采样）
 			PaperCharacter.set_xray_enabled(on, get_tree())
-		"papercraft":  # 纸艺风（样式键）：物品全量活材质 + 地形/水面记忆态
+		"papercraft":  # 纸艺风（样式键）：物品全量活材质 + 地形/水面记忆态 + SDF 造物
 			BendMat.set_papercraft(on)  # 先切物品并解析调试强制位
 			chunk_manager.set_papercraft(BendMat.papercraft_on())
+			SdfProp.set_papercraft(BendMat.papercraft_on(), get_tree())
 
 ## 应用当前画质档到场景 + 同步设置页控件（启动、恢复自动、backend 下发三处共用）。
 ## 定过档（用户/benchmark/backend）就按档应用；没定过档 = 新机器，benchmark 还没跑，
