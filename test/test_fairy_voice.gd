@@ -51,7 +51,7 @@ func _run_once() -> void:
 
 	# 点点人设触发器（fairy-persona P5）：world.gd 的造物生命周期与新交互会 try_play 这些触发词，
 	# 每个都必须有台词——否则 world.gd 里拼错字（如 create_strat）会静默无声，现有测试抓不到。
-	for trig in ["create_start", "create_fail", "create_done", "quiet", "bubble"]:
+	for trig in ["create_start", "create_fail", "create_done", "quiet", "bubble", "name_ask", "reuse_hint"]:
 		fv._t += 100.0 # 逐个跳过全局间隔，各自独立验
 		fails += _check("persona trigger has line: %s" % trig, fv.can_play(trig), true)
 	for l in fv._lines:

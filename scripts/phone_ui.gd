@@ -37,6 +37,7 @@ const APP_COL_GAP := 34             ## 同行两格的横向间距
 const APP_ROW_GAP := 30             ## 行与行的纵向间距
 
 var _w                              ## world（业务回调；动态访问，别 typed）
+var _name_player: AudioStreamPlayer ## B3 起名回放：点背包小喇叭角标播孩子给造物起的那句录音
 
 # —— 正面主屏 ——
 var _phone_clock: Label             ## 状态栏时钟（实时，手写体数字）
@@ -1048,6 +1049,21 @@ func refresh_items() -> void:
 			glyph.pressed.connect(func() -> void: _w._on_composed_item_tapped(String(item_id)))
 		else:
 			glyph.pressed.connect(func() -> void: _w._begin_placement(String(item_id)))
+		# B3 起名（reuse-name §4.2）：起过名的造物右上角挂小喇叭角标——点它回放孩子【自己那句录音】
+		# （不识字也能「读」出名字，§3.2）；格子主体仍走 _begin_placement，两个点击区互不干扰。
+		var name_asset := String(def.get("nameVoiceAsset", ""))
+		var glyph_host: Control = glyph
+		if not name_asset.is_empty():
+			var wrap := Control.new()
+			wrap.custom_minimum_size = Vector2(92.0, 92.0)
+			glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			wrap.add_child(glyph)
+			var badge := UiAssets.icon_button("ic_note", 34.0)
+			badge.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+			badge.position += Vector2(-4.0, 2.0)
+			badge.pressed.connect(func() -> void: _play_name_voice(name_asset))
+			wrap.add_child(badge)
+			glyph_host = wrap
 		var name_label := Label.new()
 		var display := String(def.get("name", "小玩意"))
 		name_label.text = display if count <= 1 else "%s×%d" % [display, count]
@@ -1055,10 +1071,31 @@ func refresh_items() -> void:
 		name_label.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		name_label.custom_minimum_size = Vector2(104.0, 0.0)
 		UiAssets.style_card_label(name_label, 26)
-		cell.add_child(glyph)
+		cell.add_child(glyph_host)
 		cell.add_child(name_label)
 		_items_grid.add_child(cell)
 	_refresh_sticker_shop()
+
+## 回放孩子给造物起的那句录音：裸 PCM(16k/16bit/mono，同 TTS 资产) → AudioStreamWAV 播放。
+func _play_name_voice(asset_hash: String) -> void:
+	if _w == null or _w.api == null or asset_hash.is_empty():
+		return
+	var audio: Dictionary = await _w.api.fetch_audio(asset_hash)
+	var bytes: PackedByteArray = audio.get("bytes", PackedByteArray())
+	if bytes.is_empty():
+		return
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = int(audio.get("rate", 16000))
+	wav.stereo = false
+	wav.data = bytes
+	if _name_player == null:
+		# PhoneUi 是 RefCounted（非 Node）：回放器挂到 world 节点树下，不能 add_child 到 self。
+		_name_player = AudioStreamPlayer.new()
+		_name_player.name = "NameVoice"
+		_w.add_child(_name_player)
+	_name_player.stream = wav
+	_name_player.play()
 
 ## ── 设置 app ────────────────────────────────────────────────────────────────
 

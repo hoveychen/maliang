@@ -169,6 +169,12 @@ var backend: Backend
 var _vc: VoiceCapture               ## 开放麦编排（mic+VAD+端侧/服务端ASR+自听防护+BGM门控），与 onboarding 共用
 var thinking_label: Label          ## 思考状态源+家长可读小字（幼儿看角色头顶的 _think_bubble 动画）
 var _think_timer: Timer            ## 「思考中」兜底超时（响应没回来时自动解卡）
+# ── B3 语音起名（reuse-name §2.2/§3.2）：造物成功后点点问「叫它什么呀？」，复用 VoiceCapture 确认模式 ──
+var _naming_item := ""             ## 非空 = 起名子模式：麦与 capture 回调都归起名，不走对话
+var _naming_prev_confirm := false  ## 起名强制 confirm_mode，结束后恢复玩家原「说完先听一遍」设置
+var _naming_timer: Timer           ## 起名静默超时：点点问完孩子没吭声/害羞 → 静默放弃（起名可选，§3.3）
+const NAMING_TIMEOUT := 12.0       ## 起名等待上限（秒）：正在说/确认则续一轮，否则放弃
+var _pending_reuse := {}           ## 待点的复用提示 {itemId,itemName}（服务端 npc_wishes 下发）；播一次即清
 var _think_bubble: Label3D         ## 思考动画气泡：选中角色头顶 ·/··/··· 循环冒泡（不识字友好）
 var _think_anim_t := 0.0           ## 思考气泡动画相位
 var emotion_bubble: Sprite3D       ## 角色头顶情绪贴纸气泡（AIGC em_*，见 _show_emotion）
@@ -473,6 +479,10 @@ func _setup_audio() -> void:
 func _voice_should_capture() -> bool:
 	if _vc.must_wait_for_ready():
 		return false
+	# B3 起名子模式：端侧就绪即开麦，但点点问句（name_ask）播放期间先静音——
+	# 无 AEC 的麦会把她的问句录回去被听成开口。她说完才放行（同 greeting 静音口径）。
+	if not _naming_item.is_empty():
+		return _vc.is_ready() and not (fairy_voice != null and fairy_voice.is_playing())
 	var x := _fsm_inputs()
 	if not _talk_pid.is_empty() and not _vc.is_ready():
 		return false # 喊话靠端侧转写做文本中继：没有可用识别就别开麦
@@ -1157,6 +1167,13 @@ func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
 	# 只在【还没用过引路】时提——用过之后还一遍遍问「想去哪儿玩呀」就成了唠叨。
 	if not _guide_used and fairy_voice.try_play("guide_hint"):
 		return
+	# B3 复用提示（§4.2）：背包旧物正好能用上当前需求 → 点点点一句（走 ambient，不占 _tts_player、
+	# 同 wish-leak 门禁），说完就消费掉（只提一次）。台词是通用句（不含动态物名，因预制 WAV），
+	# 顺手 pulse 一下册子按钮把注意力引到背包，孩子自己翻出来摆。
+	if not _pending_reuse.is_empty() and fairy_voice.try_play("reuse_hint"):
+		_pending_reuse = {}
+		_pulse_album_button()
+		return
 	# 无人回应的 idle 闲话：说得出就把下次等待拉长（退避式，不定时轰炸）。
 	if fairy_voice.try_play(_ambient_trigger()):
 		_fairy_chat_t += _fairy_idle_backoff
@@ -1174,11 +1191,15 @@ func _update_npc_wishes(delta: float) -> void:
 ## 服务端下发的漏话候选（进世界/换场景/发现新玩法后重发）：整份替换，旧台词立即作废。
 ## discovered 是【持久】口径：_guide_used 本来只记「本次进世界」，重启就忘——
 ## 那样小朋友明明早会用引路了，仙子重启后还在念叨，「已发现的不再提」就成了空话。
-func _on_npc_wishes(wishes: Array, discovered: Array) -> void:
+func _on_npc_wishes(wishes: Array, discovered: Array, reuse_hint: Variant) -> void:
 	if npc_wish_voice != null:
 		npc_wish_voice.set_wishes(wishes)
 	if discovered.has("guide_to"):
 		_guide_used = true
+	# B3 复用提示（§4.2）：服务端在「有需求语境」判出背包旧物能用上 → 记下，等 ambient 通道点一句。
+	# 服务端已做本会话去重，客户端只在有 itemId 时挂起（空/null 不覆盖已挂起的）。
+	if typeof(reuse_hint) == TYPE_DICTIONARY and not String(reuse_hint.get("itemId", "")).is_empty():
+		_pending_reuse = reuse_hint
 
 ## 音符气泡：小仙子出声时挂在头顶（氛围闲聊与 POI 提醒共用）。
 func _update_fairy_bubble(fairy: Dictionary) -> void:
@@ -3570,6 +3591,7 @@ func _setup_backend() -> void:
 	backend.creation_cancelled.connect(_on_creation_cancelled)
 	backend.prop_pending.connect(_on_prop_pending)
 	backend.item_created.connect(_on_item_created)
+	backend.item_updated.connect(_on_item_updated) # B3 起名回填：就地更新背包里那件的 nameVoiceAsset
 	backend.prop_failed.connect(_on_prop_failed)
 	backend.sticker_pending.connect(_on_sticker_pending)
 	backend.sticker_failed.connect(_on_sticker_failed)
@@ -3608,6 +3630,11 @@ func _setup_backend() -> void:
 	_think_timer.one_shot = true
 	_think_timer.timeout.connect(_on_think_timeout)
 	add_child(_think_timer)
+	# B3 起名静默超时：点点问完孩子没吭声就放弃（起名是邀请不是关卡）。
+	_naming_timer = Timer.new()
+	_naming_timer.one_shot = true
+	_naming_timer.timeout.connect(_on_naming_timeout)
+	add_child(_naming_timer)
 
 func _on_think_timeout() -> void:
 	if thinking_label.visible:
@@ -4691,10 +4718,12 @@ func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包
 	_apply_bag(data.get("bag"))
 	var item: Dictionary = data.get("item", {})
+	var item_id := String(item.get("id", ""))
 	ItemCatalog.set_defs([item]) # 新实体先入目录（patch 回来才认得 renderRef/spec）
 	_prewarm_sticker_assets([item]) # 造贴纸:预热网络贴图(打包贴纸/造物无 @ 前缀,跳过)
 	thinking_label.visible = false
-	_fairy_say("create_done") # 求夸：造物/贴纸都在此汇合，下面分支各走各的落地，求夸只发一次
+	# 点点这一拍统一走 _offer_naming：能起名就问名字（name_ask），起不了名才退回求夸（create_done）——
+	# 二选一，别在这里先 create_done 又叠 name_ask（GLOBAL_GAP 会把后一句吞掉）。见 §2.2。
 	# 先收占位符腾出格子，成品就落在那儿；占位符没立成就退回玩家身旁。
 	# 造物立熔炉、造贴纸立画板——哪个在就收哪个（另一个 no-op 返回负值）。
 	var tile := _clear_placeholder(PLACEHOLDER_FORGE_ID)
@@ -4708,6 +4737,7 @@ func _on_item_created(data: Dictionary) -> void:
 		_celebrate_sticker()
 		banner.text = "新贴纸做好啦！去手机里贴上吧"
 		banner.visible = true
+		_offer_naming(item_id)
 		return
 	var want := tile
 	if want.x < 0:
@@ -4718,12 +4748,14 @@ func _on_item_created(data: Dictionary) -> void:
 		banner.text = "变出来啦！收在册子里咯"
 		banner.visible = true
 		_pulse_album_button()
+		_offer_naming(item_id)
 		return
 	_bag_action = "" # 摆放回包静默：这里已有「变出来啦」横幅
-	backend.send_item_place(world_id, String(item.get("id", "")), spot, randf() * 360.0)
+	backend.send_item_place(world_id, item_id, spot, randf() * 360.0)
 	game_audio.play_sfx("fanfare")
 	banner.text = "变出来啦！"
 	banner.visible = true
+	_offer_naming(item_id)
 
 ## 摆放/拾起的 bag_update 回包：背包同步 + 按动作出反馈（服务端已确认动账）。
 func _on_bag_update(data: Dictionary) -> void:
@@ -5344,6 +5376,12 @@ func _on_capture_begin() -> void:
 
 ## 说完：亮思考态、造物投掷，等端侧识别出文本（local_final）。不关麦（继续聆听）。
 func _on_capture_committed() -> void:
+	# B3 起名子模式：采纳后 committed 先到、local_final 随后带来名字文本——这里什么都不做，
+	# 不亮思考态、不投蛋、不开解卡定时器，等 _on_capture_local_final 里 _finish_naming。
+	if not _naming_item.is_empty():
+		if confirm_bar != null:
+			confirm_bar.hide_bar()
+		return
 	if confirm_bar != null:
 		confirm_bar.hide_bar() # 采纳了（或本就没开确认模式）：收条
 	# 喊话没有服务端回复要等：不亮「思考中」、不开解卡定时器（端侧 ASR final 秒回）
@@ -5362,6 +5400,10 @@ func _on_capture_cancelled() -> void:
 
 ## 端侧识别出最终文本：空→退避；喊话→文本中继；否则送对话。
 func _on_capture_local_final(text: String) -> void:
+	# B3 起名子模式：这句话就是造物的名字——打包录音 + 文本发服务端落库，不走对话。
+	if not _naming_item.is_empty():
+		_finish_naming(text)
+		return
 	_vt_asr_done = Time.get_ticks_msec() # 端侧识别出文本
 	var t := text.strip_edges()
 	if t.is_empty():
@@ -5378,6 +5420,76 @@ func _on_capture_local_final(text: String) -> void:
 		return
 	_vt_send = Time.get_ticks_msec() # 发转写 → 到 character_response 即纯 LLM 耗时
 	backend.send_voice_transcript(world_id, _selected_id(), t)
+
+# ── B3 语音起名（reuse-name §2.2/§3.2/§3.3）─────────────────────────────────────
+# 造物成功 → 点点问「叫它什么呀？」→ VoiceCapture 确认模式（说→回放自己声音→确认）→ 上传录音当名字。
+# 起名是【邀请不是关卡】：离线/无端侧 ASR/不吭声/害羞一律静默跳过，item 保留 LLM 文本名。
+
+## 造物成功后的点点这一拍：能起名就问名字（name_ask），起不了名（离线/无端侧 ASR）就退回求夸（create_done）。
+func _offer_naming(item_id: String) -> void:
+	if not _begin_naming(item_id):
+		_fairy_say("create_done")
+
+## 发起起名：点点问一句 + 开确认模式麦。返回是否真的进了起名子模式（决定要不要退回求夸）。
+func _begin_naming(item_id: String) -> bool:
+	if item_id.is_empty() or not online or _vc == null or not _vc.is_ready():
+		return false
+	if not _naming_item.is_empty():
+		return false # 已在给别的东西起名：别打断（理论上造物是串行的，兜底）
+	_naming_item = item_id
+	_naming_prev_confirm = _vc.confirm_mode
+	_vc.confirm_mode = true # 起名必须走确认模式：小龄孩子说完先听自己的声音再确认（§3.2）
+	_fairy_say("name_ask") # 点点问「你想叫它什么呀？」（预制 WAV，Yunxia 音色）
+	_vc.open() # 开麦；实际开录由 _voice_should_capture 起名分支放行（点点问句播完才放）
+	_naming_timer.start(NAMING_TIMEOUT)
+	return true
+
+## 收尾起名：恢复 confirm_mode 原设置、停超时、不在对话态就关麦、收确认条。幂等。
+func _end_naming() -> void:
+	if _naming_item.is_empty():
+		return
+	_naming_item = ""
+	if _vc != null:
+		_vc.confirm_mode = _naming_prev_confirm
+		# 起名的麦是独立开的：不在近身/喊话态就关掉，别把裸麦留着（在对话里则让对话逻辑继续持麦）
+		if selected == null and _talk_pid.is_empty():
+			_vc.close()
+	if _naming_timer != null:
+		_naming_timer.stop()
+	if confirm_bar != null:
+		confirm_bar.hide_bar()
+
+## 孩子采纳了名字（confirm→local_final）：打包整段录音（原始 PCM）+ ASR 文本发服务端落库。
+## 没说清 / 没录到 → 静默跳过（item 保留 LLM 名，起名可选）。
+func _finish_naming(text: String) -> void:
+	var item_id := _naming_item
+	var t := text.strip_edges()
+	var pcm := _vc.last_pcm() if _vc != null else PackedByteArray()
+	_end_naming()
+	if item_id.is_empty() or t.is_empty() or pcm.is_empty():
+		return
+	backend.send_name_creation(world_id, item_id, Marshalls.raw_to_base64(pcm), t)
+	# 不展示 ASR 文本（孩子不识字，§3.2）：只给一句通用祝贺 + 收进册子的动效。
+	banner.text = "起好名字啦！"
+	banner.visible = true
+	if game_audio != null:
+		game_audio.play_sfx("confirm")
+
+## 起名静默超时：正在说/正在确认就再续一轮（别打断孩子），否则放弃（害羞/没吭声，§3.3）。
+func _on_naming_timeout() -> void:
+	if _vc != null and (_vc.is_recording() or _vc.is_confirming()):
+		_naming_timer.start(NAMING_TIMEOUT)
+		return
+	_end_naming()
+
+## B3 起名回填广播：就地更新背包里那件的 nameVoiceAsset/nameText（下次开背包就画小喇叭角标）。
+func _on_item_updated(data: Dictionary) -> void:
+	var item: Dictionary = data.get("item", {})
+	if item.is_empty():
+		return
+	ItemCatalog.set_defs([item]) # 目录里那行整份换新（带上 nameVoiceAsset）
+	if phone_ui != null:
+		phone_ui.refresh_items() # 背包页重画：那格出小喇叭角标
 
 ## 手机设置「说完先听一遍」：存档案 + 即时生效（下一句话就走确认流程，不必重进世界）。
 func _on_confirm_voice_toggled(on: bool) -> void:

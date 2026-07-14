@@ -22,6 +22,7 @@ signal build_options(data: Dictionary)
 signal creation_cancelled(data: Dictionary)
 signal prop_pending(data: Dictionary)      ## 造物开工（已扣花）：客户端立起魔法熔炉，含最新 wallet
 signal item_created(data: Dictionary)      ## 造物落成：{ item(实体行), wallet, bag }（万物皆物品）
+signal item_updated(data: Dictionary)      ## 造物就地更新（B3 起名回填 nameVoiceAsset/nameText）：{ worldId, item }
 signal prop_denied(data: Dictionary)       ## 小红花不足，未造物（reason=no_flowers + 引导语 + wallet）
 signal prop_failed(reason: String)
 signal sticker_pending(data: Dictionary)   ## 造贴纸开工（已扣花）：客户端立起魔法画板占位符，含最新 wallet
@@ -37,7 +38,7 @@ signal failed(reason: String)
 signal world_state(data: Dictionary)
 signal task_complete(data: Dictionary)
 ## 村民的心愿漏话候选 + 玩家已发现的玩法（服务端持久口径，进世界/换场景/发现新玩法后重发）。
-signal npc_wishes(wishes: Array, discovered: Array)
+signal npc_wishes(wishes: Array, discovered: Array, reuse_hint: Variant)  ## reuse_hint: {itemId,itemName} 或 null（B3 复用提示）
 signal praise_tts(data: Dictionary)
 ## 试用·还差一点（A1）：造物类心愿造成功后开「试用」——村民抱怨差一点，出变大/变小箭头调体型。
 signal wish_trial(data: Dictionary)      ## {npcId, itemRef, refineDir, fromSize, complaint, voiceId, fairyHint}
@@ -190,6 +191,11 @@ func send_create_build(world_id: String, blueprint_id: String, filled: Dictionar
 ## 取消引导式造角色（退出与小仙子的交互）：服务端清掉会话，后续语音不再当造角色答复。
 func send_creation_cancel() -> void:
 	_send({ "type": "creation_cancel" })
+
+## B3 起名（reuse-name）：给自己造物起个语音名。audio_b64 = 孩子那句录音的原始 PCM16(16k 单声道)
+## base64；text = 端侧 ASR 文本（内部用）。服务端 putAsset → 回填 nameVoiceAsset/nameText → item_updated。
+func send_name_creation(world_id: String, item_id: String, audio_b64: String, text: String) -> void:
+	_send({ "type": "name_creation", "worldId": world_id, "itemId": item_id, "audio": audio_b64, "text": text })
 
 ## 离开世界（玩家正常退出）：显式通知服务端收尾会话（Visit），触发批量抽记忆。
 ## 世界卸载后紧接着场景切换/节点释放，socket 可能来不及发——poll 一次尽量把帧推出；
@@ -404,7 +410,7 @@ func _dispatch(data: Dictionary) -> void:
 		"task_complete":
 			task_complete.emit(data)
 		"npc_wishes":
-			npc_wishes.emit(data.get("wishes", []), data.get("discovered", []))
+			npc_wishes.emit(data.get("wishes", []), data.get("discovered", []), data.get("reuseHint", null))
 		"praise_tts":
 			praise_tts.emit(data)
 		"wish_trial":
@@ -425,6 +431,8 @@ func _dispatch(data: Dictionary) -> void:
 			prop_pending.emit(data)
 		"item_created":
 			item_created.emit(data)
+		"item_updated":
+			item_updated.emit(data)
 		"prop_denied":
 			prop_denied.emit(data)
 		"prop_failed":
