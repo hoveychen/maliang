@@ -2651,6 +2651,9 @@ export async function handleWsMessage(
     targetPlayerId?: string;
     action?: string; // player_emote：动作名（EMOTE_ACTIONS 白名单）
     lang?: string; // player_speech：文本语言（跨语言翻译钩子，缺省 zh）
+    // 语音起名（B3 reuse-name）：name_creation 带孩子那句录音（base64 WAV）或已存 assetHash + ASR 文本
+    audio?: string;
+    assetHash?: string;
     // 玩家身份：每条消息可带 playerId（设备端稳定 UUID）；world_info 另带 profile 供首见建档。
     playerId?: string;
     profile?: {
@@ -3152,6 +3155,43 @@ export async function handleWsMessage(
     }
     store.bagAdd(worldId, session.playerId, itemId);
     socket.send(JSON.stringify({ type: 'bag_update', worldId, bag: store.getBag(worldId, session.playerId) }));
+    return;
+  }
+
+  // 语音起名（B3 reuse-name，docs/kids-thinking-reuse-name.md §4.1）：孩子给自己造的东西起了个名字。
+  //   name_creation { worldId, itemId, audio(base64 WAV) | assetHash, text }
+  // 校验 itemId 在【该 player 的背包】里（防越权改别人的东西）→ putAsset(录音) → upsertItem 回填
+  // nameVoiceAsset/nameText → 回 item_updated。复用现成 putAsset + upsertItem，零新管线、零 LLM。
+  if (msg.type === 'name_creation') {
+    const worldId = msg.worldId ?? '';
+    const itemId = String(msg.itemId ?? '');
+    // 所有权：只能给自己背包里的东西起名（内置物/别人的造物一律拒）。
+    if (!itemId || (store.getBag(worldId, session.playerId)[itemId] ?? 0) < 1) {
+      socket.send(JSON.stringify({ type: 'error', error: 'item not in bag' }));
+      return;
+    }
+    const def = store.getItemDef(worldId, itemId);
+    if (!def || def.worldId === null) {
+      // 造物才有名字可起（内置物 worldId===null）——理论上背包里的内置贴纸也可能命中，一并拒。
+      socket.send(JSON.stringify({ type: 'error', error: 'item not nameable' }));
+      return;
+    }
+    // 录音：优先 base64 音频（客户端 confirm_mode 打包好的 WAV），否则收已存在的 assetHash（复播/幂等）。
+    let assetHash = String(msg.assetHash ?? '');
+    const b64 = typeof msg.audio === 'string' ? msg.audio : '';
+    if (b64) {
+      try {
+        assetHash = store.putAsset({ bytes: Uint8Array.from(Buffer.from(b64, 'base64')), mime: 'audio/wav' });
+      } catch (err) {
+        socket.send(JSON.stringify({ type: 'error', error: `bad audio: ${String(err)}` }));
+        return;
+      }
+    }
+    if (assetHash) def.nameVoiceAsset = assetHash;
+    const text = typeof msg.text === 'string' ? msg.text.trim() : '';
+    if (text) def.nameText = text; // ASR 文本：内部用（不展示给孩子）
+    store.upsertItem(def);
+    socket.send(JSON.stringify({ type: 'item_updated', worldId, item: def }));
     return;
   }
 
