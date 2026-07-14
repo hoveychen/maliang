@@ -54,7 +54,12 @@ static func parse_command(line: String) -> Dictionary:
 			if not dict.has("x") or not dict.has("y"):
 				return {"ok": false, "error": "tap needs x,y"}
 			return {"ok": true, "op": "tap", "x": float(dict["x"]), "y": float(dict["y"])}
-		"inject", "state", "screencap", "accept", "replay", "retry", "talk_fairy", "reset_budget":
+		"pickup":
+			if not dict.has("tileX") or not dict.has("tileY"):
+				return {"ok": false, "error": "pickup needs tileX,tileY"}
+			return {"ok": true, "op": "pickup", "tileX": int(dict["tileX"]),
+				"tileY": int(dict["tileY"]), "edgeSide": int(dict.get("edgeSide", -1))}
+		"inject", "state", "screencap", "accept", "replay", "retry", "talk_fairy", "talk_npc", "reset_budget":
 			return {"ok": true, "op": op}
 		_:
 			return {"ok": false, "error": "unknown op: %s" % op}
@@ -154,6 +159,10 @@ func _execute(cmd: Dictionary) -> Dictionary:
 			return _do_confirm_key(op)
 		"talk_fairy":
 			return _do_talk_fairy()
+		"talk_npc":
+			return _do_talk_npc()
+		"pickup":
+			return _do_pickup(int(cmd["tileX"]), int(cmd["tileY"]), int(cmd["edgeSide"]))
 		"reset_budget":
 			return _do_reset_budget()
 		_:
@@ -238,6 +247,17 @@ func _snapshot() -> Dictionary:
 		var bk: Variant = w.get("backend")
 		if bk != null and (bk as Object).has_method("is_online"):
 			snap["ws_open"] = bool((bk as Object).call("is_online"))
+		# 引路态（P3 验引路链）：_fairy_guide 非空 = guide_to 已下发并 start_guide 生效。
+		var guide: Variant = w.get("_fairy_guide")
+		snap["guide_active"] = typeof(guide) == TYPE_DICTIONARY and not (guide as Dictionary).is_empty()
+		if snap["guide_active"]:
+			var plan: Variant = (guide as Dictionary).get("plan")
+			snap["guide_target"] = String((plan as Dictionary).get("targetName", "")) if typeof(plan) == TYPE_DICTIONARY else ""
+		# 复用提示态（P3 验复用链）：_pending_reuse 挂起 = 服务端判出背包旧物能用上、已下发。
+		var reuse: Variant = w.get("_pending_reuse")
+		snap["pending_reuse"] = String((reuse as Dictionary).get("itemName", "")) if typeof(reuse) == TYPE_DICTIONARY else ""
+		# 招呼态（P3 验招呼链）：最近一次「对方先开口」的招呼词（收到 character_response(greeting) 时记）。
+		snap["last_greeting"] = String(w.get("_last_greeting") if w.get("_last_greeting") != null else "")
 	var vc := _vc()
 	if vc != null:
 		snap["vc_open"] = vc.is_open()
@@ -269,6 +289,22 @@ func _do_talk_fairy() -> Dictionary:
 		return {"ok": false, "error": "world 无 harness_talk_fairy"}
 	var ok := bool(w.call("harness_talk_fairy"))
 	return {"ok": ok, "op": "talk_fairy", "entered": ok}
+
+## talk_npc：进与第一个真实非仙子村民的对话（走宿主 harness_talk_npc），验 NPC 招呼链。
+func _do_talk_npc() -> Dictionary:
+	var w := _host()
+	if w == null or not w.has_method("harness_talk_npc"):
+		return {"ok": false, "error": "world 无 harness_talk_npc"}
+	var ok := bool(w.call("harness_talk_npc"))
+	return {"ok": ok, "op": "talk_npc", "entered": ok}
+
+## pickup：拾起 tile 上一件物品进背包（走宿主 harness_pickup → 服务端 item_pickup），验复用提示需背包旧物。
+func _do_pickup(tile_x: int, tile_y: int, edge_side: int) -> Dictionary:
+	var w := _host()
+	if w == null or not w.has_method("harness_pickup"):
+		return {"ok": false, "error": "world 无 harness_pickup"}
+	var ok := bool(w.call("harness_pickup", tile_x, tile_y, edge_side))
+	return {"ok": ok, "op": "pickup", "sent": ok}
 
 ## reset_budget：清掉游玩时长冷却门（45min 玩满 → 10min 冷却模态挡住造物/交互），供 e2e 连测不被拦。
 ## 仅重置本地预算+落盘，不碰服务端；debug 构建专用，绝不进 release。
