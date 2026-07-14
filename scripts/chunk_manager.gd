@@ -220,6 +220,7 @@ const FLATTEN := 0.65
 const TILE_JITTER := 0.5
 const WALL_STRATA := 0.55  ## 崖壁逐级地层行带强度（Pokopia 化 P3）
 const CAP_TRIM := 0.9      ## 崖顶波浪盖帽强度（Pokopia 化 P4，第一识别特征）
+const CORNER_AO := 0.7     ## 墙脚接触暗缝强度（Pokopia 化 P5，内凹角柔和 AO）
 
 ## 地形专用材质（themed-terrain P1）：控制图 atlas（域/描边/角色/明暗）+ 顶面/侧壁
 ## Texture2DArray（世界 UV 平铺，per-tile 层索引选贴图）。逐层 tint/mean 与描边色取自
@@ -237,6 +238,7 @@ static func _make_ground_mat() -> ShaderMaterial:
 	m.set_shader_parameter("wall_strata", WALL_STRATA)
 	m.set_shader_parameter("cap_trim", CAP_TRIM)
 	m.set_shader_parameter("layer_cap", TerrainTextures.layer_cap_trims())
+	m.set_shader_parameter("corner_ao", CORNER_AO)
 	m.set_shader_parameter("wall_relief", TerrainTextures.layer_wall_reliefs())
 	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
 	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
@@ -795,6 +797,9 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 		var n_off: Vector2i = s["n"]
 		var tang: Vector2i = s["tang"]
 		var nfl := TerrainMap.tile_floor_level(t + n_off)
+		# 墙脚 AO（Pokopia 化 P5）：COLOR.a 编码「离墙基高度/2m」（墙基=邻居有效地面=
+		# 内凹角所在），shader 对 <0.45m 的墙脚压暗——内凹角的柔和接触暗缝。
+		var wall_base := float(nfl) * TerrainMap.STEP_HEIGHT
 		for lvl in range(nfl, fl):
 			# (q.x, q.y) = (沿墙偏移, 视觉上下偏移)；atlas 的 N(-1) = 上一级
 			var pred := func(q: Vector2i) -> bool:
@@ -821,8 +826,8 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 				verts.append(Vector3(h1.x, yt, h1.z))
 				verts.append(Vector3(h1.x, yb, h1.z))
 				verts.append(Vector3(h0.x, yb, h0.z))
-				var col_t := Color(side_layer, cap_lyr, clampf((wall_top - yt) * 0.5, 0.0, 1.0), 1.0)
-				var col_b := Color(side_layer, cap_lyr, clampf((wall_top - yb) * 0.5, 0.0, 1.0), 1.0)
+				var col_t := Color(side_layer, cap_lyr, clampf((wall_top - yt) * 0.5, 0.0, 1.0), clampf((yt - wall_base) * 0.5, 0.0, 1.0))
+				var col_b := Color(side_layer, cap_lyr, clampf((wall_top - yb) * 0.5, 0.0, 1.0), clampf((yb - wall_base) * 0.5, 0.0, 1.0))
 				for k in range(4):
 					norms.append(s["normal"])
 				cols.append(col_t)

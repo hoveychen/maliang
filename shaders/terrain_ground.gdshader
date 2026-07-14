@@ -46,6 +46,9 @@ uniform float wall_strata : hint_range(0.0, 1.0) = 0.0;
 // layer_cap 逐顶面层门控：草/沙/雪等有机地表 1，木地板/大理石等结构地面 0（波浪帽会违和）。
 uniform float cap_trim : hint_range(0.0, 1.0) = 0.0;
 uniform float layer_cap[64];
+// 墙脚接触暗缝（Pokopia 化 P5）：内凹角柔和 AO——墙面距墙基 <0.45m 渐进压暗。
+// 深度用 COLOR.a 编码的「离墙基米数/2」（_emit_walls 逐顶点写入；其余几何 a=1 → 不受影响）。
+uniform float corner_ao : hint_range(0.0, 1.0) = 0.0;
 // 低配档（AdaptiveQuality）：body（路/崖壁/地表）不采数组细节改平色 tint，每像素省一次采样；
 // 草地细节保留（占屏大头，是水彩质感的主体）。
 uniform bool low_detail = false;
@@ -66,12 +69,14 @@ const int ROLE_CLIFF_WALL = 4;  // = TerrainAtlas.ROLE_CLIFF_WALL（B*8；崖壁
 varying flat int v_layer;
 varying flat int v_cap_layer;  // 盖帽取色层（=被抬高 tile 的顶面层；仅崖壁 quad 有意义）
 varying float v_below;         // 距崖顶深度（米；COLOR.b×2 解码，quad 内线性插值精确）
+varying float v_above;         // 离墙基高度（米；COLOR.a×2 解码；非墙几何 a=1 → 2m=不受影响）
 varying vec3 v_world;  // 纸纹用世界坐标（视空间噪声会随相机游动）
 
 void vertex() {
 	v_layer = int(round(COLOR.r * 255.0));
 	v_cap_layer = int(round(COLOR.g * 255.0));
 	v_below = COLOR.b * 2.0;
+	v_above = COLOR.a * 2.0;
 	v_world = VERTEX;  // world_vertex_coords：此时 VERTEX 是世界空间
 	VERTEX.y -= curvature * dot(VERTEX.xz, VERTEX.xz);
 }
@@ -122,6 +127,10 @@ void fragment() {
 		float h2 = fract(h * 61.7);
 		col *= 1.0 + tile_jitter * 0.10 * (h - 0.5);
 		col = mix(col, col * vec3(1.06, 1.03, 0.90), tile_jitter * (h2 - 0.5));
+	}
+	if (role == ROLE_CLIFF_WALL && corner_ao > 0.001) {
+		float foot = 1.0 - smoothstep(0.05, 0.45, v_above);
+		col = mix(col, col * 0.84, foot * corner_ao);   // 墙脚接触暗缝（内凹角 AO）
 	}
 	if (role == ROLE_CLIFF_WALL && cap_trim > 0.001) {
 		float capw = cap_trim * layer_cap[v_cap_layer];

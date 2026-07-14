@@ -363,6 +363,10 @@ static func layer_wall_reliefs() -> PackedFloat32Array:
 ## 雪族崖壁倒角出雪盖圆润感，室外岩壁/室内光滑墙/现代路缘等默认 0=保持利落直角(零回归)。
 ## 地形网格无碰撞体(角色高度走逻辑格 tile_height×STEP)，倒角纯视觉、不影响行走/寻路。
 const BEVEL_SNOW := 0.22
+## 有机地表崖顶软圆角（Pokopia 化 P5）：草/沙/土/苔类台地顶棱也吃 fillet——
+## Pokopia 全场景找不到一条锋利 90° 边（设计文档§2）。比雪盖轻一档；
+## 结构地面（瓷砖/石板/现代路缘等）保持利落直角不动。
+const BEVEL_SOFT := 0.12
 static func tile_bevel(ttype: int) -> float:
 	match ttype:
 		TerrainMap.T_SNOW, TerrainMap.T_PACKED_SNOW, \
@@ -370,6 +374,11 @@ static func tile_bevel(ttype: int) -> float:
 			return BEVEL_SNOW
 		TerrainMap.T_ICE:
 			return BEVEL_SNOW * 0.6  ## 冰面积雪少，倒角轻一点
+		TerrainMap.T_GRASS, TerrainMap.T_PATH, TerrainMap.T_SAND, \
+		TerrainMap.T_COARSE_SAND, TerrainMap.T_CORAL_SAND, TerrainMap.T_REEF, \
+		TerrainMap.T_SEAGRASS, TerrainMap.T_DEEP_BED, TerrainMap.T_CRACKED_EARTH, \
+		TerrainMap.T_VOLCANIC, TerrainMap.T_MUD_BOG, TerrainMap.T_FERN:
+			return BEVEL_SOFT
 	return 0.0
 
 ## PackedColorArray → shader vec3[] 用的线性 PackedVector3Array（补齐到 SHADER_ARRAY_SIZE）。
