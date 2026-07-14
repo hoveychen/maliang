@@ -163,7 +163,7 @@ export function createMockAdapters(): ServiceAdapters {
         // 点名让别的角色执行：转写里出现花名册角色名 → performer（真实实现由 LLM 判断语气）
         const named = (ctx.worldCharacters ?? []).find((c) => transcript.includes(c.name));
         const performerName = named?.name;
-        // 造角色意图（仅拥有 create_character 能力的角色，如小神仙）：想要一个新的活伙伴。
+        // 造角色意图（仅拥有 create_character 能力的角色，如点点）：想要一个新的活伙伴。
         // 放在 create_prop 前：生物类关键词优先归造角色，避免「变一只小猫」被当造物。
         if (
           ctx.abilities.includes('create_character')
@@ -180,7 +180,7 @@ export function createMockAdapters(): ServiceAdapters {
             emotion: 'happy',
           };
         }
-        // 造贴纸意图（仅拥有 create_sticker 能力的角色，如小神仙）：出现「贴纸/贴画」。
+        // 造贴纸意图（仅拥有 create_sticker 能力的角色，如点点）：出现「贴纸/贴画」。
         // 放在 create_prop 前：「做个贴纸」的「做个」也会命中造物，贴纸关键词优先归造贴纸。
         if (ctx.abilities.includes('create_sticker') && /(贴纸|贴画|贴贴)/.test(transcript)) {
           return {
@@ -193,7 +193,7 @@ export function createMockAdapters(): ServiceAdapters {
             emotion: 'happy',
           };
         }
-        // 玩游戏意图（仅拥有 play_game 能力的角色，如小神仙）：想玩多人小游戏。
+        // 玩游戏意图（仅拥有 play_game 能力的角色，如点点）：想玩多人小游戏。
         // 放在 create_prop 前：「做个游戏」的「做个」也会命中造物，游戏关键词优先归 play_game。
         if (ctx.abilities.includes('play_game') && /(踢球|玩球|老鹰抓小鸡|捉迷藏|丢手绢|一起玩|玩游戏|做游戏|玩个游戏|做个游戏|来玩)/.test(transcript)) {
           return {
@@ -230,7 +230,7 @@ export function createMockAdapters(): ServiceAdapters {
           // 目标不在候选里：老实说不知道，不硬应下（对齐 prompt 里的「不要编」规则）
           return { kind: 'chat', replyText: '我也不知道那在哪儿呀。', emotion: 'think' };
         }
-        // 造物意图（仅拥有 create_prop 能力的角色，如小神仙）：「变/造/做 一个X」
+        // 造物意图（仅拥有 create_prop 能力的角色，如点点）：「变/造/做 一个X」
         if (ctx.abilities.includes('create_prop') && /(变出|变一|造一|做一个|做个)/.test(transcript)) {
           return {
             kind: 'command',

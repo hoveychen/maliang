@@ -1,143 +1,143 @@
 {
-  "voice": "zh-CN-XiaoyiNeural",
+  "voice": "zh-CN-YunxiaNeural",
   "lines": [
     {
       "id": "fairy_greet_1",
       "trigger": "greet",
       "cooldown": 99999,
-      "text": "你好呀小朋友！我是小仙子，今天想去哪儿玩呀？"
+      "text": "你好呀小朋友！点点来啦——点一下，变！"
     },
     {
       "id": "fairy_greet_2",
       "trigger": "greet",
       "cooldown": 99999,
-      "text": "嘿嘿，我们又见面啦！"
+      "text": "嘿嘿，又见面啦！点点好想你哦！"
     },
     {
       "id": "fairy_idle_1",
       "trigger": "idle",
       "cooldown": 60,
-      "text": "啦啦啦，今天天气真好呀。"
+      "text": "啦啦啦……点点就在你身边陪着你呢。"
     },
     {
       "id": "fairy_idle_2",
       "trigger": "idle",
       "cooldown": 60,
-      "text": "你看天上的云朵，像不像棉花糖呀？"
+      "text": "你看那朵云，像不像一大团棉花糖呀？"
     },
     {
       "id": "fairy_idle_3",
       "trigger": "idle",
       "cooldown": 60,
-      "text": "唔…今天大家都在忙些什么呢。"
+      "text": "唔……点点想画点什么好呢？"
     },
     {
       "id": "fairy_idle_4",
       "trigger": "idle",
       "cooldown": 60,
-      "text": "嗯哼，我就在你身边陪着你哟。"
+      "text": "嗯哼，有点点在，什么都不怕哟。"
     },
     {
       "id": "fairy_water_1",
       "trigger": "near_water",
       "cooldown": 90,
-      "text": "前面是小池塘，小心别掉进去咯。"
+      "text": "呀！小心小心——点点碰到水会化掉的！"
     },
     {
       "id": "fairy_water_2",
       "trigger": "near_water",
       "cooldown": 90,
-      "text": "哇，水里会不会有小鱼呀？"
+      "text": "水边危险危险，点点飞高一点点躲一下～"
     },
     {
       "id": "fairy_mountain_1",
       "trigger": "near_mountain",
       "cooldown": 90,
-      "text": "好高的山呀！我们爬上去看看吧。"
+      "text": "好高的山呀！点点飞上去看看，你也爬上来呀！"
     },
     {
       "id": "fairy_village_1",
       "trigger": "near_village",
       "cooldown": 90,
-      "text": "这里是小村庄，房子好可爱呀。"
+      "text": "这里是小村庄，房子好可爱呀，点点喜欢！"
     },
     {
       "id": "fairy_poi_pond",
       "trigger": "poi_pond",
       "cooldown": 180,
-      "text": "看！那边有个大池塘，我们过去看看吧！"
+      "text": "看！那边有个大池塘！你去玩，点点在岸上等你哦～"
     },
     {
       "id": "fairy_poi_mountain",
       "trigger": "poi_mountain",
       "cooldown": 180,
-      "text": "那边有座大山耶！要不要去爬爬看？"
+      "text": "那边有座大山耶！要不要一起去爬爬看呀？"
     },
     {
       "id": "fairy_poi_windmill",
       "trigger": "poi_windmill",
       "cooldown": 180,
-      "text": "快看！山坡上有个大风车，呼啦呼啦转呀转！"
+      "text": "快看！大风车呼啦呼啦转，点点带你去好不好？"
     },
     {
       "id": "fairy_poi_marsh",
       "trigger": "poi_marsh",
       "cooldown": 180,
-      "text": "小树林里藏着一个小水潭，我们去探险吧！"
+      "text": "小树林里有个小水潭……你去探险，点点在旁边飘着哦～"
     },
     {
       "id": "fairy_reward_1",
       "trigger": "reward",
       "cooldown": 5,
-      "text": "哇！你做到啦，真棒！"
+      "text": "哇——！你做到啦，点点都看呆啦！"
     },
     {
       "id": "fairy_reward_2",
       "trigger": "reward",
       "cooldown": 5,
-      "text": "耶！得到一个新盖章！"
+      "text": "耶！得到一个新盖章，点点好开心！"
     },
     {
       "id": "fairy_reward_3",
       "trigger": "reward",
       "cooldown": 5,
-      "text": "你好厉害呀，继续加油哦！"
+      "text": "你好厉害呀！点点要给你鼓掌！"
     },
     {
       "id": "fairy_cooldown_start_1",
       "trigger": "cooldown_start",
       "cooldown": 5,
-      "text": "今天玩得好开心呀！先歇一歇，等小闹钟转满，我们再一起玩，好不好？"
+      "text": "今天玩得好开心呀！先歇一歇，等小闹钟转满，点点再陪你玩，好不好？"
     },
     {
       "id": "fairy_cooldown_start_2",
       "trigger": "cooldown_start",
       "cooldown": 5,
-      "text": "玩了好久啦，眼睛要休息一下下哦，一会儿再来找我玩呀！"
+      "text": "玩了好久啦，眼睛要休息一下下哦，等会儿再来找点点玩呀！"
     },
     {
       "id": "fairy_cooldown_end_1",
       "trigger": "cooldown_end",
       "cooldown": 5,
-      "text": "休息好啦！我们继续一起玩吧！"
+      "text": "休息好啦！点点等你好久咯，我们继续玩吧！"
     },
     {
       "id": "fairy_guide_nudge_1",
       "trigger": "guide_nudge",
       "cooldown": 5,
-      "text": "这边这边，快跟我来呀！"
+      "text": "这边这边，快跟点点来呀！"
     },
     {
       "id": "fairy_guide_nudge_2",
       "trigger": "guide_nudge",
       "cooldown": 5,
-      "text": "跟上呀小朋友，就在前面啦！"
+      "text": "跟上呀小朋友，就在前面啦，点点等你呢！"
     },
     {
       "id": "fairy_guide_nudge_3",
       "trigger": "guide_nudge",
       "cooldown": 5,
-      "text": "我在这儿等你哦，快过来～"
+      "text": "点点在这儿等你哦，快过来～"
     },
     {
       "id": "fairy_guide_arrive_1",
@@ -149,7 +149,7 @@
       "id": "fairy_guide_arrive_2",
       "trigger": "guide_arrive",
       "cooldown": 3,
-      "text": "我们到咯，你看！"
+      "text": "我们到咯，你看你看！"
     },
     {
       "id": "fairy_guide_cancel_1",
@@ -161,43 +161,43 @@
       "id": "fairy_guide_timeout_1",
       "trigger": "guide_timeout",
       "cooldown": 3,
-      "text": "路好像有点远，我们下次再去吧～"
+      "text": "路好像有点远……我们下次再去好不好？"
     },
     {
       "id": "fairy_guide_hint_1",
       "trigger": "guide_hint",
       "cooldown": 90,
-      "text": "我认得好多好玩的地方哦…可惜没人陪我一起去。"
+      "text": "点点认得好多好玩的地方哦……可惜没人陪点点一起去。"
     },
     {
       "id": "fairy_guide_hint_2",
       "trigger": "guide_hint",
       "cooldown": 90,
-      "text": "一个人飞来飞去的…要是有人跟我一块儿去探险就好啦。"
+      "text": "一个人飞来飞去的……要是有人陪点点去探险就好啦。"
     },
     {
       "id": "fairy_guide_hint_3",
       "trigger": "guide_hint",
       "cooldown": 90,
-      "text": "山那边、水那边…我都好想再去看看呢。"
+      "text": "山那边、水那边……点点都好想再去看看呢。"
     },
     {
       "id": "fairy_stamp_pending_1",
       "trigger": "stamp_pending",
       "cooldown": 8,
-      "text": "快！把章狠狠盖上去！"
+      "text": "快！把章章狠狠盖上去，点点数着呢！"
     },
     {
       "id": "fairy_stamp_pending_2",
       "trigger": "stamp_pending",
       "cooldown": 8,
-      "text": "点一下小章章，盖到空格子里！"
+      "text": "点一下小章章，盖到空格子里呀！"
     },
     {
       "id": "fairy_flower_grown_1",
       "trigger": "flower_grown",
       "cooldown": 5,
-      "text": "哇！三个章，种出一朵小红花啦！"
+      "text": "哇！三个章，种出一朵小红花啦！点点都看呆啦！"
     },
     {
       "id": "fairy_flower_grown_2",
@@ -209,7 +209,97 @@
       "id": "fairy_field_full_1",
       "trigger": "field_full",
       "cooldown": 20,
-      "text": "花田装满啦，先用掉一朵，再种新的哦！"
+      "text": "花田装满啦，先用掉一朵，点点再陪你种新的哦！"
+    },
+    {
+      "id": "fairy_create_start_1",
+      "trigger": "create_start",
+      "cooldown": 3,
+      "text": "点点来画咯！唔……先来一点点红色……"
+    },
+    {
+      "id": "fairy_create_start_2",
+      "trigger": "create_start",
+      "cooldown": 3,
+      "text": "变、变、变——点点最会画啦！"
+    },
+    {
+      "id": "fairy_create_start_3",
+      "trigger": "create_start",
+      "cooldown": 3,
+      "text": "唔……这里再添一笔……手别抖呀手别抖……"
+    },
+    {
+      "id": "fairy_create_start_4",
+      "trigger": "create_start",
+      "cooldown": 3,
+      "text": "点一下——变！点点施魔法咯！"
+    },
+    {
+      "id": "fairy_create_start_5",
+      "trigger": "create_start",
+      "cooldown": 3,
+      "text": "让点点想想……这个颜色好不好看呢……"
+    },
+    {
+      "id": "fairy_create_fail_1",
+      "trigger": "create_fail",
+      "cooldown": 3,
+      "text": "哎呀，点点今天手笨笨的……我们再画一个好不好？"
+    },
+    {
+      "id": "fairy_create_fail_2",
+      "trigger": "create_fail",
+      "cooldown": 3,
+      "text": "呜……画歪啦画歪啦，点点重新来一次！"
+    },
+    {
+      "id": "fairy_create_fail_3",
+      "trigger": "create_fail",
+      "cooldown": 3,
+      "text": "唔，这个不太对……点点再试试，别着急哦～"
+    },
+    {
+      "id": "fairy_create_done_1",
+      "trigger": "create_done",
+      "cooldown": 3,
+      "text": "好看吗好看吗？点点画的哦！"
+    },
+    {
+      "id": "fairy_create_done_2",
+      "trigger": "create_done",
+      "cooldown": 3,
+      "text": "铛铛——！画好啦，你喜欢吗？"
+    },
+    {
+      "id": "fairy_create_done_3",
+      "trigger": "create_done",
+      "cooldown": 3,
+      "text": "嘿嘿，这是点点最得意的一笔！"
+    },
+    {
+      "id": "fairy_quiet_1",
+      "trigger": "quiet",
+      "cooldown": 3,
+      "text": "好呀……点点先睡一会儿，你叫点点，点点就醒来哦……"
+    },
+    {
+      "id": "fairy_quiet_2",
+      "trigger": "quiet",
+      "cooldown": 3,
+      "text": "呼啊——点点有点困了，先眯一会儿咯……"
+    },
+    {
+      "id": "fairy_bubble_1",
+      "trigger": "bubble",
+      "cooldown": 30,
+      "text": "等一下等一下——点点先吹个泡泡！这样水就碰不到点点啦！"
+    },
+    {
+      "id": "fairy_bubble_2",
+      "trigger": "bubble",
+      "cooldown": 30,
+      "text": "呼——泡泡好啦！嘻嘻，现在点点不怕水咯！"
     }
   ]
 }
