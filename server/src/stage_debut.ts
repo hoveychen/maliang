@@ -33,7 +33,7 @@ export function buildDebut(
   screenplay: ScreenplayName,
   sceneId: string = DEFAULT_SCENE,
 ): StageStartOpts {
-  // listCharacters 按场景过滤时恒带仙女（她跨场景跟随），照旧靠 isFairy 剔除。
+  // listCharacters 按场景过滤时恒带点点（她跨场景跟随），照旧靠 isFairy 剔除。
   const villagers = store.listCharacters(worldId, sceneId).filter((c) => !c.isFairy);
   const code = loadScreenplay(screenplay);
 

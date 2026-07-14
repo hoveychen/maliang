@@ -3,7 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
-import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import { FAIRY_VOICE } from './voice_catalog.ts';
 import { creationItemDef, getBuiltinItem } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
@@ -181,6 +182,7 @@ export class WorldStore {
       this.#migrateLegacyEntityScenes();
       this.#migrateVisitsDevice();
       this.#migrateFairyAbilities(); // 存量仙子补新增能力（create_sticker / play_game / guide_to / guide_stop）
+      this.#migrateFairyPersona(); // 存量仙子改名换人设（小神仙 → 点点，神笔的笔灵）
       this.#loadAssets();
       this.#loadSpriteAnims();
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
@@ -220,6 +222,40 @@ export class WorldStore {
       const missing = REQUIRED.filter((a) => !abilities.includes(a));
       if (missing.length === 0) continue;
       c.abilities = [...abilities, ...missing];
+      upd.run(JSON.stringify(c), r.id);
+    }
+  }
+
+  /**
+   * 存量世界的仙子改名换人设：「小神仙」→「点点」（神笔的笔灵，见 docs/fairy-persona-design.md）。
+   *
+   * 名字进 LLM 的 system prompt（characterName/personality），老库不迁移的话，生产上她会继续
+   * 自称「小神仙」、继续按旧人设说话——新客户端念的是点点，服务端答的是小神仙，当场分裂。
+   *
+   * 幂等：名字已是 FAIRY_NAME 且 personality 已是新版就跳过。
+   * 刻意**不动** spriteAsset——立绘替换走 POST /worlds/:id/fairy-sprite（P2），迁移只管文字人设。
+   */
+  #migrateFairyPersona(): void {
+    const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
+    const upd = this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?');
+    for (const r of rows) {
+      let c: Character;
+      try {
+        c = JSON.parse(r.data) as Character;
+      } catch {
+        continue;
+      }
+      if (!c.isFairy) continue;
+      // voiceId 也要迁移：它驱动【动态对话 replyText】的实时 TTS，老库存的是旧音色（Xiaoyi）。
+      // 不迁移的话，存量世界里预制台词是新音色（客户端 WAV 已重烧）、实时对话却还是旧音色，当场分裂。
+      if (c.name === FAIRY_NAME && c.personality === FAIRY_PERSONALITY && c.voiceId === FAIRY_VOICE) continue;
+      c.name = FAIRY_NAME;
+      c.personality = FAIRY_PERSONALITY;
+      c.voiceId = FAIRY_VOICE;
+      // 顺手清掉历史残留：她拿到 move_to/deliver_message 也兑现不了（effectiveAbilities 恒剔除）。
+      c.abilities = (Array.isArray(c.abilities) ? c.abilities : []).filter(
+        (a) => !LOCOMOTION_ABILITIES.includes(a),
+      );
       upd.run(JSON.stringify(c), r.id);
     }
   }
@@ -1074,7 +1110,7 @@ export class WorldStore {
 
   /**
    * 世界里的角色。传 sceneId 则只返回该场景的角色（缺 sceneId 的存量角色按 DEFAULT_SCENE 归入），
-   * 但仙女恒在——她跨场景跟随玩家，任何场景查询都带上她（委托候选/花名册在调用点各自排除 isFairy）；
+   * 但点点恒在——她跨场景跟随玩家，任何场景查询都带上她（委托候选/花名册在调用点各自排除 isFairy）；
    * 不传 = 全世界所有场景（保持既有调用点行为不变）。
    */
   listCharacters(worldId: string, sceneId?: string): Character[] {
@@ -1125,7 +1161,7 @@ export class WorldStore {
     return true;
   }
 
-  /** 玩家在某世界某场景的最后位置。没去过 → undefined（客户端按小神仙旁降生）。 */
+  /** 玩家在某世界某场景的最后位置。没去过 → undefined（客户端按点点旁降生）。 */
   getPlayerTile(worldId: string, sceneId: string, playerId: string): TilePos | undefined {
     const row = this.#db
       .prepare('SELECT tile_x, tile_y FROM player_positions WHERE world_id = ? AND scene_id = ? AND player_id = ?')

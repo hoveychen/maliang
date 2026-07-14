@@ -25,7 +25,7 @@ class StubApi extends Api:
 				  "appearance": { "spriteAsset": "spriteX" } },
 			],
 		}
-	func fetch_texture(_asset_hash: String) -> Texture2D:
+	func fetch_texture(_asset_hash: String, _gpu_compress := false) -> Texture2D:
 		var img := Image.create(40, 60, false, Image.FORMAT_RGBA8)
 		img.fill(Color(0, 1, 0, 1))
 		return ImageTexture.create_from_image(img)

@@ -18,6 +18,28 @@ export interface BehaviorScript {
   loop: boolean;
 }
 
+/**
+ * 引导精灵的名字（见 docs/fairy-persona-design.md）。
+ *
+ * 她是神笔的笔灵：画什么什么就活过来，一笔落下就是一个点——所以叫「点点」。
+ * 此前三个称呼并存且全是物种不是名字：数据里 name='小神仙'、台词里自称「小仙子」、注释里写「仙女」。
+ * 单一来源在此，别再往代码里写字面量。
+ */
+export const FAIRY_NAME = '点点';
+
+/**
+ * 点点的人设。会注入 routeIntent 的 system prompt（作为 ctx.personality）。
+ *
+ * 只写「她是谁、她想要什么」——**禁止清单（不吐槽/不反讽/不替孩子做决定）刻意不写在这里**，
+ * 那是给 LLM 的行为约束，归 system prompt 的静态前缀管（openrouter_llm.ts 的 staticSystem）。
+ * 约束混进人设，LLM 会把它当性格念出来。
+ */
+export const FAIRY_PERSONALITY =
+  `神笔的笔灵${FAIRY_NAME}。她说话用第三人称自称「${FAIRY_NAME}」。她不会走路，只会飞——笔没有腿。` +
+  '她画什么什么就活过来，最爱显摆手艺，画完一定要问「好看吗」；画歪了就笑自己手笨笨的。' +
+  '她怕水，沾了水身上的墨会化开，过水边会紧张地飞高一点。' +
+  '她对小朋友做的任何事都夸张地惊叹。她只提议，从不替小朋友做决定。';
+
 /** 所有村民共有的基础交互能力（与 scripts/behavior_executor.gd 的指令集对齐）。
  * 存量角色 abilities 里可能只有旧的两项，意图 prompt 按「基础集 ∪ 角色自带」取并集，免数据迁移。 */
 export const BASE_ABILITIES = ['move_to', 'follow', 'stop_follow', 'do_action', 'chat_with', 'deliver_message'];
@@ -160,7 +182,7 @@ export interface CharacterSpec {
  */
 export const GRID_TILES = 75;
 
-/** 世界正中心 tile：新角色/小神仙的降生点（客户端首次上报前的占位值）。 */
+/** 世界正中心 tile：新角色/点点的降生点（客户端首次上报前的占位值）。 */
 export const WORLD_CENTER_TILE: TilePos = { tileX: Math.floor(GRID_TILES / 2), tileY: Math.floor(GRID_TILES / 2) };
 
 export interface TilePos {
@@ -355,7 +377,7 @@ export interface IntentContext {
   sessionSummary?: string;
   /** 角色对当前玩家的长期记忆（带分类，注入时按 kind 分组）。 */
   memory?: { text: string; kind: MemoryKind }[];
-  /** 世界里的其他角色花名册（不含自己/小神仙）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
+  /** 世界里的其他角色花名册（不含自己/点点）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
   worldCharacters?: { id: string; name: string }[];
   /** 世界地点名清单（客户端 world_info 上报的 POI 名）：move_to 的 location_name 优先归一到这些名字。 */
   locations?: string[];

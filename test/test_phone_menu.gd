@@ -40,7 +40,7 @@ func _run(scene: Node) -> void:
 	# 两块屏幕视口按 PhoneUi 尺寸就绪
 	_check(phone.front_viewport() != null and phone.front_viewport().size == PhoneUi.FRONT_PX, "正面视口尺寸")
 	_check(phone.spread_viewport() != null and phone.spread_viewport().size == PhoneUi.SPREAD_PX, "跨页视口尺寸")
-	# 主屏图标分页：每页 2 列大格、居中；所有页图标总数 = 已实装 app 数（4）
+	# 主屏图标分页：每页 2 列大格、居中；所有页图标总数 = 已实装 app 数（5）
 	var pager: ScrollContainer = pui.get("_phone_pager")
 	var pages_box: HBoxContainer = pui.get("_phone_pages_box")
 	_check(pager != null, "_phone_pager（图标分页横滚）存在")
@@ -55,7 +55,7 @@ func _run(scene: Node) -> void:
 					cols_ok = false
 				icon_total += g.get_child_count()
 	_check(cols_ok, "每页网格 columns=%d" % PhoneUi.PHONE_GRID_COLS)
-	_check(icon_total == 4, "图标总数 = 已实装 app 数 4（home/flowers/items/settings）")
+	_check(icon_total == 5, "图标总数 = 已实装 app 数 5（home/flowers/items/quiet/settings）")
 
 	var cover: Control = pui.get("_screen_cover")
 	_check(cover != null and cover.visible, "停靠常驻=熄屏黑屏")
@@ -84,6 +84,13 @@ func _run(scene: Node) -> void:
 	pui.close_app()
 	_check(phone.state == PaperPhone.State.FRONT, "返回后回正面态")
 	_check(String(pui.get("_phone_open_app")) == "", "返回后 open_app 清空")
+
+	# quiet 是动作不是页面（fairy-persona P5）：点一下哄点点睡，不开任何页、不进跨页态。
+	scene.set("_fairy_napping", false)
+	pui.open_app("quiet")
+	_check(bool(scene.get("_fairy_napping")), "点「点点睡觉」→ 点点进入安静态")
+	_check(String(pui.get("_phone_open_app")) == "", "quiet 不开页（动作型 app）")
+	_check(not (pages.has("quiet")), "quiet 不在 _album_pages（无页面）")
 
 	# ⚠️ 先等离线兜底那次 _apply_wallet 落定（连不上后端 → 几十帧后套用默认钱包）。仪式现在要跑
 	# 真 Tween（好几秒的真帧），期间那个迟到的 bootstrap 会把测试塞的钱包冲成默认值 {3,0,0}，

@@ -53,7 +53,7 @@ export async function respondToTranscript(
   const character = store.getCharacter(worldId, characterId);
   if (!character) throw new CharacterNotFoundError(worldId, characterId);
 
-  // 花名册：当前场景里其他可指挥的角色（不含自己、不含小神仙——她悬浮不走地面寻路）。
+  // 花名册：当前场景里其他可指挥的角色（不含自己、不含点点——她悬浮不走地面寻路）。
   // sceneId 缺省=全世界（老调用点行为不变）；给了则不把别场景的角色列进「小蓝跟我来」的候选。
   const roster = store
     .listCharacters(worldId, sceneId)

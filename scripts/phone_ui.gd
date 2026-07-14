@@ -20,9 +20,11 @@ const PHONE_APPS := [
 	["home", "回家", "app_home"],
 	["flowers", "小红花", "app_flowers"],
 	["items", "物品", "app_items"],
+	["quiet", "点点睡觉", "app_quiet"],
 	["settings", "设置", "app_settings"],
 ]
-const PHONE_APP_FALLBACK := { "home": "ic_pin", "flowers": "reward_flower", "items": "ic_gift", "settings": "ic_gear" }
+## quiet 不是页面，是动作（哄点点睡）——open_app 特判后不进 _album_pages。
+const PHONE_APP_FALLBACK := { "home": "ic_pin", "flowers": "reward_flower", "items": "ic_gift", "quiet": "ic_note", "settings": "ic_gear" }
 ## 小红花经济常量（与 server/src/types.ts 对齐）。
 const MAX_FLOWERS := 9              ## 小红花上限（3×3 格）
 const STAMPS_PER_FLOWER := 3        ## 每满 3 章换 1 朵花
@@ -537,6 +539,15 @@ func _step_phone_pager(delta: float) -> void:
 
 ## 打开一个 app：跨页只显示该页并刷新，发 app_opened（world 翻到跨页）。
 func open_app(id: String) -> void:
+	# quiet 是动作不是页面：哄点点睡一会儿，然后收起手机回到世界（不开任何页）。
+	if id == "quiet":
+		if _w.game_audio != null:
+			_w.game_audio.play_sfx("select")
+		if _w.has_method("fairy_nap"):
+			_w.fairy_nap()
+		close_app()
+		back_pressed.emit() # 翻回手机正面/收起，孩子继续玩，点点在旁边睡着
+		return
 	if not _album_pages.has(id):
 		return
 	if _w.game_audio != null:

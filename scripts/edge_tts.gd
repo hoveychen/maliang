@@ -31,7 +31,7 @@ signal _synth_done(ok: bool)
 ## 服务端 voiceId → edge 音色。取值域：仙子 mock-voice-cn-fairy、LLM 造的角色 cn-child-default、
 ## 手配的 MiniMax 名（lovely_girl 等）、Kokoro zf_*/zm_*；未知按稳定哈希落池（同一 id 永远同声）。
 const _VOICE_MAP := {
-	"mock-voice-cn-fairy": "zh-CN-XiaoyiNeural", # 仙子：活泼女声（老板试听样本）
+	"mock-voice-cn-fairy": "zh-CN-YunxiaNeural", # 点点：奶声小男孩（老板 2026-07-14 定，见 docs/fairy-persona-design.md）
 	"cn-child-default": "zh-CN-YunxiaNeural", # 默认角色：小孩音
 	"lovely_girl": "zh-CN-XiaoyiNeural",
 	"cute_boy": "zh-CN-YunxiaNeural",

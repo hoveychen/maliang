@@ -120,7 +120,7 @@ func _compress_for_gpu(img: Image) -> void:
 	if img.compress(mode as Image.CompressMode, Image.COMPRESS_SOURCE_SRGB) != OK:
 		push_warning("图集显存压缩失败（回退未压缩）：%dx%d" % [img.get_width(), img.get_height()])
 
-## 新建世界（后端会种入小神仙）。失败返回空字典。
+## 新建世界（后端会种入点点）。失败返回空字典。
 func create_world() -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)

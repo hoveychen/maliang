@@ -1,9 +1,9 @@
 {
-  "voice": "zh-CN-XiaoyiNeural",
+  "voice": "zh-CN-YunxiaNeural",
   "lines": [
-    { "id": "ob_story_1", "text": "在一个开满小花的森林里，住着一位会魔法的小仙子。" },
-    { "id": "ob_story_2", "text": "小仙子有一支神奇的画笔，画什么，什么就会活过来！" },
-    { "id": "ob_story_3", "text": "今天，小仙子要带一位小朋友去魔法世界玩，就是你呀！" },
+    { "id": "ob_story_1", "text": "在一个开满小花的森林里，有一支神奇的画笔。" },
+    { "id": "ob_story_2", "text": "画笔上住着一个小精灵，叫点点。点点画什么，什么就会活过来！" },
+    { "id": "ob_story_3", "text": "今天，点点要带一位小朋友去魔法世界玩，就是你呀！" },
     { "id": "ob_q_gender", "text": "你是小男生，还是小女生呀？点一点下面的图片告诉我吧。" },
     { "id": "ob_opt_boy", "text": "是小男生呀！" },
     { "id": "ob_opt_girl", "text": "是小女生呀！" },
@@ -22,9 +22,9 @@
     { "id": "ob_opt_ball", "text": "喜欢踢球呀！" },
     { "id": "ob_opt_sing", "text": "喜欢唱歌呀！" },
     { "id": "ob_opt_story", "text": "喜欢听故事呀！" },
-    { "id": "ob_intro_ask", "text": "跟小仙子说说，你叫什么名字呀？按住大话筒说话哦。" },
-    { "id": "ob_intro_retry", "text": "小仙子没有听清呀，再说一次好不好？" },
-    { "id": "ob_generating", "text": "小仙子要施魔法啦！变、变、变——" },
+    { "id": "ob_intro_ask", "text": "跟点点说说，你叫什么名字呀？按住大话筒说话哦。" },
+    { "id": "ob_intro_retry", "text": "呀，风好大，点点没听清呀，再说一次好不好？" },
+    { "id": "ob_generating", "text": "点点来画咯！点一下——变、变、变——" },
     { "id": "ob_confirm", "text": "你看，这就是你呀！喜欢吗？" },
     { "id": "ob_regen", "text": "那我们再变一次！" },
     { "id": "ob_done", "text": "太棒啦！我们出发咯！" }

@@ -20,15 +20,15 @@ const FADE_TIME := 0.45   ## 揭开淡出时长
 const MIN_SHOW_MS := 600  ## 最短显示：避免过场一闪而过（世界瞬间就绪时也留个照面）
 const DOT_COUNT := 3
 
-const FAIRY_W := 260.0    ## 仙子精灵框宽/高（横飞时按框定位）
-const FAIRY_H := 178.0
+const FAIRY_W := 296.0    ## 点点精灵框宽/高（横飞时按框定位；比例贴合图集 cell 296×256）
+const FAIRY_H := 256.0
 const FLY_MARGIN := 44.0  ## 飞行航道左右留白
-# 仙子 idle 动画图集（服务端生成、WebP 打包本地供离线用；6×6 网格 31 帧 8fps，cell 216×160）
+# 点点 idle 动画图集（服务端 Seedance 生成、WebP 打包本地供离线用；6×6 网格 31 帧 8fps，cell 296×256）
 const FAIRY_SHEET_COLS := 6
 const FAIRY_SHEET_FRAMES := 31
 const FAIRY_SHEET_FPS := 8.0
-const FAIRY_CELL_W := 216
-const FAIRY_CELL_H := 160
+const FAIRY_CELL_W := 296
+const FAIRY_CELL_H := 256
 const PROG_FOLLOW := 2.5  ## 显示进度追真进度的速度（每秒）：真里程碑落地时仙子快速前冲
 const PROG_CREEP := 0.035 ## 真进度停滞时的慢爬（每秒），朝 0.9 渐近但永不到顶——到顶只由 world_ready 触发
 const CREEP_CEIL := 0.9   ## 慢爬封顶：网络久等时仙子最多爬到 90%，留最后一截给「真就绪」
@@ -42,7 +42,10 @@ const REACT_DUR := 0.7     ## 点击屏幕后小仙子纸片翻转反应时长
 var _fade_root: Control    ## 淡出目标（背景+三点挂它下面，改 modulate:a 剥离）
 var _portal: TextureRect   ## 航道终点的传送门（挂 CanvasLayer 上、盖过 _fade_root，单独转场）
 var _fairy: TextureRect
-var _fairy_atlas: AtlasTexture ## 仙子动画图集的取帧窗口（每帧移 region 播 idle 动画）
+var _fairy_atlas: AtlasTexture ## 点点动画图集的取帧窗口（每帧移 region 播 idle 动画）
+var _trail: Line2D             ## 点点飞过留下的墨迹（＝进度条：她画到哪儿，就是加载到哪儿）
+var _trail_base_y := 0.0       ## 墨迹基线 Y（不随点点上下起伏抖动，是稳的一道笔画）
+var _fairy_cx := 0.0           ## 点点框心 X（_layout_fairy 每帧写，墨迹终点取它）
 var _status_label: Label   ## 调试浮层：当前加载阶段文案+进度百分比（仅 debug 构建，release 不建，见 _build_overlay）
 var _dots: Array[ColorRect] = []
 var _t := 0.0
@@ -80,6 +83,23 @@ func _build_overlay() -> void:
 	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_fade_root.add_child(bg)
+
+	# 点点飞过留下的墨迹＝进度条：一道墨黑笔画，从航道起点画到她当前位置。
+	# 在 bg 之后、点点之前入树 → 画在她身后（她像正拖着笔尖画出这条线）。
+	# Line2D 挂 Control 下按画布坐标渲染；点点母题就是墨点尾迹，这里把它连成一笔。
+	_trail = Line2D.new()
+	_trail.width = 12.0
+	_trail.default_color = Color(0.16, 0.14, 0.13, 0.92) # 墨黑（微暖，非纯黑）
+	_trail.joint_mode = Line2D.LINE_JOINT_ROUND
+	_trail.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	_trail.end_cap_mode = Line2D.LINE_CAP_ROUND
+	# 起笔细、行笔粗（毛笔起收笔），用宽度曲线做出笔锋
+	var wcurve := Curve.new()
+	wcurve.add_point(Vector2(0.0, 0.35))
+	wcurve.add_point(Vector2(0.12, 1.0))
+	wcurve.add_point(Vector2(1.0, 0.9))
+	_trail.width_curve = wcurve
+	_fade_root.add_child(_trail) # Line2D 是 Node2D，本就不吃鼠标，无需 mouse_filter
 
 	# 横飞的小仙子（bob + 呼吸 + 随就绪进度从左飞到右，见 _process）——把等待可视化成
 	# 「小仙子布置世界，飞到尽头就绪」，让慢网也有进度感、且揭幕严格等仙子飞到头。
@@ -187,6 +207,7 @@ func _process(delta: float) -> void:
 	_advance_progress(delta)
 	if not _transitioning: # 转场后仙子交给吸入 tween，别再被逐帧布局覆盖 scale/位置
 		_layout_fairy()
+		_layout_trail()
 	_layout_portal()
 	# 三点顺序脉动（相位错开），alpha 在 0.35~1.0 之间呼吸
 	for i in range(_dots.size()):
@@ -254,6 +275,26 @@ func _layout_fairy() -> void:
 	_fairy.offset_bottom = base_y + FAIRY_H + bob
 	_fairy.rotation = tilt
 	_fairy.scale = Vector2(s * flip, s) # x 方向翻转做纸片翻面
+	_fairy_cx = x + FAIRY_W * 0.5           # 墨迹画到她身下的笔尖处（框心 x）
+	_trail_base_y = base_y + FAIRY_H * 0.58 # 稳的一道基线：取她身体中下部，不随 bob 抖
+
+## 墨迹进度条：从航道起点画到点点当前位置的一道手绘墨笔。沿途小幅正弦抖动＝手绘感，
+## 每 ~26px 采一个点。点点飞到哪，墨就画到哪——加载进度天然可视化成「她画出的一条线」。
+func _layout_trail() -> void:
+	if _trail == null or _fade_root == null:
+		return
+	var start_x := FLY_MARGIN + 12.0
+	var end_x := maxf(_fairy_cx - FAIRY_W * 0.18, start_x) # 收到她框心稍靠后，像墨从笔尖淌出
+	var pts := PackedVector2Array()
+	var seg := 26.0
+	var x := start_x
+	while x < end_x:
+		# 沿途手绘抖动：低频波（整体起伏）+ 固定相位（画好的部分不再动，像干了的墨）
+		var wob := sin(x * 0.03) * 5.0 + sin(x * 0.11) * 2.0
+		pts.append(Vector2(x, _trail_base_y + wob))
+		x += seg
+	pts.append(Vector2(end_x, _trail_base_y + sin(end_x * 0.03) * 5.0 + sin(end_x * 0.11) * 2.0))
+	_trail.points = pts
 
 ## 播 idle 动画：按 _t 与 fps 取当前帧，移动 AtlasTexture 的 region 到对应网格格子。
 func _update_fairy_frame() -> void:
