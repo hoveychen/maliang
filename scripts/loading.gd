@@ -578,29 +578,26 @@ class InkStroke extends Control:
 			if tang == Vector2.ZERO:
 				tang = Vector2.RIGHT
 			normals[i] = Vector2(-tang.y, tang.x)
-		# 逐笔毛：**每根连续画**(不再遇飞白硬断→不再一段一段)。逐小段给平滑 alpha：
-		# 干处变淡、湿处变浓，但从不断开。中心笔毛给 alpha 下限＝始终连着的墨脊。
+		# 逐笔毛：每根用 draw_polyline_colors **一次画成一条连续线**（单图元，顶点不双绘→无"竹节"
+		# 堆叠节点；之前逐小段半透明画，相邻段在共享点叠加成一串深节＝竹节蛇）。逐顶点给平滑 alpha：
+		# 干处变淡、湿处变浓，但从不断开。中心笔毛 alpha 下限＝始终连着的墨脊。浓度靠 15 根叠印。
 		for h in HAIRS:
 			var hv := (float(h) / float(HAIRS - 1)) * 2.0 - 1.0   # -1..1 跨笔画位置
 			var edge := 1.0 - absf(hv)                             # 中心1 边缘0
-			var base_a := 0.09 + 0.34 * edge                       # 中心深、边缘淡→羽化
-			var prev := Vector2.ZERO
-			var prev_pres := 0.0
-			var has_prev := false
+			var base_a := 0.16 + 0.5 * edge                        # 加深治"太淡"：中心浓、边缘淡→羽化
+			var hp := PackedVector2Array(); hp.resize(n)
+			var hc := PackedColorArray(); hc.resize(n)
 			for i in n:
 				var s := slen[i]
 				var sn := s / total
 				# 压力：起笔尖→迅速铺开→收笔略收
 				var pressure := smoothstep(0.0, 0.05, sn) * (1.0 - 0.22 * smoothstep(0.84, 1.0, sn))
 				var off := hv * HALF_W * pressure
-				# 存在度：中心(edge→1)给 0.55 下限＝墨脊不断；边缘(edge→0)可淡到近无＝飞白只在边缘
-				var pres := lerpf(_density(h, s), 1.0, edge * 0.55) * pressure
-				var p := _pts[i] + normals[i] * off
-				if has_prev:
-					var seg_a := base_a * (prev_pres + pres) * 0.5   # 段 alpha=两端存在度均值→平滑过渡
-					if seg_a > 0.015:                                 # 近乎透明的边缘干段跳过(省 draw，不留可见缝)
-						draw_line(prev, p, Color(INK.r, INK.g, INK.b, minf(seg_a, 0.85)), 2.6, true)
-				prev = p; prev_pres = pres; has_prev = true
+				# 存在度：中心(edge→1)给 0.6 下限＝墨脊不断；边缘(edge→0)可淡到近无＝飞白只在边缘
+				var pres := lerpf(_density(h, s), 1.0, edge * 0.6) * pressure
+				hp[i] = _pts[i] + normals[i] * off
+				hc[i] = Color(INK.r, INK.g, INK.b, minf(base_a * pres, 0.9))
+			draw_polyline_colors(hp, hc, 2.8, true)
 		# 收笔湿头：末端一小坨浓墨（毛笔抬起前的驻墨）
 		var tip := _pts[n - 1]
-		draw_circle(tip, HALF_W * 0.5, Color(INK.r, INK.g, INK.b, 0.85))
+		draw_circle(tip, HALF_W * 0.55, Color(INK.r, INK.g, INK.b, 0.92))
