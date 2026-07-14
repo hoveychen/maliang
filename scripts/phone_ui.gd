@@ -1198,7 +1198,7 @@ func _build_settings_page() -> Control:
 	gfx_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	gfx_page.add_child(gfx_title)
 	_gfx_buttons = {}
-	for key: String in GraphicsSettings.KEYS:
+	for key: String in GraphicsSettings.all_keys():  # 性能旋钮 + 样式键（纸艺风）各一张卡片
 		var pad := MarginContainer.new()  # 别让说明文字贴到页缘
 		pad.add_theme_constant_override("margin_left", 4)
 		pad.add_theme_constant_override("margin_right", 4)
