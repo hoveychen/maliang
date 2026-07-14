@@ -62,6 +62,12 @@ func _init() -> void:
 		elif cat == "scatter":
 			fails += _check("%s 是 PackedScene" % rref, 1 if res is PackedScene else 0, 1)
 
+	# 积木式造物 B1 零件（P3）：build_parts pack 的键走 `part:<id>` renderRef 由【组合物 spec】引用
+	# （composed ItemDef，不在 builtin_items.json / 地形 palette 里），故这里视作已引用、非孤儿。
+	# 它们的可 load 由 test_build_parts 单独守（每键须是 >48px 真图）。
+	for k in PackRegistry.keys_in_pack("build_parts"):
+		referenced[String(k)] = true
+
 	# 无孤儿：每条 pack 声明都被某内置物品引用（防止加了没人用的键，或删物品漏删声明）
 	for k in all_keys:
 		fails += _check("pack 键[%s] 被内置物品引用（无孤儿声明）" % k,

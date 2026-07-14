@@ -62,6 +62,7 @@ UNIT_TESTS=(
   test_player_profile
   test_stamp_ceremony
   test_composed_prop
+  test_build_parts
   test_menu_gate
   test_graphics_settings
   test_frame_sampler
