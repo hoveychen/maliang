@@ -23,9 +23,29 @@ uniform float detail_strength = 0.85;
 uniform bool low_detail = false;
 uniform float curvature = 0.0015;
 
+// —— 纸艺化（与 world_bend/terrain_ground 同一开关体系，默认 0 = 观感不变）——
+// 水的纸模语法：深浅渐变量化成离散台阶（立体书里层层剪纸的水）+ 压平波纹 + 纸纹/卡纸色调。
+// paper_bands 在本 shader 量化的是「深度分层」而非光照（水面颜色几乎全由 albedo 决定）。
+uniform float paper_bands : hint_range(0.0, 8.0) = 0.0;
+uniform float paper_grain : hint_range(0.0, 1.0) = 0.0;
+uniform float paper_tone : hint_range(0.0, 1.0) = 0.0;
+
 void vertex() {
 	VERTEX.y += sin(TIME * 1.2 + (UV2.x + UV2.y) * 0.9) * 0.05;
 	VERTEX.y -= curvature * dot(VERTEX.xz, VERTEX.xz);
+}
+
+float paper_hash(vec2 q) {
+	return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float paper_noise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(
+		mix(paper_hash(i), paper_hash(i + vec2(1.0, 0.0)), f.x),
+		mix(paper_hash(i + vec2(0.0, 1.0)), paper_hash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
 void fragment() {
@@ -34,7 +54,20 @@ void fragment() {
 	vec3 d2 = low_detail ? d1 : texture(water_tex, wuv * 1.7 - TIME * vec2(0.011, 0.016)).rgb / water_mean;
 	vec3 det = mix(vec3(1.0), (d1 + d2) * 0.5, detail_strength);
 	float depth01 = COLOR.r;
+	if (paper_bands > 0.5) {
+		// 深浅量化成剪纸台阶 + 压平波纹（纸片水是平的，只留一点笔触呼吸）
+		depth01 = floor(depth01 * paper_bands + 0.5) / paper_bands;
+		det = mix(vec3(1.0), det, 0.35);
+	}
 	vec3 col = mix(shallow_color, deep_color, depth01) * det;
+	if (paper_tone > 0.001) {
+		float plum = dot(col, vec3(0.299, 0.587, 0.114));
+		col = mix(col, mix(col, vec3(plum), 0.25) * 1.06 + 0.02, paper_tone);
+	}
+	if (paper_grain > 0.001) {
+		float g = 0.65 * paper_noise(UV2 * 0.45) + 0.35 * paper_noise(UV2 * 1.8);
+		col *= mix(1.0, 0.82 + 0.36 * g, paper_grain);
+	}
 	float fr = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
 	col = mix(col, sky_tint, fr * 0.5);
 	// 岸边泡沫带：atlas 泡沫掩码 × 时间涌动（沿岸相位用逻辑坐标，环面无缝）
