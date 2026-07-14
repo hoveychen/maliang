@@ -214,6 +214,15 @@ func _make_slot() -> Dictionary:
 	root.add_child(deco)
 	return { "root": root, "tile": tile, "water": water, "deco": deco, "wrapped": Vector2i(-999, -999) }
 
+## 贴图平色化/拼布抖动基线档（Pokopia 化 P2，调参对象）：flatten 把照片纹理往逐层
+## 平均色收敛（远看干净色块），tile_jitter 给相邻 tile/墙格轻微色差（拼布感）。
+const FLATTEN := 0.65
+const TILE_JITTER := 0.5
+const WALL_STRATA := 0.55  ## 崖壁逐级地层行带强度（Pokopia 化 P3）
+const CAP_TRIM := 0.9      ## 崖顶波浪盖帽强度（Pokopia 化 P4，第一识别特征）
+const CORNER_AO := 0.7     ## 墙脚接触暗缝强度（Pokopia 化 P5，内凹角柔和 AO）
+## 草地草簇/大头花散布（Pokopia 化 P6）的密度/姿态旋钮在 terrain_deco.gd 顶部常量区。
+
 ## 地形专用材质（themed-terrain P1）：控制图 atlas（域/描边/角色/明暗）+ 顶面/侧壁
 ## Texture2DArray（世界 UV 平铺，per-tile 层索引选贴图）。逐层 tint/mean 与描边色取自
 ## TerrainTextures / TerrainAtlas 常量（shaders/terrain_ground.gdshader）。
@@ -224,6 +233,13 @@ static func _make_ground_mat() -> ShaderMaterial:
 	m.set_shader_parameter("top_array", TerrainTextures.build_texture_array())
 	m.set_shader_parameter("layer_tint", TerrainTextures.layer_tints_linear())
 	m.set_shader_parameter("layer_mean", TerrainTextures.layer_means_linear())
+	m.set_shader_parameter("layer_flat", TerrainTextures.layer_flats_linear())
+	m.set_shader_parameter("flatten", FLATTEN)
+	m.set_shader_parameter("tile_jitter", TILE_JITTER)
+	m.set_shader_parameter("wall_strata", WALL_STRATA)
+	m.set_shader_parameter("cap_trim", CAP_TRIM)
+	m.set_shader_parameter("layer_cap", TerrainTextures.layer_cap_trims())
+	m.set_shader_parameter("corner_ao", CORNER_AO)
 	m.set_shader_parameter("wall_relief", TerrainTextures.layer_wall_reliefs())
 	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
 	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
@@ -392,6 +408,20 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 				push_warning("[items] 未知物品实体 %s（catalog 未载入?），跳过渲染" % id)
 			else:
 				push_warning("[items] renderRef %s 的键未在 PackRegistry 注册，跳过渲染" % rref)
+	# 草地装饰散布（Pokopia 化 P6）：厚叶草簇/大头花密植——落点决策与 mesh 见 TerrainDeco
+	# （纯函数确定性，重刷不闪），合批走同一个 batches。占地过滤在此层做：房/树/动态物件
+	# 脚下不长（占地是世界状态，纯函数管不着）；角色站位不算占地（暂态，与散布重摆同理）。
+	for j in range(CHUNK_TILES):
+		for i in range(CHUNK_TILES):
+			var ti := Vector2i(i, j)
+			var gt := wrapped * CHUNK_TILES + ti
+			var d := TerrainDeco.pick(gt)
+			if d.is_empty():
+				continue
+			if not OccupancyMap.is_free_rect(OccupancyMap.tile_to_cell(gt), 2, 2):
+				continue
+			var off: Vector2 = d["off"]
+			_batch(batches, d["key"], _tile_local(ti, wrapped) + Vector3(off.x, 0.0, off.y), d["scale"], d["yaw"])
 	# 边缘贴纸层：逐 tile 扫四条边（绝大多数为 0，纯 PackedByteArray 读，开销可忽略）。
 	for j in range(CHUNK_TILES):
 		for i in range(CHUNK_TILES):
@@ -759,9 +789,15 @@ func _emit_top_face(verts: PackedVector3Array, norms: PackedVector3Array, uvs: P
 func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, t: Vector2i, ttype: int, fl: int, x0: float, z0: float, loff: Vector2) -> void:
 	var ts := WorldGrid.TILE_SIZE
 	# 侧壁贴图层 = 被抬高 tile（本 tile）类型对应的侧壁层（修 CLIFF_WALL 写死的偷懒）
-	var side_lcol := Color(float(TerrainTextures.side_layer(ttype)) / 255.0, 0.0, 0.0, 1.0)
+	var side_layer := float(TerrainTextures.side_layer(ttype)) / 255.0
+	# 盖帽涂装（Pokopia 化 P4）用两个空闲顶点色通道：
+	# g = 顶面层索引（盖帽取顶面平色，生态身份跟着顶面走）；
+	# b = 距崖顶深度 below/2m（clamp 到 [0,1]；shader 只关心 <0.6m 的帽区，8bit 精度 ~8mm 足够；
+	#     跨 clamp 的 quad 在 0..2m 内逐段线性，帽区判定不受插值失真影响）。
+	var cap_lyr := float(TerrainTextures.top_layer(ttype)) / 255.0
 	# beveled tile：最顶一级墙面顶缘下降 bevel，给顶面 chamfer 斜面让位（在 boundary,y-bevel 处对齐）
 	var bevel := TerrainTextures.tile_bevel(ttype)
+	var wall_top := float(fl) * TerrainMap.STEP_HEIGHT - bevel
 	var x1 := x0 + ts
 	var z1 := z0 + ts
 	# 每边：邻居偏移 n / 墙面法线 / 上边两端点 a→b（从法线侧看去 a 在屏幕左）/
@@ -776,6 +812,9 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 		var n_off: Vector2i = s["n"]
 		var tang: Vector2i = s["tang"]
 		var nfl := TerrainMap.tile_floor_level(t + n_off)
+		# 墙脚 AO（Pokopia 化 P5）：COLOR.a 编码「离墙基高度/2m」（墙基=邻居有效地面=
+		# 内凹角所在），shader 对 <0.45m 的墙脚压暗——内凹角的柔和接触暗缝。
+		var wall_base := float(nfl) * TerrainMap.STEP_HEIGHT
 		for lvl in range(nfl, fl):
 			# (q.x, q.y) = (沿墙偏移, 视觉上下偏移)；atlas 的 N(-1) = 上一级
 			var pred := func(q: Vector2i) -> bool:
@@ -802,9 +841,14 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 				verts.append(Vector3(h1.x, yt, h1.z))
 				verts.append(Vector3(h1.x, yb, h1.z))
 				verts.append(Vector3(h0.x, yb, h0.z))
+				var col_t := Color(side_layer, cap_lyr, clampf((wall_top - yt) * 0.5, 0.0, 1.0), clampf((yt - wall_base) * 0.5, 0.0, 1.0))
+				var col_b := Color(side_layer, cap_lyr, clampf((wall_top - yb) * 0.5, 0.0, 1.0), clampf((yb - wall_base) * 0.5, 0.0, 1.0))
 				for k in range(4):
 					norms.append(s["normal"])
-					cols.append(side_lcol)
+				cols.append(col_t)
+				cols.append(col_t)
+				cols.append(col_b)
+				cols.append(col_b)
 				uvs.append(r.position)
 				uvs.append(Vector2(r.end.x, r.position.y))
 				uvs.append(r.end)
@@ -994,6 +1038,9 @@ func _scatter_kind(key: String) -> Dictionary:
 		m.set_shader_parameter("albedo_tex", tex)
 		m.set_shader_parameter("curvature", BendMat.CURVATURE)
 		info = { "mesh": q, "mat": m }
+	elif key.begins_with("deco_"):
+		# 草地装饰散布（Pokopia 化 P6）：程序化低模 mesh + 烘焙布景共享顶点色材质
+		info = { "mesh": TerrainDeco.mesh(key), "mat": SdfStaticBaker.material() }
 	elif PackRegistry.category(key) == "baked":
 		info = { "mesh": PackRegistry.load_resource(key), "mat": SdfStaticBaker.material() }
 	else:  # scatter：KayKit 场景剥出 mesh + bend 包裹材质

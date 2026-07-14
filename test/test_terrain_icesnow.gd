@@ -56,13 +56,17 @@ func _test_layer_mappings() -> void:
 	_check("LAYER_TEX_PATHS 数 = LAYER_COUNT", TT.LAYER_TEX_PATHS.size(), TT.LAYER_COUNT)
 
 ## ②b 崖壁倒角逐 tile 类型开关（老板要「每 tile 自己的、非全主题一刀切」）：
-## 雪族返回 >0 倒角量，非雪族（草/瓷砖/大理石）恒 0=直角不倒角。
+## 雪族返回满档倒角；有机地表（草/土）自 Pokopia 化 P5 起吃 BEVEL_SOFT 软圆角
+## （全场景无锋利 90° 边，见 docs/pokopia-block-design-analysis.md §2）；
+## 结构地面（瓷砖/大理石）仍恒 0=利落直角。
 func _test_bevel_gating() -> void:
 	var TT := TerrainTextures
 	for t in [TerrainMap.T_SNOW, TerrainMap.T_PACKED_SNOW, TerrainMap.T_SLUSH, TerrainMap.T_ROCK_SNOW, TerrainMap.T_ICE]:
 		_check("雪族 tile %d 倒角 >0" % t, TT.tile_bevel(t) > 0.0, true)
-	for t in [TerrainMap.T_GRASS, TerrainMap.T_TILE, TerrainMap.T_MARBLE, TerrainMap.T_PATH]:
-		_check("非雪族 tile %d 不倒角(0)" % t, TT.tile_bevel(t), 0.0)
+	for t in [TerrainMap.T_GRASS, TerrainMap.T_PATH]:
+		_check("有机 tile %d 软圆角(BEVEL_SOFT)" % t, TT.tile_bevel(t), TT.BEVEL_SOFT)
+	for t in [TerrainMap.T_TILE, TerrainMap.T_MARBLE]:
+		_check("结构 tile %d 不倒角(0)" % t, TT.tile_bevel(t), 0.0)
 
 ## ③ 受控地形：裸岩(5,5) 抬高、压实雪(10,10) 抬高，各自崖壁层不同
 func _test_type_aware_walls() -> void:

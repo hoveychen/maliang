@@ -363,6 +363,10 @@ static func layer_wall_reliefs() -> PackedFloat32Array:
 ## 雪族崖壁倒角出雪盖圆润感，室外岩壁/室内光滑墙/现代路缘等默认 0=保持利落直角(零回归)。
 ## 地形网格无碰撞体(角色高度走逻辑格 tile_height×STEP)，倒角纯视觉、不影响行走/寻路。
 const BEVEL_SNOW := 0.22
+## 有机地表崖顶软圆角（Pokopia 化 P5）：草/沙/土/苔类台地顶棱也吃 fillet——
+## Pokopia 全场景找不到一条锋利 90° 边（设计文档§2）。比雪盖轻一档；
+## 结构地面（瓷砖/石板/现代路缘等）保持利落直角不动。
+const BEVEL_SOFT := 0.12
 static func tile_bevel(ttype: int) -> float:
 	match ttype:
 		TerrainMap.T_SNOW, TerrainMap.T_PACKED_SNOW, \
@@ -370,6 +374,11 @@ static func tile_bevel(ttype: int) -> float:
 			return BEVEL_SNOW
 		TerrainMap.T_ICE:
 			return BEVEL_SNOW * 0.6  ## 冰面积雪少，倒角轻一点
+		TerrainMap.T_GRASS, TerrainMap.T_PATH, TerrainMap.T_SAND, \
+		TerrainMap.T_COARSE_SAND, TerrainMap.T_CORAL_SAND, TerrainMap.T_REEF, \
+		TerrainMap.T_SEAGRASS, TerrainMap.T_DEEP_BED, TerrainMap.T_CRACKED_EARTH, \
+		TerrainMap.T_VOLCANIC, TerrainMap.T_MUD_BOG, TerrainMap.T_FERN:
+			return BEVEL_SOFT
 	return 0.0
 
 ## PackedColorArray → shader vec3[] 用的线性 PackedVector3Array（补齐到 SHADER_ARRAY_SIZE）。
@@ -388,6 +397,71 @@ static func layer_tints_linear() -> PackedVector3Array:
 
 static func layer_means_linear() -> PackedVector3Array:
 	return _to_linear_padded(layer_means())
+
+## 层 → 平色（Pokopia 化 P2）：该层贴图经 shader 上色后呈现色的空间均值（线性空间），
+## = tint × img_mean / mean（旧水彩层 img_mean≈mean → 平色≈tint；烘色层 tint/mean 白 →
+## 平色=贴图均值，一条公式两类层通吃）。flatten 旋钮把 body 往这个平色收敛：远看干净
+## 色块、近看只留少量笔触。low_detail 档的纯色 body 也用它（layer_tint 对烘色层是白，
+## 直接当纯色会把地面洗白）。
+static var _layer_flats := PackedVector3Array()
+
+## 层 → 盖帽门控（Pokopia 化 P4）：该层作为「被抬高 tile 的顶面」时，崖壁顶缘要不要画
+## 波浪盖帽。有机地表（草/沙/雪/苔/泥…）= 1，结构地面（木地板/大理石/瓷砖/沥青/地毯…）= 0
+## ——波浪毛边帽在人造地面上违和。缺省 0，只登记有机层。
+static func layer_cap_trims() -> PackedFloat32Array:
+	var c := PackedFloat32Array()
+	c.resize(SHADER_ARRAY_SIZE)
+	c[LAYER_GRASS] = 1.0
+	c[LAYER_PATH] = 0.6       # 土顶：薄土唇
+	c[LAYER_BED] = 0.6
+	c[LAYER_SAND] = 1.0
+	c[LAYER_SNOW] = 1.0
+	c[LAYER_CORAL] = 1.0
+	c[LAYER_COARSE_SAND] = 1.0
+	c[LAYER_CORAL_SAND] = 1.0
+	c[LAYER_SEAGRASS] = 1.0
+	c[LAYER_DEEP_BED] = 1.0
+	c[LAYER_PACKED_SNOW] = 1.0
+	c[LAYER_ICE] = 0.4        # 冰沿只留淡淡一圈
+	c[LAYER_SLUSH] = 1.0
+	c[LAYER_ROCK_SNOW] = 1.0
+	c[LAYER_CRACKED_EARTH] = 1.0
+	c[LAYER_VOLCANIC] = 0.8
+	c[LAYER_MUD_BOG] = 1.0
+	c[LAYER_FERN] = 1.0
+	c[LAYER_RUBBLE] = 0.6
+	c[LAYER_FARM_FURROW] = 1.0
+	c[LAYER_LAWN_GRID] = 1.0
+	return c
+
+static func layer_flats_linear() -> PackedVector3Array:
+	if _layer_flats.is_empty():
+		_compute_layer_flats()
+	return _layer_flats
+
+## 逐层算贴图均值：sRGB→线性后对半缩到 1×1（逐级 box 均值，全程 C++ 路径，启动一次性）。
+static func _compute_layer_flats() -> void:
+	var tints := layer_tints_linear()
+	var means := layer_means_linear()
+	_layer_flats.resize(SHADER_ARRAY_SIZE)
+	for i in range(LAYER_TEX_PATHS.size()):
+		var tex: Texture2D = load(LAYER_TEX_PATHS[i])
+		var img: Image = tex.get_image() if tex != null else null
+		if img == null:
+			_layer_flats[i] = tints[i]
+			continue
+		if img.is_compressed():
+			img.decompress()
+		if img.get_format() != Image.FORMAT_RGBA8:
+			img.convert(Image.FORMAT_RGBA8)
+		img.srgb_to_linear()
+		while img.get_width() > 1 or img.get_height() > 1:
+			img.resize(maxi(1, img.get_width() >> 1), maxi(1, img.get_height() >> 1), Image.INTERPOLATE_BILINEAR)
+		var c := img.get_pixel(0, 0)
+		_layer_flats[i] = Vector3(
+			tints[i].x * c.r / maxf(means[i].x, 0.001),
+			tints[i].y * c.g / maxf(means[i].y, 0.001),
+			tints[i].z * c.b / maxf(means[i].z, 0.001))
 
 ## 组装顶面/侧壁共用的 Texture2DArray（各层同尺寸同格式）。运行期一次性建，材质共享。
 ## headless 下也可安全构造（Image 解码 + create_from_images 不依赖窗口/GPU 上传）。
