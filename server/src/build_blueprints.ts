@@ -98,6 +98,41 @@ export const BUILD_BLUEPRINTS: readonly WholeBlueprint[] = [
       slot('nose', 'snow.nose', '脸中间尖尖的、能闻味道的是什么', false, { x: 0.5, y: 0.4, scale: 0.25, rot: 0 }),
     ],
   },
+  // 蛋糕：教「叠层」——胚→奶油→顶料一层层往上叠（分解=一层是一件事）。女生向找平的第一副。
+  {
+    id: 'cake',
+    name: '蛋糕',
+    baseRef: 'blueprint:cake',
+    slots: [
+      slot('base', 'cake.base', '最下面厚厚的一大块，是什么呀', true, { x: 0.5, y: 0.7, scale: 1.0, rot: 0 }),
+      slot('cream', 'cake.cream', '抹在外面白白的、甜甜的是什么', true, { x: 0.5, y: 0.52, scale: 0.95, rot: 0 }),
+      slot('topping', 'cake.topping', '上面点缀的、一颗一颗红红的是什么', true, { x: 0.5, y: 0.34, scale: 0.5, rot: 0 }),
+      slot('candle', 'cake.candle', '过生日要吹的、亮亮的是什么', false, { x: 0.5, y: 0.18, scale: 0.4, rot: 0 }),
+    ],
+  },
+  // 花：教「功能分解」——要能站起来=茎、围一圈张开=花瓣、中间装花粉=花心（问功能不给答案的最佳载体）。
+  {
+    id: 'flower',
+    name: '小花',
+    baseRef: 'blueprint:flower',
+    slots: [
+      slot('petals', 'flower.petals', '围着中间一圈一圈张开的、五颜六色的是什么', true, { x: 0.5, y: 0.4, scale: 1.0, rot: 0 }),
+      slot('center', 'flower.center', '花正中间圆圆的、装花粉的是什么', true, { x: 0.5, y: 0.4, scale: 0.4, rot: 0 }),
+      slot('stem', 'flower.stem', '要能站起来，得有根绿绿的什么撑着', true, { x: 0.5, y: 0.74, scale: 0.9, rot: 0 }),
+      slot('leaf', 'flower.leaf', '两边张开、能晒到太阳的是什么', false, { x: 0.64, y: 0.64, scale: 0.5, rot: 0 }),
+    ],
+  },
+  // 冰淇淋：同蛋糕一路教「叠层」——甜筒托着球、球上再淋顶料（雪糕别名亦命中）。
+  {
+    id: 'icecream',
+    name: '冰淇淋',
+    baseRef: 'blueprint:icecream',
+    slots: [
+      slot('cone', 'ice.cone', '拿在手里、尖尖的能装东西的是什么', true, { x: 0.5, y: 0.74, scale: 0.8, rot: 0 }),
+      slot('scoop', 'ice.scoop', '圆圆的、凉凉的一大坨是什么', true, { x: 0.5, y: 0.42, scale: 0.9, rot: 0 }),
+      slot('topping', 'ice.topping', '淋在最上面、甜甜的是什么', false, { x: 0.5, y: 0.24, scale: 0.4, rot: 0 }),
+    ],
+  },
 ];
 
 /** 组合物里的一个零件坐位：某个槽填了哪个零件（partRenderRef 冗余进来供客户端直接画子 quad，免二次查库）。 */
@@ -134,6 +169,13 @@ const BLUEPRINT_KEYWORDS: Record<string, readonly string[]> = {
   house: ['房子', '屋子', '小屋'],
   train: ['火车'],
   snowman: ['雪人'],
+  // 蛋糕 name='蛋糕' 已够特异（不像「车」会误伤），别名只补生日/奶油款。
+  cake: ['生日蛋糕', '奶油蛋糕'],
+  // 花 name 刻意取 '小花'（2 字）而非单字 '花'——否则 '烟花'/'棉花糖'/'花生' 全会误命中升级成拼花。
+  // 别名同样都是含 '花' 的整词，仍不收单字。
+  flower: ['花朵', '花儿', '鲜花'],
+  // 冰淇淋别名收两种常见写法/叫法（冰激凌/雪糕）。
+  icecream: ['冰激凌', '雪糕'],
 };
 
 /**
@@ -172,6 +214,9 @@ const BLUEPRINT_SHAPE: Record<string, string> = {
   house: 'the empty outline of a simple front-view little house (a wall box plus a triangular roof spot)',
   train: 'the empty outline of a simple side-view little train (an engine spot plus one carriage spot on wheels)',
   snowman: 'the empty outline of a simple snowman (a big lower circle stacked with a smaller upper circle)',
+  cake: 'the empty outline of a simple front-view layered birthday cake (a wide round base tier, a cream band above it, a small topping spot and a candle spot on top)',
+  flower: 'the empty outline of a simple front-view flower (a round center spot ringed by petal spots, sitting on a straight stem with a side leaf spot)',
+  icecream: 'the empty outline of a simple ice-cream cone (a pointed cone at the bottom holding a round scoop spot, with a small topping spot on top)',
 };
 
 /** 取某蓝图骨架底板的生图 prompt（统一画风前缀 + 专属轮廓；未知回退兜底）。P3 批量生成管线读它。 */

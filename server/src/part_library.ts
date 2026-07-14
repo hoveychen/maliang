@@ -74,6 +74,48 @@ export const PART_LIBRARY: readonly PartDef[] = [
   part('hat_bucket', '帽子', '小水桶帽', ['snow.hat']),
   part('nose_carrot', '鼻子', '胡萝卜鼻子', ['snow.nose']),
   part('nose_button', '鼻子', '纽扣鼻子', ['snow.nose']),
+  // ── 蛋糕（教叠层）──
+  // 蛋糕胚
+  part('base_round', '蛋糕胚', '圆胚', ['cake.base']),
+  part('base_square', '蛋糕胚', '方胚', ['cake.base']),
+  part('base_heart', '蛋糕胚', '爱心胚', ['cake.base']),
+  // 奶油层
+  part('cream_white', '奶油层', '白奶油', ['cake.cream']),
+  part('cream_pink', '奶油层', '粉奶油', ['cake.cream']),
+  part('cream_choco', '奶油层', '巧克力奶油', ['cake.cream']),
+  // 顶料（樱桃/彩针与冰淇淋共用同类语义，但各有独立 id）
+  part('top_strawberry', '顶料', '草莓', ['cake.topping']),
+  part('top_cherry', '顶料', '樱桃', ['cake.topping']),
+  part('top_sprinkle', '顶料', '彩针', ['cake.topping']),
+  // 蜡烛
+  part('candle_one', '蜡烛', '单蜡烛', ['cake.candle']),
+  part('candle_number', '蜡烛', '数字蜡烛', ['cake.candle']),
+  // ── 花（教功能分解）──
+  // 花心
+  part('center_yellow', '花心', '黄花心', ['flower.center']),
+  part('center_orange', '花心', '橙花心', ['flower.center']),
+  part('center_dot', '花心', '圆点花心', ['flower.center']),
+  // 花瓣
+  part('petals_round', '花瓣', '圆花瓣', ['flower.petals']),
+  part('petals_pointy', '花瓣', '尖花瓣', ['flower.petals']),
+  part('petals_heart', '花瓣', '心形花瓣', ['flower.petals']),
+  // 茎
+  part('stem_straight', '茎', '直茎', ['flower.stem']),
+  part('stem_curve', '茎', '弯茎', ['flower.stem']),
+  // 叶子
+  part('leaf_single', '叶子', '单叶', ['flower.leaf']),
+  part('leaf_pair', '叶子', '双叶', ['flower.leaf']),
+  // ── 冰淇淋（同蛋糕教叠层）──
+  // 甜筒
+  part('cone_waffle', '甜筒', '华夫筒', ['ice.cone']),
+  part('cone_cup', '甜筒', '杯筒', ['ice.cone']),
+  // 球
+  part('scoop_strawberry', '冰淇淋球', '草莓球', ['ice.scoop']),
+  part('scoop_choco', '冰淇淋球', '巧克力球', ['ice.scoop']),
+  part('scoop_vanilla', '冰淇淋球', '香草球', ['ice.scoop']),
+  // 顶料
+  part('ice_cherry', '顶料', '樱桃', ['ice.topping']),
+  part('ice_sprinkle', '顶料', '彩针', ['ice.topping']),
 ];
 
 /**
@@ -134,6 +176,45 @@ const PART_SHAPE: Record<string, string> = {
   // 鼻子：贴在脸中间的小件
   nose_carrot: 'a single orange carrot nose pointing sideways, cone shape, nose only',
   nose_button: 'a single round black button nose, a simple dark circle, nose only',
+  // 蛋糕胚：横放的一大层饼胚，顶面平（好叠奶油），正视
+  base_round: 'a thick round cake sponge base tier seen from the front, a wide short cylinder with a flat top, warm sponge color, cake base only',
+  base_square: 'a thick square cake sponge base tier seen from the front, a wide flat-topped block, warm sponge color, cake base only',
+  base_heart: 'a thick heart-shaped cake sponge base tier seen from the front, flat top, warm sponge color, cake base only',
+  // 奶油层：抹在胚外的一圈奶油带，底边平
+  cream_white: 'a band of swirled white whipped cream frosting, a horizontal wavy layer with a flat bottom to sit on a cake, cream only',
+  cream_pink: 'a band of swirled pink strawberry cream frosting, a horizontal wavy layer with a flat bottom, cream only',
+  cream_choco: 'a band of swirled brown chocolate cream frosting, a horizontal wavy layer with a flat bottom, cream only',
+  // 顶料（蛋糕）：点在最上的小果子/糖粒
+  top_strawberry: 'a single small red strawberry with green leaves on top, a cute round berry, topping only',
+  top_cherry: 'a single small red cherry with a stem, a shiny round berry, topping only',
+  top_sprinkle: 'a small scatter of colorful rainbow sprinkles, tiny bright candy bits, topping only',
+  // 蜡烛：竖在蛋糕顶的小蜡烛，底端平
+  candle_one: 'a single thin striped birthday candle with a small yellow flame, standing upright, flat bottom, candle only',
+  candle_number: 'a single number-shaped birthday candle with a small yellow flame, standing upright, flat bottom, candle only',
+  // 花心：花正中的圆盘，正视
+  center_yellow: 'a round flower center disc, a plain yellow circle dotted with tiny pollen specks, flower center only',
+  center_orange: 'a round flower center disc, a plain orange circle dotted with tiny pollen specks, flower center only',
+  center_dot: 'a round flower center disc, a bright circle covered in small dots, flower center only',
+  // 花瓣：围成一圈的花冠（中间留空给花心），正视
+  petals_round: 'a ring of rounded soft flower petals arranged in a circle with an empty hole in the middle, bright color, petals only',
+  petals_pointy: 'a ring of pointy sharp flower petals arranged in a circle with an empty hole in the middle, bright color, petals only',
+  petals_heart: 'a ring of heart-shaped flower petals arranged in a circle with an empty hole in the middle, bright color, petals only',
+  // 茎：竖直的绿杆，撑住花，底端平
+  stem_straight: 'a straight upright green flower stem, a simple vertical green bar, flat bottom, stem only',
+  stem_curve: 'a gently curved green flower stem, a soft S-curve green bar, flat bottom, stem only',
+  // 叶子：从茎侧张开的绿叶
+  leaf_single: 'a single green leaf pointing sideways, a simple pointed oval, leaf only',
+  leaf_pair: 'a pair of green leaves spreading to both sides, two simple pointed ovals, leaves only',
+  // 甜筒：尖头朝下的华夫筒/杯，托着球
+  cone_waffle: 'a pointed waffle ice-cream cone, a light brown criss-cross cone with the point facing down and an open flat top, cone only',
+  cone_cup: 'a small round ice-cream cup, a short tub with an open flat top, one solid color, cup only',
+  // 冰淇淋球：圆圆的一坨，坐在筒上
+  scoop_strawberry: 'a round scoop of pink strawberry ice cream, a soft ball with a flat bottom, scoop only',
+  scoop_choco: 'a round scoop of brown chocolate ice cream, a soft ball with a flat bottom, scoop only',
+  scoop_vanilla: 'a round scoop of cream vanilla ice cream, a soft ball with a flat bottom, scoop only',
+  // 顶料（冰淇淋）：淋在球顶的小件
+  ice_cherry: 'a single small red cherry with a stem, a shiny round berry, topping only',
+  ice_sprinkle: 'a small scatter of colorful rainbow sprinkles, tiny bright candy bits, topping only',
 };
 
 /** 取某零件的生图 prompt（统一画风前缀 + 专属外观；未知回退到中文名兜底）。P3 批量生成管线读它。 */
