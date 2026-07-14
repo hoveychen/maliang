@@ -35,7 +35,7 @@ window/size/viewport_height=720
 
 enabled=PackedStringArray("res://addons/maliang_asr/plugin.cfg")
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
+window/stretch/aspect="expand"
 window/handheld/orientation=1
 
 [gui]
