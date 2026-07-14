@@ -79,12 +79,14 @@ func _ready() -> void:
 		_api = Api.new()  # 独立 benchmark 场景 world 没建 api（_ready 提前 return 了），自己建一个
 		_api.name = "BenchApi"
 		add_child(_api)
-		_build_overlay()  # 独立场景才需奶油底遮罩盖住闪烁的画质切换；embedded 由 intro 建造演出提供视觉
-	_world.call("bench_spawn_load", EXTRA_CHARS)  # 会 wander 的压测负载（压渲染 + 寻路 CPU）
+		_build_overlay()  # 独立场景才需奶油底遮罩盖住闪烁的画质切换；embedded 由 intro 分幕建造提供视觉
 	if embedded:
-		# benchmark 期锁玩家输入（相机/主角不动，防拖动干扰负载）+ 仙子定格（旁白干净）。
+		# 负载（会 wander 的「小伙伴」）已由 IntroDirector 在热闹幕分幕生好、也由它退场——benchmark 只管
+		# 在活的峰值上测。benchmark 期锁玩家输入（相机/主角不动，防拖动干扰）+ 仙子定格（旁白干净）；
 		# 村民【不】冻结：采样期照常 wander，A* + 走动 CPU 计入 p95 才测得准。
 		_world.call("set_bench_freeze", true)
+	else:
+		_world.call("bench_spawn_load", EXTRA_CHARS)  # 独立场景自铺会 wander 的压测负载（压渲染 + 寻路 CPU）
 	_levels = GraphicsSettings.all_max()  # 从全最高档起步，能不降就不降
 	_start_measure(_levels)
 
@@ -139,8 +141,7 @@ func abort() -> void:
 		_world.call("_apply_graphics_key", key, int(_levels[key]))
 	Engine.max_fps = GraphicsSettings.FPS_CAP if OS.has_feature("mobile") else 0
 	if embedded:
-		_world.call("set_bench_freeze", false)
-		_world.call("bench_despawn_load")
+		_world.call("set_bench_freeze", false)  # 负载退场由 IntroDirector 在转正前统一做（它是负载 owner）
 
 ## 应用一组档并开始采样。
 func _start_measure(levels: Dictionary) -> void:
@@ -257,9 +258,8 @@ func _finish() -> void:
 		"p95_ms": snappedf(_cur_ms, 0.1), "hit": hit,
 	})
 	if embedded:
-		# 就地收尾（不 change_scene）：解冻世界、压测负载退场，把清爽场景交回 intro 转正。
+		# 就地收尾（不 change_scene）：解锁输入/仙子。压测负载（小伙伴）退场由 IntroDirector 在转正前统一做。
 		_world.call("set_bench_freeze", false)
-		_world.call("bench_despawn_load")
 	finished.emit(_levels, _cur_ms)
 	_upload_and_enter(hit)
 

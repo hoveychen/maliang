@@ -20,6 +20,12 @@ var saw_bench_load := false      ## 采样期见到过 bench_ 压测角色
 var saw_freeze := false          ## benchmark 全程锁输入/仙子定格（_bench_freeze）出现过
 var bench_moved := false         ## 采样期村民【活着】：某 bench_ 负载角色在 benchmark 期间 wander 移动过（非冻结）
 var _bench_pos0: Dictionary = {} ## bench_ 角色首见时的逻辑坐标，用于判定它后来移动过
+# —— P2 分幕建造观测 ——
+var saw_scenery_hidden := false  ## 建造前散布植被被藏起过（perf_props 组存在节点且全不可见）
+var saw_scenery_shown := false   ## 建造幕后散布植被显示出来了（perf_props 组有可见节点）
+var saw_friends_partial := false ## 小伙伴【逐个】蹦出：见过 0<n<EXTRA_CHARS 的中间态（非齐刷刷一次生齐）
+var saw_camera_tour := false     ## 注魔期点点带镜头慢巡：focus_override 被设成非 INF 过
+var _max_bench := 0              ## 见过的 bench_ 角色数峰值（应达到 EXTRA_CHARS）
 
 func _initialize() -> void:
 	PlayerProfile.clear() # 清画质档（has_saved→false，触发 benchmark）+ intro_seen
@@ -35,12 +41,36 @@ func _tick() -> void:
 	if scene == null or done:
 		return
 	frame += 1
+	# —— P2 分幕建造：散布植被 隐藏→显示 ——
+	var props := scene.get_tree().get_nodes_in_group("perf_props")
+	if not props.is_empty():
+		var any_vis := false
+		var all_hidden := true
+		for pn in props:
+			if (pn as Node3D).visible:
+				any_vis = true
+				all_hidden = false
+		if all_hidden:
+			saw_scenery_hidden = true
+		if any_vis:
+			saw_scenery_shown = true
 	# 采样期锁存观测（benchmark 结束会解冻/退场，只能在窗口内抓）
 	var bench_running := scene.get_node_or_null("IntroDirector/Benchmark") != null
 	if bench_running:
 		saw_bench_node = true
+		# 注魔期镜头慢巡：focus_override 被设成非 INF
+		if (scene.get("focus_override") as Vector2) != Vector2.INF:
+			saw_camera_tour = true
 	if bool(scene.get("_bench_freeze")):
 		saw_freeze = true
+	# 小伙伴逐个蹦出：数当前 bench_ 角色，抓到中间态(0<n<总数)即证「逐个」而非一次生齐
+	var bench_now := 0
+	for n in (scene.get("npcs") as Array):
+		if String((n as Dictionary).get("id", "")).begins_with("bench_"):
+			bench_now += 1
+	_max_bench = maxi(_max_bench, bench_now)
+	if bench_now > 0 and bench_now < Benchmark.EXTRA_CHARS:
+		saw_friends_partial = true
 	# 采样期村民必须【活着】：抓 bench_ 负载角色，看它在 benchmark 期间 wander 移动过（旧口径会冻结它们）
 	if bench_running:
 		for n in (scene.get("npcs") as Array):
@@ -66,6 +96,12 @@ func _finish() -> void:
 	_check("采样期塞进压测负载（bench_ 村民雏形）", saw_bench_load, true)
 	_check("benchmark 全程锁输入/仙子定格", saw_freeze, true)
 	_check("采样期村民活着（wander 移动，非冻结）", bench_moved, true)
+	# —— P2 分幕建造：故事逐步加压 ——
+	_check("建造前散布植被藏起（起手空地）", saw_scenery_hidden, true)
+	_check("建造幕后散布植被显示（树木长出来）", saw_scenery_shown, true)
+	_check("小伙伴逐个蹦出（见过中间态，非一次生齐）", saw_friends_partial, true)
+	_check("小伙伴到齐峰值（= EXTRA_CHARS）", _max_bench, Benchmark.EXTRA_CHARS)
+	_check("注魔期点点带镜头慢巡（focus_override 动过）", saw_camera_tour, true)
 	# —— 定档收尾：就地应用 + 不换场景 ——
 	_check("测完已定档（has_saved 转真）", GraphicsSettings.has_saved(), true)
 	_check("档来源=bench（内嵌真定档，非骨架默认）", GraphicsSettings.source(), "bench")

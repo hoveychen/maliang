@@ -4267,6 +4267,20 @@ func bench_spawn_load(count: int) -> void:
 	for i in count:
 		bench_spawn_one(i, count)
 
+## intro 建造·起手极简：藏起散布植被 + 地面斜阳影，让「大地长出来、小树冒出来」有从无到有的过程。
+## chunk_manager 会记住 _props_shown/_ground_shadows，后续新铺的区块也继承隐藏。
+func intro_hide_scenery() -> void:
+	if chunk_manager != null:
+		chunk_manager.set_props_shown(false)
+		chunk_manager.set_ground_shadows(false)
+
+## intro 建造·揭示：树木灌木 + 地面影冒出来（回到当前画质档该有的样子）。benchmark 之后各旋钮会按定档
+## 结果再 _apply_graphics_key 覆盖，这里只负责让「建造」这一刻可见。
+func intro_show_scenery() -> void:
+	if chunk_manager != null:
+		chunk_manager.set_props_shown(int(_gfx_levels.get("prop_anim", 1)) > 0)
+		chunk_manager.set_ground_shadows(int(_gfx_levels.get("ground_shadows", 1)) > 0)
+
 ## 压测负载退场：取消驱动它的 ambient 执行器（按引用同一性，别让 step 撞上已释放节点）、注销占用、
 ## 释放节点、出 npcs 数组。bench_ 前缀成批识别。
 func bench_despawn_load() -> void:
