@@ -33,14 +33,39 @@ uniform bool low_detail = false;
 uniform float roughness : hint_range(0.0, 1.0) = 0.95;
 uniform float curvature = 0.0015;
 
+// —— 纸艺化（与 world_bend.gdshader 同一套旋钮子集）——
+// 地形是平面 quad 无需折面化；主打纸纹+卡纸色调+色阶光照+崖沿/台阶白描（层层卡纸感）。
+// 默认全 0 = 观感与旧版一致；chunk_manager._make_ground_mat 在 MALIANG_PAPERCRAFT=1 时开启。
+uniform float paper_bands : hint_range(0.0, 8.0) = 0.0;
+uniform float paper_edge : hint_range(0.0, 1.0) = 0.0;
+uniform float paper_grain : hint_range(0.0, 1.0) = 0.0;
+uniform float paper_tone : hint_range(0.0, 1.0) = 0.0;
+
 const int ROLE_CLIFF_RIM = 3;   // = TerrainAtlas.ROLE_CLIFF_RIM（B*8；仅用于选 rim 色）
 const int ROLE_CLIFF_WALL = 4;  // = TerrainAtlas.ROLE_CLIFF_WALL（B*8；崖壁浮雕按层强度插值）
 
 varying flat int v_layer;
+varying vec3 v_world;  // 纸纹用世界坐标（视空间噪声会随相机游动）
 
 void vertex() {
 	v_layer = int(round(COLOR.r * 255.0));
+	v_world = VERTEX;  // world_vertex_coords：此时 VERTEX 是世界空间
 	VERTEX.y -= curvature * dot(VERTEX.xz, VERTEX.xz);
+}
+
+float paper_hash(vec3 q) {
+	return fract(sin(dot(q, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+float paper_noise(vec3 p) {
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float n0 = mix(paper_hash(i), paper_hash(i + vec3(1.0, 0.0, 0.0)), f.x);
+	float n1 = mix(paper_hash(i + vec3(0.0, 1.0, 0.0)), paper_hash(i + vec3(1.0, 1.0, 0.0)), f.x);
+	float n2 = mix(paper_hash(i + vec3(0.0, 0.0, 1.0)), paper_hash(i + vec3(1.0, 0.0, 1.0)), f.x);
+	float n3 = mix(paper_hash(i + vec3(0.0, 1.0, 1.0)), paper_hash(i + vec3(1.0, 1.0, 1.0)), f.x);
+	return mix(mix(n0, n1, f.y), mix(n2, n3, f.y), f.z);
 }
 
 vec3 layer_col(int layer, vec2 uv) {
@@ -61,6 +86,29 @@ void fragment() {
 	if (role == ROLE_CLIFF_WALL)                           // 崖壁纵向浮雕按侧壁层强度插值（雪崖满档 / 光滑墙 0）
 		lum = mix(1.0, lum, wall_relief[v_layer]);
 	col *= lum;
+	if (paper_tone > 0.001) {
+		float plum = dot(col, vec3(0.299, 0.587, 0.114));
+		col = mix(col, mix(col, vec3(plum), 0.25) * 1.06 + 0.02, paper_tone);
+	}
+	if (paper_grain > 0.001) {
+		float g = 0.65 * paper_noise(v_world * 2.2) + 0.35 * paper_noise(v_world * 9.0);
+		col *= mix(1.0, 0.78 + 0.44 * g, paper_grain);
+	}
+	if (paper_edge > 0.001) {
+		// 崖沿/台阶棱线描卡纸切口白（fwidth 法线突变检测,与 world_bend 同款）
+		float crease = clamp((length(fwidth(NORMAL)) - 0.10) * 3.0, 0.0, 1.0);
+		col = mix(col, vec3(0.96, 0.94, 0.90), crease * paper_edge);
+	}
 	ALBEDO = col;
 	ROUGHNESS = roughness;
+}
+
+void light() {
+	// paper_bands=0 时与内建 diffuse_lambert 逐位一致（与 world_bend.gdshader 同款）
+	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+	if (paper_bands > 0.5) {
+		float q = ndl * paper_bands;
+		ndl = clamp((floor(q) + smoothstep(0.4, 0.6, fract(q))) / paper_bands, 0.0, 1.0);
+	}
+	DIFFUSE_LIGHT += ndl * ATTENUATION * LIGHT_COLOR / PI;
 }

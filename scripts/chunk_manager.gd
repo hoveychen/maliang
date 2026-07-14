@@ -208,6 +208,11 @@ static func _make_ground_mat() -> ShaderMaterial:
 	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
 	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
 	m.set_shader_parameter("curvature", BendMat.CURVATURE)
+	if BendMat.papercraft_on():
+		m.set_shader_parameter("paper_bands", 3.0)
+		m.set_shader_parameter("paper_edge", 0.7)
+		m.set_shader_parameter("paper_grain", 0.6)
+		m.set_shader_parameter("paper_tone", 0.4)
 	return m
 
 ## 半透明水面材质（shaders/water_surface.gdshader）：水彩水贴图双层滚动 + 深度调色。

@@ -15,9 +15,10 @@ static var _shader: Shader = null
 
 ## 纸艺化 PoC 开关：MALIANG_PAPERCRAFT=1 时所有 bend 材质统一开纸艺参数
 ## （折面化法线+色阶光照+纸边白描+纸纹）。-1=未读取环境变量。
+## 地形材质（chunk_manager._make_ground_mat）也认这个开关，保证全世界一套纸。
 static var _papercraft: int = -1
 
-static func _papercraft_on() -> bool:
+static func papercraft_on() -> bool:
 	if _papercraft < 0:
 		_papercraft = 1 if OS.get_environment("MALIANG_PAPERCRAFT") == "1" else 0
 	return _papercraft == 1
@@ -32,7 +33,7 @@ static func make(color: Color) -> ShaderMaterial:
 	m.shader = _shared_shader()
 	m.set_shader_parameter("albedo", color)
 	m.set_shader_parameter("curvature", CURVATURE)
-	if _papercraft_on():
+	if papercraft_on():
 		m.set_shader_parameter("paper_facet", 1.0)
 		m.set_shader_parameter("paper_bands", 3.0)
 		m.set_shader_parameter("paper_edge", 0.7)
