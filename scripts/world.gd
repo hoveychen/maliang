@@ -208,6 +208,16 @@ var _build_filled := {}            ## 已填槽 slotId → {partId, partRenderRe
 var _build_option_refs := {}       ## 本轮零件盘 partId → renderRef（点选后更新预览取用）
 var _build_preview: ComposedProp = null  ## 浮在仙子身旁的拼装台预览（骨架 + 已填零件 + 当前槽发光）
 const BUILD_PREVIEW_OFFSET := Vector3(2.2, 1.6, 0.0)  ## 拼装台相对仙子的偏移：侧旁 + 略上（与仙子同框）
+# 复用改装（B1，§3.1「拆开重组」）：物品页点组合物→「拆开改改」→拼装台预填它的零件→点槽换掉→做好了
+# 落成一行**新** ItemDef（旧的保留在背包，通往 B3）。复用 build 拼装台预览（_build_preview/_build_filled/
+# _update_build_preview），但**无 LLM 会话**——客户端本地权威编辑零件树，做好了直接 send_create_build。
+var _remixing := false             ## 正在改装（区别于 build 引导会话的 _in_creation）
+var _remix_item_id := ""           ## 正在改装的原组合物 id（旧的不动，新造一行）
+var _remix_options := {}           ## slotId → [{id,label,renderRef}] 每槽兼容零件（服务端 build_options 取回）
+var _remix_stage := "slots"        ## "slots"=选要改的槽 / "parts"=为某槽挑零件
+var _remix_slot := ""              ## parts 阶段正在为哪个槽挑零件
+var _remix_confirm_btn: Button = null  ## 「做好了」落成按钮
+var _remix_choice: Control = null  ## 物品页点组合物弹的「摆到世界 / 拆开改改」二选一小卡
 var _task_check_t := 0.0           ## bring/visit 完成判定的节流计时
 var _hud_layer: CanvasLayer        ## HUD 层（奖励飞入动画等临时控件挂这里）
 var album_button: Button           ## 左下角手机启动器按钮（AIGC 手机图标）
@@ -3512,6 +3522,7 @@ func _setup_backend() -> void:
 	backend.gen_complete.connect(_on_gen_complete)
 	backend.creation_prompt.connect(_on_creation_prompt)
 	backend.build_prompt.connect(_on_build_prompt)
+	backend.build_options.connect(_on_build_options)
 	backend.creation_cancelled.connect(_on_creation_cancelled)
 	backend.prop_pending.connect(_on_prop_pending)
 	backend.item_created.connect(_on_item_created)
@@ -5296,8 +5307,8 @@ func _build_creation_view(host: CanvasLayer) -> void:
 
 ## 进创造视图：退出普通对话构图（关横幅/情绪气泡/听到字幕，麦保留——孩子仍可语音答复），
 ## 相机推近仙子特写、背景压暗，点亮创造视图。幂等（每轮 creation_prompt 都可安全调）。
-func _enter_creation_view() -> void:
-	_in_creation = true
+func _enter_creation_view(is_remix := false) -> void:
+	_in_creation = not is_remix # 改装无 LLM 会话：不进 _in_creation，否则 _exit_interaction 会误发 creation_cancel
 	_creation_cam = true
 	banner.visible = false          # 普通对话的横幅/提示不在创造视图里出现
 	heard_label.visible = false
@@ -5362,13 +5373,18 @@ func _raise_build_preview() -> void:
 	if _build_preview != null and is_instance_valid(_build_preview):
 		return
 	var cp := ComposedProp.new()
-	var fairy := _find_fairy()
-	var fnode: Node3D = fairy.get("node") if not fairy.is_empty() else null
-	if fnode != null and is_instance_valid(fnode) and fnode.get_parent() != null:
-		fnode.get_parent().add_child(cp)
-		cp.position = fnode.position + BUILD_PREVIEW_OFFSET # 侧旁略上，与仙子特写同框
+	# 引导拼装挂仙子身旁（特写同框）；改装无仙子会话 → 挂玩家身旁（关手机后玩家一定在屏上）。
+	var anchor: Node3D = null
+	if _remixing and not player.is_empty() and is_instance_valid(player["node"]):
+		anchor = player["node"] as Node3D
 	else:
-		add_child(cp) # 兜底：仙子节点缺席也别崩
+		var fairy := _find_fairy()
+		anchor = fairy.get("node") if not fairy.is_empty() else null
+	if anchor != null and is_instance_valid(anchor) and anchor.get_parent() != null:
+		anchor.get_parent().add_child(cp)
+		cp.position = anchor.position + BUILD_PREVIEW_OFFSET # 侧旁略上，与主角同框
+	else:
+		add_child(cp) # 兜底：锚点节点缺席也别崩
 	_build_preview = cp
 
 ## 刷新拼装台：按已填槽重画骨架 + 零件，当前要填的槽发光（幂等重建，每轮 build_prompt 调）。
@@ -5387,6 +5403,263 @@ func _clear_build_preview() -> void:
 	_build_slot = ""
 	_build_filled = {}
 	_build_option_refs.clear()
+
+# ── 复用改装（B1，§3.1「拆开重组」）：物品页点组合物 → 二选一 → 拼装台改一槽 → 做好了落成新 ItemDef ──
+# 老板拍板入口形态：点组合物弹「摆到世界 / 拆开改改」二选一（点点会话式改装被否，§3.1「无需新机制」直接编辑）。
+# 全程客户端本地权威编辑零件树、无 LLM 会话；做好了 send_create_build，旧组合物保留、新造一行（通往 B3）。
+
+## 物品页点了组合物：弹「摆到世界 / 拆开改改」二选一小卡（普通物件不走这条，直接放置）。
+func _on_composed_item_tapped(item_id: String) -> void:
+	if int(bag.get(item_id, 0)) < 1:
+		return
+	_show_remix_choice(item_id)
+
+## 二选一小卡：暗底 + 中央两张大按钮。点外面=收起（不动手机），选一个=收起后各走各路。
+func _show_remix_choice(item_id: String) -> void:
+	_close_remix_choice()
+	if _hud_layer == null:
+		return
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0.0, 0.0, 0.0, 0.45)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventMouseButton and (e as InputEventMouseButton).pressed:
+			_close_remix_choice())
+	root.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var box := VBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 26)
+	var title := Label.new()
+	title.text = String(ItemCatalog.get_def(item_id).get("name", "这个小玩意"))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 46)
+	title.add_theme_color_override("font_color", Color.WHITE)
+	title.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.7))
+	title.add_theme_constant_override("outline_size", 8)
+	box.add_child(title)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 30)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	var place := Button.new()
+	place.name = "RemixChoicePlace"
+	place.custom_minimum_size = Vector2(240.0, 150.0)
+	place.text = "摆到世界"
+	UiAssets.style_card_button(place, 24.0)
+	place.add_theme_font_size_override("font_size", 40)
+	place.pressed.connect(func() -> void:
+		_close_remix_choice()
+		_begin_placement(item_id))
+	var remix := Button.new()
+	remix.name = "RemixChoiceRemix"
+	remix.custom_minimum_size = Vector2(240.0, 150.0)
+	remix.text = "拆开改改"
+	UiAssets.style_card_button(remix, 24.0)
+	remix.add_theme_font_size_override("font_size", 40)
+	remix.pressed.connect(func() -> void:
+		_close_remix_choice()
+		_begin_remix(item_id))
+	row.add_child(place)
+	row.add_child(remix)
+	box.add_child(row)
+	center.add_child(box)
+	root.add_child(center)
+	_hud_layer.add_child(root)
+	_remix_choice = root
+	if game_audio != null:
+		game_audio.play_sfx("page")
+
+func _close_remix_choice() -> void:
+	if _remix_choice != null and is_instance_valid(_remix_choice):
+		_remix_choice.queue_free()
+	_remix_choice = null
+
+## 进改装：读组合物 spec 预填拼装台、取每槽兼容零件、进拼装视图、列出可改的槽。
+func _begin_remix(item_id: String) -> void:
+	if not online:
+		return
+	var spec: Dictionary = ItemCatalog.get_def(item_id).get("spec", {})
+	var bp_id := String(spec.get("blueprintId", ""))
+	if bp_id.is_empty() or BuildBlueprints.get_blueprint(bp_id).is_empty():
+		return # 蓝图对不上（不该发生）：不进改装，别把孩子丢进空视图
+	_remixing = true
+	_remix_item_id = item_id
+	_remix_options = {}
+	_remix_stage = "slots"
+	_remix_slot = ""
+	_creation_goal = "build" # 复用拼装台预览的渲染分派
+	_build_blueprint_id = bp_id
+	_build_slot = ""
+	_build_filled = {}
+	for p in spec.get("parts", []):
+		if typeof(p) != TYPE_DICTIONARY:
+			continue
+		var sid := String((p as Dictionary).get("slotId", ""))
+		if sid.is_empty():
+			continue
+		_build_filled[sid] = {
+			"partId": String((p as Dictionary).get("partId", "")),
+			"partRenderRef": String((p as Dictionary).get("partRenderRef", "")),
+		}
+	_close_phone()
+	backend.send_build_options(world_id, bp_id) # 取每槽兼容零件，回执走 _on_build_options
+	_enter_creation_view(true) # is_remix：不进 _in_creation
+	_raise_build_preview()
+	_update_build_preview() # 预填当前零件（暂不发光）
+	if _remix_confirm_btn == null:
+		_build_remix_confirm_btn()
+	_remix_confirm_btn.visible = true
+	_remix_show_slots()
+
+## 「做好了」落成按钮（改装视图专属，挂 _creation_view 底部中央；复用一次建好切显隐）。
+func _build_remix_confirm_btn() -> void:
+	var btn := Button.new()
+	btn.name = "RemixConfirm" # headless 凭这个名字确认改装视图已就绪
+	btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	btn.offset_left = -140.0
+	btn.offset_top = -150.0
+	btn.custom_minimum_size = Vector2(280.0, 96.0)
+	btn.text = "做好了 ✓"
+	UiAssets.style_card_button(btn, 24.0)
+	btn.add_theme_font_size_override("font_size", 40)
+	btn.pressed.connect(_remix_confirm)
+	_creation_view.add_child(btn)
+	_remix_confirm_btn = btn
+
+## 兼容零件表到货：缓存 + 若正对着某槽挑零件就刷新零件盘（槽列表的零件名也可能要用它的 label）。
+func _on_build_options(data: Dictionary) -> void:
+	if not _remixing:
+		return
+	if String(data.get("blueprintId", "")) != _build_blueprint_id:
+		return
+	_remix_options = data.get("options", {})
+	if _remix_stage == "parts" and not _remix_slot.is_empty():
+		_remix_show_parts(_remix_slot)
+	else:
+		_remix_show_slots()
+
+## 取某槽当前零件的中文名（查兼容零件表 label；查不到回退 partId / 空）。
+func _remix_part_label(slot_id: String, part_id: String) -> String:
+	if part_id.is_empty():
+		return "空"
+	for o in _remix_options.get(slot_id, []):
+		if typeof(o) == TYPE_DICTIONARY and String((o as Dictionary).get("id", "")) == part_id:
+			return String((o as Dictionary).get("label", part_id))
+	return part_id
+
+## 槽列表：每个槽一张大卡（显当前零件名），点它进「为这槽挑零件」。当前不发光。
+func _remix_show_slots() -> void:
+	_remix_stage = "slots"
+	_remix_slot = ""
+	if _build_preview != null and is_instance_valid(_build_preview):
+		_build_preview.set_glow_slot("")
+	_creation_q.text = "想改哪一块呀？"
+	_creation_q.visible = true
+	for c in _creation_cards.get_children():
+		c.queue_free()
+	for s in BuildBlueprints.slots(_build_blueprint_id):
+		var sid := String((s as Dictionary).get("slotId", ""))
+		var pid := String((_build_filled.get(sid, {}) as Dictionary).get("partId", ""))
+		var card := Button.new()
+		card.custom_minimum_size = Vector2(220.0, 168.0)
+		card.text = _remix_part_label(sid, pid)
+		UiAssets.style_card_button(card, 24.0)
+		card.add_theme_font_size_override("font_size", 36)
+		card.pressed.connect(_remix_pick_slot.bind(sid))
+		_creation_cards.add_child(card)
+	if game_audio != null:
+		game_audio.play_sfx("page")
+
+## 点了某个槽：点亮它 + 弹出该槽的兼容零件盘（第一张是「返回」不改这槽）。
+func _remix_pick_slot(slot_id: String) -> void:
+	if not _remixing:
+		return
+	_remix_stage = "parts"
+	_remix_slot = slot_id
+	if _build_preview != null and is_instance_valid(_build_preview):
+		_build_preview.set_glow_slot(slot_id)
+	if game_audio != null:
+		game_audio.play_sfx("bell")
+	_remix_show_parts(slot_id)
+
+## 某槽的零件盘：返回卡 + 每个兼容零件一张卡，点零件即换（回槽列表）。零件表未到货只显返回卡。
+func _remix_show_parts(slot_id: String) -> void:
+	_creation_q.text = "换成哪一个呢？"
+	for c in _creation_cards.get_children():
+		c.queue_free()
+	var back := Button.new()
+	back.custom_minimum_size = Vector2(220.0, 168.0)
+	back.text = "← 返回"
+	UiAssets.style_card_button(back, 24.0)
+	back.add_theme_font_size_override("font_size", 36)
+	back.pressed.connect(_remix_show_slots)
+	_creation_cards.add_child(back)
+	for o in _remix_options.get(slot_id, []):
+		if typeof(o) != TYPE_DICTIONARY:
+			continue
+		var pid := String((o as Dictionary).get("id", ""))
+		if pid.is_empty():
+			continue
+		var rref := String((o as Dictionary).get("renderRef", "part:" + pid))
+		var card := Button.new()
+		card.custom_minimum_size = Vector2(220.0, 168.0)
+		card.text = String((o as Dictionary).get("label", pid))
+		UiAssets.style_card_button(card, 24.0)
+		card.add_theme_font_size_override("font_size", 36)
+		card.pressed.connect(_remix_swap.bind(slot_id, pid, rref))
+		_creation_cards.add_child(card)
+	if game_audio != null:
+		game_audio.play_sfx("page")
+
+## 换一个零件：更新零件树 + 预览即时坐进新零件，回槽列表可继续改别的。
+func _remix_swap(slot_id: String, part_id: String, render_ref: String) -> void:
+	if not _remixing:
+		return
+	_build_filled[slot_id] = { "partId": part_id, "partRenderRef": render_ref }
+	_update_build_preview()
+	if game_audio != null:
+		game_audio.play_sfx("bell")
+	_remix_show_slots()
+
+## 做好了：把编辑后的零件树（slotId→partId）直接送去落成新 ItemDef（旧的保留）。收摊改装视图；
+## 落成回执走现成 prop_pending(build 分支收拢拼装台) + item_created(进背包/自动摆放)。
+func _remix_confirm() -> void:
+	if not _remixing or not online:
+		return
+	var filled := _remix_filled_map()
+	if filled.is_empty():
+		return
+	backend.send_create_build(world_id, _build_blueprint_id, filled)
+	_end_remix_locally()
+	banner.text = "拼好啦！"
+	banner.visible = true
+
+## 改装落成要送的零件树（slotId→partId），从当前编辑态收拢（跳过空槽）。_remix_confirm 与测试共用。
+func _remix_filled_map() -> Dictionary:
+	var filled := {}
+	for sid in _build_filled:
+		var pid := String((_build_filled[sid] as Dictionary).get("partId", ""))
+		if not pid.is_empty():
+			filled[sid] = pid
+	return filled
+
+## 收摊改装（做好了/取消/落成回执）：清状态 + 收「做好了」按钮 + 收创造视图 + 收拼装台预览。
+func _end_remix_locally() -> void:
+	_remixing = false
+	_remix_item_id = ""
+	_remix_options = {}
+	_remix_stage = "slots"
+	_remix_slot = ""
+	if _remix_confirm_btn != null and is_instance_valid(_remix_confirm_btn):
+		_remix_confirm_btn.visible = false
+	_hide_creation_cards() # 收创造视图 + 相机复位
+	_clear_build_preview() # 收拼装台预览（幂等，prop_pending 也会收一次）
 
 ## 服务端判定小朋友说了「算了/不要了」：收创造视图 + 收蛋/炉，并退出对话回到自由跑动
 ## （老板拍板：取消 = 退出这个状态，别把孩子留在仙子面前干站着）。
@@ -5628,6 +5901,11 @@ func _throw_voice_answer() -> void:
 ## 点了右上角的叉：本地立刻收摊（视图/蛋/炉全收）+ 告诉服务端别再等答复 + 退出对话。
 ## 与服务端语义取消（creation_cancelled）落到同一个状态。
 func _on_creation_cancel_pressed() -> void:
+	if _remixing:
+		_end_remix_locally() # 改装取消：没发 create_build，不扣花、不留半拼预览
+		banner.text = "好，先不改啦"
+		banner.visible = true
+		return
 	if not _in_creation:
 		return
 	if online:

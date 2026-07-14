@@ -79,7 +79,7 @@ import { validateSdfPropSpec } from './sdf_prop.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
 import { BUILTIN_ITEMS, creationItemDef, creationStickerDef, creationBuildDef, getBuiltinItem, validateTerrainItems } from './items.ts';
 import { matchBlueprint, findBlueprint, type ComposedPart, type ComposedSpec } from './build_blueprints.ts';
-import { findPart } from './part_library.ts';
+import { findPart, partsForSlot } from './part_library.ts';
 import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrain_edit.ts';
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
@@ -1718,6 +1718,10 @@ export async function createBuildAsync(
       if (!partId) continue;
       const part = findPart(partId);
       if (!part) continue;
+      // fit 校验（权威，两条路径共用）：零件必须能挂进该槽（fitSlots 含槽 accept），否则丢弃。
+      // 引导会话路径的零件本就来自 partsForSlot 兼容表、天然通过；这里主要防复用改装（create_build）
+      // 传来对不上的槽零件——服务端绝不落一个歪拼的组合物。
+      if (!part.fitSlots.includes(slot.accept)) continue;
       parts.push({ slotId: slot.slotId, partId, partRenderRef: part.renderRef });
     }
     if (parts.length === 0) {
@@ -1745,6 +1749,19 @@ export async function createBuildAsync(
   } finally {
     if (!created) store.refundFlower(worldId, playerId); // 落成失败：退还，别让孩子白花一朵
   }
+}
+
+/** 复用改装（B1，docs/kids-thinking-build-from-parts.md §3.1）：某副蓝图每个槽的兼容零件表
+ *  （slotId → [{id,label,renderRef}]）。客户端进改装时一次性取回，之后本地即时建零件盘换槽——
+ *  零件库保持服务端权威，客户端不必再造一份镜像。未知蓝图返回空表。 */
+export function buildSlotOptions(blueprintId: string): Record<string, Array<{ id: string; label: string; renderRef: string }>> {
+  const bp = findBlueprint(blueprintId);
+  if (!bp) return {};
+  const out: Record<string, Array<{ id: string; label: string; renderRef: string }>> = {};
+  for (const slot of bp.slots) {
+    out[slot.slotId] = partsForSlot(slot.accept).map((p) => ({ id: p.id, label: p.name, renderRef: p.renderRef }));
+  }
+  return out;
 }
 
 /** create_character 异步落地：造角色管线（spec→审核→生图→抠图→持久化），gen_progress 逐阶段推、
@@ -2362,6 +2379,9 @@ export async function handleWsMessage(
     // 引导式造角色：creation_reply 幼儿点的图标 id / 说的话
     optionId?: string;
     spokenText?: string;
+    // 积木式造物 B1 复用改装（build_options 取兼容零件 / create_build 直接落成编辑后的零件树）
+    blueprintId?: string; // 改哪副蓝图的组合物（客户端读组合物 spec.blueprintId 带上）
+    filled?: unknown;     // create_build：编辑后的槽→零件 map（{slotId: partId}），服务端 fit 校验后落成
     // time_sync：客户端发送时刻(客户端毫秒钟)，原样回带供其算偏移
     t0?: number;
     // stage_event：舞台协议上行(kind 复用上面的字段: ack/abort/near/tap/timer)
@@ -2593,6 +2613,45 @@ export async function handleWsMessage(
   // 取消造角色（幼儿点别处/退出）：清掉会话，不再把后续语音当造角色答复。
   if (msg.type === 'creation_cancel') {
     session.creation = null;
+    return;
+  }
+
+  // 复用改装（B1，§3.1）：客户端进「拆开改改」时取回本蓝图每槽的兼容零件表，本地即时建换槽零件盘。
+  // 只读、无会话、不扣花（改装的扣费在 create_build 落成那一刻）。
+  if (msg.type === 'build_options') {
+    const worldId = msg.worldId ?? '';
+    const blueprintId = String(msg.blueprintId ?? '');
+    socket.send(JSON.stringify({ type: 'build_options', worldId, blueprintId, options: buildSlotOptions(blueprintId) }));
+    return;
+  }
+
+  // 复用改装落成（B1，§3.1「无需新机制」）：客户端把编辑后的零件树（blueprintId + filled）直接送来，
+  // 服务端 fit 校验后走 createBuildAsync 造一行**新** ItemDef（旧的保留在背包，可拆可复用），无 LLM 会话。
+  // 扣花/退还与引导拼装同价（createBuildAsync 内处理）；无仙子引导故 creatorId=''（不记 creation 记忆）。
+  if (msg.type === 'create_build') {
+    const worldId = msg.worldId ?? '';
+    const gate = limiter.tryAcquire(connKey, Date.now());
+    if (!gate.ok) {
+      socket.send(JSON.stringify({ type: 'voice_failed', reason: gate.reason }));
+      return;
+    }
+    try {
+      const blueprintId = String(msg.blueprintId ?? '');
+      const raw = (msg.filled && typeof msg.filled === 'object') ? msg.filled as Record<string, unknown> : {};
+      const filled: Record<string, string> = {};
+      for (const k of Object.keys(raw)) {
+        const v = raw[k];
+        if (typeof v === 'string' && v) filled[k] = v;
+      }
+      await createBuildAsync(
+        socket, worldId, session.playerId, blueprintId, filled,
+        adapters, store, session.clientTts, '', session.currentScene,
+      );
+    } catch (err) {
+      socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
+    } finally {
+      gate.release();
+    }
     return;
   }
 

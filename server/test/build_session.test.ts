@@ -10,10 +10,12 @@ import { tmpdir } from 'node:os';
 import {
   createBuildAsync,
   advanceBuild,
+  buildSlotOptions,
   handleWsMessage,
   newVoiceSession,
   seedFairy,
 } from '../src/server.ts';
+import { partsForSlot } from '../src/part_library.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
@@ -216,6 +218,100 @@ test('WS 点选路径：creation_reply 传 partId → 服务端权威填正在�
   // 点选 body_round（该槽兼容零件之一）：服务端直接把它坐进 body 槽。
   await send(store, session, sock, fairyId, { type: 'creation_reply', optionId: 'body_round' });
   assert.equal(session.creation?.build?.filled['body'], 'body_round', '点选零件直接填正在问的槽');
+});
+
+// ── P5 复用改装（B1，§3.1）：拆开重组 = 编辑零件树落成新 ItemDef（旧的保留），无 LLM 会话 ──
+
+test('buildSlotOptions：每个槽给出兼容零件表（id/label/renderRef），与 partsForSlot 一致', () => {
+  const car = findBlueprint('car')!;
+  const opts = buildSlotOptions('car');
+  for (const slot of car.slots) {
+    const expected = partsForSlot(slot.accept);
+    assert.ok(opts[slot.slotId], `槽 ${slot.slotId} 应有兼容零件表`);
+    assert.deepEqual(
+      opts[slot.slotId].map((o) => o.id).sort(),
+      expected.map((p) => p.id).sort(),
+      `槽 ${slot.slotId} 的兼容零件与 partsForSlot 一致`,
+    );
+    for (const o of opts[slot.slotId]) {
+      assert.ok(o.label, '零件有中文名');
+      assert.ok(o.renderRef.startsWith('part:'), '零件有 part: renderRef 供客户端画');
+    }
+  }
+});
+
+test('buildSlotOptions：未知蓝图 → 空表（不崩）', () => {
+  assert.deepEqual(buildSlotOptions('nope'), {});
+});
+
+test('createBuildAsync：编辑后的零件树落成新组合物（换一个槽的零件，其余不变）', async () => {
+  const store = freshStore();
+  const sock = fakeSocket();
+  // 原组合物：小车四槽。改装：把后轮从 wheel_round 换成 wheel_star（若存在兼容零件），车身/前轮/把手不动。
+  const carWheels = partsForSlot('car.wheel').map((p) => p.id);
+  assert.ok(carWheels.length >= 2, '轮子槽至少两种兼容零件，改装才有得换');
+  const swapTo = carWheels.find((id) => id !== 'wheel_round') ?? carWheels[0];
+  const edited = { body: 'body_box', wheel_back: swapTo, wheel_front: 'wheel_round', handle: 'handle_curve' };
+  await createBuildAsync(sock, 'default', ANON_PLAYER, 'car', edited, createMockAdapters(), store);
+
+  const created = sock.sent.find((m) => m.type === 'item_created');
+  assert.ok(created, '改装落成 item_created');
+  const def = created!.item as ItemDefLike;
+  assert.equal(def.renderRef, 'composed:');
+  const spec = def.spec as ComposedSpec;
+  const back = spec.parts.find((p) => p.slotId === 'wheel_back')!;
+  const front = spec.parts.find((p) => p.slotId === 'wheel_front')!;
+  assert.equal(back.partId, swapTo, '换掉的后轮是新零件');
+  assert.equal(front.partId, 'wheel_round', '没动的前轮保持原零件');
+});
+
+test('createBuildAsync：fit 校验丢弃对不上槽的零件（改装塞了不兼容零件不落进成品）', async () => {
+  const store = freshStore();
+  const sock = fakeSocket();
+  // 把一个屋顶零件硬塞进小车的车身槽——fit 不过，应被丢弃；其余合法零件照常落成。
+  const roof = partsForSlot('house.roof')[0];
+  assert.ok(roof, '有屋顶零件可用作反例');
+  const edited: Record<string, string> = { body: roof.id, wheel_back: 'wheel_round', wheel_front: 'wheel_round', handle: 'handle_curve' };
+  await createBuildAsync(sock, 'default', ANON_PLAYER, 'car', edited, createMockAdapters(), store);
+
+  const created = sock.sent.find((m) => m.type === 'item_created');
+  assert.ok(created, '合法零件仍能落成');
+  const spec = (created!.item as ItemDefLike).spec as ComposedSpec;
+  assert.ok(!spec.parts.find((p) => p.slotId === 'body'), '不兼容的车身零件被 fit 校验丢弃');
+  assert.ok(spec.parts.find((p) => p.slotId === 'wheel_back'), '兼容零件照常落进成品');
+});
+
+test('WS create_build：直接落成编辑后的零件树（改装无会话），产出新组合物进背包，扣 1 朵花', async () => {
+  const { store, fairyId } = await seedWorld();
+  const sock = fakeSocket();
+  const session = newVoiceSession();
+  const before = store.getWallet('default', session.playerId).flowers;
+  await send(store, session, sock, fairyId, {
+    type: 'create_build', blueprintId: 'car',
+    filled: { body: 'body_box', wheel_back: 'wheel_round', wheel_front: 'wheel_round', handle: 'handle_curve' },
+  });
+  const created = sock.sent.find((m) => m.type === 'item_created');
+  assert.ok(created, `create_build 应落成，收到：${sock.sent.map((m) => m.type).join(',')}`);
+  const def = created!.item as ItemDefLike;
+  assert.equal((def.spec as ComposedSpec).blueprintId, 'car');
+  assert.ok((store.getBag('default', session.playerId)[def.id] ?? 0) > 0, '新组合物进背包');
+  assert.equal(store.getWallet('default', session.playerId).flowers, before - 1, '改装落成扣 1 朵花');
+  assert.equal(session.creation, null, 'create_build 不开会话');
+});
+
+test('WS build_options：取回本蓝图每槽兼容零件表', async () => {
+  const { store, fairyId } = await seedWorld();
+  const sock = fakeSocket();
+  const session = newVoiceSession();
+  await send(store, session, sock, fairyId, { type: 'build_options', blueprintId: 'house' });
+  const reply = sock.sent.find((m) => m.type === 'build_options');
+  assert.ok(reply, '应回 build_options');
+  assert.equal(reply!.blueprintId, 'house');
+  const opts = reply!.options as Record<string, unknown[]>;
+  const house = findBlueprint('house')!;
+  for (const slot of house.slots) {
+    assert.ok(Array.isArray(opts[slot.slotId]) && opts[slot.slotId].length >= 1, `槽 ${slot.slotId} 有兼容零件`);
+  }
 });
 
 test('超轮兜底：卡到 CREATION_MAX_TURNS 用已填零件直接落成，不再追问', async () => {

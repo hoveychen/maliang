@@ -16,6 +16,8 @@ signal creation_prompt(data: Dictionary)
 ## 积木式造物追问一轮（build，docs/kids-thinking-build-from-parts.md）：与 creation_prompt 平行，
 ## 多带 blueprintId + slotId（当前要填的槽，客户端点亮发光）+ options（该槽兼容零件盘）。
 signal build_prompt(data: Dictionary)
+## 复用改装（B1，§3.1）：进「拆开改改」时取回本蓝图每槽的兼容零件表 {blueprintId, options:{slotId:[{id,label,renderRef}]}}
+signal build_options(data: Dictionary)
 ## 引导会话被取消（小朋友说「算了/不要了」，服务端 guide 判的）：收创造视图 + 收占位符 + 念安抚语
 signal creation_cancelled(data: Dictionary)
 signal prop_pending(data: Dictionary)      ## 造物开工（已扣花）：客户端立起魔法熔炉，含最新 wallet
@@ -171,6 +173,15 @@ func send_create_character(world_id: String, intent_text: String) -> void:
 ## 引导式造角色答复：小朋友点了图标卡（option_id）就传 option_id；否则语音答复走 voice_transcript/voice_end。
 func send_creation_reply(world_id: String, character_id: String, option_id: String) -> void:
 	_send({ "type": "creation_reply", "worldId": world_id, "characterId": character_id, "optionId": option_id })
+
+## 复用改装（B1，§3.1）：取回本蓝图每槽的兼容零件表（进「拆开改改」时调，回执走 build_options 信号）。
+func send_build_options(world_id: String, blueprint_id: String) -> void:
+	_send({ "type": "build_options", "worldId": world_id, "blueprintId": blueprint_id })
+
+## 复用改装落成（B1，§3.1）：把编辑后的零件树直接送去落成一行**新** ItemDef（旧的保留），无会话。
+## filled = {slotId: partId}（服务端 fit 校验后按蓝图槽序收拢）。回执走 prop_pending → item_created。
+func send_create_build(world_id: String, blueprint_id: String, filled: Dictionary) -> void:
+	_send({ "type": "create_build", "worldId": world_id, "blueprintId": blueprint_id, "filled": filled })
 
 ## 取消引导式造角色（退出与小仙子的交互）：服务端清掉会话，后续语音不再当造角色答复。
 func send_creation_cancel() -> void:
@@ -374,6 +385,8 @@ func _dispatch(data: Dictionary) -> void:
 			creation_prompt.emit(data)
 		"build_prompt":
 			build_prompt.emit(data)
+		"build_options":
+			build_options.emit(data)
 		"creation_cancelled":
 			creation_cancelled.emit(data)
 		"world_state":
