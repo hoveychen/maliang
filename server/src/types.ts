@@ -131,6 +131,16 @@ export interface ActiveTask {
    * （见 completeWishOnAbility）。村民不会魔法，真正兑现心愿的是小仙子。
    */
   wishAbility?: string;
+  /**
+   * 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md）：造物类心愿的两段完成。
+   * 造出来那一刻不再当场盖章——先让村民走过去用、发现「还差一点」，小朋友调对体型再盖章。
+   * 缺省（无这些字段）= 一段完成（老逻辑 / play_game / guide_to 等无体型可调的能力）。
+   */
+  wishStage?: 'pending' | 'tried'; // pending（缺省）=还没造出来；tried=造出来了、村民试用中差一点
+  refineItemRef?: string;          // 造出来那件东西的引用（item id / character id），调整按它匹配
+  refineDir?: 'smaller' | 'bigger';// 该往哪调（按造出来的档反推，保证目标档一定够得到）
+  refineFromSize?: CreatureSize;   // 造出来时的体型档（判方向调对没的基准）
+  refineTries?: number;            // 已调几次；到 REFINE_MAX_TRIES 无条件盖章，绝不无止境挑刺
 }
 
 /** LLM 从玩家意图产出的角色设定（落地前）。 */

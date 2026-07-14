@@ -7,6 +7,7 @@ import { WorldStore } from '../src/persistence.ts';
 import { createPropAsync, createStickerAsync, createCharacterAsync } from '../src/server.ts';
 import { pickTaskCandidate } from '../src/tasks.ts';
 import { WISHES, pickThanks } from '../src/wishes.ts';
+import { COMPLAINTS } from '../src/refinements.ts';
 import { ANON_PLAYER, type ActiveTask, type Character } from '../src/types.ts';
 
 function seedChar(store: WorldStore, id: string, name: string, isFairy = false): void {
@@ -42,27 +43,29 @@ function collect(): { sent: Record<string, unknown>[]; socket: { send: (s: strin
   return { sent, socket: { send: (s: string) => sent.push(JSON.parse(s)) } };
 }
 
-test('造物兑现心愿：盖章 + 委托清掉 + 村民用自己的音色道谢', async () => {
+test('造物兑现心愿(A1 两段化)：造出来先开「试用」——村民漏抱怨、不当场盖章', async () => {
   const store = seedWorld();
   setWish(store, 'create_prop');
   const { sent, socket } = collect();
 
   await createPropAsync(socket, 'w1', ANON_PLAYER, '一棵会开花的树', createMockAdapters(), store);
 
-  const done = sent.find((m) => m['type'] === 'task_complete');
-  assert.ok(done, '心愿达成应推 task_complete（复用现成的盖章庆祝演出）');
-  assert.equal((done['task'] as ActiveTask).npcName, '小兔');
-  assert.equal(store.getWallet('w1', ANON_PLAYER).stampsTotal, 1, '应盖 1 章');
-  assert.equal(store.getActiveTask('w1', ANON_PLAYER), null, '心愿达成后委托应清掉');
+  // A1：造成功不再当场盖章，先进「试用」——村民走过去用、发现「还差一点」。
+  assert.ok(!sent.some((m) => m['type'] === 'task_complete'), '试用阶段绝不当场盖章');
+  const trial = sent.find((m) => m['type'] === 'wish_trial');
+  assert.ok(trial, '造出来应开试用（wish_trial）');
+  assert.equal(trial!['npcId'], 'npc1', '试用挂在许愿的那个村民身上');
+  assert.ok(trial!['refineDir'] === 'smaller' || trial!['refineDir'] === 'bigger', '带调整方向');
+  const task = store.getActiveTask('w1', ANON_PLAYER)!;
+  assert.equal(task.wishStage, 'tried', '委托进 tried 态');
+  assert.equal(store.getWallet('w1', ANON_PLAYER).stampsTotal, 0, '试用阶段还没盖章');
 
-  const praise = sent.find((m) => m['type'] === 'praise_tts');
-  assert.ok(praise, '应有道谢语音——没人认出来他帮了忙，满足感就断了');
-  assert.equal(praise['voiceId'], 'v-npc1', '道谢必须用【许愿的那个村民】自己的音色');
-  const thanks = WISHES.create_prop!.thanks;
-  assert.ok(
-    thanks.some((t) => String(praise['text']).startsWith(t)),
-    `道谢词该出自该心愿的 thanks，实际是「${String(praise['text'])}」`,
-  );
+  // 村民用自己音色漏那句「还差一点」（走 praise_tts 音频通道，抱怨词库出）。
+  const complaint = sent.find((m) => m['type'] === 'praise_tts');
+  assert.ok(complaint, '应有村民抱怨语音');
+  assert.equal(complaint!['voiceId'], 'v-npc1', '抱怨用许愿村民自己的音色');
+  const allComplaints = [...COMPLAINTS.smaller, ...COMPLAINTS.bigger];
+  assert.ok(allComplaints.includes(String(complaint!['text'])), '抱怨词出自抱怨词库');
 });
 
 test('造物同时把玩法记进 discovered——此后全世界不再漏这个心愿', async () => {
@@ -112,15 +115,17 @@ test('造贴纸兑现贴纸心愿', async () => {
   assert.deepEqual(store.getDiscovered('w1', ANON_PLAYER), ['create_sticker']);
 });
 
-test('造角色兑现伙伴心愿', async () => {
+test('造角色兑现伙伴心愿(A1 两段化)：造出来先开「试用」，不当场盖章', async () => {
   const store = seedWorld();
   setWish(store, 'create_character');
   const { sent, socket } = collect();
 
   await createCharacterAsync(socket, 'w1', ANON_PLAYER, '一只毛茸茸的小猫', createMockAdapters(), store);
 
-  assert.ok(sent.some((m) => m['type'] === 'task_complete'), '伙伴心愿应被造角色兑现');
-  assert.deepEqual(store.getDiscovered('w1', ANON_PLAYER), ['create_character']);
+  assert.ok(!sent.some((m) => m['type'] === 'task_complete'), '试用阶段不当场盖章');
+  assert.ok(sent.some((m) => m['type'] === 'wish_trial'), '造出伙伴应开试用');
+  assert.equal(store.getActiveTask('w1', ANON_PLAYER)!.wishStage, 'tried', '委托进 tried 态');
+  assert.deepEqual(store.getDiscovered('w1', ANON_PLAYER), ['create_character'], '玩法照常记进 discovered');
 });
 
 test('造失败（审核挡）不算发现、不兑现——没造出来就是没造出来', async () => {

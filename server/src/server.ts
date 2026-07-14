@@ -85,11 +85,12 @@ import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
-import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale } from './creation_options.ts';
+import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, type CreatureSize } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
-import { completeTaskOnEvent, completeWishOnAbility, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWishRefine, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { pickComplaint, REFINE_HINT, REFINE_HINT_2 } from './refinements.ts';
 import { wishFor, IDLE_DOING } from './wishes.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
@@ -1395,8 +1396,30 @@ async function fulfillAbility(
   ability: string,
   clientTts = false,
   sceneId = DEFAULT_SCENE,
+  refine?: { itemRef: string; size: CreatureSize }, // A1：造物类带体型 → 开「试用」两段化；不带则一段完成
 ): Promise<void> {
   store.addDiscovered(worldId, playerId, ability);
+  // 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md）：造物类心愿造成功后不当场盖章——
+  // 先开「试用」：村民走过去用、发现「还差一点」，小朋友调对体型再盖章。只对 pending 的匹配 wish 生效。
+  if (refine) {
+    const trial = beginWishTrial(worldId, playerId, ability, refine.itemRef, refine.size, store);
+    if (trial) {
+      const npc = store.getCharacter(worldId, trial.task.npcId);
+      const complaint = pickComplaint(trial.dir);
+      // 客户端据此高亮那件东西 + 出「变大/变小」箭头 + 播仙子问句（预制 WAV），村民抱怨走下面 TTS 通道。
+      socket.send(JSON.stringify({
+        type: 'wish_trial', worldId, sceneId,
+        npcId: trial.task.npcId, itemRef: refine.itemRef,
+        refineDir: trial.dir, fromSize: refine.size,
+        complaint, voiceId: npc?.voiceId ?? '', fairyHint: REFINE_HINT,
+      }));
+      // 村民用自己音色漏那句「还差一点」（与道谢同一条 TTS 通道）。
+      await pushLineTts(socket, adapters, store, complaint, npc?.voiceId ?? 'cn-child-default', clientTts);
+      // 玩法已被发现（addDiscovered 上面已写）→ 漏话池刷新（与一段完成一致，避免已发现的还在漏）。
+      pushWishes(socket, store, worldId, playerId, sceneId);
+      return; // 试用中：不盖章，等 wish_refine 调对/达上限才结算
+    }
+  }
   const done = completeWishOnAbility(worldId, playerId, ability, store);
   if (done) {
     socket.send(JSON.stringify({
@@ -1618,8 +1641,10 @@ export async function createPropAsync(
       wallet: store.getWallet(worldId, playerId),
       bag: store.getBag(worldId, playerId),
     }));
-    // 造物成功 = 发现了「能造东西」这个玩法；若有村民正盼着它 → 盖章 + 它用自己的音色道谢
-    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_prop', clientTts, sceneId);
+    // 造物成功 = 发现了「能造东西」这个玩法；若有村民正盼着它 → 开「试用」（A1：造出来带体型，
+    // 村民试用差一点，小朋友调对再盖章）。体型取自造物 spec.scale 反推的档。
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_prop', clientTts, sceneId,
+      { itemRef: def.id, size: scaleToSize(validated.spec.scale) });
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
   } finally {
@@ -1814,7 +1839,9 @@ export async function createCharacterAsync(
     if (character.appearance.spriteAsset) {
       triggerCharacterAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
     }
-    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_character', clientTts, sceneId ?? DEFAULT_SCENE);
+    // A1 试用：造出来的新伙伴带体型 → 开「试用」（村民试用差一点，小朋友调对再盖章）。
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_character', clientTts, sceneId ?? DEFAULT_SCENE,
+      { itemRef: character.id, size: character.appearance.size ?? scaleToSize(character.appearance.scale) });
   } catch (err) {
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
@@ -2382,6 +2409,9 @@ export async function handleWsMessage(
     // 积木式造物 B1 复用改装（build_options 取兼容零件 / create_build 直接落成编辑后的零件树）
     blueprintId?: string; // 改哪副蓝图的组合物（客户端读组合物 spec.blueprintId 带上）
     filled?: unknown;     // create_build：编辑后的槽→零件 map（{slotId: partId}），服务端 fit 校验后落成
+    // 试用·还差一点（A1）：wish_refine 上报小朋友把造出来那件东西的体型调成了哪档
+    itemRef?: string;     // 调的是哪件东西（item id / character id，与 ActiveTask.refineItemRef 对应）
+    newSize?: string;     // 调成的体型档（small/medium/big）
     // time_sync：客户端发送时刻(客户端毫秒钟)，原样回带供其算偏移
     t0?: number;
     // stage_event：舞台协议上行(kind 复用上面的字段: ack/abort/near/tap/timer)
@@ -2613,6 +2643,31 @@ export async function handleWsMessage(
   // 取消造角色（幼儿点别处/退出）：清掉会话，不再把后续语音当造角色答复。
   if (msg.type === 'creation_cancel') {
     session.creation = null;
+    return;
+  }
+
+  // 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md §4.1）：小朋友把造出来那件东西的体型调了一次。
+  // 方向对/达上限 → 盖章 + 村民用自己音色道谢（现成结算）；方向反且未达上限 → 仙子再问一句更具体的问句。
+  // 体型的实际重渲染走现成广播（客户端 P7），这里只做「试用是否满意」的判定与结算。
+  if (msg.type === 'wish_refine') {
+    const worldId = msg.worldId ?? '';
+    const itemRef = String(msg.itemRef ?? '');
+    const newSize = (String(msg.newSize ?? 'medium')) as CreatureSize;
+    const r = completeWishRefine(worldId, session.playerId, itemRef, newSize, store);
+    if (!r) return; // 没有对应试用（不该发生）：静默
+    if (r.satisfied) {
+      socket.send(JSON.stringify({
+        type: 'task_complete', task: r.task, stampStyle: r.task.stampStyle,
+        flowerGained: r.flowerGained, wallet: r.wallet,
+      }));
+      await pushPraiseTts(socket, adapters, store, worldId, r.task, r, session.clientTts);
+    } else {
+      // 调反了、还没到上限：仙子升一级再问一句（仍是问句，客户端播预制 refine_hint_2）。
+      socket.send(JSON.stringify({
+        type: 'wish_retry', worldId, npcId: r.task.npcId, itemRef,
+        refineDir: r.task.refineDir, tries: r.tries, fairyHint: REFINE_HINT_2,
+      }));
+    }
     return;
   }
 
