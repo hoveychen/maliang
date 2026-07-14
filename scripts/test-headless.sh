@@ -67,6 +67,7 @@ UNIT_TESTS=(
   test_composed_prop
   test_build_parts
   test_menu_gate
+  test_cjk_font
   test_graphics_settings
   test_frame_sampler
   test_backend_player_id
