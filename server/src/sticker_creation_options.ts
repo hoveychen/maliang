@@ -1,5 +1,5 @@
 import type { CreationCategory, CreationOption, CreationAttrs } from './types.ts';
-import { CREATION_OPTIONS } from './creation_options.ts';
+import { CREATION_OPTIONS, recipientPhrase } from './creation_options.ts';
 
 /**
  * 引导式造贴纸的图标库（与造角色 creation_options.ts / 造物 prop_creation_options.ts 平行）。
@@ -64,6 +64,7 @@ export const STICKER_CREATION_ASK: Record<CreationCategory, string> = {
   trait: '（贴纸不问特点）',
   personality: '（贴纸不问性格）',
   name: '（贴纸不起名）',
+  recipient: '这个呀，是给谁做的呀？', // A2：recipient 就地组装，不经 guide；此处占位满足 Record 完整性
 };
 
 const BY_ID = new Map(STICKER_CREATION_OPTIONS.map((o) => [o.id, o]));
@@ -86,5 +87,6 @@ export function findStickerOptionByLabel(label: string): CreationOption | undefi
 
 /** 把造贴纸累积属性汇成给 designSticker 的中文描述。 */
 export function composeStickerDesc(a: CreationAttrs): string {
-  return `一个${a.color ?? ''}的${a.kind ?? '图案'}贴纸`;
+  const rp = recipientPhrase(a.recipient); // A2：「给X用的」进描述（贴纸尺寸固定，仅供语义/记忆）
+  return `一个${a.color ?? ''}的${a.kind ?? '图案'}贴纸${rp ? `，${rp}` : ''}`;
 }

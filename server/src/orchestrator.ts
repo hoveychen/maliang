@@ -38,6 +38,7 @@ function buildCharacter(
       scale: spec.scale,
       size: scaleToSize(spec.scale), // 体型档标记：让 /admin/calibrate-size 认得「已标定」（含 medium），重跑幂等
       ...(anchors ? { anchors } : {}),
+      ...(input.recipient ? { recipient: input.recipient } : {}), // A2：给谁造的
     },
     memory: [],
     chatHistory: [],

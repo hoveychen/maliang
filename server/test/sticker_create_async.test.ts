@@ -78,14 +78,20 @@ test('WS 语音全链路：仙子听「做个太阳贴纸」→ 引导会话 don
   const fairy = store.listCharacters('default').find((c) => c.isFairy);
   assert.ok(fairy, '默认世界应有小仙子');
 
-  const sock = fakeSocket();
   const session = newVoiceSession();
+  const limiter = new RateLimiter(100, 100);
+  await handleWsMessage(
+    fakeSocket(),
+    JSON.stringify({ type: 'voice_transcript', worldId: 'default', characterId: fairy!.id, transcript: '做个太阳贴纸' }),
+    createMockAdapters(), store, limiter, 'test', session,
+  );
+  // A2：造贴纸也先问 recipient——答「大家」后，暂存的「做个太阳贴纸」一句说全 → guideSticker done → item_created
+  const sock = fakeSocket();
   await handleWsMessage(
     sock,
-    JSON.stringify({ type: 'voice_transcript', worldId: 'default', characterId: fairy!.id, transcript: '做个太阳贴纸' }),
-    createMockAdapters(), store, new RateLimiter(100, 100), 'test', session,
+    JSON.stringify({ type: 'creation_reply', worldId: 'default', characterId: fairy!.id, optionId: 'everyone' }),
+    createMockAdapters(), store, limiter, 'test', session,
   );
-  // 「太阳」一句说全 → guideSticker 首轮即 done → 直接开造 → item_created
   const created = sock.sent.find((m) => m.type === 'item_created');
   assert.ok(created, `应出贴纸，收到消息类型：${sock.sent.map((m) => m.type).join(',')}`);
   const def = created!.item as ItemDef;

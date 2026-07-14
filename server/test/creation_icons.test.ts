@@ -110,14 +110,22 @@ test('生成后 creation_prompt 的选项带上真实 iconAsset', async () => {
     await generateCreationIcons(createMockAdapters(), store); // 先生成图标
     const fairy = store.listCharacters('default').find((c) => c.isFairy)!;
     const session = newVoiceSession();
+    const limiter = new RateLimiter(100, 100);
+    await handleWsMessage(
+      fakeSocket(),
+      JSON.stringify({ type: 'voice_transcript', worldId: 'default', characterId: fairy.id, transcript: '我想要一只小动物' }),
+      createMockAdapters(), store, limiter, 'test', session,
+    );
+    // A2：入口先问 recipient（其 self/大家选项无 iconAsset，村民用立绘）。答「大家」后进入 kind 追问——
+    // kind 才走图标库，选项应带上真实 iconAsset。
     const sock = fakeSocket();
     await handleWsMessage(
       sock,
-      JSON.stringify({ type: 'voice_transcript', worldId: 'default', characterId: fairy.id, transcript: '我想要一只小动物' }),
-      createMockAdapters(), store, new RateLimiter(100, 100), 'test', session,
+      JSON.stringify({ type: 'creation_reply', worldId: 'default', characterId: fairy.id, optionId: 'everyone' }),
+      createMockAdapters(), store, limiter, 'test', session,
     );
-    const prompt = sock.sent.find((m) => m.type === 'creation_prompt');
-    assert.ok(prompt, '应下发 creation_prompt');
+    const prompt = sock.sent.find((m) => m.type === 'creation_prompt' && m.category !== 'recipient');
+    assert.ok(prompt, '答完 recipient 应下发属性 creation_prompt');
     const options = prompt!.options as Array<{ id: string; iconAsset: string }>;
     assert.ok(options.length > 0);
     for (const o of options) assert.ok(o.iconAsset.length > 0, `选项 ${o.id} 应带 iconAsset`);

@@ -52,6 +52,7 @@ const CREATION_ASK: Record<CreationCategory, string> = {
   personality: '它是什么性格的呀？',
   name: '给它起个名字吧，你想叫它什么？',
   motion: '（造角色不问会不会动）', // 占位：motion 是造物专属类别
+  recipient: '这个呀，是给谁做的呀？', // A2：recipient 由 promptRecipient 就地组装，不经 guide；此处仅满足 Record 完整性
 };
 
 // 引导式创造里小朋友反悔的说法（真实实现由 LLM 判语义；mock 用关键词模拟同一个 cancelled 信号）。

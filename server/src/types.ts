@@ -279,6 +279,8 @@ export interface ItemDef {
    * 'edge' 只能挂 tile 四条边缘平面（贴纸类薄片），不进占用位图。
    */
   mount?: 'tile' | 'edge';
+  /** A2「给谁做的」：这件造物是给谁用的（docs/kids-thinking-made-for-whom.md），供 A1 试用/B3 起名/交付话术读取。 */
+  recipient?: RecipientRef;
 }
 
 /** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */
@@ -314,7 +316,7 @@ export interface Character {
   voiceId: string;
   /** 进对话时的招呼风格（warm|shy|playful|gentle）；缺省按 id 稳定哈希落到一种，见 greetings.ts。 */
   greetingStyle?: string;
-  appearance: { visualDescription: string; spriteAsset: string; scale: number; size?: CreatureSize; anchors?: CharacterAnchors };
+  appearance: { visualDescription: string; spriteAsset: string; scale: number; size?: CreatureSize; anchors?: CharacterAnchors; recipient?: RecipientRef };
   memory: string[];
   chatHistory: ChatTurn[];
   state: string;
@@ -348,6 +350,8 @@ export interface CreateCharacterInput {
   position?: TilePos;
   /** 新伙伴降生的场景；缺省=DEFAULT_SCENE（单场景时代/未指定时落 village）。 */
   sceneId?: string;
+  /** A2：这个新伙伴是给谁造的（落进 appearance.recipient，供 A1 试用/交付话术读取）。 */
+  recipient?: RecipientRef;
 }
 
 export interface ModerationResult {
@@ -571,6 +575,20 @@ export interface ExtractedMemory {
 
 // ── 引导式造角色（多轮会话，见 docs/guided-creation-design.md）──────────────
 
+/**
+ * A2「给谁做的」（fit-to-user，见 docs/kids-thinking-made-for-whom.md）：造物会话最前问一句
+ * 「这是给谁用的呀？」，答案是一个【人】而不是一个属性词。
+ *   'self'     给自己（玩家档案体型，缺则 medium）
+ *   'everyone' 给大家（medium，谁都能用）
+ *   'character' 给某个村民/已造角色（characterId 指向 Character；读其 appearance.size 当 size 默认）
+ * label 是给下游描述/交付话术用的显示名（村民名字/「自己」/「大家」）。
+ */
+export interface RecipientRef {
+  kind: 'self' | 'everyone' | 'character';
+  characterId?: string;
+  label?: string;
+}
+
 /** 引导式创造累积的属性（幼儿逐轮填；traits 可多个）。造角色/造物共用此结构，各取所需字段。 */
 export interface CreationAttrs {
   kind?: string;        // 类型：造角色=猫/狗/龙…；造物=花/风车/小房子…
@@ -580,6 +598,7 @@ export interface CreationAttrs {
   personality?: string; // 性格（造角色用）
   name?: string;        // 名字（造角色用；语音说，无图标）
   motion?: string;      // 会不会动：安静/会转/会飘/会跳（造物用，映射 SDF locomotion/spin）
+  recipient?: RecipientRef; // A2：给谁用的（会话最前问一步，character 时预填 size 默认）
 }
 
 /**
@@ -603,6 +622,9 @@ export interface CreationState {
   recentCreations?: string[];
   // goal==='build' 时的积木拼装状态（拼哪副蓝图 + 各槽填了什么）。turnCount/dialog 复用本对象（同一条会话）。
   build?: BuildState;
+  // A2 recipient 预问步（docs/kids-thinking-made-for-whom.md）：入口先问「给谁用」，此值非 undefined 表示
+  // 正在等 recipient 答复——收到后用它当 childInput 喂 advanceCreation，继续正常属性追问。build 不走此步。
+  pendingRequest?: string;
 }
 
 /**
@@ -629,8 +651,12 @@ export interface GuideBuildResult {
   filled?: { slotId: string; partId: string }; // 从本轮输入解析出的「填了哪个槽哪个零件」增量
 }
 
-/** 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。 */
-export type CreationCategory = 'kind' | 'color' | 'size' | 'trait' | 'personality' | 'name' | 'motion';
+/**
+ * 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。
+ * 'recipient'（A2）是唯一走【动态在场角色选项】的类别——候选由 advanceCreation 组装（场景村民
+ * +自己+大家），不进静态图标库；见 docs/kids-thinking-made-for-whom.md §4.1。
+ */
+export type CreationCategory = 'kind' | 'color' | 'size' | 'trait' | 'personality' | 'name' | 'motion' | 'recipient';
 
 /** 图标库里的一个候选项。iconAsset 由 P3 图标生成填入（/assets/:hash），未生成为空串。 */
 export interface CreationOption {

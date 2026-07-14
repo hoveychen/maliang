@@ -32,15 +32,21 @@ async function ws(adapters: ServiceAdapters, store: WorldStore, session: VoiceSe
   return sock.sent;
 }
 
+// A2「给谁做的」：造物会话最前先问一步 recipient。测试统一答「大家」推进到属性/落成阶段。
+async function answerRecipient(store: WorldStore, session: VoiceSession, fairyId: string) {
+  return ws(createMockAdapters(), store, session, { type: 'creation_reply', worldId: 'default', characterId: fairyId, optionId: 'everyone' });
+}
+
 test('造角色完成 → 仙子记 creation 记忆（归属玩家，含描述）', async () => {
   const { store, fairyId, close } = await seeded();
   try {
     const session = newVoiceSession();
     session.playerId = 'kid-1';
-    // 快捷路径：一句说全 → 首轮即造
-    const sent = await ws(createMockAdapters(), store, session, {
+    // 一句说全 → A2 先问 recipient → 答完 recipient 即造
+    await ws(createMockAdapters(), store, session, {
       type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只会飞的红色小猫',
     });
+    const sent = await answerRecipient(store, session, fairyId);
     assert.ok(sent.some((m) => m.type === 'gen_complete'), '角色应造出来');
     const mems = store.getMemories(fairyId, 'kid-1').filter((m) => m.kind === 'creation');
     assert.equal(mems.length, 1, '造完仙子应记一条 creation 记忆');
@@ -56,9 +62,10 @@ test('造物品完成 → 仙子记 creation 记忆', async () => {
   try {
     const session = newVoiceSession();
     session.playerId = 'kid-1';
-    const sent = await ws(createMockAdapters(), store, session, {
+    await ws(createMockAdapters(), store, session, {
       type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '变一个红色的风车',
     });
+    const sent = await answerRecipient(store, session, fairyId);
     assert.ok(sent.some((m) => m.type === 'item_created'), '物品应造出来');
     const mems = store.getMemories(fairyId, 'kid-1').filter((m) => m.kind === 'creation');
     assert.equal(mems.length, 1);
