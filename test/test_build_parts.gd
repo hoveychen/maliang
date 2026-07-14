@@ -9,7 +9,7 @@ var fails := 0
 func _init() -> void:
 	# build_parts pack 已注册且键数正确
 	var keys: Array = PackRegistry.keys_in_pack("build_parts")
-	_check("build_parts pack 有 32 个键", keys.size(), 32)
+	_check("build_parts pack 有 60 个键(原32+蛋糕/花/冰淇淋28)", keys.size(), 60)
 
 	# 每个零件键都能加载成真 Texture2D（宽高 > 占位 48px，证明是生成图不是占位色块）
 	var loaded_ok := 0
@@ -20,7 +20,7 @@ func _init() -> void:
 			loaded_ok += 1
 		else:
 			too_small.append(key)
-	_check("32 个零件键全加载成真图(>48px)", loaded_ok, keys.size())
+	_check("全部零件键加载成真图(>48px)", loaded_ok, keys.size())
 	if not too_small.is_empty():
 		printerr("  未加载/过小: %s" % str(too_small))
 

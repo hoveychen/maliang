@@ -129,6 +129,118 @@
     "window_square": {
       "category": "part",
       "path": "res://assets/build_parts/window_square.png"
+    },
+    "base_round": {
+      "category": "part",
+      "path": "res://assets/build_parts/base_round.png"
+    },
+    "base_square": {
+      "category": "part",
+      "path": "res://assets/build_parts/base_square.png"
+    },
+    "base_heart": {
+      "category": "part",
+      "path": "res://assets/build_parts/base_heart.png"
+    },
+    "cream_white": {
+      "category": "part",
+      "path": "res://assets/build_parts/cream_white.png"
+    },
+    "cream_pink": {
+      "category": "part",
+      "path": "res://assets/build_parts/cream_pink.png"
+    },
+    "cream_choco": {
+      "category": "part",
+      "path": "res://assets/build_parts/cream_choco.png"
+    },
+    "top_strawberry": {
+      "category": "part",
+      "path": "res://assets/build_parts/top_strawberry.png"
+    },
+    "top_cherry": {
+      "category": "part",
+      "path": "res://assets/build_parts/top_cherry.png"
+    },
+    "top_star": {
+      "category": "part",
+      "path": "res://assets/build_parts/top_star.png"
+    },
+    "candle_one": {
+      "category": "part",
+      "path": "res://assets/build_parts/candle_one.png"
+    },
+    "candle_number": {
+      "category": "part",
+      "path": "res://assets/build_parts/candle_number.png"
+    },
+    "center_yellow": {
+      "category": "part",
+      "path": "res://assets/build_parts/center_yellow.png"
+    },
+    "center_orange": {
+      "category": "part",
+      "path": "res://assets/build_parts/center_orange.png"
+    },
+    "center_dot": {
+      "category": "part",
+      "path": "res://assets/build_parts/center_dot.png"
+    },
+    "petals_round": {
+      "category": "part",
+      "path": "res://assets/build_parts/petals_round.png"
+    },
+    "petals_pointy": {
+      "category": "part",
+      "path": "res://assets/build_parts/petals_pointy.png"
+    },
+    "petals_heart": {
+      "category": "part",
+      "path": "res://assets/build_parts/petals_heart.png"
+    },
+    "stem_straight": {
+      "category": "part",
+      "path": "res://assets/build_parts/stem_straight.png"
+    },
+    "stem_curve": {
+      "category": "part",
+      "path": "res://assets/build_parts/stem_curve.png"
+    },
+    "leaf_single": {
+      "category": "part",
+      "path": "res://assets/build_parts/leaf_single.png"
+    },
+    "leaf_pair": {
+      "category": "part",
+      "path": "res://assets/build_parts/leaf_pair.png"
+    },
+    "cone_waffle": {
+      "category": "part",
+      "path": "res://assets/build_parts/cone_waffle.png"
+    },
+    "cone_cup": {
+      "category": "part",
+      "path": "res://assets/build_parts/cone_cup.png"
+    },
+    "scoop_strawberry": {
+      "category": "part",
+      "path": "res://assets/build_parts/scoop_strawberry.png"
+    },
+    "scoop_choco": {
+      "category": "part",
+      "path": "res://assets/build_parts/scoop_choco.png"
+    },
+    "scoop_vanilla": {
+      "category": "part",
+      "path": "res://assets/build_parts/scoop_vanilla.png"
+    },
+    "ice_cherry": {
+      "category": "part",
+      "path": "res://assets/build_parts/ice_cherry.png"
+    },
+    "ice_star": {
+      "category": "part",
+      "path": "res://assets/build_parts/ice_star.png"
     }
   }
 }
