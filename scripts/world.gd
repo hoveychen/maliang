@@ -5951,7 +5951,7 @@ func _poi_names(poi: Dictionary) -> Array:
 # ── 舞台协议宿主：StageAgent 的能力执行器（剧本系统，见 stage_agent.gd）────────────
 # 完成型命令（走位/动作/念白）在 _step_stage 轮询完成后回调 done→StageAgent 回 ack。
 
-const STAGE_NARRATE_VOICE := "zh-CN-XiaoyiNeural" ## 旁白固定用小仙子音色（edge 原生名，直通 map_voice）
+const STAGE_NARRATE_VOICE := "zh-CN-YunxiaNeural" ## 旁白固定用点点音色（奶声小男孩，与预制台词/运行期一致；edge 原生名直通 map_voice）
 var _stage_player_actor_id := ""                  ## 本场演出里玩家占的角色 id（stage_begin 从 isPlayer 认定）
 var _stage_actor_ids: Array = []                  ## 本场演员 id 表（overview 取全体中心用）
 
