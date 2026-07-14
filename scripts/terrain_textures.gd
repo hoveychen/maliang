@@ -396,6 +396,35 @@ static func layer_means_linear() -> PackedVector3Array:
 ## 直接当纯色会把地面洗白）。
 static var _layer_flats := PackedVector3Array()
 
+## 层 → 盖帽门控（Pokopia 化 P4）：该层作为「被抬高 tile 的顶面」时，崖壁顶缘要不要画
+## 波浪盖帽。有机地表（草/沙/雪/苔/泥…）= 1，结构地面（木地板/大理石/瓷砖/沥青/地毯…）= 0
+## ——波浪毛边帽在人造地面上违和。缺省 0，只登记有机层。
+static func layer_cap_trims() -> PackedFloat32Array:
+	var c := PackedFloat32Array()
+	c.resize(SHADER_ARRAY_SIZE)
+	c[LAYER_GRASS] = 1.0
+	c[LAYER_PATH] = 0.6       # 土顶：薄土唇
+	c[LAYER_BED] = 0.6
+	c[LAYER_SAND] = 1.0
+	c[LAYER_SNOW] = 1.0
+	c[LAYER_CORAL] = 1.0
+	c[LAYER_COARSE_SAND] = 1.0
+	c[LAYER_CORAL_SAND] = 1.0
+	c[LAYER_SEAGRASS] = 1.0
+	c[LAYER_DEEP_BED] = 1.0
+	c[LAYER_PACKED_SNOW] = 1.0
+	c[LAYER_ICE] = 0.4        # 冰沿只留淡淡一圈
+	c[LAYER_SLUSH] = 1.0
+	c[LAYER_ROCK_SNOW] = 1.0
+	c[LAYER_CRACKED_EARTH] = 1.0
+	c[LAYER_VOLCANIC] = 0.8
+	c[LAYER_MUD_BOG] = 1.0
+	c[LAYER_FERN] = 1.0
+	c[LAYER_RUBBLE] = 0.6
+	c[LAYER_FARM_FURROW] = 1.0
+	c[LAYER_LAWN_GRID] = 1.0
+	return c
+
 static func layer_flats_linear() -> PackedVector3Array:
 	if _layer_flats.is_empty():
 		_compute_layer_flats()
