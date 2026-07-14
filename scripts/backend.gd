@@ -127,6 +127,10 @@ func _open_socket() -> void:
 	# 默认入站缓冲 64KB：慢帧场景（录屏/低端机）下一帧间隔内的 TTS 分片突发
 	# 会撑爆缓冲直接断连，后续推送（如 item_created）全部丢失——调大到 2MB。
 	_ws.inbound_buffer_size = 2 * 1024 * 1024
+	# 默认出站缓冲也是 64KB：起名录音 name_creation 带 base64 WAV（~150KB+）会撑爆它，
+	# send_text 直接 ERR_OUT_OF_MEMORY 把消息丢在客户端、服务端根本收不到——孩子的名字静默丢失
+	# （真机 voice-e2e 抓到：客户端显示「起好名字啦」但服务端 nameVoiceAsset 永远为空）。调大到 2MB。
+	_ws.outbound_buffer_size = 2 * 1024 * 1024
 	_ws.connect_to_url(full_url())
 
 ## 退避序列：翻倍封顶。抽成纯函数供单测。
@@ -324,12 +328,13 @@ func _send(obj: Dictionary) -> void:
 		obj["playerId"] = player_id
 	sent.emit(obj)
 	if _open:
-		_ws.send_text(JSON.stringify(obj))
-		# 探针（debug-only）：坐实关键出站消息真发出去了（voice-e2e 排查 name_creation 落库失败）。
-		if OS.is_debug_build() and String(obj.get("type", "")) == "name_creation":
-			print("[ws] name_creation SENT (ws open)")
+		# send_text 返回值必须查：出站缓冲不够（大消息如 name_creation 录音）时它会 ERR_OUT_OF_MEMORY
+		# 静默丢弃——不查返回就会误以为发出去了。失败如实告警，别再当无事发生（voice-e2e 实锤）。
+		var err := _ws.send_text(JSON.stringify(obj))
+		if err != OK:
+			push_warning("[ws] send FAILED (err=%d): %s（出站缓冲不够？消息未送达服务端）" % [err, String(obj.get("type", ""))])
 	elif OS.is_debug_build():
-		# 探针（debug-only）：WS 未连时 _send 会静默丢弃——把丢弃如实打出来，别再当无事发生。
+		# WS 未连时 _send 会静默丢弃——把丢弃如实打出来，别再当无事发生。
 		push_warning("[ws] send DROPPED (ws closed): %s" % String(obj.get("type", "")))
 
 func _process(delta: float) -> void:
