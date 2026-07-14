@@ -1,5 +1,5 @@
 {
-  "voice": "zh-CN-XiaoyiNeural",
+  "voice": "zh-CN-YunxiaNeural",
   "lines": [
     { "id": "intro_open_1", "text": "欢迎来到精灵世界！点点来啦，我们一起把这个世界画出来吧！" },
     { "id": "intro_build_1", "text": "看呀，大地慢慢长出来啦，小树也一棵一棵冒出来咯！" },

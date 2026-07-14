@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from 'node:path';
 import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import { FAIRY_VOICE } from './voice_catalog.ts';
 import { creationItemDef, getBuiltinItem } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
@@ -232,9 +233,12 @@ export class WorldStore {
         continue;
       }
       if (!c.isFairy) continue;
-      if (c.name === FAIRY_NAME && c.personality === FAIRY_PERSONALITY) continue;
+      // voiceId 也要迁移：它驱动【动态对话 replyText】的实时 TTS，老库存的是旧音色（Xiaoyi）。
+      // 不迁移的话，存量世界里预制台词是新音色（客户端 WAV 已重烧）、实时对话却还是旧音色，当场分裂。
+      if (c.name === FAIRY_NAME && c.personality === FAIRY_PERSONALITY && c.voiceId === FAIRY_VOICE) continue;
       c.name = FAIRY_NAME;
       c.personality = FAIRY_PERSONALITY;
+      c.voiceId = FAIRY_VOICE;
       // 顺手清掉历史残留：她拿到 move_to/deliver_message 也兑现不了（effectiveAbilities 恒剔除）。
       c.abilities = (Array.isArray(c.abilities) ? c.abilities : []).filter(
         (a) => !LOCOMOTION_ABILITIES.includes(a),

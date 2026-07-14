@@ -1,5 +1,5 @@
 {
-  "voice": "zh-CN-XiaoyiNeural",
+  "voice": "zh-CN-YunxiaNeural",
   "lines": [
     { "id": "ob_story_1", "text": "在一个开满小花的森林里，有一支神奇的画笔。" },
     { "id": "ob_story_2", "text": "画笔上住着一个小精灵，叫点点。点点画什么，什么就会活过来！" },
