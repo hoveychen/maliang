@@ -35,6 +35,10 @@ uniform float detail_strength = 0.8;
 uniform vec3 layer_flat[64];
 uniform float flatten : hint_range(0.0, 1.0) = 0.0;
 uniform float tile_jitter : hint_range(0.0, 1.0) = 0.0;
+// 崖壁地层行带（Pokopia 化 P3）：每级台阶(STEP_HEIGHT=2m)一条整行同色的深浅带，
+// 微暖/微冷交替——高墙不再一面平色，块行边界隐约可读（tile_jitter 是逐格色差，
+// 这条是逐行地层，两者叠加=Pokopia 的土壁横纹）。仅作用崖壁 role。
+uniform float wall_strata : hint_range(0.0, 1.0) = 0.0;
 // 低配档（AdaptiveQuality）：body（路/崖壁/地表）不采数组细节改平色 tint，每像素省一次采样；
 // 草地细节保留（占屏大头，是水彩质感的主体）。
 uniform bool low_detail = false;
@@ -96,6 +100,11 @@ void fragment() {
 	if (role == ROLE_CLIFF_WALL)                           // 崖壁纵向浮雕按侧壁层强度插值（雪崖满档 / 光滑墙 0）
 		lum = mix(1.0, lum, wall_relief[v_layer]);
 	col *= lum;
+	if (role == ROLE_CLIFF_WALL && wall_strata > 0.001) {
+		float band = fract(sin(floor(UV2.y * 0.5) * 12.9898) * 43758.5453);  // 每 2m 级一条带
+		col *= 1.0 + wall_strata * 0.12 * (band - 0.5);
+		col = mix(col, col * vec3(1.05, 1.0, 0.90), wall_strata * 0.5 * (band - 0.5));
+	}
 	if (tile_jitter > 0.001) {
 		vec2 tid = floor(UV2 * 0.5);  // 2m 一块；tile 尺寸整除环面跨度 150，wrap 处无缝
 		float h = fract(sin(dot(tid, vec2(127.1, 311.7))) * 43758.5453);

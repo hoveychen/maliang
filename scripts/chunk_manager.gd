@@ -218,6 +218,7 @@ func _make_slot() -> Dictionary:
 ## 平均色收敛（远看干净色块），tile_jitter 给相邻 tile/墙格轻微色差（拼布感）。
 const FLATTEN := 0.65
 const TILE_JITTER := 0.5
+const WALL_STRATA := 0.55  ## 崖壁逐级地层行带强度（Pokopia 化 P3）
 
 ## 地形专用材质（themed-terrain P1）：控制图 atlas（域/描边/角色/明暗）+ 顶面/侧壁
 ## Texture2DArray（世界 UV 平铺，per-tile 层索引选贴图）。逐层 tint/mean 与描边色取自
@@ -232,6 +233,7 @@ static func _make_ground_mat() -> ShaderMaterial:
 	m.set_shader_parameter("layer_flat", TerrainTextures.layer_flats_linear())
 	m.set_shader_parameter("flatten", FLATTEN)
 	m.set_shader_parameter("tile_jitter", TILE_JITTER)
+	m.set_shader_parameter("wall_strata", WALL_STRATA)
 	m.set_shader_parameter("wall_relief", TerrainTextures.layer_wall_reliefs())
 	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
 	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
