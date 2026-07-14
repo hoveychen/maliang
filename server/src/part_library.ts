@@ -76,6 +76,74 @@ export const PART_LIBRARY: readonly PartDef[] = [
   part('nose_button', '鼻子', '纽扣鼻子', ['snow.nose']),
 ];
 
+/**
+ * 统一画风前缀——所有零件图共用这一句，保证「拼起来是一套」（§3.1 美术缝隙靠统一画风压到可接受）。
+ * 扁平卡通积木块、粗净黑描边、亮色块、童书简笔、die-cut 无背景、正视居中、无场景无落地影。
+ * 每个零件再补一句「本零件长什么样 + 以什么朝向坐进槽」——朝向锁死是关键（轮子必侧看的正圆、
+ * 屋顶必是坐在顶上的三角），否则模型每张换个角度，拼进骨架就对不上位姿。
+ */
+const PART_STYLE =
+  'flat 2D cartoon toy building-block piece, thick clean black outline, bright solid childlike colors, ' +
+  'simple storybook style, die-cut sticker with fully transparent background, centered, front view, ' +
+  'no scene, no ground, no shadow, no text';
+
+/** 每个零件的专属外观 + 坐进槽的朝向（与 PART_LIBRARY 一一对应，partIconPrompt 拼在 PART_STYLE 后）。 */
+const PART_SHAPE: Record<string, string> = {
+  // 轮子：一律侧看的正圆（能滚的姿态），轮心朝观众
+  wheel_round: 'a single round car wheel seen from the side, a perfect circle black tire with a bright hub in the center',
+  wheel_star: 'a single round car wheel seen from the side, a perfect circle tire with a yellow star-shaped hub in the center',
+  wheel_flower: 'a single round car wheel seen from the side, a perfect circle tire with a pink flower-shaped hub in the center',
+  // 车身：横放的车体，顶面平（好坐上零件），侧看
+  body_box: 'a boxy rectangular little car body shell seen from the side, flat top, one solid bright color, no wheels',
+  body_round: 'a rounded bubble-shaped little car body shell seen from the side, smooth curved top, one solid bright color, no wheels',
+  body_truck: 'a chunky pickup-truck cab-and-bed body shell seen from the side, flat cargo bed, one solid bright color, no wheels',
+  // 把手：拉着跑的手柄
+  handle_curve: 'a single curved pull handle bar, smooth arc shape, one solid color, floating alone',
+  handle_straight: 'a single straight upright pull handle bar with a round grip on top, one solid color, floating alone',
+  // 墙：正面的一面墙身（房子的躯干），矩形
+  wall_brick: 'a front-facing rectangular house wall made of red brick pattern, flat rectangle, no roof, no door',
+  wall_wood: 'a front-facing rectangular house wall made of brown wooden planks, flat rectangle, no roof, no door',
+  wall_stone: 'a front-facing rectangular house wall made of grey stone blocks, flat rectangle, no roof, no door',
+  // 屋顶：坐在墙顶上的盖子，底边平
+  roof_tri: 'a triangular pitched house roof, flat bottom edge to sit on a wall, red tiles, roof only',
+  roof_flat: 'a flat low house roof slab, flat bottom edge to sit on a wall, one solid color, roof only',
+  roof_dome: 'a rounded dome house roof, flat bottom edge to sit on a wall, one solid color, roof only',
+  // 门：贴在墙面上的门
+  door_arch: 'a single arched top wooden door, rounded top, one solid color, door only',
+  door_square: 'a single square wooden door, flat top, one solid color, door only',
+  // 窗：贴在墙面上的窗
+  window_round: 'a single round porthole window with a cross frame, blue glass, window only',
+  window_square: 'a single square window with a cross frame, blue glass, window only',
+  // 烟囱：竖在屋顶/车头上的小柱，底边平
+  chimney_brick: 'a short upright red brick chimney stack, flat bottom, chimney only',
+  chimney_pipe: 'a short upright grey metal pipe chimney, flat bottom, chimney only',
+  // 火车头：侧看的车头，前脸朝左
+  engine_classic: 'a classic steam train locomotive engine seen from the side, rounded boiler and a little cab, one solid color, no wheels',
+  engine_bullet: 'a sleek modern bullet-train nose engine seen from the side, smooth pointed front, one solid color, no wheels',
+  // 车厢：侧看的一节车厢
+  car_open: 'an open-top train freight wagon seen from the side, rectangular box with no roof, one solid color, no wheels',
+  car_closed: 'a closed roofed train carriage seen from the side, rectangular box with a rounded roof, one solid color, no wheels',
+  // 雪人雪球：正圆的白雪球
+  snowball_big: 'a big round white snowball, a plain soft white circle',
+  snowball_big_sparkle: 'a big round white snowball with a few blue sparkle dots on it, a soft white circle',
+  snowball_small: 'a small round white snowball, a plain soft white circle',
+  snowball_small_sparkle: 'a small round white snowball with a few blue sparkle dots on it, a soft white circle',
+  // 帽子：戴在头顶的帽
+  hat_top: 'a black top hat with a red band, flat bottom brim to sit on a head, hat only',
+  hat_bucket: 'a small metal bucket turned upside-down as a hat, flat bottom rim, one solid color, hat only',
+  // 鼻子：贴在脸中间的小件
+  nose_carrot: 'a single orange carrot nose pointing sideways, cone shape, nose only',
+  nose_button: 'a single round black button nose, a simple dark circle, nose only',
+};
+
+/** 取某零件的生图 prompt（统一画风前缀 + 专属外观；未知回退到中文名兜底）。P3 批量生成管线读它。 */
+export function partIconPrompt(id: string): string {
+  const shape = PART_SHAPE[id];
+  const part = PART_BY_ID.get(id);
+  if (!shape) return `${PART_STYLE}, a cute ${part?.name ?? id}`;
+  return `${PART_STYLE}, ${shape}`;
+}
+
 const PART_BY_ID = new Map(PART_LIBRARY.map((p) => [p.id, p]));
 
 /** 按 id 查零件（未知 undefined）。 */

@@ -8,12 +8,14 @@ import {
   partsForSlot,
   partAcceptCategories,
   findPart,
+  partIconPrompt,
 } from '../src/part_library.ts';
 import {
   BUILD_BLUEPRINTS,
   blueprintAcceptCategories,
   requiredSlots,
   findBlueprint,
+  blueprintBasePrompt,
 } from '../src/build_blueprints.ts';
 
 const MIN_CHOICES = 2; // 每个槽至少给孩子这么多零件可挑
@@ -92,6 +94,26 @@ test('functionHint 不泄漏零件名（点点只问功能，不给答案）', (
         );
       }
     }
+  }
+});
+
+test('每个零件都有专属生图 prompt（P3 批量生成前，画风表不能有漏项）', () => {
+  for (const p of PART_LIBRARY) {
+    const prompt = partIconPrompt(p.id);
+    assert.ok(prompt.length > 20, `零件 ${p.id} 的 prompt 太短/缺失：${prompt}`);
+    // 未命中会回退成 "a cute <name>" 兜底——那不是真画风，视为漏项。
+    assert.ok(!prompt.includes(`a cute ${p.name}`), `零件 ${p.id} 落到了兜底 prompt，没写专属外观`);
+    // 统一画风前缀在，拼起来才是一套。
+    assert.ok(prompt.includes('die-cut sticker'), `零件 ${p.id} 的 prompt 没带统一画风前缀`);
+  }
+});
+
+test('每副蓝图都有骨架底板生图 prompt，且是「空轮廓」不是成品', () => {
+  for (const bp of BUILD_BLUEPRINTS) {
+    const prompt = blueprintBasePrompt(bp.id);
+    assert.ok(prompt.length > 20, `蓝图 ${bp.id} 的底板 prompt 太短/缺失`);
+    assert.ok(prompt.includes('empty'), `蓝图 ${bp.id} 底板必须是空轮廓（含 empty），不能画成成品`);
+    assert.ok(prompt.includes('outline'), `蓝图 ${bp.id} 底板应是轮廓线`);
   }
 });
 

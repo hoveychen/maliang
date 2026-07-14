@@ -156,6 +156,32 @@ export function requiredSlots(bp: WholeBlueprint): BlueprintSlot[] {
   return bp.slots.filter((s) => s.required);
 }
 
+/**
+ * 骨架底板图的统一画风——拼装时半透明浮在点点身旁，空槽在它上面发光（§3.4 隐形脚手架）。
+ * 关键：底板是**淡的、虚的、没填零件的整体轮廓**，只让孩子看清「要拼的是个什么形状」，
+ * 绝不能画成成品（画成成品孩子就没得拼了）。与零件图同一套童书简笔画风，好让填进去不违和。
+ */
+const BLUEPRINT_STYLE =
+  'a faint pale grey dashed-outline blueprint sketch of the whole shape, very light and translucent, ' +
+  'childlike storybook line style, empty with no parts filled in, front view, centered, ' +
+  'fully transparent background, no scene, no ground, no color fill, no text';
+
+/** 每副蓝图骨架底板的专属轮廓（虚线整体形，不含任何零件）。 */
+const BLUEPRINT_SHAPE: Record<string, string> = {
+  car: 'the empty outline of a simple side-view toy car (body area plus two round wheel spots and a pull-handle spot)',
+  house: 'the empty outline of a simple front-view little house (a wall box plus a triangular roof spot)',
+  train: 'the empty outline of a simple side-view little train (an engine spot plus one carriage spot on wheels)',
+  snowman: 'the empty outline of a simple snowman (a big lower circle stacked with a smaller upper circle)',
+};
+
+/** 取某蓝图骨架底板的生图 prompt（统一画风前缀 + 专属轮廓；未知回退兜底）。P3 批量生成管线读它。 */
+export function blueprintBasePrompt(id: string): string {
+  const shape = BLUEPRINT_SHAPE[id];
+  const bp = BLUEPRINT_BY_ID.get(id);
+  if (!shape) return `${BLUEPRINT_STYLE}, the empty outline of a ${bp?.name ?? id}`;
+  return `${BLUEPRINT_STYLE}, ${shape}`;
+}
+
 /** 所有蓝图槽里出现过的 accept 类别（蓝图端视角）。用于与零件端做双向自洽校验。 */
 export function blueprintAcceptCategories(): Set<string> {
   const s = new Set<string>();
