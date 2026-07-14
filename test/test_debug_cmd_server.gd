@@ -1,0 +1,125 @@
+extends SceneTree
+## 端侧语音 e2e 注入 harness P2：debug TCP 命令服务器。验证：
+##  1) parse_command 纯函数：合法命令解析出 op+args；坏 JSON/缺 op/缺参/未知 op 都拒（与 IO 分离）；
+##  2) synth_pcm 纯函数：长度/采样率正确；
+##  3) _execute("say") 走【真实链路】：ScriptedAsr 排文本 + 合成 PCM 喂真 VAD 断句 → local_final 出预排文本；
+##     门禁生效（未开麦时 say 不喂、报 gate_closed）；
+##  4) _execute("state") 快照含 naming_item/bag/vc 各态；confirm 三键路由到 _vc。
+## 运行: godot --headless --path . --script res://test/test_debug_cmd_server.gd
+
+## stub 宿主：DebugCmdServer 只从 world 懒查 _vc 与几个状态字段，内部类声明它们即可被 get() 读到。
+class StubWorld extends Node:
+	var _vc: VoiceCapture = null
+	var _naming_item := "梯子"
+	var banner: Label = null
+	var bag := {}
+	var selected: Node = null
+
+var _ran := false
+
+func _check(name: String, got: Variant, want: Variant) -> int:
+	if got == want:
+		print("  ✓ %s" % name)
+		return 0
+	printerr("  ✗ %s: got %s want %s" % [name, str(got), str(want)])
+	return 1
+
+func _initialize() -> void:
+	process_frame.connect(_run_once)
+
+func _run_once() -> void:
+	if _ran:
+		return
+	_ran = true
+	var fails := 0
+
+	print("[parse_command：合法命令]")
+	var say := DebugCmdServer.parse_command('{"op":"say","text":"爬爬梯"}')
+	fails += _check("say ok", say.get("ok"), true)
+	fails += _check("say op", say.get("op"), "say")
+	fails += _check("say text", say.get("text"), "爬爬梯")
+	var tap := DebugCmdServer.parse_command('{"op":"tap","x":100,"y":200.5}')
+	fails += _check("tap ok", tap.get("ok"), true)
+	fails += _check("tap x", tap.get("x"), 100.0)
+	fails += _check("tap y", tap.get("y"), 200.5)
+	for op in ["state", "screencap", "accept", "replay", "retry"]:
+		var r := DebugCmdServer.parse_command('{"op":"%s"}' % op)
+		fails += _check("%s ok" % op, r.get("ok"), true)
+		fails += _check("%s op" % op, r.get("op"), op)
+
+	print("[parse_command：非法输入全部拒]")
+	fails += _check("空行拒", DebugCmdServer.parse_command("   ").get("ok"), false)
+	fails += _check("坏 JSON 拒", DebugCmdServer.parse_command("{not json").get("ok"), false)
+	fails += _check("非对象拒", DebugCmdServer.parse_command("[1,2,3]").get("ok"), false)
+	fails += _check("缺 op 拒", DebugCmdServer.parse_command('{"text":"x"}').get("ok"), false)
+	fails += _check("say 缺 text 拒", DebugCmdServer.parse_command('{"op":"say"}').get("ok"), false)
+	fails += _check("say 空 text 拒", DebugCmdServer.parse_command('{"op":"say","text":""}').get("ok"), false)
+	fails += _check("tap 缺 y 拒", DebugCmdServer.parse_command('{"op":"tap","x":1}').get("ok"), false)
+	fails += _check("未知 op 拒", DebugCmdServer.parse_command('{"op":"nope"}').get("ok"), false)
+
+	print("[synth_pcm：长度/采样率]")
+	# 30ms @ 16k mono 16bit = 16*30 样本 * 2 字节 = 960 字节
+	fails += _check("30ms 长度", DebugCmdServer.synth_pcm(30, 0.3).size(), 960)
+	fails += _check("0ms 空", DebugCmdServer.synth_pcm(0, 0.3).size(), 0)
+
+	print("[_execute say：真实注入链路 → local_final 出预排文本]")
+	# 走真实 ScriptedAsr 注入（同 test_scripted_asr）：写 flag → VoiceCapture 注替身。
+	var flag := FileAccess.open("user://asr_harness", FileAccess.WRITE)
+	if flag != null:
+		flag.store_string("1"); flag.close()
+	var world := StubWorld.new()
+	world.banner = Label.new()
+	world.banner.text = "想说什么就直接跟点点说吧"
+	world.banner.visible = true
+	root.add_child(world)
+	var vc := VoiceCapture.new()
+	world._vc = vc
+	world.add_child(vc) # _ready → debug+flag → 注 ScriptedAsr
+	fails += _check("flag 注入了 ScriptedAsr", vc._asr is ScriptedAsr, true)
+	var finals: Array[String] = []
+	vc.local_final.connect(func(t: String) -> void: finals.append(t))
+	var gate := [false]
+	vc.should_capture = func() -> bool: return gate[0]
+	var srv := DebugCmdServer.make(world)
+	root.add_child(srv)
+
+	# 门禁关（未开麦）：say 排了文本但不喂，报 gate_closed。
+	var r_closed := srv._execute({"ok": true, "op": "say", "text": "爬爬梯"})
+	fails += _check("门禁关时不喂", r_closed.get("fed"), false)
+	fails += _check("门禁关时排队 +1", r_closed.get("pending"), 1)
+	fails += _check("门禁关时不出 final", finals.size(), 0)
+
+	# 开麦 + 门禁放行：say 喂 PCM 驱 VAD 断句 → ScriptedAsr 吐队首 → local_final。
+	vc.open()
+	gate[0] = true
+	var r_fed := srv._execute({"ok": true, "op": "say", "text": "大风车"})
+	fails += _check("门禁开时喂了", r_fed.get("fed"), true)
+	# 队列此刻：["爬爬梯"(上轮没喂), "大风车"]；断一次句吐队首"爬爬梯"。
+	fails += _check("断句吐队首经真实链路出 local_final", finals, ["爬爬梯"])
+
+	print("[_execute state：状态快照]")
+	var snap := srv._execute({"ok": true, "op": "state"})
+	fails += _check("naming_item", snap.get("naming_item"), "梯子")
+	fails += _check("bag_size", snap.get("bag_size"), 0)
+	fails += _check("banner_text", snap.get("banner_text"), "想说什么就直接跟点点说吧")
+	fails += _check("banner_visible", snap.get("banner_visible"), true)
+	fails += _check("selected 空", snap.get("selected"), "")
+	fails += _check("vc_open", snap.get("vc_open"), true)
+	fails += _check("asr_pending 剩1(大风车)", snap.get("asr_pending"), 1)
+
+	print("[_execute 确认三键：路由到 _vc 不崩]")
+	# 非确认态调 retry/accept 是 no-op（_vc 内部 guard），只验路由通、回包带 vc_confirming。
+	var r_retry := srv._execute({"ok": true, "op": "retry"})
+	fails += _check("retry 回包", r_retry.get("ok"), true)
+	fails += _check("retry 后未在确认", r_retry.get("vc_confirming"), false)
+
+	vc.close(); vc.queue_free()
+	srv.queue_free()
+	world.queue_free()
+	DirAccess.remove_absolute("user://asr_harness")
+
+	if fails == 0:
+		print("test_debug_cmd_server: 全部通过")
+	else:
+		printerr("test_debug_cmd_server: %d 处失败" % fails)
+	quit(1 if fails > 0 else 0)
