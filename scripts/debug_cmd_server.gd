@@ -72,6 +72,11 @@ static func synth_pcm(ms: int, amp: float) -> PackedByteArray:
 
 # ── TCP 生命周期 ─────────────────────────────────────────────────────────────
 func _ready() -> void:
+	# app 级 autoload（[autoload] HarnessCmd）：从 App 启动就常驻、跨 menu/onboarding/world，好让 onboarding
+	# 的语音流程也能 e2e。debug 门禁在此（原来在 world.gd add_child 处）：release 一行不跑、绝不开 TCP 口。
+	if not OS.is_debug_build():
+		set_process(false)
+		return
 	_server = TCPServer.new()
 	var err := _server.listen(PORT, "127.0.0.1")
 	if err != OK:
@@ -154,17 +159,23 @@ func _execute(cmd: Dictionary) -> Dictionary:
 		_:
 			return {"ok": false, "error": "unhandled op: %s" % op}
 
+## 当前活跃的 VoiceCapture（VoiceCapture.current，各 VC 的 _ready 置 / _exit 清）——app 级 harness 跨场景
+## 定位它：onboarding 页用 onboarding 的 VC、world 用 world 的 _vc，谁在树上就打给谁，不再绑死 world。
 func _vc() -> VoiceCapture:
-	if _world == null:
-		return null
-	return _world.get("_vc") as VoiceCapture
+	return VoiceCapture.current
+
+## 当前宿主场景：app 级 autoload 由 Godot 默认构造，_world 恒为 null（make 才设）→ 回退到当前活跃场景。
+## 在 world 时 current_scene 即 world 节点（带 harness_talk_fairy/harness_reset_play_budget 钩子）；
+## 在 onboarding 时 current_scene 是 onboarding，没这些钩子——talk_fairy/reset_budget 会如实报错（本就不该在那触发）。
+func _host() -> Node:
+	return _world if _world != null else get_tree().current_scene
 
 ## inject：运行时把 _vc 的端侧 ASR 换成 ScriptedAsr（真机 handshake 入口——不依赖推 user:// 标志）。
 ## 换完 e2e 脚本才能用 say 排预排文本；未换时 say 会因 _asr 不认 enqueue 而报错。
 func _do_inject() -> Dictionary:
 	var vc := _vc()
 	if vc == null:
-		return {"ok": false, "error": "no VoiceCapture on world"}
+		return {"ok": false, "error": "no active VoiceCapture (current)"}
 	var s := vc.use_scripted_asr()
 	if s == null:
 		return {"ok": false, "error": "inject 失败（非 debug 构建？）"}
@@ -175,7 +186,7 @@ func _do_inject() -> Dictionary:
 func _do_say(text: String) -> Dictionary:
 	var vc := _vc()
 	if vc == null:
-		return {"ok": false, "error": "no VoiceCapture on world"}
+		return {"ok": false, "error": "no active VoiceCapture (current)"}
 	var asr: Object = vc._asr
 	if asr == null or not asr.has_method("enqueue"):
 		return {"ok": false, "error": "asr 不是 ScriptedAsr（harness 未注入？需 user://asr_harness 标志）"}
@@ -212,14 +223,16 @@ func _do_tap(x: float, y: float) -> void:
 ## state：一份可断言的状态快照。世界字段用 get() 读（避免对 Node 的 unsafe 属性访问告警）。
 func _snapshot() -> Dictionary:
 	var snap := {"ok": true, "op": "state"}
-	if _world != null:
-		snap["naming_item"] = String(_world.get("_naming_item") if _world.get("_naming_item") != null else "")
-		var sel := _world.get("selected") as Node
+	# app 级：不在 world 时（如 onboarding）current_scene 没有这些字段，get() 返 null → best-effort 跳过。
+	var w: Node = _host()
+	if w != null:
+		snap["naming_item"] = String(w.get("_naming_item") if w.get("_naming_item") != null else "")
+		var sel := w.get("selected") as Node
 		snap["selected"] = String(sel.get("char_name")) if sel != null else ""
-		var banner := _world.get("banner") as Label
+		var banner := w.get("banner") as Label
 		snap["banner_text"] = banner.text if banner != null else ""
 		snap["banner_visible"] = banner.visible if banner != null else false
-		var bag: Variant = _world.get("bag")
+		var bag: Variant = w.get("bag")
 		snap["bag_size"] = (bag as Dictionary).size() if typeof(bag) == TYPE_DICTIONARY else -1
 	var vc := _vc()
 	if vc != null:
@@ -247,23 +260,25 @@ func _do_screencap() -> Dictionary:
 ## 坐标盲点不可靠——tap 没命中玩家会被当点地面把玩家支使走，越走越偏；这条命令直接从 npcs 找仙子发起
 ## 靠近+进对话，e2e 脚本随后轮询 vc_open 即可。返回 entered=是否找到仙子并发起（对话开在几帧后）。
 func _do_talk_fairy() -> Dictionary:
-	if _world == null or not _world.has_method("harness_talk_fairy"):
+	var w := _host()
+	if w == null or not w.has_method("harness_talk_fairy"):
 		return {"ok": false, "error": "world 无 harness_talk_fairy"}
-	var ok := bool(_world.call("harness_talk_fairy"))
+	var ok := bool(w.call("harness_talk_fairy"))
 	return {"ok": ok, "op": "talk_fairy", "entered": ok}
 
 ## reset_budget：清掉游玩时长冷却门（45min 玩满 → 10min 冷却模态挡住造物/交互），供 e2e 连测不被拦。
 ## 仅重置本地预算+落盘，不碰服务端；debug 构建专用，绝不进 release。
 func _do_reset_budget() -> Dictionary:
-	if _world == null or not _world.has_method("harness_reset_play_budget"):
+	var w := _host()
+	if w == null or not w.has_method("harness_reset_play_budget"):
 		return {"ok": false, "error": "world 无 harness_reset_play_budget"}
-	_world.call("harness_reset_play_budget")
+	w.call("harness_reset_play_budget")
 	return {"ok": true, "op": "reset_budget"}
 
 func _do_confirm_key(op: String) -> Dictionary:
 	var vc := _vc()
 	if vc == null:
-		return {"ok": false, "error": "no VoiceCapture on world"}
+		return {"ok": false, "error": "no active VoiceCapture (current)"}
 	match op:
 		"accept": vc.accept()
 		"replay": vc.replay()

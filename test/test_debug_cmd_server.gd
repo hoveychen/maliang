@@ -130,6 +130,23 @@ func _run_once() -> void:
 	fails += _check("reset_budget 回包 ok", r_rb.get("ok"), true)
 	fails += _check("reset_budget 转调宿主一次", world.reset_budget_calls, 1)
 
+	print("[autoload 路径：_world=null 时 talk_fairy/reset_budget 经 current_scene 兜底]")
+	# 真机上 HarnessCmd 是 [autoload]，由 Godot 默认构造（不走 make）→ _world 恒为 null；
+	# 命令必须回退到 get_tree().current_scene（在 world 场景即 world 节点）才能路由到宿主钩子。
+	# 不兜底则 talk_fairy/reset_budget 在真机上全废（voice-e2e 的进对话入口断掉）。
+	var auto_srv := DebugCmdServer.new()  # 不走 make → _world 保持 null（复现 autoload 构造）
+	root.add_child(auto_srv)
+	var prev_scene := current_scene       # 本脚本 extends SceneTree，current_scene 即 tree 自身属性
+	current_scene = world                 # 模拟「当前活跃场景就是 world」（srv._do_* 内走 get_tree().current_scene）
+	var r_tf2 := auto_srv._execute({"ok": true, "op": "talk_fairy"})
+	fails += _check("autoload talk_fairy 回包 ok", r_tf2.get("ok"), true)
+	fails += _check("autoload talk_fairy 经 current_scene 转调宿主", world.talk_fairy_calls, 2)
+	var r_rb2 := auto_srv._execute({"ok": true, "op": "reset_budget"})
+	fails += _check("autoload reset_budget 回包 ok", r_rb2.get("ok"), true)
+	fails += _check("autoload reset_budget 经 current_scene 转调宿主", world.reset_budget_calls, 2)
+	current_scene = prev_scene
+	auto_srv.queue_free()
+
 	vc.close(); vc.queue_free()
 	srv.queue_free()
 	world.queue_free()

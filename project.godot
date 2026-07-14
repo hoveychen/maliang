@@ -15,6 +15,13 @@ run/main_scene="res://menu.tscn"
 config/features=PackedStringArray("4.6", "Mobile")
 config/icon="res://icon.png"
 
+[autoload]
+
+; app 级端侧语音 e2e harness 命令口（docs/voice-e2e-harness-design.md）：从 App 启动就常驻、跨
+; menu/onboarding/world，好让 onboarding 的语音流程也能 e2e。debug 门禁在脚本 _ready 内——release
+; 一行不跑、绝不开 TCP 口。autoload 名 HarnessCmd 有意与 class_name DebugCmdServer 区分（避免全局名冲突）。
+HarnessCmd="*res://scripts/debug_cmd_server.gd"
+
 [audio]
 
 driver/enable_input=true

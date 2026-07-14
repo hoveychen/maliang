@@ -14,7 +14,10 @@ extends RefCounted
 ##          渲染成本口径变了 → 旧 v1 众包样本作废。
 ## v3（benchmark-story-ramp）：采样期不再冻结村民——负载角色注册占用 + ambient wander，村民 wander
 ##          （A* 寻路 + 走动 CPU）全程计入 p95。旧 v2 冻结口径系统性偏轻、测出全最高，样本作废。
-const BENCH_VERSION := 3
+## v4（bench-determinism）：负载从【随机 wander】换成【确定性固定巡逻 + 每 trial 复位到同一状态】——
+##          仍是动态负载（A* + 走动 CPU 计入 p95，不冻结），但每次跑的负载序列可复现（真机 PoC 实测：
+##          随机 wander 目标点每 trial 不同，是 ±60ms trial 噪声的大头）。负载路径变了、成本口径变，v3 作废。
+const BENCH_VERSION := 4
 
 const DEVICE_ID_KEY := "device_id"
 
