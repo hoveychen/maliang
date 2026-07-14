@@ -88,6 +88,7 @@ UNIT_TESTS=(
   test_terrain_patch
   test_terrain_rebuild
   test_terrain_layers
+  test_terrain_deco
   test_terrain_seafloor
   test_terrain_icesnow
   test_terrain_jurassic

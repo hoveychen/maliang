@@ -221,6 +221,7 @@ const TILE_JITTER := 0.5
 const WALL_STRATA := 0.55  ## 崖壁逐级地层行带强度（Pokopia 化 P3）
 const CAP_TRIM := 0.9      ## 崖顶波浪盖帽强度（Pokopia 化 P4，第一识别特征）
 const CORNER_AO := 0.7     ## 墙脚接触暗缝强度（Pokopia 化 P5，内凹角柔和 AO）
+## 草地草簇/大头花散布（Pokopia 化 P6）的密度/姿态旋钮在 terrain_deco.gd 顶部常量区。
 
 ## 地形专用材质（themed-terrain P1）：控制图 atlas（域/描边/角色/明暗）+ 顶面/侧壁
 ## Texture2DArray（世界 UV 平铺，per-tile 层索引选贴图）。逐层 tint/mean 与描边色取自
@@ -407,6 +408,20 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 				push_warning("[items] 未知物品实体 %s（catalog 未载入?），跳过渲染" % id)
 			else:
 				push_warning("[items] renderRef %s 的键未在 PackRegistry 注册，跳过渲染" % rref)
+	# 草地装饰散布（Pokopia 化 P6）：厚叶草簇/大头花密植——落点决策与 mesh 见 TerrainDeco
+	# （纯函数确定性，重刷不闪），合批走同一个 batches。占地过滤在此层做：房/树/动态物件
+	# 脚下不长（占地是世界状态，纯函数管不着）；角色站位不算占地（暂态，与散布重摆同理）。
+	for j in range(CHUNK_TILES):
+		for i in range(CHUNK_TILES):
+			var ti := Vector2i(i, j)
+			var gt := wrapped * CHUNK_TILES + ti
+			var d := TerrainDeco.pick(gt)
+			if d.is_empty():
+				continue
+			if not OccupancyMap.is_free_rect(OccupancyMap.tile_to_cell(gt), 2, 2):
+				continue
+			var off: Vector2 = d["off"]
+			_batch(batches, d["key"], _tile_local(ti, wrapped) + Vector3(off.x, 0.0, off.y), d["scale"], d["yaw"])
 	# 边缘贴纸层：逐 tile 扫四条边（绝大多数为 0，纯 PackedByteArray 读，开销可忽略）。
 	for j in range(CHUNK_TILES):
 		for i in range(CHUNK_TILES):
@@ -1023,6 +1038,9 @@ func _scatter_kind(key: String) -> Dictionary:
 		m.set_shader_parameter("albedo_tex", tex)
 		m.set_shader_parameter("curvature", BendMat.CURVATURE)
 		info = { "mesh": q, "mat": m }
+	elif key.begins_with("deco_"):
+		# 草地装饰散布（Pokopia 化 P6）：程序化低模 mesh + 烘焙布景共享顶点色材质
+		info = { "mesh": TerrainDeco.mesh(key), "mat": SdfStaticBaker.material() }
 	elif PackRegistry.category(key) == "baked":
 		info = { "mesh": PackRegistry.load_resource(key), "mat": SdfStaticBaker.material() }
 	else:  # scatter：KayKit 场景剥出 mesh + bend 包裹材质
