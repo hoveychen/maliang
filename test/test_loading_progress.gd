@@ -59,8 +59,42 @@ func _init() -> void:
 	fails += _check("有文案原样返回", String(w.call("ready_status")), "唤醒村民 2/3")
 	w.free()
 
+	# --- 慢网停滞检测：真进度只慢爬(非跟进)累计 >0.5s 才算停滞；恢复推进立刻解除 ---
+	# 停滞是「笔尖蹭飞白 + 墨珠将滴未滴」的唯一触发信号(loading.gd _layout_trail/_layout_ink_drop)。
+	var L: Node = (load("res://scripts/loading.gd") as GDScript).new()
+	var sw := StubWorld.new()
+	L.set("_world", sw)
+	# 跟进分支：真进度领先 → _prog 追、停滞清零
+	sw.p = 0.5; L.set("_prog", 0.0)
+	L.call("_advance_progress", 0.1)
+	fails += _check("真进度推进时不停滞", L.get("_stalled"), false)
+	# 慢爬分支：真进度落在 _prog 后 → 累计 0.7s
+	sw.p = 0.0; L.set("_prog", 0.6)
+	for _i in 7:
+		L.call("_advance_progress", 0.1)
+	fails += _check("慢爬 >0.5s → 判定停滞", L.get("_stalled"), true)
+	# 恢复：真进度跳到前面 → 停滞立刻解除、计时清零
+	sw.p = 0.95
+	L.call("_advance_progress", 0.1)
+	fails += _check("真进度恢复 → 解除停滞", L.get("_stalled"), false)
+	fails += _check("解除时停滞计时清零", is_equal_approx(L.get("_stall_t"), 0.0), true)
+	# 落地/转场期不停滞（即便真进度停）
+	sw.p = 0.0; L.set("_prog", 0.6); L.set("_landing", true)
+	for _i in 7:
+		L.call("_advance_progress", 0.1)
+	fails += _check("落地期不判停滞（别在揭幕时蹭飞白）", L.get("_stalled"), false)
+	sw.free()
+	L.free()
+
 	print("test_loading_progress: %d fail(s)" % fails)
 	quit(fails)
+
+## 桩世界：只提供 ready_progress()，喂给 loading._advance_progress 驱动停滞状态机。
+## 必须 extends Node——loading.gd 的 _world 是强类型 Node，set() 一个 RefCounted 会被静默拒绝(留 null)。
+class StubWorld extends Node:
+	var p := 0.0
+	func ready_progress() -> float:
+		return p
 
 func _check(name: String, got: Variant, want: Variant) -> int:
 	if got == want:
