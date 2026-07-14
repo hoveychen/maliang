@@ -105,7 +105,7 @@ func _run() -> void:
 
 ## 建造演出脚本（设计 docs/benchmark-story-ramp-design.md）：分幕把世界「建造」出来，每幕加一层负载，
 ## 到注魔幕在满负载的活场景上定档——小朋友观赏的是一个逐步加压的故事，不是 loading。
-## 空地 → 画地长树(props 揭示) → 小伙伴逐个蹦出(负载堆峰值) → 注魔定档(满负载+镜头慢巡) →（首次）教学 → 就绪。
+## 空地 → 画地长树(props 揭示) → 小伙伴逐个蹦出(镜头绕环慢移+负载堆峰值) → 注魔定档(满负载/钉死镜头) →（首次）教学 → 就绪。
 ## 小伙伴必须在注魔【之前】到齐（峰值测准），故旁白 partner 提到 magic 前。有画质档则跳过注魔段（现状路径）。
 func _show_intro() -> void:
 	await _narrate("intro_open_1")
@@ -114,13 +114,15 @@ func _show_intro() -> void:
 		_world.call("intro_show_scenery")
 	await _narrate("intro_build_1")
 	await _narrate("intro_build_2")
-	# 热闹幕：小伙伴逐个蹦出来（会 wander 的负载村民）——在注魔测档【之前】把负载堆到峰值
+	# 热闹幕：小伙伴逐个蹦出来（会 wander 的负载村民，镜头绕环慢移）——在注魔测档【之前】把负载堆到峰值
 	await _narrate("intro_partner_1")
 	await _spawn_friends()
-	# 注魔幕：满负载活场景定档 + 点点带镜头慢巡
+	# 注魔幕：满负载活场景定档（整段钉死镜头保 trial 可比，见 _run_benchmark）
 	await _run_benchmark_if_needed()
-	# 小伙伴（压测负载）退场，把干净世界交给转正（benchmark 跑没跑都退；bench_despawn_load 幂等）
+	# 建造/热闹/注魔期抢的镜头交还玩家——benchmark 跑没跑都要还（返回用户跳过注魔，否则镜头卡在小伙伴环上）
 	if is_instance_valid(_world):
+		_world.set("focus_override", Vector2.INF)
+		# 小伙伴（压测负载）退场，把干净世界交给转正（bench_despawn_load 幂等）
 		_world.call("bench_despawn_load")
 	if _tutorial:
 		await _run_tutorial()
