@@ -52,6 +52,32 @@ const BLUEPRINTS := {
 			{ "slotId": "nose", "accept": "snow.nose", "required": false, "pose": { "x": 0.5, "y": 0.4, "scale": 0.25, "rot": 0.0 } },
 		],
 	},
+	"cake": {
+		"name": "蛋糕", "baseRef": "blueprint:cake",
+		"slots": [
+			{ "slotId": "base", "accept": "cake.base", "required": true, "pose": { "x": 0.5, "y": 0.7, "scale": 1.0, "rot": 0.0 } },
+			{ "slotId": "cream", "accept": "cake.cream", "required": true, "pose": { "x": 0.5, "y": 0.52, "scale": 0.95, "rot": 0.0 } },
+			{ "slotId": "topping", "accept": "cake.topping", "required": true, "pose": { "x": 0.5, "y": 0.34, "scale": 0.5, "rot": 0.0 } },
+			{ "slotId": "candle", "accept": "cake.candle", "required": false, "pose": { "x": 0.5, "y": 0.18, "scale": 0.4, "rot": 0.0 } },
+		],
+	},
+	"flower": {
+		"name": "小花", "baseRef": "blueprint:flower",
+		"slots": [
+			{ "slotId": "petals", "accept": "flower.petals", "required": true, "pose": { "x": 0.5, "y": 0.4, "scale": 1.0, "rot": 0.0 } },
+			{ "slotId": "center", "accept": "flower.center", "required": true, "pose": { "x": 0.5, "y": 0.4, "scale": 0.4, "rot": 0.0 } },
+			{ "slotId": "stem", "accept": "flower.stem", "required": true, "pose": { "x": 0.5, "y": 0.74, "scale": 0.9, "rot": 0.0 } },
+			{ "slotId": "leaf", "accept": "flower.leaf", "required": false, "pose": { "x": 0.64, "y": 0.64, "scale": 0.5, "rot": 0.0 } },
+		],
+	},
+	"icecream": {
+		"name": "冰淇淋", "baseRef": "blueprint:icecream",
+		"slots": [
+			{ "slotId": "cone", "accept": "ice.cone", "required": true, "pose": { "x": 0.5, "y": 0.74, "scale": 0.8, "rot": 0.0 } },
+			{ "slotId": "scoop", "accept": "ice.scoop", "required": true, "pose": { "x": 0.5, "y": 0.42, "scale": 0.9, "rot": 0.0 } },
+			{ "slotId": "topping", "accept": "ice.topping", "required": false, "pose": { "x": 0.5, "y": 0.24, "scale": 0.4, "rot": 0.0 } },
+		],
+	},
 }
 
 ## 按 id 取蓝图（未知返回空字典）。
