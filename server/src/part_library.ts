@@ -86,7 +86,7 @@ export const PART_LIBRARY: readonly PartDef[] = [
   // 顶料（樱桃/彩针与冰淇淋共用同类语义，但各有独立 id）
   part('top_strawberry', '顶料', '草莓', ['cake.topping']),
   part('top_cherry', '顶料', '樱桃', ['cake.topping']),
-  part('top_sprinkle', '顶料', '彩针', ['cake.topping']),
+  part('top_star', '顶料', '小星星糖', ['cake.topping']),
   // 蜡烛
   part('candle_one', '蜡烛', '单蜡烛', ['cake.candle']),
   part('candle_number', '蜡烛', '数字蜡烛', ['cake.candle']),
@@ -115,7 +115,7 @@ export const PART_LIBRARY: readonly PartDef[] = [
   part('scoop_vanilla', '冰淇淋球', '香草球', ['ice.scoop']),
   // 顶料
   part('ice_cherry', '顶料', '樱桃', ['ice.topping']),
-  part('ice_sprinkle', '顶料', '彩针', ['ice.topping']),
+  part('ice_star', '顶料', '小星星糖', ['ice.topping']),
 ];
 
 /**
@@ -187,7 +187,7 @@ const PART_SHAPE: Record<string, string> = {
   // 顶料（蛋糕）：点在最上的小果子/糖粒
   top_strawberry: 'a single small red strawberry with green leaves on top, a cute round berry, topping only',
   top_cherry: 'a single small red cherry with a stem, a shiny round berry, topping only',
-  top_sprinkle: 'a small scatter of colorful rainbow sprinkles, tiny bright candy bits, topping only',
+  top_star: 'a small cluster of a few colorful five-pointed star-shaped candies grouped together, each a distinct bright candy star, NOT a block, candy topping only',
   // 蜡烛：竖在蛋糕顶的小蜡烛，底端平
   candle_one: 'a single thin striped birthday candle with a small yellow flame, standing upright, flat bottom, candle only',
   candle_number: 'a single number-shaped birthday candle with a small yellow flame, standing upright, flat bottom, candle only',
@@ -214,7 +214,7 @@ const PART_SHAPE: Record<string, string> = {
   scoop_vanilla: 'a round scoop of cream vanilla ice cream, a soft ball with a flat bottom, scoop only',
   // 顶料（冰淇淋）：淋在球顶的小件
   ice_cherry: 'a single small red cherry with a stem, a shiny round berry, topping only',
-  ice_sprinkle: 'a small scatter of colorful rainbow sprinkles, tiny bright candy bits, topping only',
+  ice_star: 'a small cluster of a few colorful five-pointed star-shaped candies grouped together, each a distinct bright candy star, NOT a block, candy topping only',
 };
 
 /** 取某零件的生图 prompt（统一画风前缀 + 专属外观；未知回退到中文名兜底）。P3 批量生成管线读它。 */
