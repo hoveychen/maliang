@@ -70,13 +70,17 @@ void fragment() {
 	}
 	float fr = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
 	col = mix(col, sky_tint, fr * 0.5);
-	// 岸边泡沫带：atlas 泡沫掩码 × 时间涌动（沿岸相位用逻辑坐标，环面无缝）
-	float wob = 0.75 + 0.25 * sin(TIME * 1.6 + (UV2.x + UV2.y) * 2.4);
-	float foam = smoothstep(0.35, 0.8, texture(control_tex, UV).g * wob);
+	// 岸边白描边（Pokopia 化 P7，serebii_12）：贴岸一条恒亮实心白水线（干净轮廓线，
+	// 不是碎泡沫）。涌动只调制带宽相位（呼吸，沿岸相位用逻辑坐标，环面无缝）——
+	// 旧版拿 wob 乘泡沫本体把线压暗洗成淡蓝雾，白线必须恒亮才立得住。
+	float g = texture(control_tex, UV).g;
+	float breathe = 0.06 * sin(TIME * 1.6 + (UV2.x + UV2.y) * 2.4);
+	float foam = smoothstep(0.30 + breathe, 0.62 + breathe, g);
 	col = mix(col, foam_color, foam);
 	// 波峰高光星点：双层细节同时偏亮处提一把
 	col += step(2.6, d1.g + d2.g) * 0.12;
 	ALBEDO = col;
-	ALPHA = clamp(mix(0.55, 0.88, depth01) + fr * 0.15 + foam * 0.3, 0.0, 0.95);
+	// 白线处提不透明度（0.45）：实心线不能透出湖床把白洗蓝
+	ALPHA = clamp(mix(0.55, 0.88, depth01) + fr * 0.15 + foam * 0.45, 0.0, 0.95);
 	ROUGHNESS = 0.3;
 }
