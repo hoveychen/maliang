@@ -181,3 +181,73 @@ test('recipient 步说「算了不要了」→ 取消（cancel 意图不被 reci
     await close();
   }
 });
+
+// ── P2：产物记 recipient + 交付话术走对方音色 ──────────────────
+
+test('P2：给小兔子造物 → ItemDef.recipient 落库 + 小兔子用自己音色道谢', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    // 造物给小兔子：size 预填「小」→「变一个风车」一句 kind 齐 → done
+    await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '变一个风车' });
+    const sent = await ws(store, session, { type: 'creation_reply', worldId: 'default', characterId: fairyId, optionId: 'bunny' });
+    const created = sent.find((m) => m.type === 'item_created');
+    assert.ok(created, `应造出物品，实际：${sent.map((m) => m.type).join(',')}`);
+    const def = created!.item as { recipient?: RecipientRef };
+    assert.equal(def.recipient?.kind, 'character', 'ItemDef.recipient 记 character');
+    assert.equal(def.recipient?.characterId, 'bunny');
+    // 交付：小兔子用自己的音色（v-bunny）道谢（无心愿盖章，走 A2 交付话术）
+    const thanks = sent.find((m) => m.type === 'praise_tts' && m.voiceId === 'v-bunny');
+    assert.ok(thanks, `应有小兔子音色的道谢，实际：${JSON.stringify(sent.filter((m) => m.type === 'praise_tts'))}`);
+  } finally {
+    await close();
+  }
+});
+
+test('P2：给小兔子造角色 → appearance.recipient 落库', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '我想要一只会飞的红色猫' });
+    const sent = await ws(store, session, { type: 'creation_reply', worldId: 'default', characterId: fairyId, optionId: 'bunny' });
+    const done = sent.find((m) => m.type === 'gen_complete');
+    assert.ok(done, `应造出角色，实际：${sent.map((m) => m.type).join(',')}`);
+    const ch = done!.character as { appearance: { recipient?: RecipientRef } };
+    assert.equal(ch.appearance.recipient?.kind, 'character');
+    assert.equal(ch.appearance.recipient?.characterId, 'bunny');
+  } finally {
+    await close();
+  }
+});
+
+test('P2：给大家造物 → 不记 character recipient、无村民音色道谢', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '变一个红色的风车' });
+    const sent = await ws(store, session, { type: 'creation_reply', worldId: 'default', characterId: fairyId, optionId: 'everyone' });
+    const created = sent.find((m) => m.type === 'item_created');
+    assert.ok(created, '应造出物品');
+    const def = created!.item as { recipient?: RecipientRef };
+    assert.equal(def.recipient?.kind, 'everyone', '记 everyone');
+    assert.equal(sent.some((m) => m.type === 'praise_tts' && String(m.voiceId).startsWith('v-')), false, '给大家不走村民音色道谢');
+  } finally {
+    await close();
+  }
+});
+
+test('P2：描述注入「给X用的」——designSdfProp 收到的描述带 recipient 语义', async () => {
+  const { store, fairyId, close } = await seeded();
+  try {
+    const session = newVoiceSession();
+    await ws(store, session, { type: 'voice_transcript', worldId: 'default', characterId: fairyId, transcript: '变一个风车' });
+    // 造物给小兔子 done 后，ItemDef.name 由 designSdfProp 据描述产出——描述里应含「给小兔子用的」。
+    // 这里直接验会话累积的 recipient（描述由 composePropDesc(attrs) 生成，见 P1 单测覆盖 recipientPhrase）。
+    await ws(store, session, { type: 'creation_reply', worldId: 'default', characterId: fairyId, optionId: 'bunny' });
+    // 会话已清（done），改验产物已带 recipient（描述注入的行为由 recipientPhrase 单测保证）
+    const item = store.listWorldItems('default').find((i) => (i as { recipient?: RecipientRef }).recipient?.characterId === 'bunny');
+    assert.ok(item, '造物已落库且带 recipient=小兔子');
+  } finally {
+    await close();
+  }
+});
