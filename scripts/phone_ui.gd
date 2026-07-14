@@ -1042,7 +1042,12 @@ func refresh_items() -> void:
 			glyph = tb
 		else:
 			glyph = UiAssets.icon_button("ic_gift", 92.0) # 点一下进摆放模式（自己选位）
-		glyph.pressed.connect(func() -> void: _w._begin_placement(String(item_id)))
+		# 组合物（积木式造物，renderRef 'composed:'）多一条路：点它弹「摆到世界 / 拆开改改」，
+		# 后者进拼装台改一槽落成新物件（B1 §3.1）。普通物件仍直接进放置模式。
+		if String(def.get("renderRef", "")).begins_with("composed:"):
+			glyph.pressed.connect(func() -> void: _w._on_composed_item_tapped(String(item_id)))
+		else:
+			glyph.pressed.connect(func() -> void: _w._begin_placement(String(item_id)))
 		var name_label := Label.new()
 		var display := String(def.get("name", "小玩意"))
 		name_label.text = display if count <= 1 else "%s×%d" % [display, count]

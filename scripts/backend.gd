@@ -13,6 +13,11 @@ signal gen_complete(data: Dictionary)      ## 含 character + 最新 wallet
 signal gen_denied(data: Dictionary)        ## 小红花不足，未进造角色（reason=no_flowers + 引导语 + wallet）
 ## 引导式造角色：小仙子追问一轮（含图标选项 + 仙子问句 TTS 资源 + goal 决定占位符）
 signal creation_prompt(data: Dictionary)
+## 积木式造物追问一轮（build，docs/kids-thinking-build-from-parts.md）：与 creation_prompt 平行，
+## 多带 blueprintId + slotId（当前要填的槽，客户端点亮发光）+ options（该槽兼容零件盘）。
+signal build_prompt(data: Dictionary)
+## 复用改装（B1，§3.1）：进「拆开改改」时取回本蓝图每槽的兼容零件表 {blueprintId, options:{slotId:[{id,label,renderRef}]}}
+signal build_options(data: Dictionary)
 ## 引导会话被取消（小朋友说「算了/不要了」，服务端 guide 判的）：收创造视图 + 收占位符 + 念安抚语
 signal creation_cancelled(data: Dictionary)
 signal prop_pending(data: Dictionary)      ## 造物开工（已扣花）：客户端立起魔法熔炉，含最新 wallet
@@ -34,6 +39,10 @@ signal task_complete(data: Dictionary)
 ## 村民的心愿漏话候选 + 玩家已发现的玩法（服务端持久口径，进世界/换场景/发现新玩法后重发）。
 signal npc_wishes(wishes: Array, discovered: Array)
 signal praise_tts(data: Dictionary)
+## 试用·还差一点（A1）：造物类心愿造成功后开「试用」——村民抱怨差一点，出变大/变小箭头调体型。
+signal wish_trial(data: Dictionary)      ## {npcId, itemRef, refineDir, fromSize, complaint, voiceId, fairyHint}
+signal wish_retry(data: Dictionary)      ## 调反(未达上限)：仙子升级问句 {npcId, itemRef, refineDir, tries, fairyHint}
+signal character_resized(data: Dictionary) ## 角色体型改了(服务端重渲染广播){characterId, size, scale}
 ## tts_request 降级流（客户端 edge-tts 失败求服务端合成）：tts_start 带 mime，随后 tts_chunk/tts_end 同一通道
 signal tts_start(mime: String)
 signal tts_failed
@@ -169,6 +178,15 @@ func send_create_character(world_id: String, intent_text: String) -> void:
 func send_creation_reply(world_id: String, character_id: String, option_id: String) -> void:
 	_send({ "type": "creation_reply", "worldId": world_id, "characterId": character_id, "optionId": option_id })
 
+## 复用改装（B1，§3.1）：取回本蓝图每槽的兼容零件表（进「拆开改改」时调，回执走 build_options 信号）。
+func send_build_options(world_id: String, blueprint_id: String) -> void:
+	_send({ "type": "build_options", "worldId": world_id, "blueprintId": blueprint_id })
+
+## 复用改装落成（B1，§3.1）：把编辑后的零件树直接送去落成一行**新** ItemDef（旧的保留），无会话。
+## filled = {slotId: partId}（服务端 fit 校验后按蓝图槽序收拢）。回执走 prop_pending → item_created。
+func send_create_build(world_id: String, blueprint_id: String, filled: Dictionary) -> void:
+	_send({ "type": "create_build", "worldId": world_id, "blueprintId": blueprint_id, "filled": filled })
+
 ## 取消引导式造角色（退出与小仙子的交互）：服务端清掉会话，后续语音不再当造角色答复。
 func send_creation_cancel() -> void:
 	_send({ "type": "creation_cancel" })
@@ -289,6 +307,11 @@ func send_sticker_buy(world_id: String, item_id: String) -> void:
 func send_character_attach(world_id: String, character_id: String, slot: String, item_id: String) -> void:
 	_send({ "type": "character_attach", "worldId": world_id, "characterId": character_id, "slot": slot, "itemId": item_id })
 
+## 试用·还差一点（A1）：小朋友把造出来那件东西的体型调成 new_size（small/medium/big）。
+## 服务端应用体型+广播重渲染，并判定试用是否满意（对/达上限盖章，反且未达上限仙子再问一句）。
+func send_wish_refine(world_id: String, item_ref: String, new_size: String) -> void:
+	_send({ "type": "wish_refine", "worldId": world_id, "itemRef": item_ref, "newSize": new_size })
+
 func _send(obj: Dictionary) -> void:
 	# 统一注入玩家身份：每条出站消息带 playerId（设备端 UUID），服务端按玩家归属记忆/Visit。
 	if not player_id.is_empty() and not obj.has("playerId"):
@@ -369,6 +392,10 @@ func _dispatch(data: Dictionary) -> void:
 			gen_denied.emit(data)
 		"creation_prompt":
 			creation_prompt.emit(data)
+		"build_prompt":
+			build_prompt.emit(data)
+		"build_options":
+			build_options.emit(data)
 		"creation_cancelled":
 			creation_cancelled.emit(data)
 		"world_state":
@@ -380,6 +407,12 @@ func _dispatch(data: Dictionary) -> void:
 			npc_wishes.emit(data.get("wishes", []), data.get("discovered", []))
 		"praise_tts":
 			praise_tts.emit(data)
+		"wish_trial":
+			wish_trial.emit(data)
+		"wish_retry":
+			wish_retry.emit(data)
+		"character_resized":
+			character_resized.emit(data)
 		"tts_start":
 			tts_start.emit(String(data.get("ttsMime", "")))
 		"tts_failed":

@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { MAX_FLOWERS, STAMPS_PER_FLOWER, STAMP_STYLES, type ActiveTask, type TaskType, type Wallet } from './types.ts';
 import type { WorldStore } from './persistence.ts';
 import { wishFor, pickThanks, WISHES } from './wishes.ts';
+import { sizeToScale, type CreatureSize } from './creation_options.ts';
+import { REFINE_MAX_TRIES, refineDirFor } from './refinements.ts';
 
 /** deliver 委托的带话内容池（判定不依赖文本，纯演出）。 */
 const DELIVER_MESSAGES = [
@@ -143,6 +145,68 @@ export function completeWishOnAbility(
   const { flowerGained, wallet } = store.addStamp(worldId, playerId);
   store.setActiveTask(worldId, playerId, null);
   return { task, flowerGained, wallet };
+}
+
+/**
+ * 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md §4.1）：造物类心愿造成功后开一次「试用」——
+ * 不当场盖章，而是标记 tried + 按造出来的档定调整方向 + 记造出来那件东西的引用。返回抱怨方向，
+ * 调用方据此挑抱怨句、让【委托的那个村民】用自己音色漏出「还差一点」，仙子接一句问句。
+ *
+ * 只对进行中且盼着这个能力的 wish（且还在 pending）生效；不匹配返回 null（调用方回落一段完成）。
+ * completeWishOnAbility 保留给不带试用轴的能力（play_game/guide_to 无体型可调，仍一段完成）。
+ */
+export function beginWishTrial(
+  worldId: string,
+  playerId: string,
+  ability: string,
+  itemRef: string,
+  createdSize: CreatureSize,
+  store: WorldStore,
+): { task: ActiveTask; dir: 'smaller' | 'bigger' } | null {
+  const task = store.getActiveTask(worldId, playerId);
+  if (!task || task.type !== 'wish' || task.wishAbility !== ability) return null;
+  if ((task.wishStage ?? 'pending') !== 'pending') return null; // 已在试用中，别重开
+  const dir = refineDirFor(createdSize);
+  task.wishStage = 'tried';
+  task.refineItemRef = itemRef;
+  task.refineDir = dir;
+  task.refineFromSize = createdSize;
+  task.refineTries = 0;
+  store.setActiveTask(worldId, playerId, task);
+  return { task, dir };
+}
+
+/**
+ * 试用·还差一点（A1 §4.1）：小朋友把体型调了一次。
+ *  - 方向对（往抱怨方向调了）**或** 已达调整上限 → 盖 1 章 + 清委托，返回 satisfied（走现成盖章结算）。
+ *  - 方向反且未达上限 → 不动账、refineTries++，返回 retry（调用方让仙子再问一句更具体的问句）。
+ * 到 REFINE_MAX_TRIES 无论调成什么都盖章——终止性写死，绝不第三次挑刺（§3.2）。
+ * 只匹配 tried 且 refineItemRef 一致的委托；不匹配返回 null（不该发生，防御）。
+ */
+export function completeWishRefine(
+  worldId: string,
+  playerId: string,
+  itemRef: string,
+  newSize: CreatureSize,
+  store: WorldStore,
+):
+  | { task: ActiveTask; satisfied: true; flowerGained: boolean; wallet: Wallet }
+  | { task: ActiveTask; satisfied: false; tries: number }
+  | null {
+  const task = store.getActiveTask(worldId, playerId);
+  if (!task || task.type !== 'wish' || task.wishStage !== 'tried' || task.refineItemRef !== itemRef) return null;
+  const from = sizeToScale(task.refineFromSize);
+  const to = sizeToScale(newSize);
+  const correct = task.refineDir === 'smaller' ? to < from : to > from;
+  const tries = (task.refineTries ?? 0) + 1;
+  if (correct || tries >= REFINE_MAX_TRIES) {
+    const { flowerGained, wallet } = store.addStamp(worldId, playerId);
+    store.setActiveTask(worldId, playerId, null);
+    return { task, satisfied: true, flowerGained, wallet };
+  }
+  task.refineTries = tries;
+  store.setActiveTask(worldId, playerId, task);
+  return { task, satisfied: false, tries };
 }
 
 /**

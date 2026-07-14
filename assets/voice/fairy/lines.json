@@ -300,6 +300,30 @@
       "trigger": "bubble",
       "cooldown": 30,
       "text": "呼——泡泡好啦！嘻嘻，现在点点不怕水咯！"
+    },
+    {
+      "id": "fairy_refine_hint_1",
+      "trigger": "refine_hint",
+      "cooldown": 20,
+      "text": "咦？他好像用得不太顺手呢……你看看，是哪里不太对呀？"
+    },
+    {
+      "id": "fairy_refine_hint_2",
+      "trigger": "refine_hint",
+      "cooldown": 20,
+      "text": "唔……他好像不太满意的样子。要不要帮他改一改呀？"
+    },
+    {
+      "id": "fairy_refine_hint_2_1",
+      "trigger": "refine_hint_2",
+      "cooldown": 20,
+      "text": "是不是……它的大小不太合适呀？你觉得该大一点，还是小一点呢？"
+    },
+    {
+      "id": "fairy_refine_hint_2_2",
+      "trigger": "refine_hint_2",
+      "cooldown": 20,
+      "text": "唔……要不要试试把它变一变大小呀？你来选哦！"
     }
   ]
 }

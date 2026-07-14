@@ -61,6 +61,7 @@ UNIT_TESTS=(
   test_atlas_compress
   test_player_profile
   test_stamp_ceremony
+  test_composed_prop
   test_menu_gate
   test_graphics_settings
   test_frame_sampler
@@ -179,6 +180,9 @@ run_test test_visual_props         --fixed-fps 10 --quit-after 120
 run_test test_placement            --fixed-fps 10 --quit-after 40
 run_test test_casting_placeholder  --fixed-fps 10 --quit-after 120
 run_test test_prop_creation_cards  --fixed-fps 10 --quit-after 90
+run_test test_build_cards           --fixed-fps 10 --quit-after 90
+run_test test_remix                 --fixed-fps 10 --quit-after 90
+run_test test_refine                --fixed-fps 10 --quit-after 90
 run_test test_creation_stage       --fixed-fps 10 --quit-after 150
 run_test test_visual_settings      --fixed-fps 10 --quit-after 80
 run_test test_graphics_toggles     --fixed-fps 10 --quit-after 40

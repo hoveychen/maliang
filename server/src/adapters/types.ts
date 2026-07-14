@@ -2,6 +2,7 @@ import type {
   CharacterSpec,
   CreationState,
   ExtractedMemory,
+  GuideBuildResult,
   GuideCreationResult,
   IntentContext,
   IntentResult,
@@ -47,6 +48,12 @@ export interface LLMAdapter {
   guideProp(state: CreationState, childInput: string): Promise<GuideCreationResult>;
   /** 引导式造贴纸一轮：与 guideProp 平行，问的是 kind(图案)/color，产物描述喂 designSticker。 */
   guideSticker(state: CreationState, childInput: string): Promise<GuideCreationResult>;
+  /**
+   * 引导式积木拼装一轮（B1，docs/kids-thinking-build-from-parts.md §3.4）：与 guideProp 平行，但
+   * 问的是「未填必填槽的功能线索」、答的是「兼容零件」，产物是往骨架填零件（filled 增量）而非属性描述。
+   * 铁律：只问功能不给答案，问句绝不出现零件名。读 state.build（blueprintId + 已填槽）。
+   */
+  guideBuild(state: CreationState, childInput: string): Promise<GuideBuildResult>;
   /** 按贴纸的中文描述给出贴纸中文名 + 英文扁平贴纸生图 prompt（喂 generateIconAsset 管线）。 */
   designSticker(intentText: string): Promise<{ name: string; prompt: string }>;
   /**

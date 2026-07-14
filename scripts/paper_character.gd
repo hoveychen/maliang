@@ -132,29 +132,15 @@ func set_anchors(anchors: Dictionary) -> void:
 		_position_sticker(slot) # 锚点后到（如老档案补算）时重摆已挂贴纸
 
 ## 挂贴纸到槽位（headTop/handL/handR）。同槽重复挂 = 换贴图。tex 为贴纸图（含白描边）。
+## 前后三明治双片的几何/材质走 PaperQuad.make_sandwich 共享 helper（与组合物零件同一套数学）。
 func attach_sticker(slot: String, tex: Texture2D) -> void:
 	detach_sticker(slot)
-	var holder := Node3D.new()
-	holder.name = "sticker_" + slot
 	var h := visible_height()
 	var w := h * STICKER_W_RATIO
 	var sh := w * float(tex.get_height()) / float(tex.get_width())
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-	mat.albedo_texture = tex
-	var q := QuadMesh.new()
-	q.size = Vector2(w, sh)
-	q.material = mat
-	for side in [1.0, -1.0]:
-		var mi := MeshInstance3D.new()
-		mi.mesh = q
-		mi.position = Vector3(0.0, 0.0, STICKER_Z * side)
-		if side < 0.0:
-			mi.rotation.y = PI # 背片朝后：翻面时顶上，镜像与角色镜像一致
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		holder.add_child(mi)
-	holder.set_meta("sticker_h", sh)
+	var holder := PaperQuad.make_sandwich(tex, w, sh, STICKER_Z)
+	holder.name = "sticker_" + slot
+	holder.set_meta("sticker_h", sh) # _position_sticker 用它把头顶贴纸底边对齐锚点
 	add_child(holder)
 	_stickers[slot] = holder
 	_position_sticker(slot)
