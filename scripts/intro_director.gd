@@ -105,7 +105,7 @@ func _run() -> void:
 
 ## 建造演出脚本（设计 docs/benchmark-story-ramp-design.md）：分幕把世界「建造」出来，每幕加一层负载，
 ## 到注魔幕在满负载的活场景上定档——小朋友观赏的是一个逐步加压的故事，不是 loading。
-## 空地 → 画地长树(props 揭示) → 小伙伴逐个蹦出(负载堆峰值) → 注魔定档(满负载+镜头慢巡) →（首次）教学 → 就绪。
+## 空地 → 画地长树(props 揭示) → 小伙伴逐个蹦出(镜头绕环慢移+负载堆峰值) → 注魔定档(满负载/钉死镜头) →（首次）教学 → 就绪。
 ## 小伙伴必须在注魔【之前】到齐（峰值测准），故旁白 partner 提到 magic 前。有画质档则跳过注魔段（现状路径）。
 func _show_intro() -> void:
 	await _narrate("intro_open_1")
@@ -114,13 +114,15 @@ func _show_intro() -> void:
 		_world.call("intro_show_scenery")
 	await _narrate("intro_build_1")
 	await _narrate("intro_build_2")
-	# 热闹幕：小伙伴逐个蹦出来（会 wander 的负载村民）——在注魔测档【之前】把负载堆到峰值
+	# 热闹幕：小伙伴逐个蹦出来（会 wander 的负载村民，镜头绕环慢移）——在注魔测档【之前】把负载堆到峰值
 	await _narrate("intro_partner_1")
 	await _spawn_friends()
-	# 注魔幕：满负载活场景定档 + 点点带镜头慢巡
+	# 注魔幕：满负载活场景定档（整段钉死镜头保 trial 可比，见 _run_benchmark）
 	await _run_benchmark_if_needed()
-	# 小伙伴（压测负载）退场，把干净世界交给转正（benchmark 跑没跑都退；bench_despawn_load 幂等）
+	# 建造/热闹/注魔期抢的镜头交还玩家——benchmark 跑没跑都要还（返回用户跳过注魔，否则镜头卡在小伙伴环上）
 	if is_instance_valid(_world):
+		_world.set("focus_override", Vector2.INF)
+		# 小伙伴（压测负载）退场，把干净世界交给转正（bench_despawn_load 幂等）
 		_world.call("bench_despawn_load")
 	if _tutorial:
 		await _run_tutorial()
@@ -130,10 +132,15 @@ func _show_intro() -> void:
 ## 峰值压测负载。被跳过则把剩下的一次补齐（别停在半空），每个 idx 只生一次不重复。
 func _spawn_friends() -> void:
 	var total := Benchmark.EXTRA_CHARS
+	var center: Vector2 = _world.get("focus_logical") if is_instance_valid(_world) else Vector2.ZERO
 	for i in total:
 		if not is_instance_valid(_world):
 			return
 		_world.call("bench_spawn_one", i, total)
+		# 巡游放在【建造期】：小伙伴一个个蹦出时点点带镜头缓缓扫过环上——有生气。放这儿而非注魔测档段，
+		# 是因为测档时镜头必须钉死才能让各 trial 取景一致可比（见 _run_benchmark）。
+		var ang := float(i) / float(maxi(total, 1)) * TAU
+		_world.set("focus_override", WorldGrid.wrap_pos(center + Vector2(cos(ang), sin(ang)) * TOUR_RADIUS))
 		if _skipped:
 			for j in range(i + 1, total):
 				_world.call("bench_spawn_one", j, total)
@@ -148,27 +155,27 @@ func _run_benchmark_if_needed() -> void:
 
 ## 内嵌 benchmark：负载（会 wander 的小伙伴）已由热闹幕 _spawn_friends 铺好、也由 _show_intro 退场——
 ## 这里 add_child 一个 embedded Benchmark 只在【活的峰值】上测（村民照常 wander，仅锁输入+仙子定格），
-## 就地应用 levels + save_all（不 change_scene），期间点点带镜头慢巡。注魔旁白盖住画质切换（音频不占 GPU）。
+## 就地应用 levels + save_all（不 change_scene）。注魔旁白盖住画质切换（音频不占 GPU）。
+##
+## ⚠️ 测档整段【定住镜头】：真机实测——镜头慢巡会让相邻 trial 的采样窗落在不同取景 → p95 抖 ±18ms
+## （trial 甚至出物理上不可能的负收益），贪心戚到一个幸运低样本就误报达标、提前收手，实际只有 23fps。
+## 各 trial 取景一致才可比，所以整段测量把焦点钉死在能看到满村子的机位（村民仍 wander，CPU 负载照旧计入）。
+## 巡游给观感的部分已挪到 _spawn_friends（建造期镜头动）。
 ## 家长跳过则中止定档、不写档，记 Benchmark.pending 留待下次快速定档（不再重演整段 intro 建造）。
 ## 用轮询等 finished（而非 await 信号）：skip 可随时打断，且规避「benchmark 先于 await 就绪就 emit」的竞态。
 func _run_benchmark() -> void:
 	var b := Benchmark.make_embedded(_world)
 	_bench = b
 	add_child(b)
-	var center: Vector2 = _world.get("focus_logical") if is_instance_valid(_world) else Vector2.ZERO
-	var tour_t := 0.0
-	# 注魔旁白【触发即播、不阻塞】——采样与它并行，镜头慢巡贯穿整段测量。若像旧写法 await 旁白，
-	# 而旁白比一次测量还长，benchmark 会在旁白期间就测完、巡游一帧都跑不到（headless 实测踩到）。
+	# 钉死焦点在当前机位（小伙伴环绕于此，＝能看到满村子的代表性视角），整段测量不动 → 各 trial 可比。
+	if is_instance_valid(_world):
+		_world.set("focus_override", _world.get("focus_logical"))
+	# 注魔旁白【触发即播、不阻塞】——采样与它并行。若 await 旁白而旁白比一次测量长，benchmark 会在旁白期间
+	# 就测完（headless 实测踩到）；这里不 await，测量自己在 _process 里跑，轮询等 is_done。
 	if not _skipped and _narrator != null:
 		_narrator.play("intro_magic_1")
 		_duck(true)
 	while not b.is_done() and not _skipped:
-		tour_t += POLL_SEC
-		if is_instance_valid(_world):
-			# 点点带镜头绕村中心慢巡（老板拍板要镜头动）：半径小、人群基本留画面里，
-			# trial 间负载略抖由 FrameSampler 的 2.4s 窗口 + p95 吸收。
-			var ang := tour_t * TOUR_SPEED
-			_world.set("focus_override", WorldGrid.wrap_pos(center + Vector2(cos(ang), sin(ang)) * TOUR_RADIUS))
 		await get_tree().create_timer(POLL_SEC).timeout
 	_duck(false)
 	if is_instance_valid(_world):
