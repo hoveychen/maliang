@@ -13,16 +13,22 @@ func _init() -> void:
 	fails += _check("无存档 source 空", GraphicsSettings.source(), "")
 	fails += _check("无存档 is_user_override=false", GraphicsSettings.is_user_override(), false)
 	var d := GraphicsSettings.load_all()
-	fails += _check("默认键数=9", d.size(), 9)
+	fails += _check("默认键数=全键数", d.size(), GraphicsSettings.all_keys().size())
 	var all_max := true
 	for k: String in GraphicsSettings.KEYS:
 		if int(d[k]) != GraphicsSettings.max_level(k):
 			all_max = false
-	fails += _check("默认全最高档", all_max, true)
+	fails += _check("性能键默认全最高档", all_max, true)
 	fails += _check("hi_res 三级", GraphicsSettings.LEVELS["hi_res"], 3)
 	fails += _check("hi_res 最高档=2", GraphicsSettings.max_level("hi_res"), 2)
-	fails += _check("每键都有 subtitle", GraphicsSettings.SUBTITLES.size(), 9)
+	fails += _check("每键都有 subtitle", GraphicsSettings.SUBTITLES.size(), GraphicsSettings.all_keys().size())
 	fails += _check("每键的级名数=级数", _level_names_match(), true)
+
+	# 样式键（papercraft）：默认关、不进 benchmark 贪心的键集/起点
+	fails += _check("样式键默认关", d["papercraft"], 0)
+	fails += _check("样式键不在 KEYS", "papercraft" in GraphicsSettings.KEYS, false)
+	fails += _check("样式键在 all_keys", "papercraft" in GraphicsSettings.all_keys(), true)
+	fails += _check("all_max 不含样式键", GraphicsSettings.all_max().has("papercraft"), false)
 
 	# 越界夹取
 	fails += _check("clamp 上越界", GraphicsSettings.clamp_level("hi_res", 9), 2)
@@ -52,6 +58,15 @@ func _init() -> void:
 	fails += _check("存越界被夹 fog=0", r2["fog"], 0)
 	fails += _check("缺项补默认 outline=1", r2["outline"], 1)
 	fails += _check("source=backend 不是 user", GraphicsSettings.is_user_override(), false)
+
+	# 样式键存取往返 + 保留语义：用户开了纸艺风后，benchmark 只传性能键重定档不得冲掉
+	var style := GraphicsSettings.load_all()
+	style["papercraft"] = 1
+	GraphicsSettings.save_all(style, "user")
+	fails += _check("样式键往返 papercraft=1", GraphicsSettings.load_all()["papercraft"], 1)
+	GraphicsSettings.save_all(GraphicsSettings.all_max(), "bench", {"gpu": "Mali-G76"})
+	fails += _check("bench 重定档保留画风", GraphicsSettings.load_all()["papercraft"], 1)
+	fails += _check("bench 重定档性能键生效", GraphicsSettings.load_all()["hi_res"], 2)
 
 	# 旧档迁移：graphics 曾是平铺 bool，true→最高档 false→0；且无 source 键 → 视作 user
 	PlayerProfile.save_profile({"graphics": {
@@ -91,7 +106,7 @@ func _init() -> void:
 	quit(fails)
 
 func _level_names_match() -> bool:
-	for k: String in GraphicsSettings.KEYS:
+	for k: String in GraphicsSettings.all_keys():
 		var names: Array = GraphicsSettings.LEVEL_NAMES[k]
 		if names.size() != int(GraphicsSettings.LEVELS[k]):
 			return false

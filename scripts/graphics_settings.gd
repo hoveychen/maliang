@@ -28,6 +28,11 @@ const KEYS := [
 	"prop_anim", "prop_detail", "terrain_detail", "xray",
 ]
 
+## 样式键：纯审美偏好，不是性能旋钮。设置页/持久化/应用与 KEYS 同一套流程，
+## 但 benchmark 贪心、all_max()、backend 众包下发都只碰 KEYS——机器再快也不该
+## 替孩子决定画风。save_all 对缺席的样式键保留已存值（benchmark 重定档不冲掉画风）。
+const STYLE_KEYS := ["papercraft"]
+
 ## 每个键的级数（≥ 2）。level 取值域 [0, LEVELS[key] - 1]。
 const LEVELS := {
 	"actor_shadows": 2,
@@ -39,9 +44,10 @@ const LEVELS := {
 	"prop_detail": 2,
 	"terrain_detail": 2,
 	"xray": 2,
+	"papercraft": 2,
 }
 
-## 默认 = 各键最高档（= LEVELS[key] - 1）。
+## 默认 = 各键最高档（= LEVELS[key] - 1）。样式键例外：默认关（保持现有水彩风）。
 const DEFAULTS := {
 	"actor_shadows": 1,
 	"ground_shadows": 1,
@@ -52,6 +58,7 @@ const DEFAULTS := {
 	"prop_detail": 1,
 	"terrain_detail": 1,
 	"xray": 1,
+	"papercraft": 0,
 }
 
 ## 设置页每行的标题。
@@ -65,6 +72,7 @@ const LABELS := {
 	"prop_detail": "物件精细度",
 	"terrain_detail": "地面细节",
 	"xray": "穿透剪影",
+	"papercraft": "纸艺风",
 }
 
 ## 设置页每行的副标题：说清楚这个旋钮到底控制了什么、调低会看到什么。
@@ -78,6 +86,7 @@ const SUBTITLES := {
 	"prop_detail": "物件边缘的锐利程度。调低后边角略微发圆，但省不少算力。",
 	"terrain_detail": "小路、崖壁、水面上的第二层纹理。调低后地面纹理更简单。",
 	"xray": "角色走到房子后面时仍能看见的半透明剪影。关掉后角色会被挡住。",
+	"papercraft": "整个世界变成手工纸做的：树是折纸多面体带白折痕，地面像粉彩卡纸，湖水像剪纸台阶。喜好选择，几乎不费电。",
 }
 
 ## 每一级在 UI 上的名字（下标 = level）。2 级旋钮统一「关 / 开」语义。
@@ -91,7 +100,12 @@ const LEVEL_NAMES := {
 	"prop_detail": ["粗略", "精细"],
 	"terrain_detail": ["简单", "细致"],
 	"xray": ["关", "开"],
+	"papercraft": ["关", "开"],
 }
+
+## 设置页/持久化/应用遍历的全集：性能旋钮 + 样式键（benchmark/all_max 只用 KEYS）。
+static func all_keys() -> Array:
+	return KEYS + STYLE_KEYS
 
 ## 该键的最高档 level。
 static func max_level(key: String) -> int:
@@ -108,24 +122,29 @@ static func all_max() -> Dictionary:
 		out[k] = max_level(k)
 	return out
 
-## 读全部画质档（缺项/损坏取默认），返回 {key: int level}，只含 KEYS。
+## 读全部画质档（缺项/损坏取默认），返回 {key: int level}，含 KEYS + STYLE_KEYS。
 ## 兼容旧档：graphics 曾是 {key: bool} 平铺，true → 最高档、false → 0 档。
 static func load_all() -> Dictionary:
 	var raw := _raw()
 	var src: Dictionary = raw.get("levels", {}) if raw.has("levels") else raw
 	var out := {}
-	for k: String in KEYS:
+	for k: String in all_keys():
 		var v: Variant = src.get(k, DEFAULTS[k])
 		var lv: int = (max_level(k) if bool(v) else 0) if typeof(v) == TYPE_BOOL else int(v)
 		out[k] = clamp_level(k, lv)
 	return out
 
-## 写全部画质档（只落 KEYS 里的、夹进合法域），并入档案其余字段一起存。
+## 写全部画质档（只落 all_keys() 里的、夹进合法域），并入档案其余字段一起存。
 ## source 记录谁定的档（见文件头）；meta 是可选附加信息（gpu / bench_version / fps）。
+## 性能键缺项落默认；样式键缺项保留已存值——benchmark/backend 只传性能键的字典时，
+## 不得把用户选好的画风冲回默认。
 static func save_all(levels: Dictionary, source: String = "user", meta: Dictionary = {}) -> void:
+	var saved := load_all()
 	var lv := {}
 	for k: String in KEYS:
 		lv[k] = clamp_level(k, int(levels.get(k, DEFAULTS[k])))
+	for k: String in STYLE_KEYS:
+		lv[k] = clamp_level(k, int(levels.get(k, saved[k])))
 	var g := {"levels": lv, "source": source}
 	for mk: String in meta:
 		g[mk] = meta[mk]
