@@ -11,7 +11,7 @@ var fails := 0
 
 func _init() -> void:
 	# ── 蓝图镜像自洽 ──────────────────────────────────────────────────────────
-	_check("镜像 4 副蓝图", BuildBlueprints.BLUEPRINTS.size(), 4)
+	_check("镜像 7 副蓝图", BuildBlueprints.BLUEPRINTS.size(), 7)
 	_check("car 4 槽", (BuildBlueprints.slots("car")).size(), 4)
 	var pose := BuildBlueprints.slot_pose("car", "body")
 	_check("body 槽归一化 x=0.5", float(pose.get("x", -1)), 0.5)
@@ -58,6 +58,33 @@ func _init() -> void:
 	_check("车身 quad 宽=H", absf(body_mesh.size.x - H) < 0.001, true)
 	_check("轮子(scale0.5)比车身小", wheel_mesh.size.x < body_mesh.size.x - 0.5, true)
 	cp.free()
+
+	# ── 新蓝图（花）：验证客户端镜像同步 + 叠放 z 序（花心盖在花瓣之上）─────────────
+	var fspec := {
+		"blueprintId": "flower",
+		"parts": [
+			{ "slotId": "petals", "partId": "petals_round", "partRenderRef": "part:petals_round" },
+			{ "slotId": "center", "partId": "center_yellow", "partRenderRef": "part:center_yellow" },
+			{ "slotId": "stem", "partId": "stem_straight", "partRenderRef": "part:stem_straight" },
+			{ "slotId": "leaf", "partId": "leaf_single", "partRenderRef": "part:leaf_single" },
+		],
+	}
+	var fp := ComposedProp.from_spec(fspec)
+	root.add_child(fp)
+	_check("flower 中文名", BuildBlueprints.display_name("flower"), "小花")
+	_check("flower 4 零件 holder", fp._part_holders.size(), 4)
+	var petals: Node3D = fp._part_holders["petals"]
+	var center: Node3D = fp._part_holders["center"]
+	var stem: Node3D = fp._part_holders["stem"]
+	var petals_mesh := (petals.get_child(0) as MeshInstance3D).mesh as QuadMesh
+	var center_mesh := (center.get_child(0) as MeshInstance3D).mesh as QuadMesh
+	# petals(scale1.0) 与 center(scale0.4) 同 x/y，但花心明显小
+	_check("花心(scale0.4)比花瓣小", center_mesh.size.x < petals_mesh.size.x - 0.5, true)
+	# 花瓣先填(layer0)、花心后填(layer1)→ 花心 z 更前，盖住花瓣中心的镂空
+	_check("花心叠在花瓣之上(z更前)", center.position.z > petals.position.z, true)
+	# stem pose y=0.74 → 偏下(y<0)
+	_check("茎偏下(y<0)", stem.position.y < 0.0, true)
+	fp.free()
 
 	# ── 预览：增量填槽 + 当前槽发光 ────────────────────────────────────────────
 	var cp2 := ComposedProp.new()
