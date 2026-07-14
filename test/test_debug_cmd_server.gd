@@ -14,6 +14,14 @@ class StubWorld extends Node:
 	var banner: Label = null
 	var bag := {}
 	var selected: Node = null
+	# harness 命令路由记录（talk_fairy / reset_budget 由 _execute 转调这两个方法）
+	var talk_fairy_calls := 0
+	var reset_budget_calls := 0
+	func harness_talk_fairy() -> bool:
+		talk_fairy_calls += 1
+		return true
+	func harness_reset_play_budget() -> void:
+		reset_budget_calls += 1
 
 var _ran := false
 
@@ -42,7 +50,7 @@ func _run_once() -> void:
 	fails += _check("tap ok", tap.get("ok"), true)
 	fails += _check("tap x", tap.get("x"), 100.0)
 	fails += _check("tap y", tap.get("y"), 200.5)
-	for op in ["state", "screencap", "accept", "replay", "retry"]:
+	for op in ["state", "screencap", "accept", "replay", "retry", "talk_fairy", "reset_budget"]:
 		var r := DebugCmdServer.parse_command('{"op":"%s"}' % op)
 		fails += _check("%s ok" % op, r.get("ok"), true)
 		fails += _check("%s op" % op, r.get("op"), op)
@@ -112,6 +120,15 @@ func _run_once() -> void:
 	var r_retry := srv._execute({"ok": true, "op": "retry"})
 	fails += _check("retry 回包", r_retry.get("ok"), true)
 	fails += _check("retry 后未在确认", r_retry.get("vc_confirming"), false)
+
+	print("[_execute talk_fairy / reset_budget：路由到宿主 harness 钩子]")
+	var r_tf := srv._execute({"ok": true, "op": "talk_fairy"})
+	fails += _check("talk_fairy 回包 ok", r_tf.get("ok"), true)
+	fails += _check("talk_fairy entered", r_tf.get("entered"), true)
+	fails += _check("talk_fairy 转调宿主一次", world.talk_fairy_calls, 1)
+	var r_rb := srv._execute({"ok": true, "op": "reset_budget"})
+	fails += _check("reset_budget 回包 ok", r_rb.get("ok"), true)
+	fails += _check("reset_budget 转调宿主一次", world.reset_budget_calls, 1)
 
 	vc.close(); vc.queue_free()
 	srv.queue_free()

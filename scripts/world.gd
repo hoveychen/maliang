@@ -1634,6 +1634,30 @@ func _apply_cooldown_block(blocked: bool) -> void:
 	elif fairy_voice != null:
 		fairy_voice.try_play("cooldown_end") # 冷却结束：休息好啦，继续玩
 
+## ── e2e harness 钩子（docs/voice-e2e-harness-design.md）───────────────────────────
+## 供 DebugCmdServer 的 talk_fairy / reset_budget 命令调用。debug 构建才接命令口，release 不触达。
+
+## 不靠屏幕坐标直接进与小仙子「点点」的对话：找到仙子发起 _approach_npc（玩家走过去+进对话，
+## 与「点自己=跟身边小仙子说话」同一条已验证路径）。返回是否找到仙子并发起（对话开在几帧后，脚本轮询 vc_open）。
+func harness_talk_fairy() -> bool:
+	var fairy := _find_fairy()
+	if fairy.is_empty() or not is_instance_valid(fairy.get("node")):
+		return false
+	_approach_npc(fairy["node"])
+	return true
+
+## 清掉游玩时长冷却门（45min 玩满 → 10min 冷却模态挡住造物/交互），供 e2e 连测不被拦。
+## 与 _step_play_budget 同口径重置本地预算 + 收遮罩 + 落盘；不碰服务端。
+func harness_reset_play_budget() -> void:
+	_play_used_sec = 0.0
+	_play_cooldown_until = 0.0
+	_play_remaining_frac = 1.0
+	_play_cooldown_frac = 0.0
+	if _play_blocked:
+		_play_blocked = false
+		_apply_cooldown_block(false) # 收全屏遮罩、恢复交互
+	PlayerProfile.save_play_budget(0.0, 0.0, Time.get_unix_time_from_system())
+
 ## 冷却拦截遮罩：半透明暗底 + 居中卡片（大闹钟饼图倒计时 + 文案）。整屏 STOP 吞点击，冷却期挡住世界。
 func _build_cooldown_overlay() -> Control:
 	var root := Control.new()
