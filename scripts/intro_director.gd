@@ -12,7 +12,7 @@ extends Node
 ##   - 分幕建造演出：IntroNarrator 顺序播预制旁白，世界按幕「长」出来——空地 → 揭示树木(props) →
 ##       小伙伴逐个蹦出(会 wander 的负载村民，负载堆到峰值) → 注魔定档；无档案(未看过引导)时
 ##       穿插教学段（走路→靠近村民→开口说话，见 _run_tutorial）。可被家长长按 skip() 跳过。
-##   - benchmark 段（无画质档时）：在【满负载活场景】上跑贪心定档（Benchmark.make_embedded）——村民
+##   - benchmark 段（无画质档时）：在【满负载活场景】上跑贪心定档（Benchmark.make）——村民
 ##       照常 wander（A* 计入 p95）、仅锁输入 + 仙子定格，注魔旁白盖住画质切换、点点带镜头慢巡，测完就地
 ##       应用 levels + save_all（不 change_scene）。负载（小伙伴）由本编排器铺、也由本编排器退场（转正前）。
 ##   - 转正：等 fetch（超时兜底）→ world._bootstrap_apply 演出化落地服务端世界 → 标记 intro 已看过。
@@ -23,7 +23,9 @@ extends Node
 signal finished
 
 ## 「下次进 world 要跑 intro」：上游（menu/onboarding）按 should_run 置位，world._ready 见到即挂本编排器
-## 并消费掉。与 Benchmark.pending 同款显式开关——默认 false，故 headless 测试直接实例化 main.tscn 不会误入。
+## 并消费掉。显式开关——默认 false，故 headless 测试直接实例化 main.tscn 不会误入。
+## 画质定档（benchmark）现在只嵌在本编排器的注魔幕里跑，没有独立入口：新机器首启 / 「重新检测画质」
+## 都靠 should_run（无画质档）走这一条路。
 static var pending := false
 
 ## 是否需要 intro 前置阶段：无画质档（新 GPU 待定档）或未看过建造演出（首次）。
@@ -161,10 +163,10 @@ func _run_benchmark_if_needed() -> void:
 ## （trial 甚至出物理上不可能的负收益），贪心戚到一个幸运低样本就误报达标、提前收手，实际只有 23fps。
 ## 各 trial 取景一致才可比，所以整段测量把焦点钉死在能看到满村子的机位（村民仍 wander，CPU 负载照旧计入）。
 ## 巡游给观感的部分已挪到 _spawn_friends（建造期镜头动）。
-## 家长跳过则中止定档、不写档，记 Benchmark.pending 留待下次快速定档（不再重演整段 intro 建造）。
+## 家长跳过则中止定档、不写档（画质档没存 → 下次 should_run 自然重跑首启故事定档，不留 pending 快路径）。
 ## 用轮询等 finished（而非 await 信号）：skip 可随时打断，且规避「benchmark 先于 await 就绪就 emit」的竞态。
 func _run_benchmark() -> void:
-	var b := Benchmark.make_embedded(_world)
+	var b := Benchmark.make(_world)
 	_bench = b
 	add_child(b)
 	# 钉死焦点在当前机位（小伙伴环绕于此，＝能看到满村子的代表性视角），整段测量不动 → 各 trial 可比。
@@ -180,9 +182,8 @@ func _run_benchmark() -> void:
 	_duck(false)
 	if is_instance_valid(_world):
 		_world.set("focus_override", Vector2.INF) # 交还镜头给玩家跟随（转正后相机贴回主角）
-	if not b.is_done(): # 仅在被跳过时成立：中止、不定档、留待下次
+	if not b.is_done(): # 仅在被跳过时成立：中止、不定档（下次 should_run 见无画质档自然重跑故事）
 		b.abort()
-		Benchmark.pending = true
 	if is_instance_valid(b):
 		b.queue_free()
 	_bench = null
