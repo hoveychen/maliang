@@ -325,6 +325,12 @@ func _send(obj: Dictionary) -> void:
 	sent.emit(obj)
 	if _open:
 		_ws.send_text(JSON.stringify(obj))
+		# 探针（debug-only）：坐实关键出站消息真发出去了（voice-e2e 排查 name_creation 落库失败）。
+		if OS.is_debug_build() and String(obj.get("type", "")) == "name_creation":
+			print("[ws] name_creation SENT (ws open)")
+	elif OS.is_debug_build():
+		# 探针（debug-only）：WS 未连时 _send 会静默丢弃——把丢弃如实打出来，别再当无事发生。
+		push_warning("[ws] send DROPPED (ws closed): %s" % String(obj.get("type", "")))
 
 func _process(delta: float) -> void:
 	var t0 := Time.get_ticks_usec()

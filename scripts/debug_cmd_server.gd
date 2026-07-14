@@ -234,6 +234,10 @@ func _snapshot() -> Dictionary:
 		snap["banner_visible"] = banner.visible if banner != null else false
 		var bag: Variant = w.get("bag")
 		snap["bag_size"] = (bag as Dictionary).size() if typeof(bag) == TYPE_DICTIONARY else -1
+		# 探针：WS 是否连着（voice-e2e 查 name_creation 落库失败——疑因 _send 在 WS 断时静默丢弃）。
+		var bk: Variant = w.get("backend")
+		if bk != null and (bk as Object).has_method("is_online"):
+			snap["ws_open"] = bool((bk as Object).call("is_online"))
 	var vc := _vc()
 	if vc != null:
 		snap["vc_open"] = vc.is_open()
