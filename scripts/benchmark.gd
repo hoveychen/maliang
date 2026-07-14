@@ -22,6 +22,9 @@ signal finished(levels: Dictionary, p95_ms: float)
 const EXTRA_CHARS := 12   ## 环绕玩家的额外角色数：压满角色渲染这条最贵的路径
 const MIN_GAIN_MS := 1.5  ## 「关了真的有明显提升」的门槛：收益低于它就不值得掉这档画质
 const MAX_MEASURES := 30  ## 测量次数硬上限（~30×3.6s ≈ 108s）：最弱的机器也不能无限测下去
+const HYSTERESIS_MS := 2.0 ## 近并列滞回：后选旋钮收益要超过当前最佳 HYSTERESIS_MS 才顶替，否则按 KEYS
+                           ## 固定顺序留在先试的那个——杀掉「两旋钮收益差在测量噪声内、两次跑各选各的、
+                           ## 采纳档不可复现」（PoC 实测：actor_shadows 与 hi_res 差 ~1-2ms，一次开一次关）。
 
 var _world: Node3D
 var _levels: Dictionary          ## 当前采纳的档
@@ -76,6 +79,9 @@ func abort() -> void:
 
 ## 应用一组档并开始采样。
 func _start_measure(levels: Dictionary) -> void:
+	# 确定化：每次测量前把压测负载复位到同一状态（村民回各自 home + 重启固定巡逻），让每个 trial 的
+	# 采样窗都跑【同一段】动态负载序列，而非各测各的随机 wander（±60ms 噪声的大头，见 PoC）。
+	_world.call("bench_reset_load")
 	for key: String in GraphicsSettings.KEYS:
 		_world.call("_apply_graphics_key", key, int(levels[key]))
 	_sampler = FrameSampler.new()
@@ -116,7 +122,7 @@ func _advance(p95: float) -> void:
 	var gain := _cur_ms - p95
 	print("BENCH trial %-14s lv%d p95=%.1fms gain=%+.1fms" % [
 		_trial_key, int(_levels[_trial_key]) - 1, p95, gain])
-	if gain > _best_gain:
+	if gain > _best_gain + HYSTERESIS_MS:  # 滞回：后选旋钮要明显更优才顶替，近并列按 KEYS 顺序留先试的
 		_best_gain = gain
 		_best_key = _trial_key
 		_best_ms = p95

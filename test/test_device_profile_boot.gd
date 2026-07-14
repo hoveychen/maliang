@@ -23,8 +23,8 @@ func _init() -> void:
 	fails += _check("device id 落进档案", String(PlayerProfile.load_profile().get("device_id", "")), id1)
 
 	# 跨语言常量对齐：改了旋钮集合/口径必须两处同步 bump，否则旧样本会串桶。
-	# v3（benchmark-story-ramp）：采样期不再冻结、负载角色改活 wander（server/src/device_profile.ts 同步为 3）。
-	fails += _check("客户端 BENCH_VERSION 与服务端对齐", DeviceProfile.BENCH_VERSION, 3)
+	# v4（bench-determinism）：负载改确定性固定巡逻 + 每 trial 复位（server/src/device_profile.ts 同步为 4）。
+	fails += _check("客户端 BENCH_VERSION 与服务端对齐", DeviceProfile.BENCH_VERSION, 4)
 
 	if backup.is_empty():
 		PlayerProfile.clear()

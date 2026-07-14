@@ -467,10 +467,9 @@ func _setup_audio() -> void:
 		confirm_bar.replay_pressed.connect(_vc.replay)
 		confirm_bar.accept_pressed.connect(_vc.accept)
 		confirm_bar.retry_pressed.connect(_vc.retry)
-	# 端侧语音 e2e 注入 harness 的控制通道（docs/voice-e2e-harness-design.md §4.3）：
-	# 仅 debug 构建开本地 TCP 命令口，release 一行不跑（同 perf_sweep/[vad] logcat 门控）。
-	if OS.is_debug_build():
-		add_child(DebugCmdServer.make(self))
+	# 端侧语音 e2e 注入 harness 的控制通道（docs/voice-e2e-harness-design.md §4.3）现改为 app 级 autoload
+	# （[autoload] HarnessCmd = debug_cmd_server.gd），从 App 启动就常驻、跨 menu/onboarding/world——好让
+	# onboarding 的语音流程也能 e2e。故这里不再 add_child（否则与 autoload 抢 8577）；debug 门禁搬进了它 _ready。
 
 ## 开放麦门禁（每帧）：端侧未就绪不喂（绝不上传）；喊话只走端侧；否则按 FSM mic_open。
 ## cooldown 已折进 FSM（COOLDOWN 态非 mic_open），退避倒计时在 _process 里推进。
@@ -2269,8 +2268,8 @@ func _step_remote_actors(_delta: float) -> void:
 			_exit_player_talk()
 
 func _step_executors(delta: float) -> void:
-	# benchmark 采样期【不再】冻结村民：让 wander（A* 寻路 + 走动 CPU）全程计入 p95，
-	# 这才是弱机真实卡顿的来源。冻结静态场景无逐帧 CPU 尖峰、p95 假性达标 → 测出全最高。
+	# benchmark 采样期【不冻结】村民：让固定巡逻（A* 寻路 + 走动 CPU）全程计入 p95，才是弱机真实卡顿来源。
+	# （真机 PoC 实证：冻死静态场景无逐帧 CPU 尖峰、p95 假性达标 → 采纳过高档 → 真机反而卡；见 bench-determinism。）
 	for ex in _executors:
 		ex.step(delta)
 	# 单趟分拣（旧版两次 filter 每帧各分配一个数组+Callable，无人完成时纯浪费）
@@ -4310,14 +4309,68 @@ func bench_spawn_one(idx: int, total: int) -> void:
 	if atlas != null:
 		var phase := float(idx) / float(maxi(total, 1)) * 3.9  # 错开相位，避免整齐同帧的机械感
 		npc.play_anim(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
-	npcs.append({ "node": npc, "logical": lg, "id": did })
+	npcs.append({ "node": npc, "logical": lg, "id": did, "bench_home": lg })
 	OccupancyMap.char_register(did, lg, 2)
-	_start_ambient_wander(npcs[npcs.size() - 1])  # 会 wander = 压寻路 CPU（静态负载测不出这笔）
+	# 确定性巡逻（非随机 wander）：保住 A* 寻路 CPU 计入 p95，但每次跑的负载序列可复现——
+	# 随机 wander 的目标点每 trial 都不同、路径成本天差地别，是 ±60ms trial 噪声的大头（见 PoC 实测）。
+	_start_bench_patrol(npcs[npcs.size() - 1], idx)
 
 ## 一次生齐 count 个压测负载（独立 benchmark 场景走这条；intro 分幕用 bench_spawn_one 逐个生）。
 func bench_spawn_load(count: int) -> void:
 	for i in count:
 		bench_spawn_one(i, count)
+
+## benchmark 确定性负载：为一个 bench 村民算好一圈固定巡逻路点（绕 home 的几个方位），存进字典。
+## 路点在生成期一次算定——那时占用是确定的，所以路点集也确定；跳过水面/被占的候选，保证可达、
+## 不烧一次注定失败的全预算 A*。角度按 idx 错开，各村民走各自固定的一圈，整体负载稳定可复现。
+func _start_bench_patrol(npc_dict: Dictionary, idx: int) -> void:
+	var home: Vector2 = npc_dict["bench_home"]
+	var did := String(npc_dict.get("id", ""))
+	var base := TAU * float(idx) / float(maxi(Benchmark.EXTRA_CHARS, 1))  # 每村民一套错开但固定的方位
+	var wps: Array[Vector2] = []
+	for k in 4:
+		var a := base + TAU * float(k) / 4.0
+		var cand := WorldGrid.wrap_pos(home + Vector2(cos(a), sin(a)) * 6.0)  # 半径 6m，与旧 wander 同量级
+		if TerrainMap.tile_type(WorldGrid.to_tile(cand)) != TerrainMap.T_WATER \
+				and Pathfinder.cell_free(OccupancyMap.to_cell(cand), 2, did):
+			wps.append(cand)
+	npc_dict["bench_patrol"] = wps
+	_start_bench_patrol_exec(npc_dict)
+
+## 用村民字典里存好的巡逻路点起一个执行器：循环「等一拍 → 走到下一路点」。等待时长固定（非随机），
+## 保证每 trial 的动态负载序列一致。无可达路点时原地等（极少见，仍确定性）。
+func _start_bench_patrol_exec(npc_dict: Dictionary) -> void:
+	if npc_dict.get("replicated", false):
+		return
+	var wps: Array = npc_dict.get("bench_patrol", [])
+	var cmds: Array = []
+	if wps.is_empty():
+		cmds = [{ "type": "wait", "params": { "duration": 1.5 } }]
+	else:
+		for wp: Vector2 in wps:
+			cmds.append({ "type": "wait", "params": { "duration": 1.2 } })
+			cmds.append({ "type": "move_to", "params": { "target": [wp.x, wp.y] } })
+	var ex := BehaviorExecutor.new()
+	ex.setup(npc_dict, { "commands": cmds, "loop": true })
+	ex.ambient = true
+	_executors.append(ex)
+
+## benchmark 每 trial 前调用：把所有 bench 村民复位到各自 home + 重启巡逻，让每个 trial 的采样窗
+## 都从【同一世界状态】开始跑【同一段】动态负载——这是「确定化地动」的核心，杀掉「上一 trial 走到哪
+## 了」这个随画质档变化的隐藏变量（否则重档→低帧→村民走得慢→位置不同→负载不同，测量被自己污染）。
+func bench_reset_load() -> void:
+	for n in npcs:
+		if not String(n.get("id", "")).begins_with("bench_"):
+			continue
+		for j in range(_executors.size() - 1, -1, -1):  # 取消旧执行器（按引用同一性），避免撞上复位
+			if (_executors[j] as BehaviorExecutor).drives(n):
+				(_executors[j] as BehaviorExecutor).cancel()
+				_executors.remove_at(j)
+		var home: Vector2 = n.get("bench_home", n.get("logical"))
+		n["logical"] = home
+		n["paper_prev"] = home  # 防瞬移被 _update_paper_motion 当成一帧巨速→误触走路/翻面
+		OccupancyMap.char_register(String(n["id"]), home, 2)  # 占用重置回 home（char_register 先注销再注册）
+		_start_bench_patrol_exec(n)
 
 ## intro 建造·起手极简：藏起散布植被 + 地面斜阳影，让「大地长出来、小树冒出来」有从无到有的过程。
 ## chunk_manager 会记住 _props_shown/_ground_shadows，后续新铺的区块也继承隐藏。
