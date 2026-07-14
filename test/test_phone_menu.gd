@@ -40,7 +40,7 @@ func _run(scene: Node) -> void:
 	# 两块屏幕视口按 PhoneUi 尺寸就绪
 	_check(phone.front_viewport() != null and phone.front_viewport().size == PhoneUi.FRONT_PX, "正面视口尺寸")
 	_check(phone.spread_viewport() != null and phone.spread_viewport().size == PhoneUi.SPREAD_PX, "跨页视口尺寸")
-	# 主屏图标分页：3x3 网格、每页 columns=3；所有页图标总数 = 已实装 app 数（3）
+	# 主屏图标分页：每页 2 列大格、居中；所有页图标总数 = 已实装 app 数（4）
 	var pager: ScrollContainer = pui.get("_phone_pager")
 	var pages_box: HBoxContainer = pui.get("_phone_pages_box")
 	_check(pager != null, "_phone_pager（图标分页横滚）存在")
@@ -49,12 +49,12 @@ func _run(scene: Node) -> void:
 	var cols_ok := true
 	if pages_box != null:
 		for page in pages_box.get_children():
-			for g in page.get_children():
-				if g is GridContainer:
-					if (g as GridContainer).columns != 3:
-						cols_ok = false
-					icon_total += g.get_child_count()
-	_check(cols_ok, "每页网格 columns=3 (3x3)")
+			# 页布局：CenterContainer → GridContainer（比 3x3 版多包了一层居中容器）
+			for g in (page as Node).find_children("*", "GridContainer", true, false):
+				if (g as GridContainer).columns != PhoneUi.PHONE_GRID_COLS:
+					cols_ok = false
+				icon_total += g.get_child_count()
+	_check(cols_ok, "每页网格 columns=%d" % PhoneUi.PHONE_GRID_COLS)
 	_check(icon_total == 4, "图标总数 = 已实装 app 数 4（home/flowers/items/settings）")
 
 	var cover: Control = pui.get("_screen_cover")

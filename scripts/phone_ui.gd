@@ -26,8 +26,13 @@ const PHONE_APP_FALLBACK := { "home": "ic_pin", "flowers": "reward_flower", "ite
 ## 小红花经济常量（与 server/src/types.ts 对齐）。
 const MAX_FLOWERS := 9              ## 小红花上限（3×3 格）
 const STAMPS_PER_FLOWER := 3        ## 每满 3 章换 1 朵花
-const PHONE_GRID_COLS := 3          ## 主屏图标网格列数（3x3）
-const PHONE_PAGE_SLOTS := 9         ## 每页图标格数（3x3）
+const PHONE_GRID_COLS := 2          ## 主屏图标每行格数（2 列大格：小手指头点得准）
+const PHONE_PAGE_ROWS := 3          ## 每页行数
+const PHONE_PAGE_SLOTS := PHONE_GRID_COLS * PHONE_PAGE_ROWS  ## 每页图标格数
+const APP_TILE_PX := 132.0          ## app 图标底卡边长
+const APP_ICON_PX := 100            ## 底卡里的图标最大宽
+const APP_COL_GAP := 34             ## 同行两格的横向间距
+const APP_ROW_GAP := 30             ## 行与行的纵向间距
 
 var _w                              ## world（业务回调；动态访问，别 typed）
 
@@ -344,17 +349,17 @@ func _make_app_icon(app: Array) -> Control:
 		tex = UiAssets.tex(String(PHONE_APP_FALLBACK.get(id, "st_star")))
 	var box := VBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 6)
+	box.add_theme_constant_override("separation", 8)
 	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(72.0, 72.0)
+	btn.custom_minimum_size = Vector2(APP_TILE_PX, APP_TILE_PX)
 	btn.icon = tex
 	btn.expand_icon = true
 	btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	btn.add_theme_constant_override("icon_max_width", 56)
+	btn.add_theme_constant_override("icon_max_width", APP_ICON_PX)
 	# app 图标底：近白 + 明显沙色描边 + 稍大投影（比奶油底对比高，像贴上去的贴纸）。
 	var st := StyleBoxFlat.new()
 	st.bg_color = Color(1.0, 1.0, 0.995)
-	st.set_corner_radius_all(20)
+	st.set_corner_radius_all(28)
 	st.set_border_width_all(2)
 	st.border_color = Color(0.85, 0.72, 0.50)
 	st.shadow_color = Color(0.35, 0.24, 0.10, 0.32)
@@ -394,11 +399,13 @@ func _make_app_icon(app: Array) -> Control:
 	var cap := Label.new()
 	cap.text = String(app[1])
 	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	UiAssets.style_card_label(cap, 22)
+	UiAssets.style_card_label(cap, 26)
 	box.add_child(cap)
 	return box
 
-## 按 PHONE_APPS 切页填充图标（每页 3x3=9 格，不足不铺留白，仿 iPhone 主屏）。
+## 按 PHONE_APPS 切页填充图标（两列、最多三行=6 大格/页）。图标块顶部对齐、往下铺开占满
+## 可用高度（不是缩成一坨居中），行距拉大，像沿长条手机往下走的应用列表；水平居中。
+## 当前 4 个 app 填满前两行，第三行留白待日后新 app（装扮/引导造角色等）。
 func _build_phone_pages() -> void:
 	for c in _phone_pages_box.get_children():
 		c.queue_free()
@@ -406,18 +413,28 @@ func _build_phone_pages() -> void:
 	var pages := int(ceil(float(maxi(n, 1)) / float(PHONE_PAGE_SLOTS)))
 	var idx := 0
 	for _p in pages:
-		var page := HBoxContainer.new() # 页宽=分页容器宽（tick 同步），网格水平+垂直居中
-		page.alignment = BoxContainer.ALIGNMENT_CENTER
+		# 页填满分页容器（宽由 tick 同步、高撑满）。VBox 顶部对齐 + 内嵌 HBox 水平居中，
+		# 让两列图标从状态栏下方起往下排，占住整屏高度而非挤在顶部一小块。
+		var page := VBoxContainer.new()
+		page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		page.alignment = BoxContainer.ALIGNMENT_BEGIN
+		page.add_theme_constant_override("separation", 0)
+		var top_pad := Control.new() # 与桌面 widget 拉开一点呼吸
+		top_pad.custom_minimum_size = Vector2(0.0, 10.0)
+		page.add_child(top_pad)
+		var center := HBoxContainer.new()
+		center.alignment = BoxContainer.ALIGNMENT_CENTER
+		center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var g := GridContainer.new()
-		g.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		g.columns = PHONE_GRID_COLS
-		g.add_theme_constant_override("h_separation", 22)
-		g.add_theme_constant_override("v_separation", 22)
+		g.add_theme_constant_override("h_separation", APP_COL_GAP)
+		g.add_theme_constant_override("v_separation", APP_ROW_GAP)
 		for _s in PHONE_PAGE_SLOTS:
 			if idx < n:
 				g.add_child(_make_app_icon(PHONE_APPS[idx]))
 				idx += 1
-		page.add_child(g)
+		center.add_child(g)
+		page.add_child(center)
 		_phone_pages_box.add_child(page)
 
 ## 翻页圆点：>1 页才显示，当前页高亮。
@@ -503,8 +520,11 @@ func _step_phone_pager(delta: float) -> void:
 	var w := _phone_pager.size.x
 	if w > 1.0 and not is_equal_approx(w, _phone_page_w):
 		_phone_page_w = w
+		# 每页宽=容器宽、高=容器高：CenterContainer 撑满可用区，图标块才落在正中，
+		# 而不是缩在顶部、下半屏空一大片。
+		var h := _phone_pager.size.y
 		for pg in _phone_pages_box.get_children():
-			(pg as Control).custom_minimum_size.x = w
+			(pg as Control).custom_minimum_size = Vector2(w, h)
 	if not _phone_pager_dragging and _phone_page_w > 1.0:
 		var target := int(round(_phone_page * _phone_page_w))
 		var cur := _phone_pager.scroll_horizontal
