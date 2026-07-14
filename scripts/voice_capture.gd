@@ -87,6 +87,16 @@ func _ready() -> void:
 ## editor/headless 从源码跑时单例在、但模型不随包（除非 MALIANG_ASR_MODEL_DIR 指路），
 ## initialize() 会 asr_error → _asr 置空 = 本机无识别（语音不工作但不崩，见 _on_local_error）。
 func _setup_local_asr() -> void:
+	# e2e 注入（docs/voice-e2e-harness-design.md）：debug 构建 + user://asr_harness 标志 →
+	# 改注 ScriptedAsr 替身（不识别音频，说完吐预排文本），绕过真单例/真模型，供真机自动回归。
+	# 默认（无标志）一行不动、照走真实单例路径——回归护栏；OS.is_debug_build 门控，绝不进 release。
+	if OS.is_debug_build() and FileAccess.file_exists("user://asr_harness"):
+		_asr = ScriptedAsr.new()
+		_asr.connect("final_result", _on_local_final)
+		_asr.connect("asr_ready", _on_local_ready)
+		_asr.connect("asr_error", _on_local_error)
+		_asr.initialize()
+		return
 	if not Engine.has_singleton("MaliangAsr"):
 		# Android/导出 macOS 没有单例 = 导出漏带端侧 ASR（坏包），硬报错拒进游戏。
 		if AsrGuard.is_fatal(os_name, false, OS.has_feature("template")):
