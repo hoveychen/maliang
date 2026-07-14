@@ -389,6 +389,42 @@ static func layer_tints_linear() -> PackedVector3Array:
 static func layer_means_linear() -> PackedVector3Array:
 	return _to_linear_padded(layer_means())
 
+## 层 → 平色（Pokopia 化 P2）：该层贴图经 shader 上色后呈现色的空间均值（线性空间），
+## = tint × img_mean / mean（旧水彩层 img_mean≈mean → 平色≈tint；烘色层 tint/mean 白 →
+## 平色=贴图均值，一条公式两类层通吃）。flatten 旋钮把 body 往这个平色收敛：远看干净
+## 色块、近看只留少量笔触。low_detail 档的纯色 body 也用它（layer_tint 对烘色层是白，
+## 直接当纯色会把地面洗白）。
+static var _layer_flats := PackedVector3Array()
+
+static func layer_flats_linear() -> PackedVector3Array:
+	if _layer_flats.is_empty():
+		_compute_layer_flats()
+	return _layer_flats
+
+## 逐层算贴图均值：sRGB→线性后对半缩到 1×1（逐级 box 均值，全程 C++ 路径，启动一次性）。
+static func _compute_layer_flats() -> void:
+	var tints := layer_tints_linear()
+	var means := layer_means_linear()
+	_layer_flats.resize(SHADER_ARRAY_SIZE)
+	for i in range(LAYER_TEX_PATHS.size()):
+		var tex: Texture2D = load(LAYER_TEX_PATHS[i])
+		var img: Image = tex.get_image() if tex != null else null
+		if img == null:
+			_layer_flats[i] = tints[i]
+			continue
+		if img.is_compressed():
+			img.decompress()
+		if img.get_format() != Image.FORMAT_RGBA8:
+			img.convert(Image.FORMAT_RGBA8)
+		img.srgb_to_linear()
+		while img.get_width() > 1 or img.get_height() > 1:
+			img.resize(maxi(1, img.get_width() >> 1), maxi(1, img.get_height() >> 1), Image.INTERPOLATE_BILINEAR)
+		var c := img.get_pixel(0, 0)
+		_layer_flats[i] = Vector3(
+			tints[i].x * c.r / maxf(means[i].x, 0.001),
+			tints[i].y * c.g / maxf(means[i].y, 0.001),
+			tints[i].z * c.b / maxf(means[i].z, 0.001))
+
 ## 组装顶面/侧壁共用的 Texture2DArray（各层同尺寸同格式）。运行期一次性建，材质共享。
 ## headless 下也可安全构造（Image 解码 + create_from_images 不依赖窗口/GPU 上传）。
 static func build_texture_array() -> Texture2DArray:

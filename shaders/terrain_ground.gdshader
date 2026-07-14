@@ -27,6 +27,14 @@ uniform vec3 cliff_rim : source_color = vec3(0.63, 0.86, 0.42);  // 崖缘亮草
 uniform int base_layer = 0;
 uniform float tile_period = 10.0;      // 贴图平铺周期（米）；须整除环面跨度 150
 uniform float detail_strength = 0.8;
+// 平色化（Pokopia 化 P2）：flatten 把各层往其呈现色均值收敛（0=旧观感，1=纯平色）——
+// 照片纹理的均匀噪声远看会吃掉几何可读性，Pokopia 的表面哲学是干净色块+稀疏点缀。
+// layer_flat = 逐层平色（TerrainTextures.layer_flats_linear，线性空间，水彩/烘色两类层通吃）。
+// tile_jitter：per-tile 拼布色差（明度±5% + 色相黄↔青微摆），顶面按 2m tile、
+// 崖壁按 2m 墙格（UV2=(沿墙,y)）各自成块——保住「每块轻微色差」的方块可读性。
+uniform vec3 layer_flat[64];
+uniform float flatten : hint_range(0.0, 1.0) = 0.0;
+uniform float tile_jitter : hint_range(0.0, 1.0) = 0.0;
 // 低配档（AdaptiveQuality）：body（路/崖壁/地表）不采数组细节改平色 tint，每像素省一次采样；
 // 草地细节保留（占屏大头，是水彩质感的主体）。
 uniform bool low_detail = false;
@@ -71,7 +79,7 @@ float paper_noise(vec3 p) {
 vec3 layer_col(int layer, vec2 uv) {
 	vec3 tex = texture(top_array, vec3(uv, float(layer))).rgb;
 	vec3 det = mix(vec3(1.0), tex / max(layer_mean[layer], vec3(0.001)), detail_strength);
-	return layer_tint[layer] * det;
+	return mix(layer_tint[layer] * det, layer_flat[layer], flatten);
 }
 
 void fragment() {
@@ -79,13 +87,22 @@ void fragment() {
 	int role = int(round(ctl.b * 8.0));
 	vec2 wuv = UV2 / tile_period;
 	vec3 base = layer_col(base_layer, wuv);                // 万物基底（过渡 cell 的底色；草地世界=草，主题场景=模态地表）
-	vec3 body = low_detail ? layer_tint[v_layer] : layer_col(v_layer, wuv);
+	// 低配纯色 body：flatten>0 用真平色（layer_tint 对烘色层是白，直接用会洗白）；
+	// flatten=0 保持旧 layer_tint 语义（与已验收的低配观感逐位一致）。
+	vec3 body = low_detail ? mix(layer_tint[v_layer], layer_flat[v_layer], flatten) : layer_col(v_layer, wuv);
 	vec3 col = mix(base, body, ctl.r);                     // 主体域 R 混基底/body
 	col = mix(col, role == ROLE_CLIFF_RIM ? cliff_rim : path_rim, ctl.g);  // 描边
 	float lum = ctl.a * 2.0;                               // 明暗纹样
 	if (role == ROLE_CLIFF_WALL)                           // 崖壁纵向浮雕按侧壁层强度插值（雪崖满档 / 光滑墙 0）
 		lum = mix(1.0, lum, wall_relief[v_layer]);
 	col *= lum;
+	if (tile_jitter > 0.001) {
+		vec2 tid = floor(UV2 * 0.5);  // 2m 一块；tile 尺寸整除环面跨度 150，wrap 处无缝
+		float h = fract(sin(dot(tid, vec2(127.1, 311.7))) * 43758.5453);
+		float h2 = fract(h * 61.7);
+		col *= 1.0 + tile_jitter * 0.10 * (h - 0.5);
+		col = mix(col, col * vec3(1.06, 1.03, 0.90), tile_jitter * (h2 - 0.5));
+	}
 	if (paper_tone > 0.001) {
 		float plum = dot(col, vec3(0.299, 0.587, 0.114));
 		col = mix(col, mix(col, vec3(plum), 0.25) * 1.06 + 0.02, paper_tone);
