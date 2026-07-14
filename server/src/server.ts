@@ -84,8 +84,8 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
-import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, type CreatureSize } from './creation_options.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
@@ -1399,6 +1399,7 @@ async function fulfillAbility(
   clientTts = false,
   sceneId = DEFAULT_SCENE,
   refine?: { itemRef: string; size: CreatureSize }, // A1：造物类带体型 → 开「试用」两段化；不带则一段完成
+  recipient?: RecipientRef, // A2：这次造物是给谁做的——recipient=character 且没走心愿盖章时，对方用自己音色道谢
 ): Promise<void> {
   store.addDiscovered(worldId, playerId, ability);
   // 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md）：造物类心愿造成功后不当场盖章——
@@ -1432,6 +1433,15 @@ async function fulfillAbility(
       wallet: done.wallet,
     }));
     await pushPraiseTts(socket, adapters, store, worldId, done.task, done, clientTts);
+  }
+  // A2 交付话术（docs/kids-thinking-made-for-whom.md §4.1）：这次造物是【给某个村民】做的、且没走心愿盖章
+  // （!done——若本就是在兑现该村民心愿，上面 trial/done 已用它的音色说过话，两支合流，此处不再重复）→
+  // 那个村民用【自己的音色】道谢，让「东西是为某个人做的」被听见（与 wish-leak 同一条 pushLineTts 通道）。
+  else if (recipient?.kind === 'character' && recipient.characterId) {
+    const rc = store.getCharacter(worldId, recipient.characterId);
+    if (rc && !rc.isFairy) {
+      await pushLineTts(socket, adapters, store, recipientThanksLine(rc.name), rc.voiceId || 'cn-child-default', clientTts);
+    }
   }
   // 无条件重发漏话：心愿池此刻至少有两种变法——① 刚发现的玩法出池（「已发现的不再提」），
   // ② 造物刚花掉最后一朵花，costsFlower 的心愿集体买不起了（见 WishDef.costsFlower）。
@@ -1479,6 +1489,142 @@ async function denyForNoFlowers(
 }
 
 /** 引导式创造会话入口（造角色/造物共用）：先卡余额（0 花不进会话，仙子引导），够花再开会话推进第一轮。 */
+// ── A2「给谁做的」（fit-to-user，docs/kids-thinking-made-for-whom.md）：造物会话最前的 recipient 预问步 ──
+const RECIPIENT_SELF_ID = 'self';
+const RECIPIENT_EVERYONE_ID = 'everyone';
+const RECIPIENT_SKIP_ID = 'recipient_skip'; // 客户端「随便啦」软退出：回落（不记 recipient），不卡流程、不进 creation_cancelled
+const RECIPIENT_QUESTION = '这个呀，是给谁做的呀？';
+/** CreatureSize → 中文档标签（与图标库 size label 一致，让 recipient 预填的 size 与点选路径同口径）。 */
+const SIZE_LABEL: Record<CreatureSize, string> = { small: '小', medium: '中', big: '大' };
+
+/** A2 交付：给某村民做的东西造好时，那个村民用自己音色道谢的一句话（稳定哈希选一句，避免每次都一样）。 */
+const RECIPIENT_THANKS_LINES = [
+  '谢谢你给我做的！我好喜欢呀～',
+  '哇，这是给我的呀？我太开心啦，谢谢你！',
+  '给我做的呢！我要好好收着，谢谢你呀～',
+  '是给我用的吗？正合适呢，谢谢你！',
+];
+function recipientThanksLine(name: string): string {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return RECIPIENT_THANKS_LINES[h % RECIPIENT_THANKS_LINES.length];
+}
+
+/**
+ * recipient 预问步的一屏选项：当前场景村民（用各自立绘当图标）+ 自己 + 大家（软步骤，客户端另加「随便啦」跳过）。
+ * 与 kind/color 的静态图标库唯一的结构差异——候选是运行时在场角色，故就地组装、不进 CREATION_OPTIONS。
+ */
+async function promptRecipient(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  fairyId: string,
+  leadIn: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  goal: CreationGoal,
+): Promise<void> {
+  const sceneId = session.currentScene;
+  const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
+  const villagers = store.listCharacters(worldId, sceneId)
+    .filter((c) => !c.isFairy)
+    .map((c) => ({ id: c.id, label: c.name, iconAsset: c.appearance.spriteAsset }));
+  const options = [
+    { id: RECIPIENT_SELF_ID, label: '我自己', iconAsset: '' },
+    ...villagers,
+    { id: RECIPIENT_EVERYONE_ID, label: '大家', iconAsset: '' },
+  ];
+  // 入口那句应答（leadIn）接在问句前一次念完，避免两条消息各自起播互相抢断（与 advanceCreation 同策）。
+  const spoken = leadIn ? `${leadIn}${RECIPIENT_QUESTION}` : RECIPIENT_QUESTION;
+  let ttsAsset = '';
+  if (!session.clientTts) {
+    try {
+      ttsAsset = store.putAsset(await adapters.tts.synthesize(spoken, fairyVoice));
+    } catch (err) {
+      console.warn(`recipient 追问 TTS 失败（不阻塞，客户端可显示文字）：${String(err)}`);
+    }
+  }
+  socket.send(JSON.stringify({
+    type: 'creation_prompt',
+    goal,
+    replyText: spoken,
+    question: RECIPIENT_QUESTION,
+    category: 'recipient',
+    options,
+    ttsAsset,
+    voiceId: fairyVoice,
+  }));
+}
+
+/**
+ * 把 recipient 预问步的答复（点选 optId：self/everyone/skip/角色id；或语音 spokenText）解析成 RecipientRef。
+ * 认不出 / 「随便啦」/ 空 → null（回落，不记 recipient，绝不卡流程，见设计 §3.1）。
+ */
+function resolveRecipient(
+  optId: string,
+  spokenText: string,
+  worldId: string,
+  sceneId: string,
+  store: WorldStore,
+): RecipientRef | null {
+  const id = (optId ?? '').trim();
+  if (id) {
+    if (id === RECIPIENT_SELF_ID) return { kind: 'self', label: '自己' };
+    if (id === RECIPIENT_EVERYONE_ID) return { kind: 'everyone', label: '大家' };
+    if (id === RECIPIENT_SKIP_ID) return null;
+    const c = store.getCharacter(worldId, id);
+    if (c && !c.isFairy) return { kind: 'character', characterId: c.id, label: c.name };
+    return null; // 认不出的 id：回落
+  }
+  const t = (spokenText ?? '').trim();
+  if (!t) return null;
+  if (/(我自己|自己|给我|我的|我要)/.test(t)) return { kind: 'self', label: '自己' };
+  if (/(大家|所有人|谁都|每个人|大伙)/.test(t)) return { kind: 'everyone', label: '大家' };
+  const hit = store.listCharacters(worldId, sceneId).filter((c) => !c.isFairy).find((c) => c.name && t.includes(c.name));
+  if (hit) return { kind: 'character', characterId: hit.id, label: hit.name };
+  return null; // 说了句认不出的话：回落（那句话仍是暂存的 request 在驱动 LLM，不浪费）
+}
+
+/**
+ * 收到 recipient 答复：解析 → 记进 attrs（character 时按对方体型预填 size 默认，这是 A2 硬保底）→ 用入口
+ * 暂存的 request 继续正常属性追问（advanceCreation）。leadIn 已在 promptRecipient 念过，这里不再传。
+ */
+async function handleRecipientReply(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  fairyId: string,
+  optId: string,
+  spokenText: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  spawn?: SpawnCtx,
+): Promise<void> {
+  const state = session.creation;
+  if (!state) return;
+  const req = state.pendingRequest ?? '';
+  state.pendingRequest = undefined; // 消费掉暂存的入口话；此后 pendingRequest===undefined，不再当 recipient 步
+  if (!state.askedCategories.includes('recipient')) state.askedCategories.push('recipient');
+  const rec = resolveRecipient(optId, spokenText, worldId, session.currentScene, store);
+  if (rec) {
+    state.attrs.recipient = rec;
+    // 硬保底（§3.2）：recipient=character → 读对方体型档预填 size 默认，「给小兔子做的帽子默认就小」肉眼可见。
+    // self/everyone 没有内在体型，不预填——size 仍走正常追问，未答则 sizeToScale 回落 medium。
+    if (rec.kind === 'character' && !state.attrs.size) {
+      const sz = recipientDefaultSize(rec, (cid) => store.getCharacter(worldId, cid)?.appearance.size);
+      state.attrs.size = SIZE_LABEL[sz];
+    }
+  }
+  // 喂给 advanceCreation 的 childInput：
+  //  - 认出了 recipient（点选/语音「大家」）→ 用入口暂存的话驱动属性追问，不吞掉「我想要一只小猫」。
+  //  - 没认出（点「随便啦」/说了句不是 recipient 的话）→ 入口话 + 这句一起喂：既保住入口意图，又让 guide
+  //    能从这句里判出「算了不要了」这类取消（recipient 步不吞掉取消意图）。点选跳过时 spokenText 为空，只用入口话。
+  const childInput = rec
+    ? (req || spokenText)
+    : (spokenText.trim() ? `${req} ${spokenText}`.trim() : req);
+  await advanceCreation(socket, session, worldId, fairyId, childInput, adapters, store, '', spawn);
+}
+
 async function openCreationSession(
   socket: { send: (data: string) => void },
   session: VoiceSession,
@@ -1489,9 +1635,10 @@ async function openCreationSession(
   store: WorldStore,
   leadIn = '', // 入口那轮 routeIntent 生成的仙子应答句（缺陷 ②：此前被丢弃）
   goal: CreationGoal = 'character',
-  spawn?: SpawnCtx, // 造角色的降生上下文（落在发起者身边 + 广播给同场景的人）
   blueprintId?: string, // goal==='build' 时：拼哪副蓝图（matchBlueprint 命中的整体）
 ): Promise<void> {
+  // 注：造角色的降生上下文（spawn）不在此传——recipient 预问步把首轮 advanceCreation 推迟到 handleRecipientReply，
+  // 那里用同连接的 spawnCtx() 现算（等价且正确），故 openCreationSession 不再需要 spawn 参数。
   if (!hasFlower(store, worldId, session.playerId)) {
     // 拼装（build）与造物（prop）共用 prop_denied 拒绝 UX（都进背包、都要攒花）。
     const denyKind = goal === 'character' ? 'character' : goal === 'sticker' ? 'sticker' : 'prop';
@@ -1506,7 +1653,11 @@ async function openCreationSession(
   if (goal === 'build') {
     await advanceBuild(socket, session, worldId, fairyId, request, adapters, store, leadIn);
   } else {
-    await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn, spawn);
+    // A2「给谁做的」：造角色/物/贴纸在追问属性【之前】先问一句 recipient（软步骤）。把入口那句意图暂存进
+    // pendingRequest，等收到 recipient 答复（handleRecipientReply）再喂 advanceCreation 继续——recipient
+    // 步不吞掉「我想要一只小猫」。build 不走此步（它有自己的按功能追问骨架）。
+    session.creation.pendingRequest = request;
+    await promptRecipient(socket, session, worldId, fairyId, leadIn, adapters, store, goal);
   }
 }
 
@@ -1607,6 +1758,7 @@ export async function createPropAsync(
   clientTts = false,
   creatorId = '', // 造物的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
   sceneId = DEFAULT_SCENE, // 造完要按玩家所在场景重发漏话（心愿池随 discovered/钱包变）
+  recipient?: RecipientRef, // A2：这件东西是给谁做的（落进 ItemDef.recipient + 交付话术走对方音色）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
@@ -1629,6 +1781,7 @@ export async function createPropAsync(
       return;
     }
     const def = creationItemDef(worldId, randomUUID(), validated.spec);
+    if (recipient) def.recipient = recipient; // A2：给谁做的落库（供 A1 试用/B3 起名/交付话术读取）
     store.upsertItem(def);
     store.bagAdd(worldId, playerId, def.id);
     created = true;
@@ -1646,7 +1799,7 @@ export async function createPropAsync(
     // 造物成功 = 发现了「能造东西」这个玩法；若有村民正盼着它 → 开「试用」（A1：造出来带体型，
     // 村民试用差一点，小朋友调对再盖章）。体型取自造物 spec.scale 反推的档。
     await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_prop', clientTts, sceneId,
-      { itemRef: def.id, size: scaleToSize(validated.spec.scale) });
+      { itemRef: def.id, size: scaleToSize(validated.spec.scale) }, recipient);
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
   } finally {
@@ -1669,6 +1822,7 @@ export async function createStickerAsync(
   clientTts = false,
   creatorId = '', // 造贴纸的角色（小仙子）：给了就在造完后记一条 creation 记忆
   sceneId = DEFAULT_SCENE, // 造完要按玩家所在场景重发漏话
+  recipient?: RecipientRef, // A2：这张贴纸是给谁做的（落进 ItemDef.recipient + 交付话术走对方音色）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'sticker', clientTts);
@@ -1687,6 +1841,7 @@ export async function createStickerAsync(
     // 复用图标专用管线：扁平生图 → 绿幕抠图 → 程序加白 die-cut 贴纸边 → 存资产哈希。
     const assetHash = await generateIconAsset(adapters, prompt, store);
     const def = creationStickerDef(worldId, randomUUID(), name, assetHash);
+    if (recipient) def.recipient = recipient; // A2：给谁做的落库
     store.upsertItem(def);
     store.bagAdd(worldId, playerId, def.id);
     created = true;
@@ -1700,7 +1855,7 @@ export async function createStickerAsync(
       wallet: store.getWallet(worldId, playerId),
       bag: store.getBag(worldId, playerId),
     }));
-    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_sticker', clientTts, sceneId);
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_sticker', clientTts, sceneId, undefined, recipient);
   } catch (err) {
     socket.send(JSON.stringify({ type: 'sticker_failed', reason: String(err) }));
   } finally {
@@ -1805,6 +1960,7 @@ export async function createCharacterAsync(
   clientTts = false,
   creatorId = '', // 造角色的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
   spawn?: SpawnCtx, // 降生上下文：落在发起者所在场景/身边 + 向同场景其他人广播 character_spawned
+  recipient?: RecipientRef, // A2：这个新伙伴是给谁造的（落进 appearance.recipient + 交付话术走对方音色）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'character', clientTts);
@@ -1818,7 +1974,7 @@ export async function createCharacterAsync(
     const sceneId = spawn?.sceneId;
     const position = sceneId ? store.getPlayerTile(worldId, sceneId, playerId) : undefined;
     const character = await createCharacter(
-      { worldId, intentText: description, byFairy: true, sceneId, position },
+      { worldId, intentText: description, byFairy: true, sceneId, position, recipient },
       adapters,
       store,
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
@@ -1843,7 +1999,7 @@ export async function createCharacterAsync(
     }
     // A1 试用：造出来的新伙伴带体型 → 开「试用」（村民试用差一点，小朋友调对再盖章）。
     await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_character', clientTts, sceneId ?? DEFAULT_SCENE,
-      { itemRef: character.id, size: character.appearance.size ?? scaleToSize(character.appearance.scale) });
+      { itemRef: character.id, size: character.appearance.size ?? scaleToSize(character.appearance.scale) }, recipient);
   } catch (err) {
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
@@ -1931,11 +2087,12 @@ export async function advanceCreation(
   const summarize = () => isSticker ? composeStickerDesc(state.attrs) : isProp ? composePropDesc(state.attrs) : describeCreationAttrs(state);
   // done 时按目标分派到对应的异步造：造贴纸 createStickerAsync，造物 createPropAsync，造角色 createCharacterAsync。
   // 造贴纸/造物都进背包（私有，不广播；摆放走放置模式 terrain_patch 自带实体定义），只有造角色要降生广播。
+  const recipient = state.attrs.recipient; // A2：会话最前问出的「给谁做的」→ 传给产物落库 + 交付话术走对方音色
   const finishCreate = (desc: string) => isSticker
-    ? createStickerAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId, session.currentScene)
+    ? createStickerAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId, session.currentScene, recipient)
     : isProp
-      ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId, session.currentScene)
-      : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId, spawn);
+      ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId, session.currentScene, recipient)
+      : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId, spawn, recipient);
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
   // 超轮兜底（适配器无关）：已追问满上限还没 done，就用现有属性直接造——绝不无限追问。
   // 此前只有 mock 在 turnCount>=5 时强制 done，线上 LLM 属性解析不进去就会原地循环。
@@ -2146,6 +2303,8 @@ function describeCreationAttrs(state: CreationState): string {
   if (a.traits.length > 0) parts.push(a.traits.join('、'));
   if (a.personality) parts.push(`性格${a.personality}`);
   if (a.name) parts.push(`叫${a.name}`);
+  const rp = recipientPhrase(a.recipient); // A2：带上「给X用的」，让 designCharacter 也能从语义再判一次体型
+  if (rp) parts.push(rp);
   return parts.join('，');
 }
 
@@ -2665,6 +2824,12 @@ export async function handleWsMessage(
     try {
       // 点选 → 用该选项的中文 label 当输入；否则用语音转写文本。
       const optId = typeof msg.optionId === 'string' ? msg.optionId : '';
+      // A2 recipient 预问步的答复（pendingRequest 非空即表示在等它）：解析 recipient → 继续正常追问。
+      // 必须先于 build/属性分支——recipient 步的 optId 是 self/everyone/skip/角色id，不在任何图标库里。
+      if (session.creation.pendingRequest !== undefined) {
+        await handleRecipientReply(socket, session, msg.worldId ?? '', msg.characterId ?? '', optId, String(msg.spokenText ?? ''), adapters, store, spawnCtx());
+        return;
+      }
       // 积木拼装（build）：点选传的是零件 partId → 直接坐进正在问的槽（服务端权威填槽，不靠 LLM 解析），
       // 再把零件中文名当输入喂 advanceBuild 推进对话（guideBuild 见槽已填即跳到下一个）。
       if (session.creation.goal === 'build') {
@@ -2796,6 +2961,11 @@ export async function handleWsMessage(
       }
       // 造角色/物/贴纸/拼装引导会话进行中：这句话当会话答复，不走 routeIntent。积木拼装走 advanceBuild。
       if (session.creation?.active) {
+        // A2：正在等 recipient 答复（孩子用语音说「给小兔子」）→ 当 recipient 解析，不当属性追问。
+        if (session.creation.pendingRequest !== undefined) {
+          await handleRecipientReply(socket, session, msg.worldId ?? '', msg.characterId ?? '', '', transcript, adapters, store, spawnCtx());
+          return;
+        }
         if (session.creation.goal === 'build') {
           await advanceBuild(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '');
         } else {
@@ -2823,7 +2993,7 @@ export async function handleWsMessage(
       );
       // 造角色/造物入口：respondToTranscript 识别到意图但没出声，这里开引导会话，不发普通回应。
       if (response.characterRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText, 'character', spawnCtx());
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText, 'character');
         return;
       }
       if (response.propRequest) {
@@ -2831,14 +3001,14 @@ export async function handleWsMessage(
         // 无蓝图则回落现有整体造物（优雅降级）。docs/kids-thinking-build-from-parts.md §4.1。
         const bp = matchBlueprint(response.propRequest);
         if (bp) {
-          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'build', spawnCtx(), bp.id);
+          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'build', bp.id);
         } else {
-          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
+          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop');
         }
         return;
       }
       if (response.stickerRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.stickerRequest, adapters, store, response.replyText, 'sticker', spawnCtx());
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.stickerRequest, adapters, store, response.replyText, 'sticker');
         return;
       }
       // 玩游戏入口：生成剧本→过 typecheck→开演（stage_begin 广播全场），不发普通回应。

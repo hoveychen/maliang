@@ -1,4 +1,4 @@
-import type { CreationCategory, CreationOption } from './types.ts';
+import type { CreationCategory, CreationOption, RecipientRef } from './types.ts';
 
 /**
  * 引导式造角色的预设图标库（见 docs/guided-creation-design.md §4）。
@@ -108,6 +108,35 @@ export function scaleToSize(scale: number | null | undefined): CreatureSize {
   if (scale <= 0.85) return 'small';
   if (scale >= 1.2) return 'big';
   return 'medium';
+}
+
+/**
+ * A2「给谁做的」的硬保底（docs/kids-thinking-made-for-whom.md §3.2）：recipient → size 默认。
+ * 只在 recipient=character 时有意义——读那个角色的体型档，让「给小兔子做的帽子默认就小」这条因果
+ * 肉眼可见。self/everyone/缺失一律回落 medium（它们没有内在体型）。
+ * getCharacterSize 由调用方注入（服务端传 id => store.getCharacter(worldId,id)?.appearance.size），
+ * 保持本模块不依赖 WorldStore、可脱离服务端单测。
+ */
+export function recipientDefaultSize(
+  recipient: RecipientRef | undefined,
+  getCharacterSize: (characterId: string) => CreatureSize | undefined,
+): CreatureSize {
+  if (recipient?.kind === 'character' && recipient.characterId) {
+    return getCharacterSize(recipient.characterId) ?? 'medium';
+  }
+  return 'medium';
+}
+
+/**
+ * A2 交付/描述用的「给<对方>用的」前缀（docs/kids-thinking-made-for-whom.md §4.1）：注入 designCharacter/
+ * designSdfProp 的汇总描述，让生成端也能从语义再判一次体型；缺失/skip 返回空串（不说废话）。
+ */
+export function recipientPhrase(recipient: RecipientRef | undefined): string {
+  if (!recipient) return '';
+  if (recipient.kind === 'self') return '给小朋友自己用的';
+  if (recipient.kind === 'everyone') return '给大家用的';
+  if (recipient.kind === 'character') return `给${recipient.label || '小伙伴'}用的`;
+  return '';
 }
 
 /**

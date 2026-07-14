@@ -204,6 +204,7 @@ var _creation_step := 0            ## 已走过的轮数（点亮的圆点数）
 var _creation_cam := false         ## 创造视图相机特写态（推近仙子；退出创造复位）
 var _in_creation := false          ## 正在引导式创造（造角色或造物；期间语音/点选都是这次会话的答复）
 var _creation_goal := "character"  ## 这次引导在造什么（服务端 creation_prompt.goal）：character→降生蛋，prop→魔法熔炉，build→拼装台
+var _creation_category := ""       ## 本轮追问的类别（creation_prompt.category）；'recipient'（A2 给谁做的）时多加一张「随便啦」软退出卡
 # ── 积木式造物（build，docs/kids-thinking-build-from-parts.md）拼装台状态 ──
 var _build_blueprint_id := ""      ## 正在拼哪副蓝图（build_prompt.blueprintId）
 var _build_slot := ""              ## 当前要填的槽（build_prompt.slotId）——拼装台点亮它发光；与服务端 askedSlots.at(-1) 一致
@@ -5562,7 +5563,13 @@ func _on_creation_prompt(data: Dictionary) -> void:
 	_creation_q.text = String(data.get("question", data.get("replyText", "")))
 	_creation_q.visible = true
 	_advance_creation_dots()
+	_creation_category = String(data.get("category", ""))
 	_build_creation_cards(data.get("options", []))
+	# A2「给谁做的」（docs/kids-thinking-made-for-whom.md）：recipient 是可跳过的软步骤——多加一张「随便啦」卡。
+	# 它走现成 send_creation_reply（optionId='recipient_skip'），服务端回落「给大家」，绝不进 creation_cancelled
+	# （那是「不造了」，语义不同）。选项本身（自己/在场村民立绘/大家）已由 _build_creation_cards 通用渲染。
+	if _creation_category == "recipient":
+		_append_recipient_skip_card()
 	var asset := String(data.get("ttsAsset", ""))
 	if not asset.is_empty():
 		_play_tts(asset) # 仙子把问题和选项念出来（幼儿不识字）
@@ -5940,6 +5947,18 @@ func _build_creation_cards(options: Array) -> void:
 	# 选项卡摆上桌：一记轻「翻纸」声（发牌感），配合仙子随后念问题。空选项（快捷路径）不响。
 	if _creation_cards.get_child_count() > 0 and game_audio != null:
 		game_audio.play_sfx("page")
+
+## A2 recipient 步的「随便啦」软退出卡：等价于「不答」——走现成 send_creation_reply(optionId='recipient_skip')，
+## 服务端回落「给大家」+medium 继续会话，不触发 creation_cancelled（那是「不造了」）。灰底次要样式与选项卡区分。
+func _append_recipient_skip_card() -> void:
+	var card := Button.new()
+	card.custom_minimum_size = Vector2(220.0, 168.0)
+	card.text = "随便啦"
+	UiAssets.style_card_button(card, 24.0)
+	card.add_theme_font_size_override("font_size", 40)
+	card.modulate = Color(1, 1, 1, 0.7) # 次要卡：比在场角色/自己/大家淡一点
+	card.pressed.connect(_on_creation_card.bind("recipient_skip", card))
+	_creation_cards.add_child(card)
 
 ## 选项卡图标（生成后 iconAsset 才非空）：异步拉图贴到按钮，失败保留文字兜底。
 func _apply_card_icon(card: Button, asset: String) -> void:

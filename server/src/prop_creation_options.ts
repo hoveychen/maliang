@@ -1,5 +1,5 @@
 import type { CreationCategory, CreationOption, CreationAttrs } from './types.ts';
-import { CREATION_OPTIONS } from './creation_options.ts';
+import { CREATION_OPTIONS, recipientPhrase } from './creation_options.ts';
 
 /**
  * 引导式造物品的图标库（与造角色 creation_options.ts 平行）。
@@ -94,6 +94,7 @@ export const PROP_CREATION_ASK: Record<CreationCategory, string> = {
   trait: '它有什么特别的地方吗？',
   personality: '（造物不问性格）',
   name: '（造物不起名）',
+  recipient: '这个呀，是给谁做的呀？', // A2：recipient 就地组装，不经 guide；此处占位满足 Record 完整性
 };
 
 /** 把造物累积属性汇成给 designSdfProp 的中文描述。 */
@@ -101,5 +102,7 @@ export function composePropDesc(a: CreationAttrs): string {
   const head = `一个${a.color ?? ''}${a.size ?? ''}的${a.kind ?? '小物件'}`;
   const parts = [head];
   if (a.motion && a.motion !== '安安静静') parts.push(a.motion);
+  const rp = recipientPhrase(a.recipient); // A2：「给X用的」也进描述，designSdfProp 从语义再判一次体型
+  if (rp) parts.push(rp);
   return parts.join('，');
 }
