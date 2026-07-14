@@ -54,7 +54,7 @@ static func parse_command(line: String) -> Dictionary:
 			if not dict.has("x") or not dict.has("y"):
 				return {"ok": false, "error": "tap needs x,y"}
 			return {"ok": true, "op": "tap", "x": float(dict["x"]), "y": float(dict["y"])}
-		"inject", "state", "screencap", "accept", "replay", "retry":
+		"inject", "state", "screencap", "accept", "replay", "retry", "talk_fairy", "reset_budget":
 			return {"ok": true, "op": op}
 		_:
 			return {"ok": false, "error": "unknown op: %s" % op}
@@ -147,6 +147,10 @@ func _execute(cmd: Dictionary) -> Dictionary:
 			return _do_screencap()
 		"accept", "replay", "retry":
 			return _do_confirm_key(op)
+		"talk_fairy":
+			return _do_talk_fairy()
+		"reset_budget":
+			return _do_reset_budget()
 		_:
 			return {"ok": false, "error": "unhandled op: %s" % op}
 
@@ -238,6 +242,23 @@ func _do_screencap() -> Dictionary:
 	if err != OK:
 		return {"ok": false, "error": "save_png failed: %d" % err}
 	return {"ok": true, "op": "screencap", "path": ProjectSettings.globalize_path(path)}
+
+## talk_fairy：不靠屏幕坐标直接进与小仙子「点点」的对话（走宿主已验证的 _approach_npc 路径）。
+## 坐标盲点不可靠——tap 没命中玩家会被当点地面把玩家支使走，越走越偏；这条命令直接从 npcs 找仙子发起
+## 靠近+进对话，e2e 脚本随后轮询 vc_open 即可。返回 entered=是否找到仙子并发起（对话开在几帧后）。
+func _do_talk_fairy() -> Dictionary:
+	if _world == null or not _world.has_method("harness_talk_fairy"):
+		return {"ok": false, "error": "world 无 harness_talk_fairy"}
+	var ok := bool(_world.call("harness_talk_fairy"))
+	return {"ok": ok, "op": "talk_fairy", "entered": ok}
+
+## reset_budget：清掉游玩时长冷却门（45min 玩满 → 10min 冷却模态挡住造物/交互），供 e2e 连测不被拦。
+## 仅重置本地预算+落盘，不碰服务端；debug 构建专用，绝不进 release。
+func _do_reset_budget() -> Dictionary:
+	if _world == null or not _world.has_method("harness_reset_play_budget"):
+		return {"ok": false, "error": "world 无 harness_reset_play_budget"}
+	_world.call("harness_reset_play_budget")
+	return {"ok": true, "op": "reset_budget"}
 
 func _do_confirm_key(op: String) -> Dictionary:
 	var vc := _vc()
