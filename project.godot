@@ -38,6 +38,13 @@ window/stretch/mode="canvas_items"
 window/stretch/aspect="keep"
 window/handheld/orientation=1
 
+[gui]
+
+; 全局默认字体：站酷快乐体（圆润童趣）为主 + 霞鹜文楷全字形兜底（见其 .import 的 fallbacks）。
+; 之前全 UI 中文没有任何自带字体，靠 allow_system_fallback 回落到系统 CJK 字体——iOS 的系统
+; 字体回落对 CJK 不稳，渲染成豆腐块（□□□）。打包字体后中文不再依赖 iOS 系统回落。
+theme/custom_font="uid://cniqcuskmc3gj"
+
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
