@@ -1,7 +1,11 @@
 import type {
+  AvatarAttrs,
+  AvatarGuideState,
+  ChatTurn,
   CharacterSpec,
   CreationState,
   ExtractedMemory,
+  GuideAvatarResult,
   GuideBuildResult,
   GuideCreationResult,
   IntentContext,
@@ -68,6 +72,21 @@ export interface LLMAdapter {
   compactSession(ctx: SessionCompactionContext): Promise<string>;
   /** onboarding 自我介绍：从小朋友的转写里提取名字与称呼（提取不到均返回空串）。 */
   extractProfile(transcript: string): Promise<{ name: string; nickname: string }>;
+  /**
+   * onboarding 形象引导一轮（docs/onboarding-avatar-redesign-design.md §2.2）：与 guideCreation 平行，
+   * 问玩家自己的外观（性别/发型/衣服/主色/图案/配饰）。无 cancelled——小朋友不耐烦就 done 用已知属性画。
+   */
+  guideAvatar(state: AvatarGuideState, childInput: string): Promise<GuideAvatarResult>;
+  /**
+   * onboarding 形象描述合成（§2.3）：把属性+对话汇成纯外观中文描述，硬规则——双手空着绝不持物、
+   * 喜好一律转译为穿戴元素（恐龙→恐龙连帽衫，不是抱恐龙玩偶）、只有这一个孩子无背景无道具。
+   */
+  describeAvatar(attrs: AvatarAttrs, dialog: ChatTurn[]): Promise<string>;
+  /**
+   * 照镜子·改一改（§2.4）：把小朋友点名的修改合并进外观描述，未点名的部分保持原意不变；
+   * 产物仍受 describeAvatar 同一套硬规则约束。
+   */
+  refineAvatar(description: string, childRequest: string): Promise<string>;
   /** 存量角色体型回填：从英文 visualDescription 判定体型（small/medium/big），供 /admin/calibrate-size。 */
   classifyCreatureSize(visualDescription: string): Promise<CreatureSize>;
   respond(prompt: string): Promise<string>;
