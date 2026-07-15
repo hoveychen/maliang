@@ -22,6 +22,14 @@ const CACHE_DIR := "user://asset_cache"
 ## 内存里已解码的纹理缓存（本次会话内）：同一 hash 免磁盘读+免重复解码（如仙子 idle 轮询反复取同图）。
 var _tex_mem: Dictionary = {}
 
+## 显存诊断开关（仅 debug 构建，照 BendMat 的 MALIANG_PAPERCRAFT 先例，release 一行不跑）。
+## MALIANG_TEX_DIAG=downsample 时把走块压缩路径（gpu_compress=true）的图集在上传前长宽各减半
+## （显存降 4×，接近块压缩本该省下的量级）。用来 A/B 隔离「未压缩村民图集是否是掉帧主因」：
+## 村民照常渲染、draw call / 顶点数 / A* 寻路全不变，A（无开关）与 B（下采样）唯一变量就是纹理
+## 显存/带宽。见 docs/../plans 与 _apply_tex_diag。运行时 Image.compress 在出货模板不可用（压缩器
+## etcpak/betsy 编辑器专属），故图集在真机恒未压缩 RGBA8——这个探针不改那个事实，只砍显存占用做对照。
+static var _tex_diag_downsample := OS.is_debug_build() and OS.get_environment("MALIANG_TEX_DIAG") == "downsample"
+
 func _ready() -> void:
 	var env := OS.get_environment("MALIANG_API_BASE")
 	if not env.is_empty():
@@ -86,6 +94,7 @@ func _decode_image_async(buf: PackedByteArray, gpu_compress := false) -> Texture
 	var task := WorkerThreadPool.add_task(func() -> void:
 		var im := _load_image_buf(buf)
 		if im != null and gpu_compress:
+			_apply_tex_diag(im, _tex_diag_downsample) # 诊断探针：置位时长宽减半（见 _tex_diag_downsample）
 			_compress_for_gpu(im)
 		out[0] = im)
 	while not WorkerThreadPool.is_task_completed(task):
@@ -93,6 +102,14 @@ func _decode_image_async(buf: PackedByteArray, gpu_compress := false) -> Texture
 	WorkerThreadPool.wait_for_task_completion(task)  # 完成后仍需 wait 回收任务句柄
 	var img: Image = out[0]
 	return null if img == null else ImageTexture.create_from_image(img)
+
+## 诊断探针（纯函数，线程安全）：downsample 置位时把 image 长宽各减半（双线性），显存降 4×。
+## 抽成静态纯函数是为了单测能直接喂 Image 断言尺寸，不必跑整条 WorkerThreadPool 解码路径。
+## 至少留 1 像素，杜绝极小图 resize 到 0。
+static func _apply_tex_diag(img: Image, downsample: bool) -> void:
+	if not downsample:
+		return
+	img.resize(maxi(1, img.get_width() / 2), maxi(1, img.get_height() / 2), Image.INTERPOLATE_BILINEAR)
 
 ## 动画图集的显存块压缩。
 ##
