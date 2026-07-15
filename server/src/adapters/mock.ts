@@ -302,6 +302,10 @@ export function createMockAdapters(): ServiceAdapters {
             emotion: 'happy',
           };
         }
+        // 放弃委托：有进行中委托 + 反悔词 → abandonTask（mock 用关键词模拟真 LLM 的语义判定）
+        if (ctx.activeTask && /(不想做|不做了|不帮|算了|放弃|不想要了)/.test(transcript)) {
+          return { kind: 'chat', replyText: '好呀，那我们做点别的吧！', emotion: 'happy', abandonTask: true };
+        }
         // 委托发起：有候选且小朋友问「有什么要帮忙的」→ offerTask
         if (ctx.taskCandidate && /(帮忙|任务|做什么|帮你)/.test(transcript)) {
           return {

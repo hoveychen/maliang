@@ -333,6 +333,22 @@ func visible_height() -> float:
 		th = float(_sheet.get("cellH", th))
 	return th * pixel_size
 
+## 委托提示 chip 用的小头像：静态角色返回整张立绘；动画角色裁出图集第 0 帧
+## （直接用整张图集会把多帧糊成一片）。纹理已随角色降生加载好，同步返回、无需拉取。
+func portrait_tex() -> Texture2D:
+	if texture == null:
+		return null
+	if _sheet.is_empty():
+		return texture
+	var cw := float(_sheet.get("cellW", 0.0))
+	var ch := float(_sheet.get("cellH", 0.0))
+	if cw <= 0.0 or ch <= 0.0:
+		return texture
+	var at := AtlasTexture.new()
+	at.atlas = texture
+	at.region = Rect2(0.0, 0.0, cw, ch)  # 第 0 帧在图集左上角
+	return at
+
 func _refresh_geometry() -> void:
 	if texture == null:
 		return

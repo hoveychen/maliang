@@ -62,6 +62,7 @@ UNIT_TESTS=(
   test_sdf_static_baker
   test_paper_idle
   test_paper_clips
+  test_task_chip_portrait
   test_anim_clip_pick
   test_atlas_compress
   test_player_profile
@@ -185,6 +186,7 @@ run_test test_visual_greeting      --fixed-fps 10 --quit-after 60
 run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
 run_test test_paper_actions        --fixed-fps 10 --quit-after 60
 run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
+run_test test_task_hint_ask        --fixed-fps 10 --quit-after 60
 run_test test_visual_props         --fixed-fps 10 --quit-after 120
 run_test test_placement            --fixed-fps 10 --quit-after 40
 run_test test_casting_placeholder  --fixed-fps 10 --quit-after 120

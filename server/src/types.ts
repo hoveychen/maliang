@@ -383,6 +383,8 @@ export interface IntentResult {
   performerName?: string;
   /** LLM 在这句回应里发起了上下文给的委托候选（taskCandidate）→ 服务端把它设为进行中。 */
   offerTask?: boolean;
+  /** 小朋友说「不想做了/算了/不帮他了」→ 放弃进行中的委托（仅在 ctx.activeTask 存在时认）。 */
+  abandonTask?: boolean;
 }
 
 /** 意图路由的上下文（喂给 LLM）。 */
@@ -459,6 +461,8 @@ export interface VoiceResponse {
   performerId?: string;
   /** 这句回应里新发起的委托（LLM offerTask 且服务端已设为进行中）→ 客户端显示任务提示。 */
   task?: ActiveTask;
+  /** 小朋友说「不想做了」→ 服务端已清掉进行中委托，客户端据此撤掉任务提示 chip。 */
+  taskCleared?: boolean;
   /** create_prop 意图的物件描述：不下发客户端，由 WS 层摘走并异步造物（prop_created 推送）。 */
   propRequest?: string;
   /** create_character 意图的新伙伴描述：不下发客户端，由 WS 层摘走并异步造角色（gen_progress/gen_complete 推送）。仅小仙子有此能力。 */
