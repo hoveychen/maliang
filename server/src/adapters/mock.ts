@@ -20,7 +20,7 @@ import {
   type SessionCompactionContext,
 } from '../types.ts';
 import { CREATION_OPTIONS, optionsByCategory, sizeToScale, inferSizeFromText } from '../creation_options.ts';
-import { composeAvatarDesc, deterministicGuideAvatar } from '../avatar_options.ts';
+import { avatarDescForbidden, composeAvatarDesc, deterministicGuideAvatar } from '../avatar_options.ts';
 import type { CreatureSize } from '../creation_options.ts';
 import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
 import { STICKER_CREATION_OPTIONS, STICKER_CREATION_ASK, stickerOptionsByCategory, composeStickerDesc, stickerIconPrompt } from '../sticker_creation_options.ts';
@@ -416,7 +416,9 @@ export function createMockAdapters(): ServiceAdapters {
         return composeAvatarDesc(attrs);
       },
       async refineAvatar(description: string, childRequest: string): Promise<string> {
-        // 确定性：原描述 + 修改要求（真实 LLM 会把修改融进原文）
+        // 违规要求（持物/头顶物）不予并入——原描述原样返回（与真实实现同契约：
+        // 不满足不合规的要求，胜过把「帽」漏给生图）。合法要求确定性拼接。
+        if (avatarDescForbidden(childRequest)) return description;
         return `${description}。按小朋友的要求调整：${childRequest}`;
       },
       async guideBuild(state: CreationState, childInput: string): Promise<GuideBuildResult> {
