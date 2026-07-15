@@ -46,6 +46,33 @@ class StubWorld extends Node:
 	func harness_pick_option(option_id: String) -> bool:
 		pick_calls.append(option_id)
 		return true
+	# AI 感知扩展（ai-harness P1）：fsm/空间/钱包/手机/摆放/门禁位（字段名与 world.gd 一一对应）
+	var player := {"logical": Vector2(21.0, 43.0)}
+	var wallet := {"flowers": 2, "stampProgress": 1, "stampsTotal": 4}
+	var active_task := {}
+	var _phone_cam := false
+	var phone_ui: Node = null
+	var _placing := false
+	var _place_item_id := ""
+	var _place_legal := false
+	var _place_tile := Vector2i.ZERO
+	var _play_blocked := false
+	var _stage_active := false
+	var _refine_active := false
+	var _remixing := false
+	var world_id := "w-test"
+	var _talk_pid := ""
+	var npcs: Array = []
+	func _fsm_state() -> InteractionFsm.State:
+		return InteractionFsm.State.LISTENING
+
+## stub 角色节点：只要能被 get("char_name") 读到名字即可。
+class StubChar extends Node:
+	var char_name := "点点"
+
+## stub 手机 UI：只要能被 get("_phone_open_app") 读到当前 app 即可。
+class StubPhone extends Node:
+	var _phone_open_app := "items"
 
 var _ran := false
 
@@ -172,6 +199,60 @@ func _run_once() -> void:
 	# 不在引导时：in_creation=false 且不带 creation_options（回包精简）
 	fails += _check("非引导 in_creation false", snap.get("in_creation"), false)
 	fails += _check("非引导不带 creation_options", snap.has("creation_options"), false)
+
+	print("[_execute state：AI 感知扩展（ai-harness P1）]")
+	fails += _check("fsm_state 名字", snap.get("fsm_state"), "LISTENING")
+	fails += _check("mic_open 随 fsm", snap.get("mic_open"), true)
+	fails += _check("player_pos", snap.get("player_pos"), {"x": 21.0, "y": 43.0})
+	fails += _check("player_tile", snap.get("player_tile"), {"x": 10, "y": 21})
+	fails += _check("wallet flowers", (snap.get("wallet") as Dictionary).get("flowers"), 2)
+	fails += _check("空 active_task 不带键", snap.has("active_task"), false)
+	fails += _check("bag_items 明细（空包）", snap.get("bag_items"), {})
+	fails += _check("phone_open 默认关", snap.get("phone_open"), false)
+	fails += _check("placing 默认关", snap.get("placing"), false)
+	fails += _check("非摆放不带 place_item_id", snap.has("place_item_id"), false)
+	fails += _check("play_blocked", snap.get("play_blocked"), false)
+	fails += _check("stage_active", snap.get("stage_active"), false)
+	fails += _check("refine_active", snap.get("refine_active"), false)
+	fails += _check("remixing", snap.get("remixing"), false)
+	fails += _check("world_id", snap.get("world_id"), "w-test")
+	fails += _check("talk_pid 空", snap.get("talk_pid"), "")
+	fails += _check("无 NPC 时 npcs 空明细", snap.get("npcs"), [])
+
+	# 置位后再快照：手机开在 items、摆放中、NPC 明细（名字+tile）。
+	world._phone_cam = true
+	world.phone_ui = StubPhone.new()
+	world.add_child(world.phone_ui)
+	world._placing = true
+	world._place_item_id = "item-9"
+	world._place_legal = true
+	world._place_tile = Vector2i(7, 8)
+	world.bag = {"item-9": 2}
+	world.active_task = {"id": "t1", "title": "给舞舞兔造凳子"}
+	var fairy_node := StubChar.new()
+	world.add_child(fairy_node)
+	world.npcs = [{"id": "npc-1", "is_fairy": true, "node": fairy_node, "logical": Vector2(10.0, 10.0)}]
+	var asnap := srv._execute({"ok": true, "op": "state"})
+	fails += _check("phone_open 置位", asnap.get("phone_open"), true)
+	fails += _check("phone_app", asnap.get("phone_app"), "items")
+	fails += _check("placing 置位", asnap.get("placing"), true)
+	fails += _check("place_item_id", asnap.get("place_item_id"), "item-9")
+	fails += _check("place_legal", asnap.get("place_legal"), true)
+	fails += _check("place_tile", asnap.get("place_tile"), {"x": 7, "y": 8})
+	fails += _check("bag_items 明细", asnap.get("bag_items"), {"item-9": 2})
+	fails += _check("active_task 透传", (asnap.get("active_task") as Dictionary).get("title"), "给舞舞兔造凳子")
+	var nds: Array = asnap.get("npcs")
+	fails += _check("npc 明细数量", nds.size(), 1)
+	fails += _check("npc 明细 id", (nds[0] as Dictionary).get("id"), "npc-1")
+	fails += _check("npc 明细 fairy", (nds[0] as Dictionary).get("fairy"), true)
+	fails += _check("npc 明细名字", (nds[0] as Dictionary).get("name"), "点点")
+	fails += _check("npc 明细 tile", (nds[0] as Dictionary).get("tile"), {"x": 5, "y": 5})
+	fails += _check("npc 明细 dead", (nds[0] as Dictionary).get("dead"), false)
+	# 复位，免得污染后续断言（后面还有引导态/确认键的快照）。
+	world._placing = false
+	world._phone_cam = false
+	world.npcs = []
+	world.bag = {}
 
 	print("[_execute state：引导式造物态快照]")
 	world._in_creation = true

@@ -329,6 +329,7 @@ func _snapshot() -> Dictionary:
 		if typeof(npcs) == TYPE_ARRAY:
 			snap["npc_count"] = (npcs as Array).size()
 			var ids := PackedStringArray()
+			var detail := []
 			for n in (npcs as Array):
 				var nd := n as Dictionary
 				var tag := String(nd.get("id", "?"))
@@ -338,7 +339,69 @@ func _snapshot() -> Dictionary:
 				if not is_instance_valid(node):
 					tag += "(dead)"
 				ids.append(tag)
+				# AI 感知：结构化明细（含名字与 tile 位置，决策「去找谁」的空间基准）。
+				var ent := {"id": String(nd.get("id", "?")), "fairy": bool(nd.get("is_fairy", false)),
+					"dead": not is_instance_valid(node)}
+				if is_instance_valid(node):
+					var nm: Variant = (node as Object).get("char_name")
+					ent["name"] = String(nm) if nm != null else ""
+				var lg: Variant = nd.get("logical")
+				if typeof(lg) == TYPE_VECTOR2:
+					var nt := WorldGrid.to_tile(lg)
+					ent["tile"] = {"x": nt.x, "y": nt.y}
+				detail.append(ent)
 			snap["npc_ids"] = ids
+			snap["npcs"] = detail
+		# ── AI 驱动感知扩展（ai-harness P1）────────────────────────────────────
+		# 权威交互态：现在能不能说话/动看 fsm_state/mic_open，不再猜零散标志位。
+		if w.has_method("_fsm_state"):
+			var fs: int = int(w.call("_fsm_state"))
+			snap["fsm_state"] = InteractionFsm.name_of(fs)
+			snap["mic_open"] = InteractionFsm.mic_open(fs)
+		# 玩家空间基准（逻辑坐标 + tile）：AI 决策移动/靠近全靠它。
+		var player: Variant = w.get("player")
+		if typeof(player) == TYPE_DICTIONARY and typeof((player as Dictionary).get("logical")) == TYPE_VECTOR2:
+			var pl: Vector2 = (player as Dictionary)["logical"]
+			snap["player_pos"] = {"x": pl.x, "y": pl.y}
+			var pt := WorldGrid.to_tile(pl)
+			snap["player_tile"] = {"x": pt.x, "y": pt.y}
+		# 钱包 / 委托 / 背包明细（bag_size 保留兼容，明细供摆放/复用决策）。
+		var wlt: Variant = w.get("wallet")
+		if typeof(wlt) == TYPE_DICTIONARY:
+			snap["wallet"] = wlt
+		var task: Variant = w.get("active_task")
+		if typeof(task) == TYPE_DICTIONARY and not (task as Dictionary).is_empty():
+			snap["active_task"] = task
+		if typeof(bag) == TYPE_DICTIONARY:
+			snap["bag_items"] = bag
+		# 手机态：开着没有、停在哪个 app（空=主屏）。
+		var pcam: Variant = w.get("_phone_cam")
+		snap["phone_open"] = bool(pcam) if pcam != null else false
+		var pu: Variant = w.get("phone_ui")
+		if pu != null and pu is Object and is_instance_valid(pu):
+			var app: Variant = (pu as Object).get("_phone_open_app")
+			snap["phone_app"] = String(app) if app != null else ""
+		# 摆放模式：等落位确认时 AI 需知道幽灵在哪、合不合法。
+		var placing: Variant = w.get("_placing")
+		snap["placing"] = bool(placing) if placing != null else false
+		if snap["placing"]:
+			snap["place_item_id"] = String(w.get("_place_item_id") if w.get("_place_item_id") != null else "")
+			snap["place_legal"] = bool(w.get("_place_legal")) if w.get("_place_legal") != null else false
+			var ptile: Variant = w.get("_place_tile")
+			if typeof(ptile) == TYPE_VECTOR2I:
+				snap["place_tile"] = {"x": (ptile as Vector2i).x, "y": (ptile as Vector2i).y}
+		# 输入被吞/被拦的门禁位：AI 发动作前先看这些，别对着遮罩空点。
+		var blocked: Variant = w.get("_play_blocked")
+		snap["play_blocked"] = bool(blocked) if blocked != null else false
+		var stg: Variant = w.get("_stage_active")
+		snap["stage_active"] = bool(stg) if stg != null else false
+		var rfn: Variant = w.get("_refine_active")
+		snap["refine_active"] = bool(rfn) if rfn != null else false
+		var rmx: Variant = w.get("_remixing")
+		snap["remixing"] = bool(rmx) if rmx != null else false
+		# 会话标识 / 喊话对象。
+		snap["world_id"] = String(w.get("world_id") if w.get("world_id") != null else "")
+		snap["talk_pid"] = String(w.get("_talk_pid") if w.get("_talk_pid") != null else "")
 	var vc := _vc()
 	if vc != null:
 		snap["vc_open"] = vc.is_open()
