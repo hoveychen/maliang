@@ -78,7 +78,11 @@ func _tick() -> void:
 	# 首帧起连；出错/断开则重连（server 首帧才 listen）。
 	if _client == null:
 		_client = StreamPeerTCP.new()
-		_client.connect_to_host("127.0.0.1", DebugCmdServer.PORT)
+		var port := DebugCmdServer.PORT
+		var env_port := OS.get_environment("MALIANG_HARNESS_PORT")
+		if not env_port.is_empty() and env_port.is_valid_int():
+			port = int(env_port) # 与 server 同一约定：8577 被 iproxy/adb forward 占走时回测换口
+		_client.connect_to_host("127.0.0.1", port)
 	_client.poll()
 	var status := _client.get_status()
 	if status == StreamPeerTCP.STATUS_ERROR or status == StreamPeerTCP.STATUS_NONE:
