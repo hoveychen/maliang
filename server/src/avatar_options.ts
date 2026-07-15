@@ -47,11 +47,13 @@ export const AVATAR_OPTIONS: readonly AvatarOption[] = [
   opt('av_mot_ball', 'motif', '足球'), opt('av_mot_heart', 'motif', '爱心'),
   opt('av_mot_butterfly', 'motif', '蝴蝶'), opt('av_mot_rocket', 'motif', '小火箭'),
   opt('av_mot_car', 'motif', '小汽车'), opt('av_mot_note', 'motif', '音符'),
-  // accessory 小配饰
-  opt('av_acc_cap', 'accessory', '棒球帽'), opt('av_acc_crown', 'accessory', '小皇冠'),
+  // accessory 小配饰。⚠️硬约束（老板 2026-07-15 定）：头顶必须留空——headTop 是贴纸装扮的
+  // 锚点槽（character-anchors 三槽之一），形象自带帽子/皇冠会跟孩子贴上去的贴纸打架。
+  // 所以配饰库里没有任何头顶物；发卡/蝴蝶结是「别在侧边头发/胸前」的，不占头顶。
+  opt('av_acc_cape', 'accessory', '小斗篷'), opt('av_acc_bowtie', 'accessory', '小领结'),
   opt('av_acc_clip', 'accessory', '发卡'), opt('av_acc_scarf', 'accessory', '围巾'),
   opt('av_acc_glasses', 'accessory', '小眼镜'), opt('av_acc_bow', 'accessory', '蝴蝶结'),
-  opt('av_acc_backpack', 'accessory', '小背包'), opt('av_acc_strawhat', 'accessory', '草帽'),
+  opt('av_acc_backpack', 'accessory', '小背包'), opt('av_acc_badge', 'accessory', '小徽章'),
 ];
 
 /**
@@ -89,15 +91,15 @@ export const AVATAR_ICON_PROMPTS: Record<string, string> = {
   av_mot_rocket: 'a cute flat cartoon rocket with round window flying upward with small flame, no face',
   av_mot_car: 'a cute flat cartoon toy car side view with big round wheels, no face',
   av_mot_note: 'a cute plump flat music note, symbol only, no face',
-  // accessory → 单件配饰（object only, no person, no face）
-  av_acc_cap: 'a cute flat kids baseball cap side view, single object, no person, no face',
-  av_acc_crown: 'a cute flat little golden crown with round jewel tips, single object, no person, no face',
+  // accessory → 单件配饰（object only, no person, no face；库里无头顶物，见选项表注释）
+  av_acc_cape: 'a cute flat small kids superhero cape spread out, single object, no person, no face',
+  av_acc_bowtie: 'a cute flat little bow tie, single object, no person, no face',
   av_acc_clip: 'a cute flat hair clip with a small flower on it, single object, no person, no face',
   av_acc_scarf: 'a cute flat cozy knitted scarf loosely folded, single object, no person, no face',
   av_acc_glasses: 'a cute flat pair of round kids glasses, single object, no person, no face',
   av_acc_bow: 'a cute flat ribbon bow, single object, no person, no face',
   av_acc_backpack: 'a cute flat small kids backpack front view, single object, no person, no face',
-  av_acc_strawhat: 'a cute flat straw sun hat with a ribbon band, single object, no person, no face',
+  av_acc_badge: 'a cute flat round star badge pin, single object, no person, no face',
 };
 
 /** 取形象图标的生图 prompt（color 无图标不在表内；未知 id 回退 label 兜底）。 */
@@ -115,7 +117,7 @@ export const AVATAR_ASK: Record<AvatarCategory, string> = {
   outfit: '魔法森林里要跑要跳还要爬树，穿什么最方便呀？',
   color: '你的衣服想要什么颜色的呀？',
   motif: '你最喜欢什么图案呀？点点把它画到你衣服上！',
-  accessory: '再挑一个小宝贝戴上好不好？',
+  accessory: '再挑一个小宝贝配在身上好不好？',
 };
 
 const BY_ID = new Map(AVATAR_OPTIONS.map((o) => [o.id, o]));
@@ -140,6 +142,18 @@ export function findAvatarOptionByLabel(label: string): AvatarOption | undefined
 export const AVATAR_FORBIDDEN_DESC = /(抱着|拿着|手持|举着|捧着|牵着|手里)/;
 
 /**
+ * 头顶遮挡措辞（同为机器判据）：headTop 是贴纸装扮锚点槽，形象自带帽子/皇冠会跟贴纸打架
+ * （老板 2026-07-15 定：头顶、双手都要留空）。「连帽衫」不误伤——那是穿的不是戴的，
+ * 兜帽垂在脑后（describeAvatar prompt 里另有明文）。
+ */
+export const AVATAR_FORBIDDEN_HEAD = /(戴着[^，。]{0,8}帽|头上戴|头顶戴|皇冠|头盔|草帽|棒球帽|遮阳帽|贝雷帽|头纱|发冠)/;
+
+/** 描述是否违反任一硬规则（持物/头顶遮挡）——LLM 产物的重试判据与单测共用。 */
+export function avatarDescForbidden(desc: string): boolean {
+  return AVATAR_FORBIDDEN_DESC.test(desc) || AVATAR_FORBIDDEN_HEAD.test(desc);
+}
+
+/**
  * 把形象属性汇成纯外观中文描述——mock 与 LLM 降级链共用的确定性兜底。
  * 硬规则内建：双手空着；图案是「印在衣服上」的穿戴元素，绝不手持（治「抱着玩偶」病灶）。
  */
@@ -151,7 +165,7 @@ export function composeAvatarDesc(a: AvatarAttrs): string {
   if (a.motifs.length > 0) parts.push(`衣服上印着${a.motifs.join('和')}图案`);
   if (a.accessory) parts.push(`还带着${a.accessory}`);
   for (const e of a.extras) parts.push(e);
-  parts.push('双手空空的自然垂在身边，没有拿任何东西');
+  parts.push('双手空空的自然垂在身边，没有拿任何东西，头顶上也没有戴任何东西');
   return parts.join('，');
 }
 
