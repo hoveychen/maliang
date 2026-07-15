@@ -1302,12 +1302,12 @@ func _select_item(item_id: String) -> void:
 	if rref.begins_with("composed:"):
 		actions.add_child(_detail_action_btn("拆开改改", "ic_retry", true,
 			func() -> void: _w._on_composed_item_tapped(item_id)))
-	# 再听一次（起过名的造物）：回放孩子那句录音。
-	var name_asset := String(def.get("nameVoiceAsset", ""))
-	if not name_asset.is_empty():
-		actions.add_child(_detail_action_btn("再听一次", "ic_note", true,
-			func() -> void: _play_name_voice(name_asset)))
+	# 再听一次：点点重念这件东西的名字（录音/预烧/运行时 TTS 三级回落，见 _speak_item_name）。
+	actions.add_child(_detail_action_btn("再听一次", "ic_note", true,
+		func() -> void: _speak_item_name(item_id, def)))
 	_items_detail.add_child(actions)
+	# 点击物品即播：点点念出这件东西叫什么（点选即触发，backpack-redesign §6）。
+	_speak_item_name(item_id, def)
 
 ## 详情面板里的一个动作按钮（图标+文字，禁用则灰置不可点）。
 func _detail_action_btn(text: String, icon: String, enabled: bool, cb: Callable) -> Button:
@@ -1398,13 +1398,47 @@ func _play_name_voice(asset_hash: String) -> void:
 	wav.mix_rate = int(audio.get("rate", 16000))
 	wav.stereo = false
 	wav.data = bytes
+	_play_item_stream(wav)
+
+## 物名/录音回放共用的播放器（PhoneUi 是 RefCounted，回放器挂到 world 节点树下）。
+func _play_item_stream(stream: AudioStream) -> void:
+	if stream == null or _w == null:
+		return
 	if _name_player == null:
-		# PhoneUi 是 RefCounted（非 Node）：回放器挂到 world 节点树下，不能 add_child 到 self。
 		_name_player = AudioStreamPlayer.new()
 		_name_player.name = "NameVoice"
 		_w.add_child(_name_player)
-	_name_player.stream = wav
+	_name_player.stream = stream
 	_name_player.play()
+
+## 点点念物品名（背包重做 §6）：三级回落——
+##  1) 孩子给造物起过名的录音（nameVoiceAsset）最亲切，优先播；
+##  2) 内置物名走点点预烧 WAV（构建期 Yunxia，运行期零 TTS，离线可用）；
+##  3) 造物动态名（没预烧）走运行时 edge-tts 让点点现念 def.name（需在线，音色同预烧的 Yunxia）。
+## 点击物品（详情打开）即播；详情面板「再听一次」也走这里。
+func _speak_item_name(item_id: String, def: Dictionary) -> void:
+	if item_id.is_empty():
+		return
+	var name_asset := String(def.get("nameVoiceAsset", ""))
+	if not name_asset.is_empty():
+		_play_name_voice(name_asset)
+		return
+	var baked := "res://assets/voice/items/%s.wav" % item_id
+	if ResourceLoader.exists(baked):
+		var stream: AudioStream = load(baked)
+		if stream != null:
+			_play_item_stream(stream)
+			return
+	# 造物动态名：运行时 TTS（音色 zh-CN-YunxiaNeural，与预烧内置物名一致，点点声音不跳变）。
+	var nm := String(def.get("name", "")).strip_edges()
+	if nm.is_empty() or _w == null or _w.edge_tts == null or not _w.edge_tts.available:
+		return
+	var mp3: PackedByteArray = await _w.edge_tts.synthesize(nm, "zh-CN-YunxiaNeural")
+	if mp3.is_empty():
+		return
+	var s := AudioStreamMP3.new()
+	s.data = mp3
+	_play_item_stream(s)
 
 ## ── 设置 app ────────────────────────────────────────────────────────────────
 

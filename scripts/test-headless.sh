@@ -188,6 +188,7 @@ run_test test_paper_actions        --fixed-fps 10 --quit-after 60
 run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
 run_test test_visual_props         --fixed-fps 10 --quit-after 120
 run_test test_placement            --fixed-fps 10 --quit-after 40
+run_test test_item_voice           --fixed-fps 10 --quit-after 60
 run_test test_casting_placeholder  --fixed-fps 10 --quit-after 120
 run_test test_prop_creation_cards  --fixed-fps 10 --quit-after 90
 run_test test_build_cards           --fixed-fps 10 --quit-after 90
