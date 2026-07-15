@@ -412,6 +412,12 @@ export interface IntentContext {
   wishContext?: string;
   /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing，命中 prompt cache。 */
   cacheKey?: string;
+  /**
+   * 玩家 onboarding 档案摘要（喜好接线，docs/onboarding-avatar-redesign-design.md §2.5）：
+   * 称呼/喜欢的图案/主色/形象创作原话——注入后点点/村民能自然提起（「你不是最喜欢小恐龙嘛」）。
+   * 由 onboardingProfileNote(store.getOnboardingProfile(playerId)) 生成，无档案则 undefined。
+   */
+  childProfile?: string;
 }
 
 /** session 超长压缩（compactSession）的上下文：把较旧轮次压成一段中文摘要，session 内继续对话时注入。 */

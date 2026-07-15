@@ -271,6 +271,11 @@ ${abilityLines}
       ? `\n你自己的一个念想：${ctx.wishContext}\n小朋友要是问起、或者话赶话聊到了，就用你的口吻说说这个念想（你有多想要、想着它的时候什么心情）。` +
         `\n但【绝不要】开口求他帮忙、也不要提「小仙子能变出来」——你只是在说自己的心事。他愿不愿意帮、想到去找谁帮，都由他自己决定。`
       : '';
+    // onboarding 档案喜好（P5 接线）：让角色能自然提起小朋友的喜好——但只做谈资，不做清单背诵。
+    const profileLine = ctx.childProfile
+      ? `\n关于这位小朋友（TA创建自己形象时留下的）：${ctx.childProfile}。` +
+        `聊天时机合适可以自然提起（如「你不是最喜欢小恐龙嘛」），一次最多提一样，别每句都提、别背清单。`
+      : '';
     // 记忆按 kind 分组注入（memoryLine 分组注入）
     const mem = ctx.memory ?? [];
     let memoryLine = '';
@@ -286,7 +291,7 @@ ${abilityLines}
     const summaryLine = ctx.sessionSummary
       ? `\n这次见面更早的对话（已压缩成摘要）：${ctx.sessionSummary}`
       : '';
-    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + guideTargetLine + wishLine + taskLine + memoryLine + summaryLine;
+    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + guideTargetLine + wishLine + taskLine + profileLine + memoryLine + summaryLine;
 
     // 把近 N 轮历史按角色映射成对话消息，让回应有上下文
     const historyMsgs = (ctx.recentHistory ?? []).map((t) => ({

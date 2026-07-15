@@ -1,4 +1,4 @@
-import type { AvatarAttrs, AvatarCategory, AvatarGuideState, AvatarOption, GuideAvatarResult } from './types.ts';
+import type { AvatarAttrs, AvatarCategory, AvatarGuideState, AvatarOption, GuideAvatarResult, PlayerOnboardingProfile } from './types.ts';
 
 /**
  * 玩家形象 onboarding 的选项库（见 docs/onboarding-avatar-redesign-design.md §2.2）。
@@ -153,6 +153,28 @@ export function composeAvatarDesc(a: AvatarAttrs): string {
   for (const e of a.extras) parts.push(e);
   parts.push('双手空空的自然垂在身边，没有拿任何东西');
   return parts.join('，');
+}
+
+/**
+ * onboarding 档案 → 对话 prompt 里的一句喜好摘要（IntentContext.childProfile）。
+ * 只挑「角色能自然聊起」的料：称呼/图案/主色/形象创作原话/refine 小坚持；没料返回 undefined
+ * （无档案的老玩家一个字节都不多注入）。纯函数，可单测。
+ */
+export function onboardingProfileNote(p: PlayerOnboardingProfile | undefined): string | undefined {
+  if (!p) return undefined;
+  const bits: string[] = [];
+  const call = p.nickname || p.name;
+  if (call) bits.push(`TA叫「${call}」`);
+  const a = p.attrs;
+  if (a) {
+    if (a.motifs.length > 0) bits.push(`最喜欢的图案是${a.motifs.join('、')}`);
+    if (a.color) bits.push(`最喜欢${a.color}`);
+    const extras = a.extras.slice(0, 2);
+    if (extras.length > 0) bits.push(`创建形象时说过「${extras.join('」「')}」`);
+  }
+  if (p.refineNotes.length > 0) bits.push(`对自己形象的小坚持：「${p.refineNotes.join('」「')}」`);
+  if (bits.length === 0) return undefined;
+  return bits.join('，');
 }
 
 /** 提前收工的口头信号（「就这样」类；含不耐烦——onboarding 无反悔语义，不想选=done）。 */
