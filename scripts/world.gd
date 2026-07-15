@@ -1922,6 +1922,7 @@ func _process(delta: float) -> void:
 	_update_npc_notice(delta)  # 近身空闲村民偶尔转头看玩家打招呼（在 reposition 后跑，paper_walk 已更新）
 	_update_npc_wishes(delta)  # 近身村民偶尔漏一句心愿（3D 定位音，走近才听清）
 	_update_portal_markers()   # 传送门拱随世界滚动（与角色同一套环面最短位移）
+	_update_home_portals()     # 回家临时门随世界滚动 + 按 rise 从地下升起/沉下
 	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
 	_update_refine_indicator(delta)
@@ -3841,7 +3842,38 @@ func _clear_portal_markers() -> void:
 			(node as Node).queue_free()
 	_portal_markers.clear()
 
-## 回家传送门过场状态机推进（home-portal-anim）。P1 为占位骨架，各阶段逻辑在 P2-P7 逐步接入。
+## 召唤一座临时回家门：初始埋在地下（rise=0），随后由 _step_home 的升起/沉下阶段推进 rise。
+## 门只是装饰，绝不进 _portals（_step_portal 不理它、Mover 不参与脚本 lerp）。返回门记录字典。
+func _summon_home_portal(tile: Vector2i) -> Dictionary:
+	var prop := SdfProp.from_json_file(PORTAL_MARKER_SPEC)
+	if prop == null:
+		push_warning("[home] 回家门 spec 载入失败：%s" % PORTAL_MARKER_SPEC)
+		return {}
+	add_child(prop)
+	var rec := { "node": prop, "logical": WorldGrid.from_tile_center(tile), "rise": 0.0 }
+	_home_portals.append(rec)
+	_place_portal_node(prop, rec["logical"], -HOME_PORTAL_SINK) # 先埋地下，避免召唤当帧闪现半空
+	return rec
+
+## 逐帧把临时回家门摆到渲染空间，按各自 rise∈[0,1] 从地下升起（extra_y = -(1-rise)*sink）。
+## SdfProp 禁缩放，故用 position.y 平移做召唤/消散，地面不透明网格天然裁掉埋在下面的部分。
+func _update_home_portals() -> void:
+	for rec in _home_portals:
+		var node: Variant = rec.get("node", null)
+		if node == null or not is_instance_valid(node):
+			continue
+		var rise := clampf(float(rec.get("rise", 1.0)), 0.0, 1.0)
+		_place_portal_node(node as Node3D, rec["logical"], -(1.0 - rise) * HOME_PORTAL_SINK)
+
+## 消散并释放所有临时回家门（沉下动画由 HP_DISPEL 阶段先把 rise 推回 0 再调用）。
+func _dispel_home_portals() -> void:
+	for rec in _home_portals:
+		var node: Variant = rec.get("node", null)
+		if node != null and is_instance_valid(node):
+			(node as Node).queue_free()
+	_home_portals.clear()
+
+## 回家传送门过场状态机推进（home-portal-anim）。P1-P2 为占位骨架，各阶段逻辑在 P3-P7 逐步接入。
 func _step_home(_delta: float) -> void:
 	if not _homing:
 		return
