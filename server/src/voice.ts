@@ -176,8 +176,12 @@ export async function respondToTranscript(
   // 造角色/造物/造贴纸入口：不在这里合成/发普通回应，交给 WS 层的引导会话（guideCreation/guideProp/guideSticker）驱动——
   // 由它合成仙子的问句 TTS 并下发 creation_prompt（含图标选项），避免入口这轮重复出声。
   if (response.characterRequest || response.propRequest || response.stickerRequest || response.gameRequest) return response;
-  // LLM 在这句回应里发起了委托候选 → 设为进行中，随 character_response 下发给客户端做提示
-  if (intent.offerTask && taskCandidate) {
+  // 小朋友说「不想做了」→ 清掉进行中委托，随回应通知客户端撤提示 chip（优先于回带/发起）。
+  if (intent.abandonTask && activeTask) {
+    store.setActiveTask(worldId, playerId, null);
+    response.taskCleared = true;
+  } else if (intent.offerTask && taskCandidate) {
+    // LLM 在这句回应里发起了委托候选 → 设为进行中，随 character_response 下发给客户端做提示
     store.setActiveTask(worldId, playerId, taskCandidate);
     response.task = taskCandidate;
   } else if (activeTask) {

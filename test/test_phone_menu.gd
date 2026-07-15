@@ -291,15 +291,14 @@ func _run(scene: Node) -> void:
 			and phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED,
 		"收起后跨页停更、正面渲一帧熄屏黑底后自动停（UPDATE_ONCE）")
 
-	# 回家 app：跨页有「回家」按钮；离线且已在 village 时点回家 → 就地把玩家挪回原点附近空位解卡。
+	# 回家 app：跨页有「回家」按钮；点回家 → 启动传送门过场动画（软过场：召门→走进→黑幕→走出，
+	# 见 home-portal-anim）。这里只验按钮接线启动了动画；完整落位/黑幕/消散由 test_home_soft、
+	# test_home_cross、test_home_edge 覆盖（那三个逐帧驱动到动画走完）。
 	_check(pui.get("_home_btn") != null and pui.get("_home_btn") is Button, "回家页有「回家」按钮(_home_btn)")
-	var far := WorldGrid.from_tile_center(Vector2i(50, 50))
-	(scene.get("player") as Dictionary)["logical"] = far
+	(scene.get("player") as Dictionary)["logical"] = WorldGrid.from_tile_center(Vector2i(50, 50))
 	scene._go_home()
-	var home_pos: Vector2 = (scene.get("player") as Dictionary)["logical"]
-	var d_home := WorldGrid.shortest_delta(home_pos, WorldGrid.from_tile_center(Vector2i.ZERO)).length()
-	_check(d_home <= 20.0, "离线回家：玩家从(50,50)挪回原点附近（环面距原点 %.1f ≤ 20 单位）" % d_home)
-	_check(WorldGrid.shortest_delta(scene.get("focus_logical"), home_pos).length() < 0.01, "回家后相机聚焦跟到玩家")
+	_check(scene.get("_homing"), "点回家启动了传送门过场动画（_homing=true）")
+	_check((scene.get("_home_portals") as Array).size() == 1, "回家：召唤了一座临时传送门（近门）")
 
 	# 过场 loading 遮罩：_setup_hud 建好、初始隐藏；步进一帧仙子动画不崩
 	var overlay: Control = scene.get("_transition_overlay")

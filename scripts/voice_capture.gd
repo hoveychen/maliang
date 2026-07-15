@@ -174,6 +174,9 @@ func must_wait_for_ready() -> bool:
 func open() -> void:
 	if _open:
 		return
+	# iOS 麦权限被拒 → 盖引导层 + 暂停树，**不**置 _open：解除后宿主重新调用本函数即自愈开麦。
+	if MicPermission.enforce(get_tree()):
+		return
 	_open = true
 	if _mic != null:
 		_mic.start()

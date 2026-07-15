@@ -86,7 +86,7 @@ import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
-import { AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
+import { avatarDescForbidden, stripAvatarOptionIds, AVATAR_EARLY_DONE, AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
@@ -649,10 +649,12 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       try {
         desc = (await adapters.llm.refineAvatar(refineFrom, refineRequest)).trim();
       } catch {
-        desc = `${refineFrom}。按小朋友的要求调整：${refineRequest}`; // LLM 挂了不丢孩子的话
+        // LLM 挂了：合法要求原样追加（不丢孩子的话）；要求本身违规（持物/头顶物）→ 原描述照旧
+        desc = avatarDescForbidden(refineRequest) ? refineFrom : `${refineFrom}。按小朋友的要求调整：${refineRequest}`;
       }
     }
     if (desc.length === 0) return reply.code(400).send({ error: 'visualDescription required' });
+    desc = stripAvatarOptionIds(desc); // 同 avatar-chat：存量档案/上一轮描述可能带 av_ 代号
     const check = await adapters.moderation.moderateText(desc);
     if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
     const gen = await generateSprite(adapters, desc, store);
@@ -705,11 +707,17 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const state = sanitizeAvatarState(body);
     const childInput = cleanStr(body.childInput, 200);
     let r: GuideAvatarResult;
-    try {
-      r = await adapters.llm.guideAvatar(state, childInput);
-    } catch (err) {
-      console.warn(`guideAvatar 失败，退确定性题序：${String(err)}`);
-      r = deterministicGuideAvatar(state, childInput);
+    if (AVATAR_EARLY_DONE.test(childInput)) {
+      // 「就这样/不想选了」确定性收工——生产实测真 LLM 会无视 prompt 连问 6 轮（2026-07-15 抽查），
+      // 终止性写死在端点，不靠 LLM 自觉（A1 refineTries 同款纪律）。已知属性直接去画。
+      r = { replyText: '好嘞，点点这就把你画进魔法世界！', done: true };
+    } else {
+      try {
+        r = await adapters.llm.guideAvatar(state, childInput);
+      } catch (err) {
+        console.warn(`guideAvatar 失败，退确定性题序：${String(err)}`);
+        r = deterministicGuideAvatar(state, childInput);
+      }
     }
     // 状态归并在服务端做（客户端只存不算）。motifs/extras 契约为「增量后全量」，整组替换。
     const attrs: AvatarAttrs = { ...state.attrs, motifs: [...state.attrs.motifs], extras: [...state.attrs.extras] };
@@ -742,6 +750,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
         // 走兜底
       }
       if (description.length === 0) description = composeAvatarDesc(attrs);
+      description = stripAvatarOptionIds(description); // 生产实测 LLM 会把 av_ 选项代号抄进描述
       const check = await adapters.moderation.moderateText(description);
       if (!check.allowed) description = composeAvatarDesc(attrs);
       return { replyText: r.replyText, done: true, description, state: nextState };

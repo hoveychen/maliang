@@ -1,0 +1,6 @@
+{
+  "voice": "zh-CN-YunxiaNeural",
+  "lines": [
+    { "id": "mic_permission", "text": "咦？点点听不到你说话了。快去找个大人，帮点点把麦克风打开好不好呀？" }
+  ]
+}

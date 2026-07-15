@@ -59,3 +59,6 @@ gdextension_asr/.sconsign.dblite
 libmaliang_asr.*.framework
 gdextension_asr/sherpa-onnx-ios/
 gdextension_asr/bin_ios/
+
+# Python 字节码缓存（e2e 脚本 import 时生成）
+__pycache__/

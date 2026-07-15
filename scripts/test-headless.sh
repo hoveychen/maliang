@@ -19,6 +19,9 @@ GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 export MALIANG_API_BASE="${MALIANG_API_BASE:-http://127.0.0.1:1}"
 # 回测离线约定：关掉 edge-tts 真网探活（协议单测/真网冒烟见 test_edge_tts.gd）。
 export MALIANG_EDGE_TTS="${MALIANG_EDGE_TTS:-0}"
+# harness 命令口走回测专用端口：8577 常被 iproxy/adb forward 转发到真机调试设备占走，
+# 会让 test_harness_wire 环境性挂掉（backpack/menu 两条线都撞过）。
+export MALIANG_HARNESS_PORT="${MALIANG_HARNESS_PORT:-8579}"
 
 echo "== import（刷新类缓存）=="
 "$GODOT" --headless --import --path "$ROOT" >/dev/null 2>&1
@@ -44,6 +47,7 @@ UNIT_TESTS=(
   test_ball_replication_buffer
   test_behavior_executor
   test_edge_tts
+  test_tts_prebuffer
   test_fairy_voice
   test_npc_wish_voice
   test_prebaked_voice
@@ -63,6 +67,7 @@ UNIT_TESTS=(
   test_sdf_static_baker
   test_paper_idle
   test_paper_clips
+  test_task_chip_portrait
   test_anim_clip_pick
   test_atlas_compress
   test_player_profile
@@ -70,6 +75,7 @@ UNIT_TESTS=(
   test_composed_prop
   test_build_parts
   test_menu_gate
+  test_menu_album
   test_cjk_font
   test_graphics_settings
   test_papercraft_toggle
@@ -122,6 +128,7 @@ UNIT_TESTS=(
   test_paper_phone
   test_paper_book
   test_asr_guard
+  test_mic_permission
   test_interaction_fsm
   test_adaptive_fps_cap
   test_paper_xray_gate
@@ -186,6 +193,7 @@ run_test test_visual_greeting      --fixed-fps 10 --quit-after 60
 run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
 run_test test_paper_actions        --fixed-fps 10 --quit-after 60
 run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
+run_test test_task_hint_ask        --fixed-fps 10 --quit-after 60
 run_test test_visual_props         --fixed-fps 10 --quit-after 120
 run_test test_placement            --fixed-fps 10 --quit-after 40
 run_test test_item_voice           --fixed-fps 10 --quit-after 60
@@ -203,6 +211,12 @@ run_test test_device_profile_boot
 run_test test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
 run_test test_visual_scene_switch   --fixed-fps 10 --quit-after 60
 run_test test_visual_portal         --fixed-fps 10 --quit-after 90
+run_test test_home_portal           --fixed-fps 10 --quit-after 30
+run_test test_home_walk             --fixed-fps 10 --quit-after 40
+run_test test_home_input_lock       --fixed-fps 10 --quit-after 40
+run_test test_home_cross            --fixed-fps 10 --quit-after 90
+run_test test_home_soft             --fixed-fps 10 --quit-after 90
+run_test test_home_edge             --fixed-fps 10 --quit-after 90
 
 # ── macOS 端侧 ASR 端到端真识别（GDExtension 在 headless 也加载）──────────────
 # 喂真中文 wav 给 sherpa 识别器，断言识别文本含「研究」。framework 与模型都是 gitignored，

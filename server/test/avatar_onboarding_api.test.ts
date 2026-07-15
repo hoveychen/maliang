@@ -191,3 +191,26 @@ test('debug api：玩家详情带 onboarding 档案（additive 字段）+ 档案
     await app.close();
   }
 });
+
+test('debug api：只有 onboarding 档案、还没进过世界的玩家——详情不 404（合成最小档案）', async () => {
+  const { app, store } = await makeApp();
+  try {
+    store.saveOnboardingProfile({
+      playerId: 'p-fresh', name: '新新', nickname: '新新',
+      attrs: { gender: '小男生', color: '蓝色', motifs: [], extras: [] },
+      visualDescription: 'd', refineNotes: [], spriteAsset: 'h-fresh', createdAt: '2026-07-15',
+    });
+    // 刻意不 upsertPlayer——world_info 才建 players 行，刚建完形象的孩子就是这个状态
+    const res = await app.inject({ method: 'GET', url: '/debug/api/players/p-fresh' });
+    assert.equal(res.statusCode, 200, '不得 404——管理台「所有玩家」要看得到 TA');
+    const d = res.json() as { player: { name: string; spriteAsset: string }; onboarding: { attrs: { gender: string } } | null };
+    assert.equal(d.player.name, '新新');
+    assert.equal(d.player.spriteAsset, 'h-fresh');
+    assert.equal(d.onboarding?.attrs.gender, '小男生');
+
+    const miss = await app.inject({ method: 'GET', url: '/debug/api/players/p-nothing' });
+    assert.equal(miss.statusCode, 404, '两边都没有才 404');
+  } finally {
+    await app.close();
+  }
+});

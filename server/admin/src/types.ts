@@ -58,12 +58,37 @@ export interface ChatTurn {
   ts: number;
 }
 
+/** onboarding 形象对话累积的结构化属性（服务端 AvatarAttrs 同形）。 */
+export interface AvatarAttrs {
+  gender?: string;
+  hairstyle?: string;
+  outfit?: string;
+  color?: string;
+  motifs: string[];
+  extras: string[];
+  accessory?: string;
+}
+
+/** 玩家 onboarding 档案（服务端 PlayerOnboardingProfile 同形；玩家详情 additive 字段 + 总表端点）。 */
+export interface OnboardingProfile {
+  playerId: string;
+  name: string;
+  nickname: string;
+  attrs: AvatarAttrs;
+  visualDescription: string;
+  refineNotes: string[];
+  spriteAsset: string;
+  createdAt: string;
+}
+
 export interface PlayerDetail {
   player: Player;
   visits: Visit[];
   memories: { worldId: string; characterId: string; characterName: string; items: MemoryItem[] }[];
   chats: { worldId: string; characterId: string; characterName: string; turns: ChatTurn[] }[];
   spriteAnim: SpriteAnimRecord;
+  /** onboarding 档案（无档案 null——升级前的服务端也可能不带此字段）。 */
+  onboarding?: OnboardingProfile | null;
 }
 
 export interface ActiveTask {

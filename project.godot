@@ -25,6 +25,7 @@ HarnessCmd="*res://scripts/debug_cmd_server.gd"
 [audio]
 
 driver/enable_input=true
+general/ios/session_category=2
 
 [display]
 
