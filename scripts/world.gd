@@ -1436,7 +1436,9 @@ func _setup_hud() -> void:
 			_fit_phone(false)
 			paper_phone.show_front())
 
-	# 进行中委托的提示 chip（右上角，图标为主：目标 ⇒ 奖励贴纸，_update_task_chip 重建）
+	# 进行中委托的提示 chip（右上角，图标为主：委托人头像+目标 ⇒ 奖励贴纸，_update_task_chip 重建）
+	# 整个 chip 可点：点一下小仙子会用自己的话提醒该怎么做（跑腿提带路/心愿提一起造）——见 _on_task_chip_input。
+	# mouse_filter=STOP 让容器自己收点击；子图标/字设 IGNORE（见 _chip_icon/_chip_label）好让点击穿到容器。
 	task_chip = HBoxContainer.new()
 	task_chip.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	task_chip.grow_horizontal = Control.GROW_DIRECTION_BEGIN
@@ -1445,6 +1447,8 @@ func _setup_hud() -> void:
 	task_chip.alignment = BoxContainer.ALIGNMENT_END
 	task_chip.add_theme_constant_override("separation", 8)
 	task_chip.visible = false
+	task_chip.mouse_filter = Control.MOUSE_FILTER_STOP
+	task_chip.gui_input.connect(_on_task_chip_input)
 	layer.add_child(task_chip)
 
 	# 顶部「听到的文字」反馈：让大人能确认 ASR 是否识别成功
@@ -5690,6 +5694,8 @@ func _on_character_response(data: Dictionary) -> void:
 	_show_emotion(String(data.get("emotion", "happy")))
 	if typeof(data.get("task")) == TYPE_DICTIONARY:
 		_set_active_task(data["task"]) # 新发起的委托（或进行中的重申）→ 提示 chip
+	if bool(data.get("taskCleared", false)):
+		_set_active_task(null) # 小朋友说「不想做了」→ 服务端已清委托，撤掉提示 chip
 	# 引路（仅小仙子）：guide=开始领路（新计划覆盖旧的）；guideStop=小朋友说「不去了」。
 	# 服务端算不出计划时不会下发 guide，只留口头回应——她绝不会应下「跟我来」却不动。
 	if typeof(data.get("guide")) == TYPE_DICTIONARY:
@@ -7469,23 +7475,55 @@ func _set_active_task(task: Variant) -> void:
 		game_audio.play_sfx("task")
 	_update_task_chip()
 
-## chip 里的小图标/短字（图标为主，家长可读短名）。
+## chip 里的小图标（mouse_filter=IGNORE：点击穿到容器，整片 chip 一起响应）。
 func _chip_icon(tex: Texture2D) -> TextureRect:
 	var r := TextureRect.new()
 	r.texture = tex
 	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	r.custom_minimum_size = Vector2(38.0, 38.0)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return r
+
+## chip 里的委托人/目标小头像：从已降生的角色节点直接取立绘（动画角色裁第 0 帧）。
+## 头像比图标略大、顶对齐立绘的头（KEEP_ASPECT_COVERED + 上裁）——一眼看出是谁。
+## 节点不在场（目标在别场景/未降生）返回 null，调用方回落到类型图标。
+func _chip_portrait(node: PaperCharacter) -> TextureRect:
+	if node == null:
+		return null
+	var tex := node.portrait_tex()
+	if tex == null:
+		return null
+	var r := TextureRect.new()
+	r.texture = tex
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	r.custom_minimum_size = Vector2(46.0, 46.0)
+	r.clip_contents = true  # COVERED 会溢出裁剪框，clip 掉多余
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return r
 
 func _chip_label(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_style_label(l, 26)
 	return l
 
-## 委托提示 chip：目标图标+短名 ⇒ 奖励贴纸图标（AIGC 贴纸，_set_active_task 时重建）。
+## 按名字找已降生的角色节点（deliver/bring 的目标是角色名）。找不到返回 null。
+func _find_npc_node_by_name(name: String) -> PaperCharacter:
+	if name.is_empty():
+		return null
+	for n in npcs:
+		var node := n["node"] as PaperCharacter
+		if node != null and node.char_name == name:
+			return node
+	return null
+
+## 委托提示 chip（纯图标，去文字——幼儿园孩子不识字）：委托人头像 + 类型图标 + 目标线索 ⇒ 盖章图标。
+## 头像直接从已降生的角色节点取立绘（_chip_portrait）；节点不在场（目标在别场景/未降生）回落到类型图标。
+## _set_active_task 时重建；点一下整片 chip 让小仙子提醒该怎么做（_on_task_chip_input）。
 func _update_task_chip() -> void:
 	if task_chip == null:
 		return
@@ -7494,25 +7532,47 @@ func _update_task_chip() -> void:
 	if active_task.is_empty():
 		task_chip.visible = false
 		return
-	task_chip.add_child(_chip_icon(UiAssets.tex("ic_target")))
+	# 委托人头像领头（谁给你的活）——不在场回落到通用目标图标
+	var owner := _chip_portrait(_find_npc_by_id(String(active_task.get("npcId", ""))))
+	task_chip.add_child(owner if owner != null else _chip_icon(UiAssets.tex("ic_target")))
 	match String(active_task.get("type", "")):
 		"deliver":
 			task_chip.add_child(_chip_icon(UiAssets.tex("ic_chat")))
-			task_chip.add_child(_chip_label("→%s" % active_task.get("targetName", "")))
+			_add_chip_target_portrait(String(active_task.get("targetName", "")))
 		"bring":
 			task_chip.add_child(_chip_icon(UiAssets.tex("ic_handshake")))
-			task_chip.add_child(_chip_label("%s→%s" % [active_task.get("targetName", ""), active_task.get("npcName", "")]))
+			_add_chip_target_portrait(String(active_task.get("targetName", "")))
 		"visit":
-			task_chip.add_child(_chip_icon(UiAssets.tex("ic_pin")))
-			task_chip.add_child(_chip_label(String(active_task.get("locationName", ""))))
+			task_chip.add_child(_chip_icon(UiAssets.tex("ic_pin"))) # 地点无头像，钉子图标即目标
 		"wish":
 			# 心愿委托（wishes.ts）：某个村民盼着一样东西，而他自己不会魔法——
 			# 魔法棒图标就是给小朋友的线索：这事得找会变魔法的（小仙子）。
 			task_chip.add_child(_chip_icon(UiAssets.tex("ic_wand")))
-			task_chip.add_child(_chip_label(String(active_task.get("npcName", ""))))
 	task_chip.add_child(_chip_label("⇒"))
 	task_chip.add_child(_chip_icon(UiAssets.tex(_stamp_icon(String(active_task.get("stampStyle", "star")))))) # 奖励=盖这款集邮章
 	task_chip.visible = true
+
+## deliver/bring 的目标是角色：优先放目标头像，节点不在场回落到通用目标图标。
+func _add_chip_target_portrait(name: String) -> void:
+	var p := _chip_portrait(_find_npc_node_by_name(name))
+	task_chip.add_child(p if p != null else _chip_icon(UiAssets.tex("ic_target")))
+
+## 点了委托 chip：让小仙子用自己的话提醒当前委托该怎么做（跑腿提带路/心愿提一起造）。
+## 具体走对话通道的实现见 _ask_fairy_about_task（P3）。
+func _on_task_chip_input(event: InputEvent) -> void:
+	if active_task.is_empty():
+		return
+	var tapped := (event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed) \
+			or (event is InputEventMouseButton \
+				and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT \
+				and (event as InputEventMouseButton).pressed)
+	if tapped:
+		_ask_fairy_about_task()
+
+## 问小仙子当前委托怎么做（P3 接对话通道：选中点点 + 发合成转写）。P2 先占位，避免半截调用崩溃。
+func _ask_fairy_about_task() -> void:
+	if game_audio != null:
+		game_audio.play_sfx("tap")
 
 ## 盖章款式 id → 图标名（stamp_<style>，未知款式回退 stamp_star）。
 func _stamp_icon(style: String) -> String:
