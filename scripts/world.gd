@@ -1743,6 +1743,9 @@ func _red_flower_count() -> int:
 	return int(wallet.get("flowers", 0))
 
 func _physics_process(delta: float) -> void:
+	# 回家过场中：玩家由 _step_home 脚本驱动走进/走出传送门，吞掉方向键，别让手动操控抢位。
+	if _homing:
+		return
 	# 方向键直接驱动玩家（桌面调试；与点击移动同一 Mover 规则）
 	var input := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	if input != Vector2.ZERO and not player.is_empty():
@@ -2802,6 +2805,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	# benchmark 采样期：吞掉一切玩家输入（点击移动/手势/缩放），玩家不动→相机不动→可复现帧。
 	# 注：将来若把「家长长按跳过 intro」接到输入，须让它绕过这道门（否则采样期跳不了）。
 	if _bench_freeze:
+		return
+	# 回家过场中：玩家被脚本驱动走进/走出传送门，吞掉点击移动/手势/缩放，别让点击抢位或起新移动。
+	if _homing:
 		return
 	# 观演/游戏态：StageAgent 全权调度演出，吞掉一切玩家输入（点击移动/进对话/手势/缩放）。
 	# 唯一例外——「点角色」这类游戏规则（躲猫猫抓人/点选）仍要探测：命中被 watch 的演员即上行 tap 事件。

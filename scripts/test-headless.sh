@@ -205,6 +205,7 @@ run_test test_visual_scene_switch   --fixed-fps 10 --quit-after 60
 run_test test_visual_portal         --fixed-fps 10 --quit-after 90
 run_test test_home_portal           --fixed-fps 10 --quit-after 30
 run_test test_home_walk             --fixed-fps 10 --quit-after 40
+run_test test_home_input_lock       --fixed-fps 10 --quit-after 40
 
 # ── macOS 端侧 ASR 端到端真识别（GDExtension 在 headless 也加载）──────────────
 # 喂真中文 wav 给 sherpa 识别器，断言识别文本含「研究」。framework 与模型都是 gitignored，
