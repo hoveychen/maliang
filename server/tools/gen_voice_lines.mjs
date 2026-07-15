@@ -1,6 +1,7 @@
 // 预制台词 TTS 批量合成：读 <目录>/lines.json，逐条 edge-tts（微软云，免费）合成 mp3，
 // ffmpeg 转 PCM16 单声道写 WAV。voice 字段用 edge 音色名（如 zh-CN-XiaoxiaoNeural）；
-// 仙子统一 zh-CN-XiaoyiNeural，与客户端运行期 edge_tts.gd 的仙子映射一致（音色不跳变）。
+// 音色由各目录 lines.json 的 voice 字段决定；点点（仙子/笔灵）与 intro 旁白当前用
+// zh-CN-YunxiaNeural，与客户端运行期 edge_tts.gd 的映射一致（音色不跳变）。
 // 幂等：已有 wav 跳过；--force 全量重生成。运行期游戏零 TTS 调用（纯播本地文件）。
 // 用法：node tools/gen_voice_lines.mjs [目录=../assets/voice/fairy] [--force]
 // 依赖：ffmpeg 在 PATH；ws 包（server 依赖树自带）。
