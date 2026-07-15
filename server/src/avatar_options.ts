@@ -1,4 +1,4 @@
-import type { AvatarAttrs, AvatarCategory, AvatarOption } from './types.ts';
+import type { AvatarAttrs, AvatarCategory, AvatarGuideState, AvatarOption, GuideAvatarResult } from './types.ts';
 
 /**
  * 玩家形象 onboarding 的选项库（见 docs/onboarding-avatar-redesign-design.md §2.2）。
@@ -153,4 +153,56 @@ export function composeAvatarDesc(a: AvatarAttrs): string {
   for (const e of a.extras) parts.push(e);
   parts.push('双手空空的自然垂在身边，没有拿任何东西');
   return parts.join('，');
+}
+
+/** 提前收工的口头信号（「就这样」类；含不耐烦——onboarding 无反悔语义，不想选=done）。 */
+const AVATAR_EARLY_DONE = /(就这样|好了|够了|够啦|可以了|不想选|不选了|算了)/;
+
+/**
+ * 形象引导一轮的【确定性】推进——mock 适配器与「LLM 失败/超时降级链」共用的同一实现
+ * （docs/onboarding-avatar-redesign-design.md §3.3：宁可退到平庸也绝不卡住小朋友）。
+ * 行为契约与 LLM 路径一致：按图标 label 认属性；开放语音（非库内 label）整句收进上一轮
+ * 问的类别、不归一；性别第一问；性别+2项外观、说「就这样」、或超轮即 done；无 cancelled。
+ * 纯函数：不改 state，本轮增量放 updatedAttrs（motifs/extras 为增量后全量）。
+ */
+export function deterministicGuideAvatar(state: AvatarGuideState, childInput: string): GuideAvatarResult {
+  const attrs: AvatarAttrs = { ...state.attrs, motifs: [...state.attrs.motifs], extras: [...state.attrs.extras] };
+  const updated: Partial<AvatarAttrs> = {};
+  const text = childInput.trim();
+  const lastAsked = state.askedCategories.at(-1) as AvatarCategory | undefined;
+  const isKnownLabel = AVATAR_OPTIONS.some((o) => text.includes(o.label));
+  if (lastAsked && text && !isKnownLabel && !AVATAR_EARLY_DONE.test(text)) {
+    // 开放语音优先：原话进属性，不归一成库里的词（个性化来源）
+    switch (lastAsked) {
+      case 'gender': attrs.extras.push(text); updated.extras = [...attrs.extras]; break; // 性别答非所问 → 当外观点收下
+      case 'hairstyle': if (!attrs.hairstyle) { attrs.hairstyle = text; updated.hairstyle = text; } break;
+      case 'outfit': if (!attrs.outfit) { attrs.outfit = text; updated.outfit = text; } break;
+      case 'color': if (!attrs.color) { attrs.color = text; updated.color = text; } break;
+      case 'motif': attrs.motifs.push(text); updated.motifs = [...attrs.motifs]; break;
+      case 'accessory': if (!attrs.accessory) { attrs.accessory = text; updated.accessory = text; } break;
+    }
+  } else {
+    for (const o of AVATAR_OPTIONS) {
+      if (!text.includes(o.label)) continue;
+      if (o.category === 'gender' && !attrs.gender) { attrs.gender = o.label; updated.gender = o.label; }
+      else if (o.category === 'hairstyle' && !attrs.hairstyle) { attrs.hairstyle = o.label; updated.hairstyle = o.label; }
+      else if (o.category === 'outfit' && !attrs.outfit) { attrs.outfit = o.label; updated.outfit = o.label; }
+      else if (o.category === 'color' && !attrs.color) { attrs.color = o.label; updated.color = o.label; }
+      else if (o.category === 'motif' && !attrs.motifs.includes(o.label)) { attrs.motifs.push(o.label); updated.motifs = [...attrs.motifs]; }
+      else if (o.category === 'accessory' && !attrs.accessory) { attrs.accessory = o.label; updated.accessory = o.label; }
+    }
+  }
+  const early = AVATAR_EARLY_DONE.test(text);
+  const knownCount = [attrs.hairstyle, attrs.outfit, attrs.color, attrs.accessory].filter(Boolean).length
+    + (attrs.motifs.length > 0 ? 1 : 0) + (attrs.extras.length > 0 ? 1 : 0);
+  const enough = !!attrs.gender && knownCount >= 2;
+  const forced = state.turnCount >= 5;
+  if (early || enough || forced) {
+    return { replyText: '好嘞，点点这就把你画进魔法世界！', done: true, updatedAttrs: updated };
+  }
+  // 追问下一个缺失类别（gender→hairstyle→outfit→color→motif→accessory）
+  const next: AvatarCategory = !attrs.gender ? 'gender' : !attrs.hairstyle ? 'hairstyle'
+    : !attrs.outfit ? 'outfit' : !attrs.color ? 'color' : attrs.motifs.length === 0 ? 'motif' : 'accessory';
+  const optionIds = avatarOptionsByCategory(next).slice(0, 4).map((o) => o.id);
+  return { replyText: AVATAR_ASK[next], done: false, question: AVATAR_ASK[next], category: next, optionIds, updatedAttrs: updated };
 }

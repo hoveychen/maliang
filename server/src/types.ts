@@ -757,3 +757,22 @@ export interface GuideAvatarResult {
   optionIds?: string[];                 // done=false：候选项 id（2–4）
   updatedAttrs?: Partial<AvatarAttrs>;  // 从本轮输入解析出的属性更新（motifs/extras 为增量后全量）
 }
+
+/**
+ * 玩家 onboarding 档案（§2.5，老板拍板当期接线）：onboarding 完成时客户端全量上报落库。
+ * 键 = playerId（设备端稳定 UUID，同 players 表）。独立表、不并进 Player——world_info 的
+ * Player upsert 是整行覆盖（server.ts world_info handler），并进去会被抹掉。
+ * 隐私边界：只存结构化属性+文本，不存录音（音频本就不上行）。
+ * 本地 user://profile.json 照旧是主档（离线可玩的根基），这里是服务端副本：
+ * 管理台可见 + 世界里点点/村民 LLM prompt 注入喜好（P5）+ 换设备恢复的地基。
+ */
+export interface PlayerOnboardingProfile {
+  playerId: string;
+  name: string;
+  nickname: string;
+  attrs: AvatarAttrs;          // 结构化答案（含开放语音原话）
+  visualDescription: string;   // LLM 合成的最终外观描述
+  refineNotes: string[];       // 照镜子环孩子提的修改原话（个性化金矿：「头发要长一点」）
+  spriteAsset: string;         // 最终采纳的形象资产 hash
+  createdAt: string;           // ISO 时间；客户端带上，服务端不取墙上时钟
+}

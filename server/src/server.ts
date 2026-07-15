@@ -84,8 +84,9 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type ItemDef, type Player, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
+import { composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
@@ -636,10 +637,21 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { count: characters.length, regenerated: regenTriggered.size, characters };
   });
 
-  // onboarding 玩家形象：描述（由问题答案拼装）→ 生图 → 资产 hash。不建角色——
+  // onboarding 玩家形象：描述（引导对话 LLM 合成，或降级链本地拼装）→ 生图 → 资产 hash。不建角色——
   // 玩家档案在设备端，资产内容寻址共享。描述过文字审核（防客户端篡改）。
-  app.post<{ Body: { visualDescription?: string } | null }>('/player-sprite', async (req, reply) => {
-    const desc = (req.body?.visualDescription ?? '').trim();
+  // 照镜子·改一改（docs/onboarding-avatar-redesign-design.md §2.4）：带 refineFrom+refineRequest 时
+  // 先 LLM 把小朋友点名的修改并进描述再生图；产物描述随返回体带回，客户端下一轮 refine 接着用。
+  app.post<{ Body: { visualDescription?: string; refineFrom?: string; refineRequest?: string } | null }>('/player-sprite', async (req, reply) => {
+    let desc = (req.body?.visualDescription ?? '').trim();
+    const refineFrom = (req.body?.refineFrom ?? '').trim().slice(0, 600);
+    const refineRequest = (req.body?.refineRequest ?? '').trim().slice(0, 200);
+    if (refineFrom.length > 0 && refineRequest.length > 0) {
+      try {
+        desc = (await adapters.llm.refineAvatar(refineFrom, refineRequest)).trim();
+      } catch {
+        desc = `${refineFrom}。按小朋友的要求调整：${refineRequest}`; // LLM 挂了不丢孩子的话
+      }
+    }
     if (desc.length === 0) return reply.code(400).send({ error: 'visualDescription required' });
     const check = await adapters.moderation.moderateText(desc);
     if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
@@ -647,7 +659,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     // 试点：玩家形象静态先返回，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     triggerCharacterAnimation(adapters, store, gen.hash, toSpriteSheet);
     // anchors 随返回体进设备档案（玩家档案在 user://profile.json，服务端够不着，见设计 §2.3）
-    return { spriteAsset: gen.hash, anchors: gen.anchors ?? undefined };
+    return { spriteAsset: gen.hash, anchors: gen.anchors ?? undefined, visualDescription: desc };
   });
 
   // 存量玩家档案补算锚点（设计 §2.3）：老档案只有 spriteAsset 没有 anchors，客户端发现缺失时
@@ -682,6 +694,84 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       confirmTtsAsset: hash,
       confirmMime: audio.mime,
     };
+  });
+
+  // ── onboarding 形象引导对话（docs/onboarding-avatar-redesign-design.md §2.2/§3.1）──
+  // 无状态 HTTP 多轮：客户端每轮把 state（attrs/askedCategories/turnCount/dialog）全量带回，
+  // 服务端跑一轮 guideAvatar、归并增量后把新 state 原样返给客户端下轮再带来——服务端零会话。
+  // LLM 挂了退 deterministicGuideAvatar 静态题序（§3.3 降级链：绝不卡小朋友）。
+  app.post<{ Body: Record<string, unknown> | null }>('/onboarding/avatar-chat', async (req) => {
+    const body = req.body ?? {};
+    const state = sanitizeAvatarState(body);
+    const childInput = cleanStr(body.childInput, 200);
+    let r: GuideAvatarResult;
+    try {
+      r = await adapters.llm.guideAvatar(state, childInput);
+    } catch (err) {
+      console.warn(`guideAvatar 失败，退确定性题序：${String(err)}`);
+      r = deterministicGuideAvatar(state, childInput);
+    }
+    // 状态归并在服务端做（客户端只存不算）。motifs/extras 契约为「增量后全量」，整组替换。
+    const attrs: AvatarAttrs = { ...state.attrs, motifs: [...state.attrs.motifs], extras: [...state.attrs.extras] };
+    const u = r.updatedAttrs;
+    if (u) {
+      if (u.gender) attrs.gender = u.gender;
+      if (u.hairstyle) attrs.hairstyle = u.hairstyle;
+      if (u.outfit) attrs.outfit = u.outfit;
+      if (u.color) attrs.color = u.color;
+      if (u.accessory) attrs.accessory = u.accessory;
+      if (u.motifs) attrs.motifs = u.motifs;
+      if (u.extras) attrs.extras = u.extras;
+    }
+    const dialog = [...state.dialog];
+    if (childInput) dialog.push({ role: 'child', text: childInput, ts: Date.now() });
+    dialog.push({ role: 'npc', text: r.replyText, ts: Date.now() });
+    const nextState: AvatarGuideState = {
+      attrs,
+      askedCategories: r.category ? [...state.askedCategories, r.category] : state.askedCategories,
+      turnCount: state.turnCount + 1,
+      dialog: dialog.slice(-24),
+      ...(state.childName ? { childName: state.childName } : {}),
+    };
+    if (r.done) {
+      // 外观描述合成（§2.3 硬规则在 LLM prompt 内）；LLM 挂/被审核拒 → 确定性模板兜底（必然安全）
+      let description = '';
+      try {
+        description = (await adapters.llm.describeAvatar(attrs, nextState.dialog)).trim();
+      } catch {
+        // 走兜底
+      }
+      if (description.length === 0) description = composeAvatarDesc(attrs);
+      const check = await adapters.moderation.moderateText(description);
+      if (!check.allowed) description = composeAvatarDesc(attrs);
+      return { replyText: r.replyText, done: true, description, state: nextState };
+    }
+    // 选项卡：id→label+iconAsset（图标未生成为空串，客户端回落文字卡/色块）
+    const options = (r.optionIds ?? []).flatMap((id) => {
+      const o = findAvatarOption(id);
+      return o ? [{ id: o.id, label: o.label, iconAsset: store.getCreationIcon(o.id) }] : [];
+    });
+    return { replyText: r.replyText, done: false, question: r.question ?? r.replyText, category: r.category, options, state: nextState };
+  });
+
+  // onboarding 档案落库（§2.5）：完成时客户端全量上报。键=playerId（设备端稳定 UUID），
+  // 幂等可覆盖（重跑 onboarding/换形象都重报）。本地 user://profile.json 仍是主档，这里是副本。
+  app.post<{ Body: Record<string, unknown> | null }>('/onboarding/profile', async (req, reply) => {
+    const body = req.body ?? {};
+    const playerId = cleanStr(body.playerId, 64);
+    if (playerId.length === 0) return reply.code(400).send({ error: 'playerId required' });
+    const profile: PlayerOnboardingProfile = {
+      playerId,
+      name: cleanStr(body.name, 20),
+      nickname: cleanStr(body.nickname, 20),
+      attrs: sanitizeAvatarState(body).attrs,
+      visualDescription: cleanStr(body.visualDescription, 600),
+      refineNotes: cleanStrArr(body.refineNotes, 4, 120),
+      spriteAsset: cleanStr(body.spriteAsset, 64),
+      createdAt: cleanStr(body.createdAt, 40),
+    };
+    store.saveOnboardingProfile(profile);
+    return { ok: true };
   });
 
   // SDF 可动物件：描述 → LLM 设计 spec（~15 行 JSON）→ 服务端校验 → 下发。
@@ -2387,6 +2477,55 @@ export function sanitizeAnchors(v: unknown): CharacterAnchors | undefined {
   const handR = pt(o.handR);
   if (!headTop || !handL || !handR) return undefined;
   return { headTop, handL, handR, source: o.source === 'vision' ? 'vision' : 'fallback' };
+}
+
+// ── onboarding 形象引导的不可信输入夹紧（与 sanitizeAnchors 同哲学：设备端自报，全部当脏数据）──
+
+function cleanStr(v: unknown, max: number): string {
+  return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+
+function cleanStrArr(v: unknown, maxItems: number, maxLen: number): string[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    .map((s) => s.trim().slice(0, maxLen))
+    .slice(0, maxItems);
+}
+
+const AVATAR_CATEGORY_SET = new Set(['gender', 'hairstyle', 'outfit', 'color', 'motif', 'accessory']);
+
+/**
+ * 从 /onboarding/avatar-chat（及 /onboarding/profile 的 attrs 部分）请求体重建 AvatarGuideState。
+ * 无状态多轮的服务端半段：客户端带回什么都不信，逐字段夹紧（长度/条数/类别白名单/轮数上限）。
+ */
+export function sanitizeAvatarState(raw: unknown): AvatarGuideState {
+  const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const a = (b.attrs && typeof b.attrs === 'object' ? b.attrs : {}) as Record<string, unknown>;
+  const attrs: AvatarAttrs = { motifs: cleanStrArr(a.motifs, 6, 60), extras: cleanStrArr(a.extras, 6, 60) };
+  const gender = cleanStr(a.gender, 20);
+  if (gender) attrs.gender = gender;
+  const hairstyle = cleanStr(a.hairstyle, 60);
+  if (hairstyle) attrs.hairstyle = hairstyle;
+  const outfit = cleanStr(a.outfit, 60);
+  if (outfit) attrs.outfit = outfit;
+  const color = cleanStr(a.color, 30);
+  if (color) attrs.color = color;
+  const accessory = cleanStr(a.accessory, 60);
+  if (accessory) attrs.accessory = accessory;
+  const askedCategories = cleanStrArr(b.askedCategories, 12, 12).filter((c) => AVATAR_CATEGORY_SET.has(c));
+  const turnRaw = typeof b.turnCount === 'number' && Number.isFinite(b.turnCount) ? Math.floor(b.turnCount) : 0;
+  const dialog: ChatTurn[] = Array.isArray(b.dialog)
+    ? b.dialog
+        .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
+        .map((t) => ({ role: t.role === 'npc' ? ('npc' as const) : ('child' as const), text: cleanStr(t.text, 300), ts: 0 }))
+        .filter((t) => t.text.length > 0)
+        .slice(-24)
+    : [];
+  const state: AvatarGuideState = { attrs, askedCategories, turnCount: Math.max(0, Math.min(10, turnRaw)), dialog };
+  const childName = cleanStr(b.childName, 20);
+  if (childName) state.childName = childName;
+  return state;
 }
 
 export function presenceOf(store: WorldStore, worldId: string, sceneId: string, playerId: string): ActorPresence {

@@ -3,7 +3,6 @@ import { fallbackVoice } from '../voice_catalog.ts';
 import {
   BASE_ABILITIES,
   type AvatarAttrs,
-  type AvatarCategory,
   type AvatarGuideState,
   type CharacterSpec,
   type CreationAttrs,
@@ -21,7 +20,7 @@ import {
   type SessionCompactionContext,
 } from '../types.ts';
 import { CREATION_OPTIONS, optionsByCategory, sizeToScale, inferSizeFromText } from '../creation_options.ts';
-import { AVATAR_ASK, AVATAR_OPTIONS, avatarOptionsByCategory, composeAvatarDesc } from '../avatar_options.ts';
+import { composeAvatarDesc, deterministicGuideAvatar } from '../avatar_options.ts';
 import type { CreatureSize } from '../creation_options.ts';
 import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
 import { STICKER_CREATION_OPTIONS, STICKER_CREATION_ASK, stickerOptionsByCategory, composeStickerDesc, stickerIconPrompt } from '../sticker_creation_options.ts';
@@ -410,47 +409,8 @@ export function createMockAdapters(): ServiceAdapters {
         return { replyText: STICKER_CREATION_ASK[next], done: false, question: STICKER_CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
       },
       async guideAvatar(state: AvatarGuideState, childInput: string): Promise<GuideAvatarResult> {
-        // 形象引导 mock：按图标 label 认属性；开放语音（非库内 label）整句收进上一轮问的类别。
-        // 凑够 性别+2项外观、说「就这样」、或超轮即 done。无 cancelled——onboarding 必须产出形象。
-        const attrs: AvatarAttrs = { ...state.attrs, motifs: [...state.attrs.motifs], extras: [...state.attrs.extras] };
-        const updated: Partial<AvatarAttrs> = {};
-        const text = childInput.trim();
-        const lastAsked = state.askedCategories.at(-1) as AvatarCategory | undefined;
-        const isKnownLabel = AVATAR_OPTIONS.some((o) => text.includes(o.label));
-        if (lastAsked && text && !isKnownLabel && !/(就这样|好了|够了|够啦|可以了|不想选|不选了)/.test(text)) {
-          // 开放语音优先：原话进属性，不归一成库里的词（个性化来源）
-          switch (lastAsked) {
-            case 'gender': attrs.extras.push(text); updated.extras = [...attrs.extras]; break; // 性别答非所问 → 当外观点收下
-            case 'hairstyle': if (!attrs.hairstyle) { attrs.hairstyle = text; updated.hairstyle = text; } break;
-            case 'outfit': if (!attrs.outfit) { attrs.outfit = text; updated.outfit = text; } break;
-            case 'color': if (!attrs.color) { attrs.color = text; updated.color = text; } break;
-            case 'motif': attrs.motifs.push(text); updated.motifs = [...attrs.motifs]; break;
-            case 'accessory': if (!attrs.accessory) { attrs.accessory = text; updated.accessory = text; } break;
-          }
-        } else {
-          for (const o of AVATAR_OPTIONS) {
-            if (!text.includes(o.label)) continue;
-            if (o.category === 'gender' && !attrs.gender) { attrs.gender = o.label; updated.gender = o.label; }
-            else if (o.category === 'hairstyle' && !attrs.hairstyle) { attrs.hairstyle = o.label; updated.hairstyle = o.label; }
-            else if (o.category === 'outfit' && !attrs.outfit) { attrs.outfit = o.label; updated.outfit = o.label; }
-            else if (o.category === 'color' && !attrs.color) { attrs.color = o.label; updated.color = o.label; }
-            else if (o.category === 'motif' && !attrs.motifs.includes(o.label)) { attrs.motifs.push(o.label); updated.motifs = [...attrs.motifs]; }
-            else if (o.category === 'accessory' && !attrs.accessory) { attrs.accessory = o.label; updated.accessory = o.label; }
-          }
-        }
-        const early = /(就这样|好了|够了|够啦|可以了|不想选|不选了)/.test(text);
-        const knownCount = [attrs.hairstyle, attrs.outfit, attrs.color, attrs.accessory].filter(Boolean).length
-          + (attrs.motifs.length > 0 ? 1 : 0) + (attrs.extras.length > 0 ? 1 : 0);
-        const enough = !!attrs.gender && knownCount >= 2;
-        const forced = state.turnCount >= 5;
-        if (early || enough || forced) {
-          return { replyText: '好嘞，点点这就把你画进魔法世界！', done: true, updatedAttrs: updated };
-        }
-        // 追问下一个缺失类别（gender→hairstyle→outfit→color→motif→accessory）
-        const next: AvatarCategory = !attrs.gender ? 'gender' : !attrs.hairstyle ? 'hairstyle'
-          : !attrs.outfit ? 'outfit' : !attrs.color ? 'color' : attrs.motifs.length === 0 ? 'motif' : 'accessory';
-        const optionIds = avatarOptionsByCategory(next).slice(0, 4).map((o) => o.id);
-        return { replyText: AVATAR_ASK[next], done: false, question: AVATAR_ASK[next], category: next, optionIds, updatedAttrs: updated };
+        // 形象引导 mock = 确定性推进的共用实现（它同时是服务端 LLM 失败的降级链，一处实现两处用）
+        return deterministicGuideAvatar(state, childInput);
       },
       async describeAvatar(attrs: AvatarAttrs): Promise<string> {
         return composeAvatarDesc(attrs);

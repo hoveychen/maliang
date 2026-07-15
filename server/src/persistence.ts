@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
 import { creationItemDef, getBuiltinItem } from './items.ts';
@@ -386,6 +386,12 @@ export class WorldStore {
       CREATE TABLE IF NOT EXISTS creation_icons (
         option_id TEXT PRIMARY KEY,
         asset_hash TEXT NOT NULL
+      );
+      -- 玩家 onboarding 档案（docs/onboarding-avatar-redesign-design.md §2.5）：键=playerId。
+      -- 独立于 players 表——world_info 的 Player upsert 是整行覆盖，并进去会被抹掉。
+      CREATE TABLE IF NOT EXISTS player_onboarding (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL
       );
       -- 物品实体外观缩略图：物品在服务端没有图片，全靠客户端按 renderRef 现场渲染。
       -- debug 后台要看物品长什么样，就让客户端把每个 ItemDef 渲染成一张 PNG 上传（内容
@@ -1207,6 +1213,23 @@ export class WorldStore {
     };
     backfill('characters');
     backfill('props');
+  }
+
+  /** 落/更新玩家 onboarding 档案（键=playerId；整对象 UPSERT 一行，重跑 onboarding 覆盖旧档）。 */
+  saveOnboardingProfile(profile: PlayerOnboardingProfile): void {
+    this.#db
+      .prepare('INSERT INTO player_onboarding (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+      .run(profile.playerId, JSON.stringify(profile));
+  }
+
+  getOnboardingProfile(playerId: string): PlayerOnboardingProfile | undefined {
+    const row = this.#db.prepare('SELECT data FROM player_onboarding WHERE id = ?').get(playerId) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as PlayerOnboardingProfile) : undefined;
+  }
+
+  listOnboardingProfiles(): PlayerOnboardingProfile[] {
+    const rows = this.#db.prepare('SELECT data FROM player_onboarding').all() as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as PlayerOnboardingProfile);
   }
 
   /** 登记/更新玩家档案（首见即建，再见即更）。整对象 UPSERT 一行。 */
