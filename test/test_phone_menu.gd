@@ -13,6 +13,13 @@ func _check(cond: bool, msg: String) -> void:
 		printerr("  ✗ ", msg)
 		_fails += 1
 
+## 背包格的数量角标文字（P3）：直属 Label 子节点=数量圆角标；无则返回空串。
+func _count_badge_text(cell: Control) -> String:
+	for c in cell.get_children():
+		if c is Label:
+			return (c as Label).text
+	return ""
+
 func _initialize() -> void:
 	var scene: Node = load("res://main.tscn").instantiate()
 	root.add_child(scene)
@@ -113,6 +120,16 @@ func _run(scene: Node) -> void:
 		pui.tick(0.05)
 	_check(ipager != null and absi(ipager.scroll_vertical - int(round(PhoneUi.ITEMS_PAGE_H))) <= 3,
 		"翻到第 2 页：纵向滚动 snap 到 1×页高（%d≈%d）" % [ipager.scroll_vertical, int(round(PhoneUi.ITEMS_PAGE_H))])
+	# 数量角标（P3）：份数>1 出圆角标、=1 不出；格子已去文字名（不含物品名 Label）。
+	scene.set("bag", { "aa": 3, "bb": 1 })
+	pui.open_app("items")
+	await scene.get_tree().process_frame
+	var g0: GridContainer = (pui.get("_items_pages_box") as VBoxContainer).get_child(0) as GridContainer
+	var cell_aa: Control = g0.get_child(0) as Control  # "aa" 排在 "bb" 前
+	var cell_bb: Control = g0.get_child(1) as Control
+	_check(_count_badge_text(cell_aa) == "x3", "份数 3：出数量角标 x3")
+	_check(_count_badge_text(cell_bb) == "", "份数 1：不出数量角标")
+
 	# 空背包：无物品仍不崩、出空态提示、只 1 页（空网格）
 	scene.set("bag", {})
 	pui.open_app("items")

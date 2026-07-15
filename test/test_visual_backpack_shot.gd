@@ -18,14 +18,14 @@ func _tick() -> void:
 		8:
 			(scene.get("album_button") as Button).emit_signal("pressed") # 开手机
 		30:
-			var bag := {}
-			for i in 20:
-				bag["itm_%02d" % i] = (2 if i % 3 == 0 else 1)  # 每 3 件一个份数=2 看角标
-			scene.set("bag", bag)
+			# 真实内置 item id：离线也能走客户端现场离屏渲染出真图（P3 缩略图混合来源的「没图现渲」半边）；
+			# 给几个份数>1 看右上数量角标。
+			scene.set("bag", {
+				"tree_puff_a": 1, "rock_0": 3, "tuft_0": 1, "house_0": 1,
+				"bush_puff": 2, "tree_puff_b": 1, "rock_1": 1, "house_1": 5,
+			})
 		36:
-			scene.call("_open_app", "items") # 翻转+展开跨页 → 背包 4×4
-		60:
-			(scene.get("phone_ui") as PhoneUi).set("_items_page", 1) # 拨到第 2 页看 snap
+			scene.call("_open_app", "items") # 翻转+展开跨页 → 背包 4×4，逐件懒渲缩略图
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
