@@ -59,6 +59,29 @@ static func parse_command(line: String) -> Dictionary:
 				return {"ok": false, "error": "pickup needs tileX,tileY"}
 			return {"ok": true, "op": "pickup", "tileX": int(dict["tileX"]),
 				"tileY": int(dict["tileY"]), "edgeSide": int(dict.get("edgeSide", -1))}
+		"photo":
+			# 摄影模式（menu 相册拍摄）：hud 显隐 / pitch,yaw,dist,lift 摄影机位 / clear_cam 撤机位，均可选。
+			var out := {"ok": true, "op": "photo"}
+			if dict.has("hud"):
+				out["hud"] = bool(dict["hud"])
+			if dict.has("pitch") or dict.has("yaw") or dict.has("dist") or dict.has("lift"):
+				out["cam"] = {"pitch": float(dict.get("pitch", 35.0)), "yaw": float(dict.get("yaw", 0.0)),
+					"dist": float(dict.get("dist", 18.0)), "lift": float(dict.get("lift", 0.0))}
+			if bool(dict.get("clear_cam", false)):
+				out["clear_cam"] = true
+			return out
+		"scene":
+			var sid := String(dict.get("id", ""))
+			if sid.is_empty():
+				return {"ok": false, "error": "scene needs id"}
+			return {"ok": true, "op": "scene", "id": sid}
+		"teleport":
+			# 摄影找机位：tileX/tileY 目标格，或 near=true 传到第一个村民旁（二选一，near 优先）。
+			var near := bool(dict.get("near", false))
+			if not near and (not dict.has("tileX") or not dict.has("tileY")):
+				return {"ok": false, "error": "teleport needs tileX,tileY or near"}
+			return {"ok": true, "op": "teleport", "tileX": int(dict.get("tileX", -1)),
+				"tileY": int(dict.get("tileY", -1)), "near": near}
 		"inject", "state", "screencap", "accept", "replay", "retry", "talk_fairy", "talk_npc", "reset_budget":
 			return {"ok": true, "op": op}
 		_:
@@ -82,13 +105,20 @@ func _ready() -> void:
 	if not OS.is_debug_build():
 		set_process(false)
 		return
+	# 端口可被 MALIANG_HARNESS_PORT 覆盖：桌面拍摄/回归与真机调试并存时 8577 常被 iproxy/adb
+	# forward 转发到真机占走（IPv6 通配监听会把 127.0.0.1 的连接也吃掉）——桌面驱动换口，
+	# 避免命令赛跑打到别人的设备上（踩过：拍 menu 相册时 tap/screencap 打进了 iOS 诊断机）。
+	var port := PORT
+	var env_port := OS.get_environment("MALIANG_HARNESS_PORT")
+	if not env_port.is_empty() and env_port.is_valid_int():
+		port = int(env_port)
 	_server = TCPServer.new()
-	var err := _server.listen(PORT, "127.0.0.1")
+	var err := _server.listen(port, "127.0.0.1")
 	if err != OK:
-		push_warning("[harness] TCP 命令口监听失败(port=%d): %d" % [PORT, err])
+		push_warning("[harness] TCP 命令口监听失败(port=%d): %d" % [port, err])
 		_server = null
 		return
-	print("[harness] debug 命令口就绪 127.0.0.1:%d（adb forward tcp:%d tcp:%d 后连）" % [PORT, PORT, PORT])
+	print("[harness] debug 命令口就绪 127.0.0.1:%d（adb forward tcp:%d tcp:%d 后连）" % [port, port, port])
 
 func _exit_tree() -> void:
 	if _peer != null:
@@ -165,6 +195,12 @@ func _execute(cmd: Dictionary) -> Dictionary:
 			return _do_pickup(int(cmd["tileX"]), int(cmd["tileY"]), int(cmd["edgeSide"]))
 		"reset_budget":
 			return _do_reset_budget()
+		"photo":
+			return _do_photo(cmd)
+		"scene":
+			return _do_scene(String(cmd["id"]))
+		"teleport":
+			return _do_teleport(cmd)
 		_:
 			return {"ok": false, "error": "unhandled op: %s" % op}
 
@@ -243,6 +279,11 @@ func _snapshot() -> Dictionary:
 		snap["banner_visible"] = banner.visible if banner != null else false
 		var bag: Variant = w.get("bag")
 		snap["bag_size"] = (bag as Dictionary).size() if typeof(bag) == TYPE_DICTIONARY else -1
+		# 摄影驱动（menu 相册拍摄）轮询用：当前场景 + 是否在换场景过场中。
+		var sid: Variant = w.get("_scene_id")
+		snap["scene_id"] = String(sid) if sid != null else ""
+		var trans: Variant = w.get("_transitioning")
+		snap["transitioning"] = bool(trans) if trans != null else false
 		# 探针：WS 是否连着（voice-e2e 查 name_creation 落库失败——疑因 _send 在 WS 断时静默丢弃）。
 		var bk: Variant = w.get("backend")
 		if bk != null and (bk as Object).has_method("is_online"):
@@ -294,6 +335,40 @@ func _do_screencap() -> Dictionary:
 	if err != OK:
 		return {"ok": false, "error": "save_png failed: %d" % err}
 	return {"ok": true, "op": "screencap", "path": ProjectSettings.globalize_path(path)}
+
+## photo：摄影模式（menu 相册拍摄）——HUD 显隐 + 摄影机位覆盖，透传 world.harness_photo。
+func _do_photo(cmd: Dictionary) -> Dictionary:
+	var w := _host()
+	if w == null or not w.has_method("harness_photo"):
+		return {"ok": false, "error": "world 无 harness_photo"}
+	var args := {}
+	if cmd.has("hud"):
+		args["hud"] = cmd["hud"]
+	if cmd.has("cam"):
+		args["cam"] = cmd["cam"]
+	if bool(cmd.get("clear_cam", false)):
+		args["clear_cam"] = true
+	var st: Dictionary = w.call("harness_photo", args)
+	var out := {"ok": true, "op": "photo"}
+	out.merge(st)
+	return out
+
+## teleport：摄影找机位——玩家就地搬到目标 tile / 第一个村民旁（world.harness_teleport）。
+func _do_teleport(cmd: Dictionary) -> Dictionary:
+	var w := _host()
+	if w == null or not w.has_method("harness_teleport"):
+		return {"ok": false, "error": "world 无 harness_teleport"}
+	var ok := bool(w.call("harness_teleport",
+		Vector2i(int(cmd["tileX"]), int(cmd["tileY"])), bool(cmd["near"])))
+	return {"ok": ok, "op": "teleport"}
+
+## scene：摄影切场景（走正常黑幕过场），脚本随后轮询 state.scene_id / transitioning 等落地。
+func _do_scene(sid: String) -> Dictionary:
+	var w := _host()
+	if w == null or not w.has_method("harness_enter_scene"):
+		return {"ok": false, "error": "world 无 harness_enter_scene"}
+	var ok := bool(w.call("harness_enter_scene", sid))
+	return {"ok": ok, "op": "scene", "id": sid}
 
 ## talk_fairy：不靠屏幕坐标直接进与小仙子「点点」的对话（走宿主已验证的 _approach_npc 路径）。
 ## 坐标盲点不可靠——tap 没命中玩家会被当点地面把玩家支使走，越走越偏；这条命令直接从 npcs 找仙子发起

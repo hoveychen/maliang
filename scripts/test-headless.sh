@@ -19,6 +19,9 @@ GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 export MALIANG_API_BASE="${MALIANG_API_BASE:-http://127.0.0.1:1}"
 # 回测离线约定：关掉 edge-tts 真网探活（协议单测/真网冒烟见 test_edge_tts.gd）。
 export MALIANG_EDGE_TTS="${MALIANG_EDGE_TTS:-0}"
+# harness 命令口走回测专用端口：8577 常被 iproxy/adb forward 转发到真机调试设备占走，
+# 会让 test_harness_wire 环境性挂掉（backpack/menu 两条线都撞过）。
+export MALIANG_HARNESS_PORT="${MALIANG_HARNESS_PORT:-8579}"
 
 echo "== import（刷新类缓存）=="
 "$GODOT" --headless --import --path "$ROOT" >/dev/null 2>&1
@@ -71,6 +74,7 @@ UNIT_TESTS=(
   test_composed_prop
   test_build_parts
   test_menu_gate
+  test_menu_album
   test_cjk_font
   test_graphics_settings
   test_papercraft_toggle
