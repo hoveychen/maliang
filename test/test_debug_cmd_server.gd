@@ -144,6 +144,26 @@ func _run_once() -> void:
 	fails += _check("tap 缺 y 拒", DebugCmdServer.parse_command('{"op":"tap","x":1}').get("ok"), false)
 	fails += _check("未知 op 拒", DebugCmdServer.parse_command('{"op":"nope"}').get("ok"), false)
 
+	print("[parse_command：手势 drag/swipe/long_press/pinch（ai-harness P3）]")
+	var dg := DebugCmdServer.parse_command('{"op":"drag","x1":1,"y1":2,"x2":3,"y2":4}')
+	fails += _check("drag ok", dg.get("ok"), true)
+	fails += _check("drag kind", dg.get("kind"), "drag")
+	fails += _check("drag from", dg.get("from"), Vector2(1, 2))
+	fails += _check("drag to", dg.get("to"), Vector2(3, 4))
+	fails += _check("drag 默认 400ms", dg.get("ms"), 400)
+	fails += _check("swipe 同形默认 250ms",
+		DebugCmdServer.parse_command('{"op":"swipe","x1":0,"y1":0,"x2":1,"y2":1}').get("ms"), 250)
+	fails += _check("drag 缺参拒", DebugCmdServer.parse_command('{"op":"drag","x1":1}').get("ok"), false)
+	fails += _check("long_press 默认 700ms",
+		DebugCmdServer.parse_command('{"op":"long_press","x":1,"y":2}').get("ms"), 700)
+	fails += _check("long_press 缺参拒", DebugCmdServer.parse_command('{"op":"long_press"}').get("ok"), false)
+	fails += _check("pinch 默认 scale",
+		DebugCmdServer.parse_command('{"op":"pinch","x":1,"y":2}').get("scale"), 0.5)
+	fails += _check("pinch 零 scale 拒",
+		DebugCmdServer.parse_command('{"op":"pinch","x":1,"y":2,"scale":0}').get("ok"), false)
+	fails += _check("ms 下限钳 16",
+		DebugCmdServer.parse_command('{"op":"drag","x1":0,"y1":0,"x2":1,"y2":1,"ms":1}').get("ms"), 16)
+
 	print("[parse_command：ui / screencap wire（ai-harness P2）]")
 	var ui_p := DebugCmdServer.parse_command('{"op":"ui"}')
 	fails += _check("ui ok", ui_p.get("ok"), true)
@@ -354,6 +374,72 @@ func _run_once() -> void:
 		func(e: Variant) -> String: return String((e as Dictionary).get("path", "")).split("/")[-1])
 	fails += _check("texts=true 含 Label", tnames.has("Title"), true)
 	fixture.queue_free()
+
+	print("[手势引擎：跨帧事件序列（ai-harness P3）]")
+	var evs: Array = []
+	srv.event_sink = func(e: InputEvent) -> void: evs.append(e)
+	# tap 也走 sink：down+up 序列可断言
+	srv._execute({"ok": true, "op": "tap", "x": 5.0, "y": 6.0})
+	fails += _check("tap 两事件", evs.size(), 2)
+	fails += _check("tap down 先行", (evs[0] as InputEventScreenTouch).pressed, true)
+	fails += _check("tap up 同点", (evs[1] as InputEventScreenTouch).position, Vector2(5, 6))
+	evs.clear()
+	# drag：down → 插值 ScreenDrag（单调向目标）→ up 落终点
+	var derr: String = srv.start_gesture(
+		DebugCmdServer.parse_command('{"op":"drag","x1":0,"y1":0,"x2":100,"y2":0,"ms":100}'))
+	fails += _check("drag 发起成功", derr, "")
+	fails += _check("drag 在飞", srv.gesture_active(), true)
+	fails += _check("drag down 先行", (evs[0] as InputEventScreenTouch).pressed, true)
+	for _i in 4:
+		srv._step_gesture(0.03) # 4×30ms > 100ms
+	fails += _check("drag 完成", srv.gesture_active(), false)
+	var dlast := evs[-1] as InputEventScreenTouch
+	fails += _check("drag up 收尾", dlast.pressed, false)
+	fails += _check("drag up 落终点", dlast.position, Vector2(100, 0))
+	var xs: Array = []
+	for e in evs:
+		if e is InputEventScreenDrag:
+			xs.append((e as InputEventScreenDrag).position.x)
+	fails += _check("drag 有插值帧", xs.size() >= 2, true)
+	var mono := true
+	for i in range(1, xs.size()):
+		if float(xs[i]) < float(xs[i - 1]) - 0.001:
+			mono = false
+	fails += _check("drag 插值单调", mono, true)
+	evs.clear()
+	# long_press：down…（无拖动帧）…到时才 up
+	srv.start_gesture(DebugCmdServer.parse_command('{"op":"long_press","x":10,"y":10,"ms":100}'))
+	srv._step_gesture(0.05)
+	fails += _check("long_press 未到时不抬", srv.gesture_active(), true)
+	srv._step_gesture(0.06)
+	fails += _check("long_press 到时抬起", srv.gesture_active(), false)
+	var has_drag := false
+	for e in evs:
+		if e is InputEventScreenDrag:
+			has_drag = true
+	fails += _check("long_press 无拖动帧", has_drag, false)
+	fails += _check("long_press down+up 共两事件", evs.size(), 2)
+	evs.clear()
+	# pinch：双指按下、间距收敛到 dist*scale、双指抬起
+	srv.start_gesture(DebugCmdServer.parse_command(
+		'{"op":"pinch","x":200,"y":200,"scale":0.5,"ms":60,"dist":80}'))
+	for _i in 3:
+		srv._step_gesture(0.03)
+	fails += _check("pinch 完成", srv.gesture_active(), false)
+	var ups: Array = evs.filter(func(e: Variant) -> bool:
+		return e is InputEventScreenTouch and not (e as InputEventScreenTouch).pressed)
+	fails += _check("pinch 双指抬起", ups.size(), 2)
+	var gap: float = absf(((ups[1] as InputEventScreenTouch).position
+		- (ups[0] as InputEventScreenTouch).position).x)
+	fails += _check("pinch 终距=dist*scale*2", gap, 80.0)
+	# 在飞时再发起被拒（TCP 层本不会发生：在飞期间不取新行，这是最后一道护栏）
+	srv.start_gesture(DebugCmdServer.parse_command('{"op":"long_press","x":1,"y":1,"ms":50}'))
+	fails += _check("在飞再发起拒",
+		srv.start_gesture(DebugCmdServer.parse_command('{"op":"long_press","x":2,"y":2,"ms":50}')),
+		"gesture already active")
+	srv._step_gesture(0.1) # 收尾清场
+	evs.clear()
+	srv.event_sink = Callable(Input, "parse_input_event")
 
 	print("[_execute state：引导式造物态快照]")
 	world._in_creation = true
