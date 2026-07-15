@@ -231,6 +231,8 @@ static func _make_ground_mat() -> ShaderMaterial:
 	m.shader = load("res://shaders/terrain_ground.gdshader")
 	m.set_shader_parameter("control_tex", TerrainAtlas.texture())
 	m.set_shader_parameter("top_array", TerrainTextures.build_texture_array())
+	# gl_compatibility（iOS）对 sampler2DArray 不做 source_color 的 sRGB 解码 → 手动补（见 shader 注释）。
+	m.set_shader_parameter("srgb_array_manual", RenderingServer.get_current_rendering_method() == "gl_compatibility")
 	m.set_shader_parameter("layer_tint", TerrainTextures.layer_tints_linear())
 	m.set_shader_parameter("layer_mean", TerrainTextures.layer_means_linear())
 	m.set_shader_parameter("layer_flat", TerrainTextures.layer_flats_linear())

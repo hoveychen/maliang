@@ -12,6 +12,12 @@ render_mode cull_back, diffuse_lambert, specular_disabled, world_vertex_coords;
 
 uniform sampler2D control_tex : filter_linear_mipmap, repeat_disable;  // 控制图选域用（老 Mali 上大覆盖面最贵的采样）
 uniform sampler2DArray top_array : source_color, filter_linear_mipmap, repeat_enable;  // 顶面+侧壁贴图数组（层序 = TerrainTextures.LAYER_*）
+// ⚠ gl_compatibility 渲染器（iOS 单切，见 project.godot rendering_method.ios）对 sampler2DArray
+// 不施加 source_color 的 sRGB→线性解码（普通 sampler2D 有，纹理数组这条漏了）。于是采样值停留在
+// sRGB（偏亮），而 layer_mean 是 GDScript 已线性化的 → det=tex/mean 被抬高数倍 → 浅色地表（路面）
+// 顶爆成纯白。修法：仅在 gl_compat 下由 chunk_manager 置真，shader 内手动补一次精确 sRGB 解码；
+// mobile/forward+ 恒 false → 那两条渲染路径字节不变（源头解码已正确，绝不能二次解码）。
+uniform bool srgb_array_manual = false;
 // 逐层色调 / 均值（TerrainTextures.layer_tints_linear/means_linear 传入，已 sRGB→线性；下标 = 层索引）。
 // 数组长度 = TerrainTextures.SHADER_ARRAY_SIZE（P3 12 主题全铺预留 64；两处必须同步）。
 uniform vec3 layer_tint[64];
@@ -96,8 +102,15 @@ float paper_noise(vec3 p) {
 	return mix(mix(n0, n1, f.y), mix(n2, n3, f.y), f.z);
 }
 
+// Godot 源码同款 sRGB→线性（piecewise，非 pow(2.2) 近似）——补 gl_compat 数组漏掉的解码，
+// 数值上与 mobile 的 source_color 自动解码一致，故开启后两渲染器 det 结果对齐。
+vec3 srgb_to_linear(vec3 c) {
+	return mix(pow((c + vec3(0.055)) / vec3(1.055), vec3(2.4)), c / vec3(12.92), lessThan(c, vec3(0.04045)));
+}
+
 vec3 layer_col(int layer, vec2 uv) {
 	vec3 tex = texture(top_array, vec3(uv, float(layer))).rgb;
+	if (srgb_array_manual) tex = srgb_to_linear(tex);  // gl_compat：补数组漏掉的 sRGB 解码
 	vec3 det = mix(vec3(1.0), tex / max(layer_mean[layer], vec3(0.001)), detail_strength);
 	return mix(layer_tint[layer] * det, layer_flat[layer], flatten);
 }
