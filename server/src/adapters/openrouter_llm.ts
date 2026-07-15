@@ -234,7 +234,7 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
 小朋友对你说了一句话，判断这是「闲聊」还是「让你（或别的角色）做一件会做的事」。
 会做的事(abilities)：
 ${abilityLines}
-严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","offerTask":true或省略,"behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
+严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","offerTask":true或省略,"abandonTask":true或省略,"behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - 小朋友说「告诉X…」「帮我跟X说…」是带话：用 deliver_message（to=X，message=要带的话），不要用 move_to——光走过去话就丢了。
@@ -260,7 +260,8 @@ ${abilityLines}
       ? `\n可以带小朋友去的地方和人：${ctx.guideTargets.map((t) => `${t.name}(${t.sceneName})`).join('、')}。guide_to 的名字只能从这里选。`
       : '';
     const taskLine = ctx.activeTask
-      ? `\n进行中的小任务：${describeTask(ctx.activeTask)}（委托人是${ctx.activeTask.npcName}，完成能盖一个小红花集邮章）。小朋友问起就温柔提醒，不要重复发起新任务。`
+      ? `\n进行中的小任务：${describeTask(ctx.activeTask)}（委托人是${ctx.activeTask.npcName}，完成能盖一个小红花集邮章）。小朋友问起「这个怎么做呀」就温柔提醒该去找谁/去哪/要变出什么，别重复发起新任务；跑腿类（带话/带人/去某地）可以用问句提议「要我带你去吗」，心愿类（要变出一样东西）就说「我们一起把它变出来好不好」，别对心愿类提带路。` +
+        `\n小朋友要是说「不想做了」「算了」「不帮他了」这类反悔的意思，就输出 "abandonTask": true，replyText 给一句温柔不失落的话（如「好呀，那我们做点别的吧」），别追问、别劝他继续。`
       : ctx.taskCandidate
         ? `\n当下没有进行中的任务。时机合适时（小朋友问「有什么要帮忙的」，或聊天里自然接得上），你可以发起这个小委托：${describeTask(ctx.taskCandidate)}，完成能盖一个集邮章、集满三个换一朵小红花。若这句回应里发起了它，输出 "offerTask": true 并用你的口吻把请求说出来；不合适就别硬塞。`
         : '';
@@ -313,6 +314,7 @@ ${abilityLines}
       emotion?: unknown;
       performer?: unknown;
       offerTask?: unknown;
+      abandonTask?: unknown;
       behaviorScript?: unknown;
     } = {};
     try {
@@ -332,6 +334,8 @@ ${abilityLines}
       if (performer && performer !== ctx.characterName) result.performerName = performer;
     }
     if (raw.offerTask === true && ctx.taskCandidate) result.offerTask = true;
+    // 放弃委托只在真有进行中委托时认——没活可放弃时 LLM 若误判也不生效。
+    if (raw.abandonTask === true && ctx.activeTask) result.abandonTask = true;
     return result;
   }
 
