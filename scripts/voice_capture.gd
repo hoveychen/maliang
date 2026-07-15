@@ -37,7 +37,10 @@ signal confirm_ready(text: String)
 ## 端侧模型异步加载完成（宿主用于日志/状态图标）。名不用 ready：与 Node 内置信号撞名。
 signal asr_ready
 
-const UNMUTE_GRACE := 0.3         ## 旁白/音效结束后的静默恢复期：残响尾音不算开口（同旧两处）
+## 旁白/音效结束后的静默恢复期：残响尾音不算开口（同旧两处）。
+## 契约（test_sfx_mic_guard 断言）：必须盖住开麦态会播的最长音效——界面音换 soft_ui 后
+## enter=0.447s（旧 maximize_003 只有 212ms，0.3 够用），盖不住=音效尾巴顶开 VAD 误录一轮空音。
+const UNMUTE_GRACE := 0.6
 const CHUNK_FLUSH_SECS := 0.15    ## 分片喂 ASR 的节奏：不每帧碎喂
 const MIC_RATE := 16000           ## 麦克风/回放采样率（MicRecorder 出 16k PCM16 单声道）
 
