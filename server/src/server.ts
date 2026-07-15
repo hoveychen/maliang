@@ -86,7 +86,7 @@ import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
-import { AVATAR_EARLY_DONE, AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
+import { avatarDescForbidden, AVATAR_EARLY_DONE, AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
@@ -649,7 +649,8 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       try {
         desc = (await adapters.llm.refineAvatar(refineFrom, refineRequest)).trim();
       } catch {
-        desc = `${refineFrom}。按小朋友的要求调整：${refineRequest}`; // LLM 挂了不丢孩子的话
+        // LLM 挂了：合法要求原样追加（不丢孩子的话）；要求本身违规（持物/头顶物）→ 原描述照旧
+        desc = avatarDescForbidden(refineRequest) ? refineFrom : `${refineFrom}。按小朋友的要求调整：${refineRequest}`;
       }
     }
     if (desc.length === 0) return reply.code(400).send({ error: 'visualDescription required' });
