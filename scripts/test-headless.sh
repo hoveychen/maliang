@@ -52,6 +52,7 @@ UNIT_TESTS=(
   test_voice_vad
   test_voice_capture
   test_voice_confirm
+  test_voice_wave
   test_name_voice
   test_scripted_asr
   test_debug_cmd_server
