@@ -139,8 +139,7 @@ var npcs: Array = []              ## [{ node:PaperCharacter, logical:Vector2 }]
 var player: Dictionary = {}       ## 玩家角色 { node, logical, id, span }；不进 npcs（拾取/对话只对 NPC）
 var selected: PaperCharacter = null
 var voice_wave: Control            ## 底部收听 HUD（AIGC 边框贴图 + 声波柱，近身对话期间显示，见 _update_voice_wave）
-var _wave_bars: Array = []         ## voice_wave 里的一排 ColorRect 柱子
-var _wave_t := 0.0
+var voice_wave_widget: VoiceWave   ## voice_wave 内嵌的共用声波控件（流动波，自跑动画）
 var _dragging := false
 var _press_pos := Vector2.ZERO
 # 暗黑式按住跟随：指针按在空地上即走，按住期间节流重下发指针下地面为移动目标
@@ -1351,24 +1350,24 @@ func _setup_hud() -> void:
 	frame.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	voice_wave.add_child(frame)
-	# 声波柱：锚在 HUD 竖直中心，居中一排排在边框空心内板，底边对齐、只向上长
-	var bar_w := 12.0
-	var gap := 8.0
-	for i in WAVE_BARS:
-		var bar := ColorRect.new()
-		bar.color = Color(0.96, 0.5, 0.36) # 珊瑚色：与边框描边同调、内板上高对比
-		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		bar.anchor_left = 0.5
-		bar.anchor_right = 0.5
-		bar.anchor_top = 0.5
-		bar.anchor_bottom = 0.5
-		var xoff := (float(i) - float(WAVE_BARS - 1) * 0.5) * (bar_w + gap)
-		bar.offset_left = xoff - bar_w * 0.5
-		bar.offset_right = xoff + bar_w * 0.5
-		bar.offset_bottom = WAVE_BASE_Y
-		bar.offset_top = WAVE_BASE_Y - WAVE_MIN_H
-		voice_wave.add_child(bar)
-		_wave_bars.append(bar)
+	# 声波柱：共用 VoiceWave 控件（流动波），锚在 HUD 竖直中心、底边落在中心下方 WAVE_BASE_Y
+	# 处（内板中下部），只向上长。参数即 world 原口径（九条珊瑚色、idle_floor/gain 默认）。
+	var wave := VoiceWave.new()
+	wave.bar_count = WAVE_BARS
+	wave.bar_width = 12.0
+	wave.bar_gap = 8.0
+	wave.bar_min_h = WAVE_MIN_H
+	wave.bar_max_h = WAVE_MAX_H
+	wave.bar_color = Color(0.96, 0.5, 0.36) # 珊瑚色：与边框描边同调、内板上高对比
+	wave.level_source = func() -> float: return _vc.level() if _vc != null else 0.0
+	wave.anchor_left = 0.5
+	wave.anchor_right = 0.5
+	wave.anchor_top = 0.5
+	wave.anchor_bottom = 0.5
+	wave.offset_bottom = WAVE_BASE_Y                 # 底边（柱底）落在中心下方 WAVE_BASE_Y
+	wave.offset_top = WAVE_BASE_Y - WAVE_MAX_H       # 上边留出最高柱的空间
+	voice_wave.add_child(wave)
+	voice_wave_widget = wave
 
 	# 左下角手机菜单：一台竖屏手机（比旧书本按钮更大更好点），点开在 HUD 里弹手机壳+屏幕。
 	album_button = Button.new()
@@ -2744,23 +2743,11 @@ func _layout_voice_wave(creation: bool) -> void:
 	voice_wave.offset_right = WAVE_HUD_W * 0.5 + dx
 	voice_wave.scale = Vector2.ONE * (CREATION_WAVE_SCALE if creation else 1.0)
 
-func _update_voice_wave(delta: float) -> void:
+## 只管收听 HUD 的显隐（选中角色时显示）：声波起伏由 VoiceWave 自跑，隐藏时它自动停。
+func _update_voice_wave(_delta: float) -> void:
 	var active := selected != null and is_instance_valid(selected)
 	if voice_wave.visible != active:
 		voice_wave.visible = active
-	if not active:
-		return
-	_wave_t += delta
-	var lvl := (_vc.level() if _vc != null else 0.0)
-	# 整体幅度随音量抬升（静息也留 0.25 让波条一直在滚动，孩子看出「一直在听」）；
-	# 每根柱子相位错开 → 一条左右流动的声波，音量越大越高越满。柱底钉在 HUD 竖直中心
-	# 下方 WAVE_BASE_Y 处（内板中下部），只向上长。
-	var base := 0.25 + lvl * 0.75
-	for i in _wave_bars.size():
-		var bar := _wave_bars[i] as ColorRect
-		var shape := 0.5 + 0.5 * sin(_wave_t * 7.0 + float(i) * 0.8)
-		var amp := base * (0.4 + 0.6 * shape)
-		bar.offset_top = WAVE_BASE_Y - (WAVE_MIN_H + amp * (WAVE_MAX_H - WAVE_MIN_H))
 
 ## 角色立绘的可见世界宽度（米）：quad 的宽就是单格立绘的宽（sprite-sheet 已按 cellW 归一）。
 func _char_quad_w(npc: PaperCharacter) -> float:
