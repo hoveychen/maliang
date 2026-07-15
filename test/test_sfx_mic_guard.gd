@@ -17,8 +17,9 @@ extends SceneTree
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --path . \
 ##       --fixed-fps 10 --quit-after 60 --script res://test/test_sfx_mic_guard.gd
 
-## world.gd 的 UNMUTE_GRACE。开麦态最长音效是 enter(212ms)，窗口须盖得住。
-const UNMUTE_GRACE := 0.3
+## 直接读 VoiceCapture.UNMUTE_GRACE（曾是手抄镜像 0.3：换音效后真值该涨而镜像不涨，
+## 断言追着旧值跑——soft_ui 换音把 enter 拉到 447ms 时本测试如期变红）。
+const UNMUTE_GRACE := VoiceCapture.UNMUTE_GRACE
 
 var scene: Node
 var frame := 0
