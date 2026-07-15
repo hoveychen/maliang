@@ -20,23 +20,32 @@ func _initialize() -> void:
 		"hospital":"res://tools/export_hospital.gd","future_robot":"res://tools/export_future_robot.gd",
 		"seafloor":"res://tools/export_seafloor.gd",
 	}
-	var ex = load(exporters[theme])
 	ItemCatalog.ensure_builtin()
 	TerrainMap.reset()
-	var r: Dictionary = TerrainMap.load_from_bytes(ex.build_terrain_bytes())
+	# 打包场景（village/forest）读 assets/terrain/<theme>.mltr；其余走 exporter 现产
+	var bytes: PackedByteArray
+	if theme in ["village", "forest"]:
+		var f := FileAccess.open("res://assets/terrain/%s.mltr" % theme, FileAccess.READ)
+		bytes = f.get_buffer(f.get_length())
+	else:
+		bytes = load(exporters[theme]).build_terrain_bytes()
+	var r: Dictionary = TerrainMap.load_from_bytes(bytes)
 	if not r["ok"]:
 		printerr("注入失败 ", theme, ": ", r.get("error","")); quit(1); return
-	# 光
+	# 光/环境与 world._setup_environment 的 Pokopia 化 P1 值对齐（冷影暖光色相分离）——
+	# harness 观感必须等于游戏内观感，否则差距取证失真。改 world 光照时此处要跟。
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-55.0,-40.0,0.0)
-	light.light_color = Color(1.0,0.96,0.86); light.light_energy = 1.25
+	light.light_color = Color(1.0,0.94,0.80); light.light_energy = 1.45
+	var sun_fwd := -light.basis.z
+	BlobShadow.sun_ground_dir = Vector3(sun_fwd.x, 0.0, sun_fwd.z).normalized()
 	root.add_child(light)
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.7,0.82,0.92)
+	e.background_color = Color(0.80, 0.86, 1.0)  # = world.SKY_HORIZON_COLOR
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.6,0.62,0.66); e.ambient_light_energy = 1.0
+	e.ambient_light_color = Color(0.62, 0.70, 0.92); e.ambient_light_energy = 0.64
 	env.environment = e; root.add_child(env)
 	# 地形
 	cm = ChunkManager.new(); root.add_child(cm)
