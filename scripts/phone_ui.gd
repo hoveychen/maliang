@@ -1302,7 +1302,7 @@ func _select_item(item_id: String) -> void:
 	# 装到身上（仅贴纸）：依赖 self-stickers 落 main（player_attach）。未落地 → 灰置（设计 §7）。
 	if rref.begins_with("sticker:"):
 		var can_attach: bool = _w.has_method("_begin_self_attach") or _w.has_method("send_player_attach")
-		actions.add_child(_detail_action_btn("装到身上", "ic_note", can_attach,
+		actions.add_child(_detail_action_btn("装到身上", "ic_sparkle", can_attach,
 			func() -> void:
 				if _w.has_method("_begin_self_attach"):
 					_w._begin_self_attach(item_id)))
@@ -1323,18 +1323,35 @@ func _select_item(item_id: String) -> void:
 	# 点击物品即播：点点念出这件东西叫什么（点选即触发，backpack-redesign §6）。
 	_speak_item_name(item_id, def)
 
-## 详情面板里的一个动作按钮（图标+文字，禁用则灰置不可点）。
+## 详情面板动作按钮（P3，老板要更大更明确）：图上字下——大图标（84px）夺目、文字在下辅助
+## （不识字看图、识字看字），整块 220×140 大按钮小手好戳。禁用则内容半透明灰置不可点。
+## 图标+文字放进按钮内一个 mouse_filter=IGNORE 的居中 VBox，点击照样穿透到按钮（同 app 图标做法）。
 func _detail_action_btn(text: String, icon: String, enabled: bool, cb: Callable) -> Button:
 	var btn := Button.new()
-	btn.text = text
-	btn.icon = UiAssets.tex(icon)
-	btn.add_theme_constant_override("icon_max_width", 40)
-	btn.add_theme_font_size_override("font_size", 32)
-	btn.custom_minimum_size = Vector2(240.0, 0.0)
+	btn.custom_minimum_size = Vector2(220.0, 140.0)
 	UiAssets.style_card_button(btn)
 	btn.disabled = not enabled
 	if enabled:
 		btn.pressed.connect(cb)
+	var box := VBoxContainer.new()
+	box.name = "ActionContent"
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 4)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var ic := UiAssets.icon_rect(icon, 84.0)
+	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(ic)
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiAssets.style_card_label(lbl, 32)
+	box.add_child(lbl)
+	if not enabled:
+		box.modulate = Color(1.0, 1.0, 1.0, 0.4) # 灰置：内容变淡（禁用态一眼可辨）
+	btn.add_child(box)
 	return btn
 
 ## 物品最佳可用纹理（同步）：贴纸本尊 / 缩略图缓存；都没有返回 null（调用方回退礼盒 + 触发现渲）。

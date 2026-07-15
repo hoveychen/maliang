@@ -136,13 +136,20 @@ func _run(scene: Node) -> void:
 	pui._select_item("aa")
 	_check(String(pui.get("_selected_item")) == "aa", "选中 aa：_selected_item 记录")
 	_check(pui.get("_detail_image") != null, "详情：大图控件就位")
+	# P3:按钮文字从 btn.text 移进按钮内的 Label(图上字下),故从内层 Label 取文字;并验大图标够大。
 	var btn_texts := []
+	var big_icon := false
 	for c in (pui.get("_items_detail") as VBoxContainer).get_children():
 		if c is VBoxContainer:
 			for b in (c as VBoxContainer).get_children():
 				if b is Button:
-					btn_texts.append((b as Button).text)
-	_check(btn_texts.has("摆到地块"), "详情：有「摆到地块」动作按钮")
+					for lbl in (b as Button).find_children("*", "Label", true, false):
+						btn_texts.append((lbl as Label).text)
+					for ir in (b as Button).find_children("*", "TextureRect", true, false):
+						if (ir as TextureRect).custom_minimum_size.x >= 72.0:
+							big_icon = true
+	_check(btn_texts.has("摆到地块"), "详情：有「摆到地块」动作按钮(文字辅助)")
+	_check(big_icon, "详情：动作按钮图标够大(≥72px,P3)")
 	pui.open_app("items")
 	_check(String(pui.get("_selected_item")) == "", "重开物品页：详情回空态")
 
