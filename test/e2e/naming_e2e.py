@@ -184,7 +184,27 @@ def launch_app():
     print(f"[adb] 起 App {LAUNCH_ACTIVITY}")
 
 
-def _answer_prompt(h, snap):
+def _say_until(h, text, progressed, desc, tries=4, timeout=25.0):
+    """说一句并等「进展」(progressed(s) 为真)。真机真麦会与合成 PCM 打架、偶发空断句触发
+    「我没听清」——撞上就清掉重说(最多 tries 次)。返回命中的快照或 None。"""
+    for i in range(tries):
+        if not h.say_when_open(text):
+            print(f"    (第{i+1}次门禁没开,等等重说)")
+            h.wait_banner_stable(secs=3.0, timeout=10.0)
+            continue
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            s = h.state()
+            if progressed(s):
+                return s
+            if "没听清" in s.get("banner_text", ""):  # 真麦空断句干扰 → 重说
+                print(f"    (第{i+1}次撞「我没听清」=真麦干扰,重说)")
+                break
+            time.sleep(1.5)
+    return None
+
+
+def _answer_prompt(h, snap, start_bag):
     """应答当前这一轮引导：有卡就 pick（recipient→self，否则第一张），无卡开放问就 say 肯定。"""
     opts = snap.get("creation_options") or []
     cat = snap.get("creation_category", "")
@@ -200,27 +220,44 @@ def _answer_prompt(h, snap):
         r = h.pick(oid)
         print(f"    → pick optionId={oid!r}（{cat or '无类别'}）picked={r.get('picked')}")
         return bool(r.get("picked"))
-    # 无卡 = 开放语音问句（如属性确认「对吗？」）：语音肯定应答
+    # 无卡 = 开放语音问句（如属性确认「对吗？」）：语音肯定应答，撞真麦干扰会重说。
+    # 进展＝问句变了(下一轮)或造物完成。
+    q = snap.get("creation_question", "")
     ans = "对呀就是这样"
-    fed = h.say_when_open(ans)
-    print(f"    → say {ans!r} fed={fed}")
-    return fed
+    got = _say_until(h, ans,
+                     lambda s: (s.get("naming_item") or (s.get("bag_size", 0) or 0) > start_bag
+                                or (s.get("in_creation") and s.get("creation_question", "") not in (q, "", *TRANSIENT_Q))),
+                     "开放问句应答", tries=4, timeout=30.0)
+    print(f"    → say {ans!r} 进展={got is not None}")
+    return got is not None
 
 
 def run_flow(h, intent, name, pre_taps):
     fails = 0
 
+    # [0] 进世界：标题页→世界的 pre_taps（如进世界按钮）+ 等世界就绪。inject 必须在世界里
+    # （VoiceCapture.current 只在 world 场景 _ready 后才有；标题页 inject 会「no active VoiceCapture」）。
+    for (x, y) in pre_taps:
+        print(f"[0] 进世界 tap ({x},{y})")
+        h.tap(x, y)
+        time.sleep(0.6)
+    if pre_taps:
+        # 就绪＝服务端 bootstrap 完成：ws 连上 + 8 个服务端村民 + vc 就绪。只等「有村民」不够——
+        # 本地种子村民(4)立即出现但 ws 未连=离线模式,造物意图发不出去(实测 npc=4/ws=False 时门禁不开)。
+        print("[0] 等世界就绪（ws_open + npc≥8 + vc_ready，冷缓存慢填最多 120s）…")
+        try:
+            s = h.wait_state(lambda s: (s.get("npc_count") or 0) >= 8 and s.get("ws_open") and s.get("vc_ready"),
+                             "世界就绪(ws+8村民+vc)", timeout=120.0, poll=2.0)
+            print(f"  ✓ 世界就绪 npc={s.get('npc_count')} ws_open={s.get('ws_open')} vc_ready={s.get('vc_ready')}")
+        except HarnessError as e:
+            print(f"  ✗ {e}"); return 1
+
     print("[1] inject：运行时换 ScriptedAsr（真机注入入口，不推标志文件）")
     r = h.inject()
     if not (r.get("ok") and r.get("injected") and r.get("ready")):
-        print(f"  ✗ inject 未成功: {r}"); return 1
+        print(f"  ✗ inject 未成功（不在世界里？VoiceCapture 未就绪？）: {r}"); return 1
     print("  ✓ 已换 ScriptedAsr 且 ready")
     h.reset_budget()  # 清游玩时长冷却门，免得连测被拦
-
-    for (x, y) in pre_taps:
-        print(f"[*] 预置 tap ({x},{y})")
-        h.send({"op": "tap", "x": x, "y": y})
-        time.sleep(0.6)
 
     print("[2] talk_fairy：进与点点的对话（造物意图对她说）")
     r = h.talk_fairy()
@@ -231,8 +268,11 @@ def run_flow(h, intent, name, pre_taps):
 
     start_bag = h.state().get("bag_size", 0) or 0
     print(f"[3] say 造物意图: 「{intent}」（初始 bag={start_bag}）")
-    if not h.say_when_open(intent):
-        print("  ✗ 意图没喂进去（门禁一直没开 / 不在对话态）"); return 1
+    started = _say_until(h, intent,
+                         lambda s: s.get("in_creation") or (s.get("bag_size", 0) or 0) > start_bag,
+                         "造物意图→引导开启", tries=4, timeout=30.0)
+    if started is None:
+        print("  ✗ 意图反复没进引导（门禁没开 / 真麦干扰未克服）"); return 1
     print("  ✓ 意图已说出，进引导多轮应答…")
 
     print("[4] guided-creation 逐轮应答直到火箭落背包")
@@ -259,7 +299,7 @@ def run_flow(h, intent, name, pre_taps):
         labels = [o.get("label") for o in (snap.get("creation_options") or [])]
         print(f"  轮{rnd}: 问「{q}」options={labels}")
         last_q = q
-        if not _answer_prompt(h, snap):
+        if not _answer_prompt(h, snap, start_bag):
             print(f"  ✗ 第{rnd}轮应答没喂进去"); fails += 1; break
     else:
         print("  ✗ 8 轮内造物没落地（引导没走完）"); fails += 1
@@ -299,12 +339,18 @@ def main():
     ap.add_argument("--intent", default="点点，帮我造一个火箭", help="造物意图（说给点点）")
     ap.add_argument("--name", default="", help="给造物起的名字（可选；给了才驱起名收尾）")
     ap.add_argument("--tap", action="append", default=[], metavar="X,Y",
-                    help="talk_fairy 前的预置盲坐标 tap（如从标题页进世界，可多次）")
+                    help="进世界前的预置盲坐标 tap（标题页→世界，可多次；inject 前执行）")
+    ap.add_argument("--enter-tap", default="491,638", metavar="X,Y",
+                    help="--launch 且未给 --tap 时，默认点这个进世界按钮坐标（本机=华为 Mate20Pro 的黄箭头）")
     args = ap.parse_args()
 
     pre_taps = []
     for t in args.tap:
         xs, ys = t.split(",")
+        pre_taps.append((float(xs), float(ys)))
+    # --launch 起 App 后停在标题页：没显式给 --tap 就自动补进世界 tap（否则 inject 会「不在世界」失败）。
+    if args.launch and not pre_taps:
+        xs, ys = args.enter_tap.split(",")
         pre_taps.append((float(xs), float(ys)))
 
     if args.device:
