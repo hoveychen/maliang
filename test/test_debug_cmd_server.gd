@@ -100,15 +100,6 @@ func _run_once() -> void:
 		DebugCmdServer.parse_command('{"op":"teleport","near":true}').get("ok"), true)
 	fails += _check("teleport 缺参拒", DebugCmdServer.parse_command('{"op":"teleport"}').get("ok"), false)
 
-	print("[parse_command：measure_p95 纹理显存诊断采样]")
-	var mp := DebugCmdServer.parse_command('{"op":"measure_p95"}')
-	fails += _check("measure_p95 ok", mp.get("ok"), true)
-	fails += _check("measure_p95 op", mp.get("op"), "measure_p95")
-	fails += _check("measure_p95 缺省不带 warmup", mp.has("warmup"), false)
-	var mp2 := DebugCmdServer.parse_command('{"op":"measure_p95","warmup":0.5,"window":1.0}')
-	fails += _check("measure_p95 warmup 透传", mp2.get("warmup"), 0.5)
-	fails += _check("measure_p95 window 透传", mp2.get("window"), 1.0)
-
 	print("[parse_command：pick 引导点卡]")
 	var pk := DebugCmdServer.parse_command('{"op":"pick","optionId":"self"}')
 	fails += _check("pick ok", pk.get("ok"), true)
@@ -254,24 +245,6 @@ func _run_once() -> void:
 	fails += _check("autoload reset_budget 经 current_scene 转调宿主", world.reset_budget_calls, 2)
 	current_scene = prev_scene
 	auto_srv.queue_free()
-
-	print("[_execute measure_p95：延迟回复→泵满帧→回 p95 并清采样器、还原 fps]")
-	var saved_fps := Engine.max_fps
-	var r_m := srv._execute(DebugCmdServer.parse_command('{"op":"measure_p95","warmup":0.0,"window":0.1}'))
-	fails += _check("measure_p95 延迟回复(__defer__)", r_m.get("__defer__"), true)
-	fails += _check("measure_p95 起了采样器", srv._sampler != null, true)
-	# 泵真实帧 delta：warmup 0 → 每帧记账；累计 >window(0.1) 即采满 → 回 p95、清采样器、还原 cap。
-	srv._pump_measure(0.06)
-	fails += _check("未采满前采样器还在", srv._sampler != null, true)
-	srv._pump_measure(0.06) # 累计 0.12 > 0.1 → 采满
-	fails += _check("measure_p95 采满后清采样器", srv._sampler == null, true)
-	fails += _check("measure_p95 采满后还原 fps cap", Engine.max_fps, saved_fps)
-	# 采样中并发拒绝：起一个长窗口不泵满，再起一个应被拒（回 error，非 __defer__）。
-	srv._execute(DebugCmdServer.parse_command('{"op":"measure_p95","warmup":0.0,"window":10.0}'))
-	var r_busy := srv._execute({"ok": true, "op": "measure_p95"})
-	fails += _check("measure_p95 采样中拒并发", r_busy.get("error"), "measure already running")
-	srv._sampler = null # 清掉上面那个未采满的长窗口采样器，免污染
-	Engine.max_fps = saved_fps
 
 	vc.close(); vc.queue_free()
 	srv.queue_free()

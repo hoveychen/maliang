@@ -73,31 +73,11 @@ func _init() -> void:
 	if can:
 		_test_cell_bleed(api)
 
-	_test_tex_diag()
-
 	if _fails == 0:
 		print("atlas_compress tests PASS")
 	else:
 		printerr("atlas_compress tests FAILED: %d" % _fails)
 	quit(_fails)
-
-## 诊断探针 Api._apply_tex_diag：MALIANG_TEX_DIAG=downsample 时把图集长宽减半做 A/B 隔离
-## （证「未压缩村民图集是否吃帧」）。这里钉：置位→尺寸减半、缺省→原样、极小图不塌成 0。
-func _test_tex_diag() -> void:
-	var a := Image.create(2000, 2560, false, Image.FORMAT_RGBA8)
-	Api._apply_tex_diag(a, false)
-	_ok("诊断关：尺寸原样", a.get_width() == 2000 and a.get_height() == 2560,
-		"%dx%d" % [a.get_width(), a.get_height()])
-
-	var b := Image.create(2000, 2560, false, Image.FORMAT_RGBA8)
-	Api._apply_tex_diag(b, true)
-	_ok("诊断开：长宽各减半（显存降 4×）", b.get_width() == 1000 and b.get_height() == 1280,
-		"%dx%d" % [b.get_width(), b.get_height()])
-
-	var tiny := Image.create(1, 1, false, Image.FORMAT_RGBA8)
-	Api._apply_tex_diag(tiny, true)
-	_ok("诊断开：极小图不塌成 0", tiny.get_width() >= 1 and tiny.get_height() >= 1,
-		"%dx%d" % [tiny.get_width(), tiny.get_height()])
 
 ## 块压缩以 4×4 为块。cell 宽不是 4 的倍数时，一个块会横跨相邻两格的边界，把两格的颜色
 ## 揉进同一个块 —— 播放时上一帧的边缘会渗进这一帧。服务端把 cellW/cellH 对齐到 4 就是为了
