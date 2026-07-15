@@ -88,18 +88,20 @@ func _run(scene: Node) -> void:
 	_check(phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_ALWAYS,
 		"跨页态跨页视口在更新")
 
-	# 背包 4×4 纵向翻页（backpack-redesign P2）：塞 20 件 → 2 页（16+4），验证网格列数/页数/圆点/snap。
+	# 背包 2×4 纵向翻页（backpack-redesign P2，方案二改 2 列）：塞 20 件 → 按 ITEMS_PER_PAGE 分页，
+	# 验证网格列数/页数/圆点/snap。页数从常量推导，改列数不再破断言。
 	var bag := {}
 	for i in 20:
 		bag["itm_%02d" % i] = 1
 	scene.set("bag", bag)
 	pui.open_app("items")
 	await scene.get_tree().process_frame  # 冲刷上一轮空背包页的延迟 queue_free，再数页数
+	var epages := int(ceil(20.0 / float(PhoneUi.ITEMS_PER_PAGE)))  # 20 件 @ 8/页 = 3 页
 	var ipager: ScrollContainer = pui.get("_items_pager")
 	var ipages: VBoxContainer = pui.get("_items_pages_box")
 	var idots: VBoxContainer = pui.get("_items_dots")
 	_check(ipager != null and ipages != null and idots != null, "背包翻页容器/页箱/圆点就位")
-	_check(ipages != null and ipages.get_child_count() == 2, "20 件 → 2 页（16 件/页）")
+	_check(ipages != null and ipages.get_child_count() == epages, "20 件 → %d 页（%d 件/页）" % [epages, PhoneUi.ITEMS_PER_PAGE])
 	var icols_ok := true
 	var icell_total := 0
 	if ipages != null:
@@ -108,8 +110,8 @@ func _run(scene: Node) -> void:
 				icols_ok = false
 			icell_total += (g as GridContainer).get_child_count()
 	_check(icols_ok, "每页网格 columns=%d" % PhoneUi.ITEMS_COLS)
-	_check(icell_total == 20, "两页格子总数 = 物品数 20")
-	_check(idots != null and idots.get_child_count() == 2 and idots.visible, "2 页 → 2 个纵向圆点、可见")
+	_check(icell_total == 20, "各页格子总数 = 物品数 20")
+	_check(idots != null and idots.get_child_count() == epages and idots.visible, "%d 页 → %d 个纵向圆点、可见" % [epages, epages])
 	# 单页视口高定死一页：容器 min 高 = ITEMS_PAGE_H，snap 目标 = 页序 × 页高
 	_check(ipager != null and is_equal_approx(ipager.custom_minimum_size.y, PhoneUi.ITEMS_PAGE_H),
 		"翻页容器高 = ITEMS_PAGE_H（固定单页高）")

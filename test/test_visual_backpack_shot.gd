@@ -19,13 +19,14 @@ func _tick() -> void:
 			(scene.get("album_button") as Button).emit_signal("pressed") # 开手机
 		30:
 			# 真实内置 item id：离线也能走客户端现场离屏渲染出真图（P3 缩略图混合来源的「没图现渲」半边）；
-			# 给几个份数>1 看右上数量角标。
+			# 给几个份数>1 看右上数量角标。塞 11 件（>8）→ 2 页，看纵向翻页圆点。
 			scene.set("bag", {
 				"tree_puff_a": 1, "rock_0": 3, "tuft_0": 1, "house_0": 1,
 				"bush_puff": 2, "tree_puff_b": 1, "rock_1": 1, "house_1": 5,
+				"rock_2": 1, "tree_puff_c": 1, "windmill": 2,
 			})
 		36:
-			scene.call("_open_app", "items") # 翻转+展开跨页 → 背包 4×4，逐件懒渲缩略图
+			scene.call("_open_app", "items") # 翻转+展开跨页 → 背包 2×4（方案二 2 列），逐件懒渲缩略图
 		70:
 			(scene.get("phone_ui") as PhoneUi)._select_item("house_1") # 左半页出详情（大图+名字+动作按钮+x5 角标）
 
