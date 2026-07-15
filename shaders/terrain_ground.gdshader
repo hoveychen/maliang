@@ -76,14 +76,12 @@ varying flat int v_layer;
 varying flat int v_cap_layer;  // 盖帽取色层（=被抬高 tile 的顶面层；仅崖壁 quad 有意义）
 varying float v_below;         // 距崖顶深度（米；COLOR.b×2 解码，quad 内线性插值精确）
 varying float v_above;         // 离墙基高度（米；COLOR.a×2 解码；非墙几何 a=1 → 2m=不受影响）
-varying vec3 v_world;  // 纸纹用世界坐标（视空间噪声会随相机游动）
 
 void vertex() {
 	v_layer = int(round(COLOR.r * 255.0));
 	v_cap_layer = int(round(COLOR.g * 255.0));
 	v_below = COLOR.b * 2.0;
 	v_above = COLOR.a * 2.0;
-	v_world = VERTEX;  // world_vertex_coords：此时 VERTEX 是世界空间
 	VERTEX.y -= curvature * dot(VERTEX.xz, VERTEX.xz);
 }
 
@@ -164,7 +162,11 @@ void fragment() {
 		col = mix(col, mix(col, vec3(plum), 0.25) * 1.06 + 0.02, paper_tone);
 	}
 	if (paper_grain > 0.001) {
-		float g = 0.65 * paper_noise(v_world * 2.2) + 0.35 * paper_noise(v_world * 9.0);
+		// grain 锚在 UV2（逻辑世界米坐标，烘进网格恒定）——不能用 VERTEX：地形每帧按玩家
+		// 居中重摆 root.position（chunk_manager.update），同一地块的世界坐标每帧在变，
+		// 用它采噪声会让颗粒像一层灰尘随相机游动，贴不住地面。UV2 锚在环面，走路时纹丝不动。
+		vec3 gp = vec3(UV2.x, UV2.y, 0.0);
+		float g = 0.65 * paper_noise(gp * 2.2) + 0.35 * paper_noise(gp * 9.0);
 		col *= mix(1.0, 0.78 + 0.44 * g, paper_grain);
 	}
 	if (paper_edge > 0.001) {
