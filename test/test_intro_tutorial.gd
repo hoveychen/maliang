@@ -17,6 +17,10 @@ var base := Vector2.ZERO       ## 玩家摆动锚点（村民旁）
 var target := Vector2.ZERO     ## 目标 demo 村民逻辑坐标
 var have_target := false
 var villager_emoted := false   ## 全程锁存：任一 demo 村民被近身触发过挥手/点头
+var fairy_spoke_during_intro := false ## 全程锁存：intro 未结束时点点是否闲聊过（greet/idle）——应恒 false
+var fairy_bubble_during_intro := false ## 全程锁存：intro 未结束时点点音符气泡/语音是否出现过——应恒 false（视觉上也不抢旁白）
+var hint_ring_shown := false   ## 全程锁存：走路/靠近步的地面脉动光环出现过（Bug②视觉指引）
+var mic_hint_shown := false    ## 全程锁存：说话步话筒+声波 HUD 被亮起过（Bug②视觉指引）
 var swing_t := 0.0
 
 func _initialize() -> void:
@@ -68,6 +72,21 @@ func _tick() -> void:
 	if bool(scene.get("_intro_listening")):
 		scene.call("intro_feed_pcm", _voice(200))
 	var intro: Node = scene.get("_intro")
+	# 编排旁白由 IntroNarrator 独占音轨；点点的环境闲聊(greet/guide_hint/idle)在 intro 期间
+	# 必须闭嘴，否则两个音源叠着孩子一句听不清（Bug①）。锁存：intro 未 done 时 _fairy_greeted 一旦为真即失败。
+	if intro != null and not bool(intro.call("is_done")):
+		if bool(scene.get("_fairy_greeted")):
+			fairy_spoke_during_intro = true
+		var fb: Variant = scene.get("_fairy_bubble")
+		var fv: Variant = scene.get("fairy_voice")
+		if (fb is Node3D and (fb as Node3D).visible) or (fv != null and bool(fv.call("is_playing"))):
+			fairy_bubble_during_intro = true
+	# Bug②视觉指引锁存：教学步会亮地面脉动光环(走路/靠近)与话筒 HUD(说话)
+	var hint_node: Variant = scene.get("_intro_hint")
+	if hint_node is Node3D and (hint_node as Node3D).visible:
+		hint_ring_shown = true
+	if scene.get("_intro_mic_hint") == true:
+		mic_hint_shown = true
 	if intro != null and bool(intro.call("is_done")):
 		done = true
 		_finish()
@@ -76,6 +95,10 @@ func _finish() -> void:
 	_check("桌面/headless 说话步门禁未挡", bool(scene.call("intro_asr_blocked")), false)
 	_check("教学:开口被本地 VAD 检测到", bool(scene.call("intro_heard_speech")), true)
 	_check("教学:村民被近身触发挥手 emote", villager_emoted, true)
+	_check("Bug①:intro 期间点点不抢旁白(环境闲聊被 gate)", fairy_spoke_during_intro, false)
+	_check("Bug①:intro 期间点点无音符气泡/语音(视觉不抢拍)", fairy_bubble_during_intro, false)
+	_check("Bug②:走路/靠近步亮过地面脉动光环", hint_ring_shown, true)
+	_check("Bug②:说话步亮过话筒+声波 HUD", mic_hint_shown, true)
 	_check("编排器完成转正", done, true)
 	_check("首次演完标记 intro_seen（false→true）", PlayerProfile.intro_seen(), true)
 	var demos := 0
