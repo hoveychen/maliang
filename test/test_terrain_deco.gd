@@ -16,6 +16,7 @@ func _init() -> void:
 	_test_meshes_budget()
 	_test_density_band()
 	_test_flower_patchiness()
+	_test_theme_groups()
 	TerrainMap.reset()
 	print("test_terrain_deco: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
@@ -111,6 +112,55 @@ func _test_flower_patchiness() -> void:
 			if d.get("key", "") == "deco_flower" and not TerrainDeco._in_flower_patch(gt):
 				leak += 1
 	_check("花不漏出花畦（漏 %d 株）" % leak, leak, 0)
+
+## 主题层散布（pokopia-themes P2）：每类地表刷一块 20×20，出装饰的键必须属于该层
+## 装饰组、占率落在「配置出率 ± 带宽」内；结构面（石板/沥青/地毯/瓷砖）保持全秃。
+func _test_theme_groups() -> void:
+	for tt in TerrainDeco.THEME_GROUPS:
+		var groups: Array = TerrainDeco.THEME_GROUPS[tt]
+		var expect_rate: float = groups[groups.size() - 1][1]  # 累计上限=总出率
+		var allowed := {}
+		for e in groups:
+			allowed[e[0]] = true
+		TerrainMap.reset()
+		var edits := []
+		for z in range(20, 40):
+			for x in range(20, 40):
+				edits.append({ "x": x, "y": z, "t": tt })
+		var p := TerrainMap.apply_patch({ "edits": edits })
+		_check("类型 %d 刷块 ok" % tt, p["ok"], true)
+		var hit := 0
+		var wrong_key := 0
+		for z in range(20, 40):
+			for x in range(20, 40):
+				var d := TerrainDeco.pick(Vector2i(x, z))
+				if d.is_empty():
+					continue
+				hit += 1
+				if not allowed.has(d["key"]):
+					wrong_key += 1
+		var rate := float(hit) / 400.0
+		_check("类型 %d 只出本层装饰组（越界 %d）" % [tt, wrong_key], wrong_key, 0)
+		# 400 格样本的抽样噪声：出率带宽取 配置值 ±0.6 倍（下限>0 保证「真的长了」）
+		var lo := expect_rate * 0.4
+		var hi := expect_rate * 1.6 + 0.02
+		_check("类型 %d 出率在带宽 [%.2f,%.2f]（实际 %.2f）" % [tt, lo, hi, rate],
+			rate > lo and rate < hi, true)
+	# 结构面阴性样本：装饰该来自 items，terrain 散布保持全秃
+	for tt in [TerrainMap.T_STONE_SLAB, TerrainMap.T_ASPHALT, TerrainMap.T_CARPET_RED,
+			TerrainMap.T_TILE, TerrainMap.T_MARBLE, TerrainMap.T_METAL_PLATE]:
+		TerrainMap.reset()
+		var edits := []
+		for z in range(20, 30):
+			for x in range(20, 30):
+				edits.append({ "x": x, "y": z, "t": tt })
+		TerrainMap.apply_patch({ "edits": edits })
+		var bare := true
+		for z in range(20, 30):
+			for x in range(20, 30):
+				if not TerrainDeco.pick(Vector2i(x, z)).is_empty():
+					bare = false
+		_check("结构面类型 %d 全秃" % tt, bare, true)
 
 func _check(what: String, got: Variant, want: Variant) -> void:
 	if got == want:
