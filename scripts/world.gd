@@ -383,6 +383,11 @@ var _tts_stream_pcm := PackedByteArray()
 var _tts_gen_playback: AudioStreamGeneratorPlayback = null
 var _tts_ending := false  ## 已收到 tts_end：积压排空+缓冲播完后主动 stop（generator 不会自己停）
 var _tts_gen_capacity := 0 ## generator 空缓冲容量（开播时实测，播完判定的基准）
+## 流式 TTS 预缓冲：tts_start 后先攒够 TTS_PREBUFFER_SEC 秒 PCM 再 play()，避免服务端分片节奏
+## 慢于播放导致 generator 缓冲欠载（声音出一点就卡再续，实测尤其见于 iOS 走服务端降级流时）。
+const TTS_PREBUFFER_SEC := 0.4
+var _tts_prebuffering := false ## true=已建 generator 但攒预缓冲中，尚未 play()
+var _tts_prebuffer_bytes := 0  ## 起播阈值（按采样率算的 PCM16 单声道字节数）
 # clientTts：edge-tts 本地合成（设计见 docs/edge-tts-client-design.md）
 var edge_tts: EdgeTts
 var _tts_pending := false ## 本地合成/降级请求进行中：视同「角色在说话」（闭麦/压 BGM/相机），防 300ms 空窗漏麦
@@ -6471,19 +6476,31 @@ func _start_tts_stream(rate: int) -> void:
 	gen.buffer_length = 2.0
 	_tts_player.stop()
 	_tts_player.stream = gen
-	_tts_player.play()
-	_tts_gen_playback = _tts_player.get_stream_playback()
+	# 先不 play()：进预缓冲态，攒够阈值（或 tts_end 早到）后由 _drain_tts_stream 真正起播，防欠载。
+	_tts_gen_playback = null
 	_tts_ending = false
-	_tts_gen_capacity = _tts_gen_playback.get_frames_available() # 刚开播缓冲全空 = 实际容量
-	_mark_tts_out()
+	_tts_prebuffering = true
+	_tts_prebuffer_bytes = int(float(rate) * 2.0 * TTS_PREBUFFER_SEC) # PCM16 单声道：rate*2 字节/秒
+
+## 攒够预缓冲阈值、或短句 tts_end 已到（总量不足阈值也得播）才起播。
+static func _stream_ready_to_play(pcm_bytes: int, prebuffer_bytes: int, ending: bool) -> bool:
+	return pcm_bytes >= prebuffer_bytes or ending
 
 func _on_tts_chunk(pcm: PackedByteArray) -> void:
-	if _tts_gen_playback != null:
+	if _tts_gen_playback != null or _tts_prebuffering:
 		_tts_stream_pcm.append_array(pcm)
 		_drain_tts_stream()
 
 ## 把积压 PCM16 按 generator 剩余空位转成帧推入（每帧 Vector2 双声道同值）。
 func _drain_tts_stream() -> void:
+	if _tts_prebuffering:
+		if not _stream_ready_to_play(_tts_stream_pcm.size(), _tts_prebuffer_bytes, _tts_ending):
+			return
+		_tts_player.play() # 攒够了才起播：get_stream_playback 必须在 play 之后
+		_tts_gen_playback = _tts_player.get_stream_playback()
+		_tts_gen_capacity = _tts_gen_playback.get_frames_available() # 刚开播缓冲全空 = 实际容量
+		_tts_prebuffering = false
+		_mark_tts_out()
 	if _tts_gen_playback == null:
 		return
 	if _tts_stream_pcm.size() < 2:
@@ -6521,6 +6538,7 @@ func _parse_rate(mime: String, fallback: int) -> int:
 ## 下载 TTS（L16 PCM，采样率随 provider：local Kokoro 24k / 讯飞 16k）→ AudioStreamWAV 播放。
 func _play_tts(asset: String) -> void:
 	_tts_gen_playback = null # 切回整段路径时停掉流式排空
+	_tts_prebuffering = false # 若上一句流还卡在预缓冲态，切整段路径时一并弃掉（每帧 drain 别再起播它）
 	_tts_ending = false
 	var audio := await api.fetch_audio(asset)
 	var bytes := audio["bytes"] as PackedByteArray
@@ -6554,6 +6572,7 @@ func _speak_line(text: String, voice_id: String) -> void:
 
 func _play_tts_mp3(bytes: PackedByteArray) -> void:
 	_tts_gen_playback = null # 切整段路径时停掉流式排空（与 _play_tts 同款复位）
+	_tts_prebuffering = false # 同上：edge 整段 mp3 抢占时弃掉未起播的预缓冲流
 	_tts_ending = false
 	var mp3 := AudioStreamMP3.new()
 	mp3.data = bytes
