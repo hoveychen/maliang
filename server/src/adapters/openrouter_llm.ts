@@ -236,6 +236,7 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
 ${abilityLines}
 严格只输出 JSON：{"kind":"chat"|"command","replyText":"中文回应","emotion":"happy|think|wave|sad","performer":"角色名或省略","offerTask":true或省略,"abandonTask":true或省略,"behaviorScript":{"commands":[{"type":"move_to","params":{"location_name":"…"}}],"loop":false}}
 - chat 时不要 behaviorScript。
+- 【空口承诺红线】只要小朋友的话是「让谁做一件事」——就地动作（跳一下/转个圈/点点头/挥挥手/躺下…）、去某地、跟着/别跟、去找谁、带话——就必须 kind=command 并给出对应 behaviorScript，哪怕只是点个头这种小动作也要给指令。【绝不】用「嗯嗯我在听呢」「好呀～」这种不带 behaviorScript 的话敷衍搪塞：那会让你嘴上答应了、身体却没动（说要做、人没动，还占着对话），正是要杜绝的。只有问好、闲聊、表达心情这种没让你做事的话才 kind=chat。
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - 小朋友说「告诉X…」「帮我跟X说…」是带话：用 deliver_message（to=X，message=要带的话），不要用 move_to——光走过去话就丢了。
 - 小朋友让你「去找X」「去叫X过来」「把X喊来」「去找X一起玩」是让你走过去把 X 找来：必须 kind=command，用 chat_with（character_name=X）。哪怕话里带个「玩」字也【绝不是】闲聊——你嘴上答应「好呀我去找他」却不给指令，就成了原地空口承诺（说要去、人没动、对话也不关），这正是要避免的。真要去就把指令给上。
