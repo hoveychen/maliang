@@ -85,8 +85,9 @@ static func build_terrain_bytes() -> PackedByteArray:
 	# ── 地表分区（顶面语义）──
 	_ellipse_type(types, n, 22.5, 20.5, 10.0, 9.0, T_WOOD_FLOOR)     # 西北 木廊
 	_ellipse_type(types, n, 55.5, 55.5, 9.0, 8.0, T_WOOD_FLOOR)      # 东南 木廊
-	_ellipse_type(types, n, 18.5, 55.5, 8.0, 7.0, T_COBBLE)          # 西南 卵石庭
-	_ellipse_type(types, n, 55.5, 20.5, 7.0, 6.5, T_COBBLE)          # 东北 卵石庭
+	_ellipse_type(types, n, 18.5, 55.5, 9.5, 8.5, T_COBBLE)          # 西南 卵石庭（P4 扩大）
+	_ellipse_type(types, n, 55.5, 20.5, 8.5, 7.5, T_COBBLE)          # 东北 卵石庭（P4 扩大）
+	_ellipse_type(types, n, 37.5, 22.5, 5.0, 4.5, T_CRACKED_EARTH)   # 北 夯土场（P4 拼布）
 
 	# ── 夯土 mound（夯土台）：footprint 涂夯土，再同心抬高（逐级露夯土崖壁）──
 	_ellipse_type(types, n, 50.5, 28.5, 6.5, 6.0, T_CRACKED_EARTH)

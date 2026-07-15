@@ -87,7 +87,8 @@ static func build_terrain_bytes() -> PackedByteArray:
 	# ── 地表分区（顶面语义，行主序 wrap）──
 	_ellipse_type(types, n, 18.5, 18.5, 13.0, 11.0, T_SNOW)     # 西北 雪原
 	_ellipse_type(types, n, 55.5, 55.5, 12.0, 10.0, T_SNOW)     # 东南 雪原
-	_ellipse_type(types, n, 55.5, 18.5, 8.0, 7.0, T_SLUSH)      # 东北 融雪泥泞
+	_ellipse_type(types, n, 55.5, 18.5, 9.0, 8.0, T_SLUSH)      # 东北 融雪泥泞（P4 扩大）
+	_ellipse_type(types, n, 20.5, 37.5, 4.0, 3.6, T_ICE)        # 西 小冰塘（P4 拼布）
 	_ellipse_type(types, n, 20.5, 55.5, 7.0, 6.5, T_SLUSH)      # 西南 融雪泥泞
 	_ellipse_type(types, n, 37.5, 40.5, 10.0, 9.0, T_ICE)       # 中央 冰湖（结冰面，可走）
 

@@ -94,6 +94,8 @@ static func build_terrain_bytes() -> PackedByteArray:
 	# 中央矮玩具台（1 级木平台，木壁 type-aware）
 	_ellipse_type(types, n, 37.5, 37.5, 3.5, 3.2, T_WOOD_FLOOR)
 	_ellipse_h(heights, n, 37.5, 37.5, 3.5, 3.2, 1)
+	# 台面内嵌拼图垫（P4 清单 A：木叠木读「地板破洞」，内圈对比层，外圈木保侧壁）
+	_ellipse_type(types, n, 37.5, 37.5, 2.4, 2.1, T_PUZZLE_MAT)
 	# 四壁：房间边界 2 格厚墙环（内缘 X0/Z0..X1/Z1，外扩 2 格），抬高 WALL_H
 	_wall_ring(types, heights, n, X0, Z0, X1, Z1, 2, T_TOY_WALL, WALL_H)
 

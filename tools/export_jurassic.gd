@@ -83,8 +83,9 @@ static func build_terrain_bytes() -> PackedByteArray:
 		types[i] = T_CRACKED_EARTH
 
 	# ── 地表分区（顶面语义，行主序 wrap）──
-	_ellipse_type(types, n, 18.5, 18.5, 13.0, 11.0, T_FERN)      # 西北 蕨类草地
-	_ellipse_type(types, n, 55.5, 55.5, 12.0, 10.0, T_FERN)      # 东南 蕨类草地
+	_ellipse_type(types, n, 18.5, 18.5, 14.0, 12.0, T_FERN)      # 西北 蕨类草地（P4 扩大）
+	_ellipse_type(types, n, 55.5, 55.5, 13.0, 11.0, T_FERN)      # 东南 蕨类草地（P4 扩大）
+	_ellipse_type(types, n, 20.5, 37.5, 4.5, 4.0, T_MUD_BOG)     # 西 泥沼小塘（P4 拼布）
 	_ellipse_type(types, n, 37.5, 40.5, 11.0, 10.0, T_MUD_BOG)   # 中央 泥沼盆地
 	_ellipse_type(types, n, 55.5, 20.5, 9.0, 8.0, T_RUBBLE)      # 东北 碎石滩
 	_ellipse_type(types, n, 20.5, 55.5, 7.0, 6.5, T_RUBBLE)      # 西南 碎石滩

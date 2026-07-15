@@ -86,7 +86,9 @@ static func build_terrain_bytes() -> PackedByteArray:
 
 	# ── 地表分区（顶面语义，行主序 wrap）──
 	_ellipse_type(types, n, 18.5, 18.5, 13.0, 11.0, T_SEAGRASS)   # 西北 海草地
-	_ellipse_type(types, n, 52.5, 52.5, 12.0, 10.0, T_CORAL_SAND) # 东南 珊瑚砂
+	_ellipse_type(types, n, 52.5, 52.5, 13.0, 11.0, T_CORAL_SAND) # 东南 珊瑚砂（P4 扩大）
+	_ellipse_type(types, n, 37.5, 18.5, 5.0, 4.5, T_SEAGRASS)     # 北 海草小丛（P4 拼布）
+	_ellipse_type(types, n, 52.5, 37.5, 4.0, 3.6, T_SEAGRASS)     # 东 海草小丛（P4 拼布）
 	_ellipse_type(types, n, 55.5, 18.5, 8.0, 7.0, T_COARSE_SAND)  # 东北 粗沙滩
 	_ellipse_type(types, n, 20.5, 55.5, 7.0, 6.5, T_COARSE_SAND)  # 西南 粗沙滩
 	_ellipse_type(types, n, 37.5, 40.5, 10.0, 9.0, T_DEEP_BED)    # 中央 深水床盆地

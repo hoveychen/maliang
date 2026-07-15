@@ -86,7 +86,9 @@ static func build_terrain_bytes() -> PackedByteArray:
 	# ── 地表分区（顶面语义）──
 	_ellipse_type(types, n, 22.5, 52.5, 13.0, 12.0, T_CRACKED_EARTH) # 西南 斗兽场沙土
 	_ellipse_type(types, n, 18.5, 18.5, 10.0, 9.0, T_MOSAIC)         # 西北 马赛克庭
-	_ellipse_type(types, n, 55.5, 55.5, 9.0, 8.0, T_MOSAIC)          # 东南 马赛克庭
+	_ellipse_type(types, n, 55.5, 55.5, 10.5, 9.5, T_MOSAIC)         # 东南 马赛克庭（P4 扩大）
+	_ellipse_type(types, n, 37.5, 20.5, 5.0, 4.5, T_MARBLE)          # 北 大理石广场（P4 拼布）
+	_ellipse_type(types, n, 26.5, 37.5, 4.5, 4.0, T_MARBLE)          # 西 大理石步道（P4 拼布）
 	_ellipse_type(types, n, 55.5, 18.5, 8.0, 7.0, T_RUBBLE)          # 东北 碎石堆
 
 	# ── 大理石 mound（神庙台）：footprint 涂大理石，再同心抬高（逐级露大理石崖壁）──
