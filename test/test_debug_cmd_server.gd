@@ -22,6 +22,19 @@ class StubWorld extends Node:
 		return true
 	func harness_reset_play_budget() -> void:
 		reset_budget_calls += 1
+	# 摄影钩子（photo/scene 命令路由记录）
+	var photo_args := []
+	var scene_ids := []
+	func harness_photo(args: Dictionary) -> Dictionary:
+		photo_args.append(args)
+		return {"hud": bool(args.get("hud", true)), "photo_cam": args.has("cam")}
+	func harness_enter_scene(id: String) -> bool:
+		scene_ids.append(id)
+		return true
+	var teleports := []
+	func harness_teleport(tile: Vector2i, near: bool) -> bool:
+		teleports.append([tile, near])
+		return true
 
 var _ran := false
 
@@ -54,6 +67,27 @@ func _run_once() -> void:
 		var r := DebugCmdServer.parse_command('{"op":"%s"}' % op)
 		fails += _check("%s ok" % op, r.get("ok"), true)
 		fails += _check("%s op" % op, r.get("op"), op)
+
+	print("[parse_command：photo/scene（menu 相册拍摄）]")
+	var ph := DebugCmdServer.parse_command('{"op":"photo","hud":false,"pitch":28,"yaw":0.6,"dist":22}')
+	fails += _check("photo ok", ph.get("ok"), true)
+	fails += _check("photo hud", ph.get("hud"), false)
+	fails += _check("photo cam pitch", (ph.get("cam") as Dictionary).get("pitch"), 28.0)
+	fails += _check("photo cam lift 缺省", (ph.get("cam") as Dictionary).get("lift"), 0.0)
+	var ph2 := DebugCmdServer.parse_command('{"op":"photo","clear_cam":true}')
+	fails += _check("photo clear_cam", ph2.get("clear_cam"), true)
+	fails += _check("photo 只 clear 不带 cam 键", ph2.has("cam"), false)
+	var sc := DebugCmdServer.parse_command('{"op":"scene","id":"forest"}')
+	fails += _check("scene ok", sc.get("ok"), true)
+	fails += _check("scene id", sc.get("id"), "forest")
+	fails += _check("scene 缺 id 拒", DebugCmdServer.parse_command('{"op":"scene"}').get("ok"), false)
+	var tp := DebugCmdServer.parse_command('{"op":"teleport","tileX":37,"tileY":40}')
+	fails += _check("teleport ok", tp.get("ok"), true)
+	fails += _check("teleport tileX", tp.get("tileX"), 37)
+	fails += _check("teleport near 缺省 false", tp.get("near"), false)
+	fails += _check("teleport near=true 免坐标",
+		DebugCmdServer.parse_command('{"op":"teleport","near":true}').get("ok"), true)
+	fails += _check("teleport 缺参拒", DebugCmdServer.parse_command('{"op":"teleport"}').get("ok"), false)
 
 	print("[parse_command：非法输入全部拒]")
 	fails += _check("空行拒", DebugCmdServer.parse_command("   ").get("ok"), false)
@@ -112,6 +146,8 @@ func _run_once() -> void:
 	fails += _check("banner_text", snap.get("banner_text"), "想说什么就直接跟点点说吧")
 	fails += _check("banner_visible", snap.get("banner_visible"), true)
 	fails += _check("selected 空", snap.get("selected"), "")
+	fails += _check("scene_id 宿主无字段兜底空", snap.get("scene_id"), "")
+	fails += _check("transitioning 宿主无字段兜底 false", snap.get("transitioning"), false)
 	fails += _check("vc_open", snap.get("vc_open"), true)
 	fails += _check("asr_pending 剩1(大风车)", snap.get("asr_pending"), 1)
 
@@ -129,6 +165,20 @@ func _run_once() -> void:
 	var r_rb := srv._execute({"ok": true, "op": "reset_budget"})
 	fails += _check("reset_budget 回包 ok", r_rb.get("ok"), true)
 	fails += _check("reset_budget 转调宿主一次", world.reset_budget_calls, 1)
+
+	print("[_execute photo / scene：路由到宿主摄影钩子]")
+	var r_ph := srv._execute(DebugCmdServer.parse_command('{"op":"photo","hud":false,"pitch":30,"dist":20}'))
+	fails += _check("photo 回包 ok", r_ph.get("ok"), true)
+	fails += _check("photo 转调宿主一次", world.photo_args.size(), 1)
+	fails += _check("photo 透传 hud", (world.photo_args[0] as Dictionary).get("hud"), false)
+	fails += _check("photo 透传 cam dist",
+		((world.photo_args[0] as Dictionary).get("cam") as Dictionary).get("dist"), 20.0)
+	var r_sc := srv._execute({"ok": true, "op": "scene", "id": "forest"})
+	fails += _check("scene 回包 ok", r_sc.get("ok"), true)
+	fails += _check("scene 转调宿主", world.scene_ids, ["forest"])
+	var r_tp := srv._execute(DebugCmdServer.parse_command('{"op":"teleport","near":true}'))
+	fails += _check("teleport 回包 ok", r_tp.get("ok"), true)
+	fails += _check("teleport 透传 near", (world.teleports[0] as Array)[1], true)
 
 	print("[autoload 路径：_world=null 时 talk_fairy/reset_budget 经 current_scene 兜底]")
 	# 真机上 HarnessCmd 是 [autoload]，由 Godot 默认构造（不走 make）→ _world 恒为 null；
