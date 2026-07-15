@@ -16,8 +16,6 @@ const STATUS_UNDETERMINED := 0
 const STATUS_DENIED := 1
 const STATUS_GRANTED := 2
 
-const MSG := "麦克风被关掉了，\n听不到小朋友说话啦。\n\n请到 设置 → maliang → 麦克风 打开它。"
-
 ## 纯判定（供单测）：仅当 iOS + 能查到权限 + 权限=拒绝 才拦。
 ## 缺单例（singleton_present=false）时**不拦**——查不到就不该误伤（可能是老包/桌面）。
 static func should_block(os_name: String, status: int, singleton_present: bool) -> bool:
