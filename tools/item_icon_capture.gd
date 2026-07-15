@@ -35,7 +35,9 @@ extends SceneTree
 ## 修历史坏数据：ITEM_ICON_REDO_HASHES=hash1,hash2,... 让「当前 iconHash 命中该列表」的物品无视
 ##   已有图强制重渲（重渲出唯一新图后即脱离该列表，自然被后续进程跳过，配合上限+until 收敛）。
 
-const VP_SIZE := 320               # 缩略图边长（正方形，透明底）
+const VP_SIZE := 320               # 缩略图边长（离屏渲染分辨率，正方形透明底）
+const ICON_MAX_PX := 160           # 存图长边上限：显示只到 ~160(格)/200(详情)，160 足够；把 320px 图砍进 <50KB
+const ICON_MAX_BYTES := 50 * 1024  # 单张 PNG 上限（老板定 <50KB）：超了逐档降尺寸(160→128→96)
 const SETTLE_FRAMES := 10          # 每个物品渲染前等的帧数（够 SDF 顶点吸附收敛）
 const CAM_ELEV_DEG := 28.0         # 相机俯角（近似游戏内斜俯视）
 const CAM_AZIM_DEG := 35.0         # 相机方位角
@@ -150,7 +152,7 @@ func _run() -> void:
 			print("[icon] skip %s（renderRef=%s 无法渲染）" % [id, def.get("renderRef", "")])
 			skip += 1
 			continue
-		var png := img.save_png_to_buffer()
+		var png := _encode_icon(id, img)
 		# 停滞帧护栏（次要防线，主防线是每进程上限）：GPU 累积后 SubViewport 会冻结在上一张成功帧上，
 		# 这帧非空白、骗过空白护栏，若与上一张已上传的 PNG 字节相同就判冻结帧、跳过留待新进程。
 		# ⚠️ 注意：字节相同不一定是冻结——共享同一 glb 的物品（如 roman:* 复用 medieval 资产、
@@ -357,6 +359,26 @@ func _get_json(path: String) -> Dictionary:
 		return {}
 	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
 	return data if typeof(data) == TYPE_DICTIONARY else {}
+
+## 存图前降尺寸+控 <50KB：先把长边降到 ICON_MAX_PX，若 PNG 仍超线就逐档缩(128→96)直到达标。
+## 320px 未压缩图对简单纸艺物件常 >50KB；显示尺寸只到 ~160/200，降到 160 观感不变却砍进 50KB 线内。
+## 确定性：同一 img 恒产同一 png（停滞帧护栏 png==_last_png 仍成立）。
+func _encode_icon(id: String, img: Image) -> PackedByteArray:
+	var png := PackedByteArray()
+	for cap in [ICON_MAX_PX, 128, 96]:
+		var scaled := img.duplicate() as Image
+		var longest := maxi(scaled.get_width(), scaled.get_height())
+		if longest > cap:
+			var s := float(cap) / float(longest)
+			scaled.resize(maxi(1, int(round(scaled.get_width() * s))),
+				maxi(1, int(round(scaled.get_height() * s))), Image.INTERPOLATE_LANCZOS)
+		png = scaled.save_png_to_buffer()
+		if png.size() <= ICON_MAX_BYTES:
+			break
+	print("[icon] %s PNG %.1fKB (%dx%d)" % [id, png.size() / 1024.0, img.get_width(), img.get_height()])
+	if png.size() > ICON_MAX_BYTES:
+		push_warning("[icon] %s 仍 %.1fKB >50KB（内容太复杂?降到 96px 仍超）" % [id, png.size() / 1024.0])
+	return png
 
 func _post_icon(id: String, png_b64: String) -> Dictionary:
 	var http := HTTPRequest.new()

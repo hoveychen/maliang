@@ -23,12 +23,15 @@ func _tick() -> void:
 			scene.set("bag", {
 				"tree_puff_a": 1, "rock_0": 3, "tuft_0": 1, "house_0": 1,
 				"bush_puff": 2, "tree_puff_b": 1, "rock_1": 1, "house_1": 5,
-				"rock_2": 1, "tree_puff_c": 1, "windmill": 2,
+				"rock_2": 1, "tree_puff_c": 1, "windmill": 2, "sticker_sun": 1,
 			})
 		36:
-			scene.call("_open_app", "items") # 翻转+展开跨页 → 背包 2×4（方案二 2 列），逐件懒渲缩略图
-		70:
-			(scene.get("phone_ui") as PhoneUi)._select_item("house_1") # 左半页出详情（大图+名字+动作按钮+x5 角标）
+			scene.call("_open_app", "items") # 翻转+展开跨页 → 背包 2×4（方案二 2 列），逐件懒渲缩略图（贴纸已抽走）
+		60:
+			scene.call("_open_app", "stickers") # P7：贴纸独立 app（拥有贴纸网格 + 小铺）
+		75:
+			var p := scene.get("phone_ui") as PhoneUi
+			p._select_item("sticker_sun", p.get("_stickers_detail")) # 贴纸详情=摆到地块/装到身上/扔掉+念名 badge 看溢不溢出
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
