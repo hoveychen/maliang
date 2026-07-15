@@ -566,7 +566,7 @@ ${catLines}
 判断规则：至少知道 性别 + 另外两项外观 就可以画了；小朋友说「就这样/够了/画吧」也立刻画。
 小朋友如果不耐烦、说不想选了，不要挽留，直接 done=true 用已知道的属性去画（缺的你来补得可爱些）。
 严格只输出 JSON：{"replyText":"你要对小朋友说的话(中文,温暖童趣,≤两句,若在问就把问题和选项自然念出来)","done":true或false,"question":"done=false时的问题","category":"done=false时问的类别","optionIds":["done=false时的选项id"],"updatedAttrs":{"gender":"","hairstyle":"","outfit":"","color":"","motifs":[""],"accessory":"","extras":[""]}}
-updatedAttrs 只填这轮从小朋友输入里新解析出的属性（没有就省略字段；motifs/extras 给增量后的全量数组）。绝不包含暴力、恐怖、武器、成人内容。`;
+updatedAttrs 只填这轮从小朋友输入里新解析出的属性（没有就省略字段；motifs/extras 给增量后的全量数组）。replyText 和 updatedAttrs 的值里绝不出现 av_ 开头的英文选项代号——那是给系统看的，对小朋友和属性只用中文词。绝不包含暴力、恐怖、武器、成人内容。`;
     const content = await this.#client.chatText(
       this.#model,
       [

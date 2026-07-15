@@ -149,6 +149,15 @@ export const AVATAR_FORBIDDEN_DESC = /(抱着|拿着|手持|举着|捧着|牵着
  */
 export const AVATAR_FORBIDDEN_HEAD = /(皇冠|头盔|头纱|发冠|(?<![连兜])帽(?!衫|兜))/;
 
+/**
+ * 剥离描述里的 av_ 选项代号——生产实测（2026-07-15）LLM 会把图标 id 抄进描述
+ * （「留着av_hair_short短短的头发」），代号进生图 prompt 是噪音、落档案是脏数据。
+ * 在描述出口统一剥（avatar-chat done / player-sprite refine 两处调用）。
+ */
+export function stripAvatarOptionIds(s: string): string {
+  return s.replace(/\bav_[a-z0-9_]+/g, '');
+}
+
 /** 描述是否违反任一硬规则（持物/头顶遮挡）——LLM 产物的重试判据与单测共用。 */
 export function avatarDescForbidden(desc: string): boolean {
   return AVATAR_FORBIDDEN_DESC.test(desc) || AVATAR_FORBIDDEN_HEAD.test(desc);
