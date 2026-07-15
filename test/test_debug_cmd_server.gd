@@ -144,6 +144,29 @@ func _run_once() -> void:
 	fails += _check("tap 缺 y 拒", DebugCmdServer.parse_command('{"op":"tap","x":1}').get("ok"), false)
 	fails += _check("未知 op 拒", DebugCmdServer.parse_command('{"op":"nope"}').get("ok"), false)
 
+	print("[parse_command：ui / screencap wire（ai-harness P2）]")
+	var ui_p := DebugCmdServer.parse_command('{"op":"ui"}')
+	fails += _check("ui ok", ui_p.get("ok"), true)
+	fails += _check("ui texts 缺省 false", ui_p.get("texts"), false)
+	fails += _check("ui texts=true", DebugCmdServer.parse_command('{"op":"ui","texts":true}').get("texts"), true)
+	var sc_p := DebugCmdServer.parse_command('{"op":"screencap","wire":true,"max_dim":320,"quality":0.5}')
+	fails += _check("screencap wire", sc_p.get("wire"), true)
+	fails += _check("screencap max_dim", sc_p.get("max_dim"), 320)
+	fails += _check("screencap quality", sc_p.get("quality"), 0.5)
+	fails += _check("screencap 裸命令兼容", DebugCmdServer.parse_command('{"op":"screencap"}').get("ok"), true)
+
+	print("[encode_jpg_b64：降采样 JPEG base64 纯函数]")
+	var big := Image.create(128, 64, false, Image.FORMAT_RGBA8)
+	big.fill(Color(0.9, 0.3, 0.2))
+	var enc := DebugCmdServer.encode_jpg_b64(big, 32, 0.75)
+	fails += _check("encode ok", enc.get("ok"), true)
+	fails += _check("长边收到 32", enc.get("w"), 32)
+	fails += _check("短边等比 16", enc.get("h"), 16)
+	fails += _check("b64 非空", (enc.get("jpg_b64") as String).is_empty(), false)
+	fails += _check("b64 可解回", Marshalls.base64_to_raw(enc.get("jpg_b64")).is_empty(), false)
+	var enc0 := DebugCmdServer.encode_jpg_b64(big, 0, 0.75)
+	fails += _check("max_dim=0 不缩", enc0.get("w"), 128)
+
 	print("[synth_pcm：长度/采样率]")
 	# 30ms @ 16k mono 16bit = 16*30 样本 * 2 字节 = 960 字节
 	fails += _check("30ms 长度", DebugCmdServer.synth_pcm(30, 0.3).size(), 960)
@@ -253,6 +276,84 @@ func _run_once() -> void:
 	world._phone_cam = false
 	world.npcs = []
 	world.bag = {}
+
+	print("[_execute ui：可点元素枚举（ai-harness P2）]")
+	var fixture := Control.new()
+	fixture.name = "UiFixture"
+	root.add_child(fixture)
+	var btn := Button.new()
+	btn.name = "ConfirmBtn"
+	btn.text = "确认"
+	btn.position = Vector2(10, 20)
+	btn.size = Vector2(80, 30)
+	fixture.add_child(btn)
+	var dis := TextureButton.new()
+	dis.name = "DisabledBtn"
+	dis.disabled = true
+	fixture.add_child(dis)
+	var hidden := Button.new()
+	hidden.name = "HiddenBtn"
+	hidden.visible = false
+	fixture.add_child(hidden)
+	var lbl := Label.new()
+	lbl.name = "Title"
+	lbl.text = "标题"
+	fixture.add_child(lbl)
+	var tapc := Control.new()
+	tapc.name = "TapArea"
+	tapc.gui_input.connect(func(_e: InputEvent) -> void: pass)
+	fixture.add_child(tapc)
+	var svp := SubViewport.new()
+	svp.name = "PhoneScreen"
+	svp.size = Vector2i(100, 100)
+	fixture.add_child(svp)
+	var pbtn := Button.new()
+	pbtn.name = "PhoneBtn"
+	pbtn.text = "手机键"
+	svp.add_child(pbtn)
+	# 自绘点击区：脚本重写 _gui_input（stamp_card/onboarding 这一类）
+	var gs := GDScript.new()
+	gs.source_code = "extends Control\nfunc _gui_input(_e: InputEvent) -> void:\n\tpass\n"
+	gs.reload()
+	var drawn: Control = gs.new()
+	drawn.name = "DrawnTapArea"
+	fixture.add_child(drawn)
+
+	var uir := srv._execute({"ok": true, "op": "ui", "texts": false})
+	fails += _check("ui 回包 ok", uir.get("ok"), true)
+	var els: Array = (uir.get("elements") as Array).filter(
+		func(e: Variant) -> bool: return (String((e as Dictionary).get("path", "")).contains("UiFixture")))
+	var names := els.map(func(e: Variant) -> String:
+		return String((e as Dictionary).get("path", "")).split("/")[-1])
+	fails += _check("按钮在列", names.has("ConfirmBtn"), true)
+	fails += _check("禁用按钮也在列", names.has("DisabledBtn"), true)
+	fails += _check("隐藏按钮不在列", names.has("HiddenBtn"), false)
+	fails += _check("默认不含 Label", names.has("Title"), false)
+	fails += _check("gui_input 连接的点击区在列", names.has("TapArea"), true)
+	fails += _check("脚本重写 _gui_input 的点击区在列", names.has("DrawnTapArea"), true)
+	fails += _check("SubViewport 内按钮在列", names.has("PhoneBtn"), true)
+	for e in els:
+		var ed := e as Dictionary
+		var nm := String(ed.get("path", "")).split("/")[-1]
+		match nm:
+			"ConfirmBtn":
+				fails += _check("按钮 kind", ed.get("kind"), "button")
+				fails += _check("按钮 text", ed.get("text"), "确认")
+				fails += _check("按钮 viewport=root", ed.get("viewport"), "root")
+				fails += _check("按钮 disabled=false", ed.get("disabled"), false)
+				fails += _check("按钮 rect.w", (ed.get("rect") as Dictionary).get("w"), 80.0)
+			"DisabledBtn":
+				fails += _check("禁用位导出", ed.get("disabled"), true)
+			"TapArea":
+				fails += _check("点击区 kind", ed.get("kind"), "tap_area")
+			"PhoneBtn":
+				fails += _check("SubViewport 标记", ed.get("viewport"), "PhoneScreen")
+	var uir_t := srv._execute({"ok": true, "op": "ui", "texts": true})
+	var tnames: Array = (uir_t.get("elements") as Array).filter(
+		func(e: Variant) -> bool: return String((e as Dictionary).get("path", "")).contains("UiFixture")).map(
+		func(e: Variant) -> String: return String((e as Dictionary).get("path", "")).split("/")[-1])
+	fails += _check("texts=true 含 Label", tnames.has("Title"), true)
+	fixture.queue_free()
 
 	print("[_execute state：引导式造物态快照]")
 	world._in_creation = true

@@ -7,8 +7,10 @@ extends Node
 ## 逐行发 JSON 命令（一行一条），每条回一行 JSON 应答。命令集见 parse_command / 设计 §2.1：
 ##   {"op":"say","text":"爬爬梯"}   排下一句 ASR 文本 + 喂合成 PCM 驱 VAD 断句（=真人说一句）
 ##   {"op":"tap","x":..,"y":..}      盲坐标触屏
-##   {"op":"state"}                  回状态快照（_naming_item/selected/banner/bag/vc 各态）
+##   {"op":"state"}                  回状态快照（fsm/玩家坐标/钱包/背包/手机/摆放/NPC/vc 各态）
+##   {"op":"ui","texts":false}       可点/可读元素枚举（button/tap_area[/text] + 屏幕矩形 + viewport 标记）
 ##   {"op":"screencap"}              截一帧落盘 user://harness_cap.png
+##   {"op":"screencap","wire":true}  截图降采样 JPEG base64 直接回包（max_dim/quality 可选）
 ##   {"op":"accept"/"replay"/"retry"} 确认模式三键（说完先回放、采纳/重听/重说）
 ##
 ## say 只把 PCM 喂进 _vc；到底录不录仍由真实 should_capture 门禁决定（§3.2，门禁本身是被测对象）。
@@ -88,7 +90,20 @@ static func parse_command(line: String) -> Dictionary:
 				return {"ok": false, "error": "teleport needs tileX,tileY or near"}
 			return {"ok": true, "op": "teleport", "tileX": int(dict.get("tileX", -1)),
 				"tileY": int(dict.get("tileY", -1)), "near": near}
-		"inject", "state", "screencap", "accept", "replay", "retry", "talk_fairy", "talk_npc", "reset_budget":
+		"ui":
+			# UI 可点元素枚举（AI 感知）：texts=true 时连可见 Label 文本一起导出（读屏用）。
+			return {"ok": true, "op": "ui", "texts": bool(dict.get("texts", false))}
+		"screencap":
+			# wire=true 时截图降采样转 JPEG base64 直接回包（真机 user:// adb 拉不出来）。
+			var scap := {"ok": true, "op": "screencap"}
+			if dict.has("wire"):
+				scap["wire"] = bool(dict["wire"])
+			if dict.has("max_dim"):
+				scap["max_dim"] = int(dict["max_dim"])
+			if dict.has("quality"):
+				scap["quality"] = float(dict["quality"])
+			return scap
+		"inject", "state", "accept", "replay", "retry", "talk_fairy", "talk_npc", "reset_budget":
 			return {"ok": true, "op": op}
 		_:
 			return {"ok": false, "error": "unknown op: %s" % op}
@@ -189,8 +204,10 @@ func _execute(cmd: Dictionary) -> Dictionary:
 			return {"ok": true, "op": "tap"}
 		"state":
 			return _snapshot()
+		"ui":
+			return _do_ui(bool(cmd.get("texts", false)))
 		"screencap":
-			return _do_screencap()
+			return _do_screencap(cmd)
 		"accept", "replay", "retry":
 			return _do_confirm_key(op)
 		"talk_fairy":
@@ -411,18 +428,108 @@ func _snapshot() -> Dictionary:
 		snap["asr_pending"] = _asr_pending(vc._asr)
 	return snap
 
-func _do_screencap() -> Dictionary:
+func _do_screencap(cmd: Dictionary) -> Dictionary:
 	var tree := get_tree()
 	if tree == null or tree.root == null:
 		return {"ok": false, "error": "no scene tree"}
 	var img := tree.root.get_texture().get_image()
 	if img == null:
 		return {"ok": false, "error": "no viewport image"}
+	# wire 回传（AI 感知主路）：真机 user:// 是 app 私有目录 adb 拉不出来，图必须走 TCP 回包。
+	if bool(cmd.get("wire", false)):
+		var enc := encode_jpg_b64(img, int(cmd.get("max_dim", 960)), float(cmd.get("quality", 0.75)))
+		if not bool(enc.get("ok", false)):
+			return enc
+		enc["op"] = "screencap"
+		return enc
 	var path := "user://harness_cap.png"
 	var err := img.save_png(path)
 	if err != OK:
 		return {"ok": false, "error": "save_png failed: %d" % err}
 	return {"ok": true, "op": "screencap", "path": ProjectSettings.globalize_path(path)}
+
+## 纯函数：Image → 降采样 JPEG base64（长边收到 max_dim，质量 quality）。供 headless 单测。
+static func encode_jpg_b64(img: Image, max_dim: int, quality: float) -> Dictionary:
+	var work := img.duplicate() as Image
+	if work.is_compressed():
+		work.decompress()
+	work.convert(Image.FORMAT_RGB8)
+	var longest := maxi(work.get_width(), work.get_height())
+	if max_dim > 0 and longest > max_dim:
+		var k := float(max_dim) / float(longest)
+		work.resize(maxi(1, int(work.get_width() * k)), maxi(1, int(work.get_height() * k)),
+			Image.INTERPOLATE_LANCZOS)
+	var buf := work.save_jpg_to_buffer(clampf(quality, 0.1, 1.0))
+	if buf.is_empty():
+		return {"ok": false, "error": "jpg encode failed"}
+	return {"ok": true, "w": work.get_width(), "h": work.get_height(),
+		"jpg_b64": Marshalls.raw_to_base64(buf)}
+
+## ui：可点/可读元素枚举（AI 感知）——遍历整棵树收可见 Control：
+##   button   BaseButton 族（text/disabled/屏幕矩形）
+##   tap_area gui_input 有连接或脚本重写 _gui_input 的 Control（menu 全屏进入/手机遮罩/集章卡这类自绘点击区）
+##   text     texts=true 时附带非空 Label（读屏：menu/onboarding 页面文字）
+## viewport 字段标记元素住在哪个视口："root" 直接盲坐标 tap 可达；SubViewport 名（如手机屏）
+## 则坐标系不通——驱动方须走语义点击（click_ui，P4）。
+func _do_ui(with_texts: bool) -> Dictionary:
+	var tree := get_tree()
+	if tree == null or tree.root == null:
+		return {"ok": false, "error": "no scene tree"}
+	var out := []
+	_collect_ui(tree.root, "root", with_texts, out)
+	return {"ok": true, "op": "ui", "elements": out}
+
+func _collect_ui(node: Node, viewport: String, with_texts: bool, out: Array) -> void:
+	var vp := viewport
+	if node is SubViewport:
+		vp = String(node.name)
+	if node is Control:
+		var entry := describe_control(node as Control, vp, with_texts)
+		if not entry.is_empty():
+			out.append(entry)
+	for child in node.get_children():
+		_collect_ui(child, vp, with_texts, out)
+
+## 纯判定：单个 Control → 元素描述（不感兴趣返回空 dict）。供 headless 单测。
+static func describe_control(c: Control, vp: String, with_texts: bool) -> Dictionary:
+	if not c.is_visible_in_tree():
+		return {}
+	var kind := ""
+	if c is BaseButton:
+		kind = "button"
+	elif c.gui_input.get_connections().size() > 0 or _script_overrides(c, "_gui_input"):
+		kind = "tap_area"
+	elif with_texts and c is Label and not (c as Label).text.strip_edges().is_empty():
+		kind = "text"
+	if kind.is_empty():
+		return {}
+	var r := c.get_global_rect()
+	var entry := {"kind": kind, "class": c.get_class(), "path": String(c.get_path()),
+		"viewport": vp,
+		"rect": {"x": r.position.x, "y": r.position.y, "w": r.size.x, "h": r.size.y}}
+	var label := ""
+	if c is Button:
+		label = (c as Button).text
+	elif c is Label:
+		label = (c as Label).text
+	if label.is_empty():
+		label = c.tooltip_text
+	if label.is_empty():
+		label = String(c.name)
+	entry["text"] = label
+	if c is BaseButton:
+		entry["disabled"] = (c as BaseButton).disabled
+	return entry
+
+## 脚本（含基类链）是否重写了某方法——识别自绘点击区（重写 _gui_input 的 Control）。
+static func _script_overrides(o: Object, method: String) -> bool:
+	var s: Script = o.get_script()
+	while s != null:
+		for md in s.get_script_method_list():
+			if String((md as Dictionary).get("name", "")) == method:
+				return true
+		s = s.get_base_script()
+	return false
 
 ## photo：摄影模式（menu 相册拍摄）——HUD 显隐 + 摄影机位覆盖，透传 world.harness_photo。
 func _do_photo(cmd: Dictionary) -> Dictionary:
