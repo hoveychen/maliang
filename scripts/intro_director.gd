@@ -42,6 +42,7 @@ const APPROACH_RADIUS := 6.0      ## 教学「靠近村民」达标半径（< wo
 const STEP_TIMEOUT_SEC := 25.0    ## 单个教学步等孩子操作的上限（到点静默推进，不卡住演出）
 const LISTEN_TIMEOUT_SEC := 15.0  ## 教学「开口说话」步等开口的上限
 const FRIEND_SPAWN_GAP := 0.18    ## 小伙伴逐个「蹦出来」的间隔（秒）：错开登场，非齐刷刷冒出
+const OPEN_EMPTY_BEAT := 1.2      ## 揭幕后留给「空地」的短暂一眼（秒）：树随开场白冒出来，不让孩子对着静止空地干等整条开场白
 const TOUR_RADIUS := 3.2          ## 注魔期镜头慢巡半径（逻辑单位）：绕村中心轻飘，人群基本留画面里（保负载可比）
 const TOUR_SPEED := 0.5           ## 巡游角速度（弧度/秒）：~12s 一圈，慢而不晕
 const HINT_COLOR_WALK := Color(1.0, 0.92, 0.35, 0.9) ## 走路步地面环：暖黄「点这儿走过去」
@@ -113,10 +114,10 @@ func _run() -> void:
 ## 空地 → 画地长树(props 揭示) → 小伙伴逐个蹦出(镜头绕环慢移+负载堆峰值) → 注魔定档(满负载/钉死镜头) →（首次）教学 → 就绪。
 ## 小伙伴必须在注魔【之前】到齐（峰值测准），故旁白 partner 提到 magic 前。有画质档则跳过注魔段（现状路径）。
 func _show_intro() -> void:
-	await _narrate("intro_open_1")
-	# 建造幕：大地/树木「长出来」——揭示散布植被 + 地面影
-	if is_instance_valid(_world):
-		_world.call("intro_show_scenery")
+	# 开场幕：揭幕后只留很短一眼空地，树就随开场白冒出来——原来是整条 intro_open_1(6.3s) 放完才长树，
+	# 揭幕(~t6)到长树(~t10.5) 有 ~4.5s 空地静止期，孩子像被扔在空地上干等（老板反馈）。现在把
+	# intro_show_scenery 提到开场白进行中(~1.2s)，保留「空地→长树」观感、消掉干等。
+	await _open_with_scenery()
 	await _narrate("intro_build_1")
 	await _narrate("intro_build_2")
 	# 热闹幕：小伙伴逐个蹦出来（会 wander 的负载村民，镜头绕环慢移）——在注魔测档【之前】把负载堆到峰值
@@ -132,6 +133,20 @@ func _show_intro() -> void:
 	if _tutorial:
 		await _run_tutorial()
 	await _narrate("intro_ready_1")
+
+## 开场白：播起来 → 留 OPEN_EMPTY_BEAT 一眼空地 → 在【这条旁白进行中】揭示植被(树/地面影) → 等它播完。
+## 拆出来是因为普通 _narrate 只能「播完再揭景」，而我们要「树随开场白冒出来」消掉空地干等。
+## skip 时 dur=0：短睡立即返回、照样揭景（与原 _show_intro「skip 也 show_scenery」一致），再由转正 apply 收尾。
+func _open_with_scenery() -> void:
+	var dur := 0.0
+	if not _skipped and _narrator != null:
+		dur = _narrator.play("intro_open_1")
+		_duck(true)
+	await _sleep(minf(OPEN_EMPTY_BEAT, dur))
+	if is_instance_valid(_world):
+		_world.call("intro_show_scenery")
+	await _sleep(maxf(dur + NARRATE_TAIL - OPEN_EMPTY_BEAT, 0.0))
+	_duck(false)
 
 ## 热闹幕：逐个生出 EXTRA_CHARS 个会 wander 的「小伙伴」，错开登场像一个个蹦出来——也是 benchmark 的
 ## 峰值压测负载。被跳过则把剩下的一次补齐（别停在半空），每个 idx 只生一次不重复。
