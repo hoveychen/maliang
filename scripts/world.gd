@@ -3937,10 +3937,25 @@ func _abort_homing() -> void:
 	_home_phase = HP_IDLE
 	_homing = false
 
-## 同场景回家软过场：把玩家就地重定位到原点空位，召远门、坐门上、定走出端点，转走出。
-## P6 会在此外套 _step_transition 的黑幕淡入淡出（重定位挪到全黑时刻做，遮住瞬移）；
-## 现版本无黑幕（瞬移可见），P6 补上。
+## 同场景回家软过场：直接驱动 _step_transition 的黑幕（_pending_scene 留空→不发换场景报文），
+## 全黑时刻再把玩家瞬移到原点（黑幕遮住），召远门、定走出端点，然后淡出、走出。复用同一张
+## 水彩+仙子 loading 遮罩，与跨场景观感一致；需求 2：村里回家也走完整动画，不再静默 snap。
 func _begin_soft_home() -> void:
+	_transitioning = true
+	_transition_t = 0.0
+	_fade_target = 1.0
+	_pending_scene = ""            # 空→_step_transition 全黑时不发任何报文
+	_await_skin = false
+	_arrive_tile = Vector2i(-1, -1)
+	if game_audio != null:
+		game_audio.play_sfx("whoosh")
+	_home_set_phase(HP_SOFT_BLACK)
+
+## 软过场全黑时刻的重定位：把玩家（和跟随的仙子）搬到原点空位，销近门、在落点召远门（揭幕即立），
+## 定走出端点。全在黑幕背后发生，瞬移不穿帮。
+func _relocate_home_and_summon_far() -> void:
+	if player.is_empty():
+		return
 	OccupancyMap.char_unregister(PLAYER_ID)
 	var spot := _find_free_spot(WorldGrid.from_tile_center(HOME_TILE), PLAYER_SPAN)
 	player["logical"] = spot
@@ -3955,7 +3970,6 @@ func _begin_soft_home() -> void:
 		rec["rise"] = 1.0 # 远门立着（玩家从里走出）
 	_home_from = player["logical"]
 	_home_to = _home_step_spot(player["logical"])
-	_home_set_phase(HP_WALK_OUT)
 
 ## 回家传送门过场状态机推进（home-portal-anim）。
 ## RISE_NEAR(门升起) → WALK_IN(走进) → 跨场景 CROSS_WAIT(黑幕换场景) / 同场景软过场(P6) → WALK_OUT(走出) → DISPEL(门沉下消散)。
@@ -3979,6 +3993,16 @@ func _step_home(delta: float) -> void:
 			# 黑幕/换场景由 _step_transition + _on_scene_entered 接管：那边销近门、在落点召远门、
 			# 把玩家坐门上、定走出端点。等过场彻底收尾（不再 _transitioning）再走出。
 			if not _transitioning:
+				_home_set_phase(HP_WALK_OUT)
+		HP_SOFT_BLACK:
+			# 同场景软过场：等黑幕全黑再瞬移到原点（遮住），召远门、定走出端点，然后淡出。
+			if _fade_a >= 1.0:
+				_relocate_home_and_summon_far()
+				_fade_target = 0.0
+				_home_set_phase(HP_WALK_OUT_WAIT)
+		HP_WALK_OUT_WAIT:
+			# 等黑幕淡出（露出站在门里的玩家）再迈步走出。
+			if _fade_a <= 0.0:
 				_home_set_phase(HP_WALK_OUT)
 		HP_WALK_OUT:
 			if _step_home_walk(delta):
@@ -4297,26 +4321,8 @@ func _go_home() -> void:
 		return
 	if online and backend != null and _scene_id != HOME_SCENE:
 		_begin_homing(true) # 跨场景：召唤门 → 走进 → enter_scene 落原点 → 走出 → 门消散
-		return
-	# 同场景 / 离线：P6 升级为软过场动画（软过场经 _begin_homing(false)）；暂就地瞬移解卡。
-	_go_home_instant()
-
-## 同场景/离线的就地瞬移解卡（旧行为，P6 由软过场动画替代）：停当前移动/接近，把玩家搬回原点附近空位。
-func _go_home_instant() -> void:
-	if player.is_empty():
-		return
-	_cancel_player_move()
-	_clear_approach()
-	if game_audio != null:
-		game_audio.play_sfx("whoosh")
-	OccupancyMap.char_unregister(PLAYER_ID)
-	var spot := _find_free_spot(WorldGrid.from_tile_center(HOME_TILE), PLAYER_SPAN)
-	player["logical"] = spot
-	OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
-	focus_logical = spot
-	var fairy := _find_fairy()
-	if not fairy.is_empty():
-		fairy["logical"] = WorldGrid.wrap_pos(focus_logical + Vector2(2.6, 1.8))
+	else:
+		_begin_homing(false) # 同场景/离线：软过场（黑幕遮住原地瞬移 → 走出），不发换场景报文
 
 ## 收到 scene_entered：卸载当前场景的角色/物件 → 上新地形并重铺区块 → 生成新场景角色/物件
 ## → 按该场景玩家最后位置落位。顺序保证「地形在 chunk 重铺、角色/玩家落位之前就位」
