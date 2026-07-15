@@ -1778,6 +1778,28 @@ func harness_enter_scene(scene_id: String) -> bool:
 	enter_scene(scene_id)
 	return _pending_scene == scene_id
 
+## harness（AI 驱动）：手机开/关/开 app。手机屏住在 SubViewport 里、盲坐标 tap 到不了，
+## 这条走与真点击相同的内部路径（_open_phone/_open_app），驱动方随后用 state.phone_open/phone_app 核落地。
+func harness_phone(action: String, app_id := "") -> bool:
+	if paper_phone == null or phone_ui == null:
+		return false
+	match action:
+		"open":
+			if paper_phone.state == PaperPhone.State.DOCKED:
+				_open_phone()
+			return true
+		"close":
+			_close_phone()
+			return true
+		"app":
+			if app_id.is_empty():
+				return false
+			if paper_phone.state == PaperPhone.State.DOCKED:
+				_open_phone()
+			_open_app(app_id)
+			return true
+	return false
+
 ## 冷却拦截遮罩：半透明暗底 + 居中卡片（大闹钟饼图倒计时 + 文案）。整屏 STOP 吞点击，冷却期挡住世界。
 func _build_cooldown_overlay() -> Control:
 	var root := Control.new()
