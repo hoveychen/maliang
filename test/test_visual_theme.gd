@@ -58,10 +58,13 @@ func _initialize() -> void:
 	# AIMY：看向点的 y 偏移（默认 0=看渲染原点）。bend 曲率把远处地形卷成穹顶下沉，
 	# 取负值让相机多向下看、把 focus 处的地块从画面底部提到中央（QA 取景用，不影响观感判断）。
 	var aim_y := float(OS.get_environment("AIMY")) if OS.get_environment("AIMY")!="" else 0.0
-	camera.look_at(Vector3(0.0, aim_y, 0.0), Vector3.UP)
+	# look_at 在 _initialize 阶段静默不生效（global transform 未传播,rotation 保持 0=水平朝-Z）,
+	# 首轮 13 张截图因此全是水平机位。改显式 pitch 旋转:相机在 +Z 上方,绕 X 负转俯视原点。
+	camera.rotation_degrees.x = -rad_to_deg(atan2(camera.position.y - aim_y, camera.position.z))
 	var fp := OS.get_environment("FOCUS"); var ft := Vector2i(45,33)
 	if fp != "": ft = Vector2i(int(fp.split(",")[0]), int(fp.split(",")[1]))
 	var focus := TerrainMap.tile_center(ft)
+	print("CAMDIAG pos=", camera.position, " rotdeg=", camera.rotation_degrees, " pitch=", pitch, " dist=", dist, " aimy=", aim_y, " focus_tile=", ft, " focus_logical=", focus)
 	cm.rebuild()
 	set_meta("focus", focus)
 	process_frame.connect(_on_frame)
