@@ -65,6 +65,11 @@ class StubWorld extends Node:
 	var npcs: Array = []
 	func _fsm_state() -> InteractionFsm.State:
 		return InteractionFsm.State.LISTENING
+	# 手机便捷口路由记录（phone 命令 → harness_phone）
+	var phone_calls := []
+	func harness_phone(action: String, app_id := "") -> bool:
+		phone_calls.append([action, app_id])
+		return true
 
 ## stub 角色节点：只要能被 get("char_name") 读到名字即可。
 class StubChar extends Node:
@@ -374,6 +379,95 @@ func _run_once() -> void:
 		func(e: Variant) -> String: return String((e as Dictionary).get("path", "")).split("/")[-1])
 	fails += _check("texts=true 含 Label", tnames.has("Title"), true)
 	fixture.queue_free()
+
+	print("[parse_command：click_ui / phone（ai-harness P4）]")
+	var cu := DebugCmdServer.parse_command('{"op":"click_ui","text":"确认"}')
+	fails += _check("click_ui by text ok", cu.get("ok"), true)
+	fails += _check("click_ui text", cu.get("text"), "确认")
+	fails += _check("click_ui by path ok",
+		DebugCmdServer.parse_command('{"op":"click_ui","path":"/root/X"}').get("ok"), true)
+	fails += _check("click_ui 双缺拒", DebugCmdServer.parse_command('{"op":"click_ui"}').get("ok"), false)
+	fails += _check("phone open ok",
+		DebugCmdServer.parse_command('{"op":"phone","action":"open"}').get("ok"), true)
+	fails += _check("phone app 带 id ok",
+		DebugCmdServer.parse_command('{"op":"phone","action":"app","id":"items"}').get("id"), "items")
+	fails += _check("phone app 缺 id 拒",
+		DebugCmdServer.parse_command('{"op":"phone","action":"app"}').get("ok"), false)
+	fails += _check("phone 未知 action 拒",
+		DebugCmdServer.parse_command('{"op":"phone","action":"smash"}').get("ok"), false)
+
+	print("[_execute click_ui / phone（ai-harness P4）]")
+	var fix2 := Control.new()
+	fix2.name = "ClickFixture"
+	root.add_child(fix2)
+	var buy := Button.new()
+	buy.name = "BuyBtn"
+	buy.text = "买贴纸"
+	fix2.add_child(buy)
+	var buy_hits := [0]
+	buy.pressed.connect(func() -> void: buy_hits[0] += 1)
+	var dis2 := Button.new()
+	dis2.name = "Dis2"
+	dis2.text = "禁用键"
+	dis2.disabled = true
+	fix2.add_child(dis2)
+	var area2 := Control.new()
+	area2.name = "ScrimArea"
+	area2.position = Vector2(40, 60)
+	area2.size = Vector2(20, 20)
+	area2.gui_input.connect(func(_e: InputEvent) -> void: pass)
+	fix2.add_child(area2)
+	var svp2 := SubViewport.new()
+	svp2.name = "PhoneScreen2"
+	svp2.size = Vector2i(120, 120)
+	fix2.add_child(svp2)
+	var gs2 := GDScript.new()
+	gs2.source_code = "extends Control\nvar hits := 0\nfunc _gui_input(_e: InputEvent) -> void:\n\thits += 1\n"
+	gs2.reload()
+	var card2: Control = gs2.new()
+	card2.name = "StampCard2"
+	card2.size = Vector2(50, 50)
+	svp2.add_child(card2)
+
+	# 文字精确命中 Button → 直发 pressed
+	var r_cu := srv._execute(DebugCmdServer.parse_command('{"op":"click_ui","text":"买贴纸"}'))
+	fails += _check("click_ui 文字命中 ok", r_cu.get("ok"), true)
+	fails += _check("click_ui method=signal", r_cu.get("method"), "signal")
+	fails += _check("click_ui 按钮被按", buy_hits[0], 1)
+	# 子串命中
+	var r_fz := srv._execute(DebugCmdServer.parse_command('{"op":"click_ui","text":"贴纸"}'))
+	fails += _check("click_ui 子串命中", r_fz.get("ok"), true)
+	fails += _check("click_ui 子串按下", buy_hits[0], 2)
+	# path 命中
+	var r_cp := srv._execute(DebugCmdServer.parse_command(
+		'{"op":"click_ui","path":"%s"}' % buy.get_path()))
+	fails += _check("click_ui path 命中", r_cp.get("ok"), true)
+	fails += _check("click_ui path 按下", buy_hits[0], 3)
+	# 禁用按钮拒
+	var r_dis := srv._execute(DebugCmdServer.parse_command('{"op":"click_ui","text":"禁用键"}'))
+	fails += _check("click_ui 禁用拒", r_dis.get("ok"), false)
+	# 找不到拒
+	fails += _check("click_ui 无命中拒",
+		srv._execute(DebugCmdServer.parse_command('{"op":"click_ui","text":"不存在的键"}')).get("ok"), false)
+	# 根视口自绘点击区 → 真 tap（走 sink 收两事件，落矩形中心）
+	var evs2: Array = []
+	srv.event_sink = func(e: InputEvent) -> void: evs2.append(e)
+	var r_area := srv._execute(DebugCmdServer.parse_command('{"op":"click_ui","text":"ScrimArea"}'))
+	fails += _check("tap_area method=tap", r_area.get("method"), "tap")
+	fails += _check("tap_area 两触屏事件", evs2.size(), 2)
+	fails += _check("tap_area 落中心", (evs2[0] as InputEventScreenTouch).position, Vector2(50, 70))
+	srv.event_sink = Callable(Input, "parse_input_event")
+	# SubViewport 内自绘点击区 → 喂本地 _gui_input（down+up 两次）
+	var r_card := srv._execute(DebugCmdServer.parse_command('{"op":"click_ui","text":"StampCard2"}'))
+	fails += _check("SubViewport 点击区 method=gui_input", r_card.get("method"), "gui_input")
+	fails += _check("SubViewport 点击区收 down+up", card2.get("hits"), 2)
+	# phone 路由到宿主
+	var r_po := srv._execute(DebugCmdServer.parse_command('{"op":"phone","action":"open"}'))
+	fails += _check("phone open ok", r_po.get("ok"), true)
+	var r_pa := srv._execute(DebugCmdServer.parse_command('{"op":"phone","action":"app","id":"items"}'))
+	fails += _check("phone app ok", r_pa.get("ok"), true)
+	fails += _check("phone 转调记录", world.phone_calls, [["open", ""], ["app", "items"]])
+	fix2.queue_free()
 
 	print("[手势引擎：跨帧事件序列（ai-harness P3）]")
 	var evs: Array = []

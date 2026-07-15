@@ -12,6 +12,8 @@ extends Node
 ##   {"op":"pinch","x":..,"y":..,"scale":0.5,"ms":400,"dist":80}  双指捏合/张开（相机缩放）
 ##   {"op":"state"}                  回状态快照（fsm/玩家坐标/钱包/背包/手机/摆放/NPC/vc 各态）
 ##   {"op":"ui","texts":false}       可点/可读元素枚举（button/tap_area[/text] + 屏幕矩形 + viewport 标记）
+##   {"op":"click_ui","text":"确认"}  语义点击（或 path=节点路径；Button 直发 pressed，SubViewport 内可达）
+##   {"op":"phone","action":"open"}   手机便捷口：open/close/app（app 带 id，如 items/stickers/settings）
 ##   {"op":"screencap"}              截一帧落盘 user://harness_cap.png
 ##   {"op":"screencap","wire":true}  截图降采样 JPEG base64 直接回包（max_dim/quality 可选）
 ##   {"op":"accept"/"replay"/"retry"} 确认模式三键（说完先回放、采纳/重听/重说）
@@ -131,6 +133,22 @@ static func parse_command(line: String) -> Dictionary:
 		"ui":
 			# UI 可点元素枚举（AI 感知）：texts=true 时连可见 Label 文本一起导出（读屏用）。
 			return {"ok": true, "op": "ui", "texts": bool(dict.get("texts", false))}
+		"click_ui":
+			# 语义点击：按节点 path 或可见文字找控件（Button 直发 pressed；SubViewport 内也可达）。
+			var cpath := String(dict.get("path", ""))
+			var ctext := String(dict.get("text", ""))
+			if cpath.is_empty() and ctext.is_empty():
+				return {"ok": false, "error": "click_ui needs path or text"}
+			return {"ok": true, "op": "click_ui", "path": cpath, "text": ctext}
+		"phone":
+			# 手机便捷口：open/close/app（手机屏在 SubViewport，盲坐标到不了）。
+			var act := String(dict.get("action", ""))
+			if not act in ["open", "close", "app"]:
+				return {"ok": false, "error": "phone action must be open/close/app"}
+			var aid := String(dict.get("id", ""))
+			if act == "app" and aid.is_empty():
+				return {"ok": false, "error": "phone app needs id"}
+			return {"ok": true, "op": "phone", "action": act, "id": aid}
 		"screencap":
 			# wire=true 时截图降采样转 JPEG base64 直接回包（真机 user:// adb 拉不出来）。
 			var scap := {"ok": true, "op": "screencap"}
@@ -258,6 +276,10 @@ func _execute(cmd: Dictionary) -> Dictionary:
 			return _snapshot()
 		"ui":
 			return _do_ui(bool(cmd.get("texts", false)))
+		"click_ui":
+			return _do_click_ui(String(cmd["path"]), String(cmd["text"]))
+		"phone":
+			return _do_phone(String(cmd["action"]), String(cmd["id"]))
 		"screencap":
 			return _do_screencap(cmd)
 		"accept", "replay", "retry":
@@ -645,6 +667,77 @@ static func describe_control(c: Control, vp: String, with_texts: bool) -> Dictio
 	if c is BaseButton:
 		entry["disabled"] = (c as BaseButton).disabled
 	return entry
+
+## click_ui：语义点击。BaseButton 直发 pressed 信号（本仓 UI 全是代码连 pressed 的按钮，语义等价、
+## 且 SubViewport 内也可达）；根视口的自绘点击区按矩形中心走真触屏 tap；SubViewport 内的自绘
+## 点击区喂本地坐标鼠标事件（脚本重写 _gui_input 的直调、信号连接的走 gui_input.emit）。
+## 按 text 找时先精确匹配、无则子串匹配，多命中取第一个并在回包报 matches 数。
+func _do_click_ui(path: String, text: String) -> Dictionary:
+	var tree := get_tree()
+	if tree == null or tree.root == null:
+		return {"ok": false, "error": "no scene tree"}
+	var target: Control = null
+	var matches := 1
+	if not path.is_empty():
+		target = tree.root.get_node_or_null(NodePath(path)) as Control
+		if target == null:
+			return {"ok": false, "error": "no control at path: %s" % path}
+	else:
+		var els := []
+		_collect_ui(tree.root, "root", false, els)
+		var exact := []
+		var fuzzy := []
+		for e in els:
+			var t := String((e as Dictionary).get("text", ""))
+			if t == text:
+				exact.append(e)
+			elif t.contains(text):
+				fuzzy.append(e)
+		var hits: Array = exact if not exact.is_empty() else fuzzy
+		if hits.is_empty():
+			return {"ok": false, "error": "no clickable with text: %s" % text}
+		matches = hits.size()
+		target = tree.root.get_node_or_null(
+			NodePath(String((hits[0] as Dictionary)["path"]))) as Control
+		if target == null:
+			return {"ok": false, "error": "matched node vanished"}
+	if not target.is_visible_in_tree():
+		return {"ok": false, "error": "control not visible: %s" % String(target.get_path())}
+	var res := {"ok": true, "op": "click_ui", "clicked": String(target.get_path()), "matches": matches}
+	if target is BaseButton:
+		var b := target as BaseButton
+		if b.disabled:
+			return {"ok": false, "error": "button disabled: %s" % String(target.get_path())}
+		b.pressed.emit()
+		res["method"] = "signal"
+		return res
+	if target.get_viewport() == tree.root:
+		var c := target.get_global_rect().get_center()
+		_do_tap(c.x, c.y)
+		res["method"] = "tap"
+		return res
+	# SubViewport 内自绘点击区：真 tap 到不了，喂本地坐标鼠标按下+抬起。
+	var center := target.size * 0.5
+	for pressed in [true, false]:
+		var ev := InputEventMouseButton.new()
+		ev.button_index = MOUSE_BUTTON_LEFT
+		ev.pressed = pressed
+		ev.position = center
+		ev.global_position = center
+		if _script_overrides(target, "_gui_input"):
+			target.call("_gui_input", ev)
+		else:
+			target.gui_input.emit(ev)
+	res["method"] = "gui_input"
+	return res
+
+## phone：手机开/关/开 app——透传宿主 harness_phone（world 才有；别处如实报错）。
+func _do_phone(action: String, app_id: String) -> Dictionary:
+	var w := _host()
+	if w == null or not w.has_method("harness_phone"):
+		return {"ok": false, "error": "world 无 harness_phone"}
+	var okp := bool(w.call("harness_phone", action, app_id))
+	return {"ok": okp, "op": "phone", "action": action, "id": app_id}
 
 ## 脚本（含基类链）是否重写了某方法——识别自绘点击区（重写 _gui_input 的 Control）。
 static func _script_overrides(o: Object, method: String) -> bool:
