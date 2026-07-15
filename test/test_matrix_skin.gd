@@ -42,9 +42,12 @@ func _init() -> void:
 				continue
 			var rref := String(ItemCatalog.get_def(id).get("renderRef", ""))
 			var key := rref.get_slice(":", 1)
-			if ChunkManager.BAKED_MESHES.has(key) or ChunkManager.KAYKIT_SCATTER.has(key):
+			# 分类源已从 chunk_manager 的四张 preload 常量表迁到数据驱动的 PackRegistry
+			# （world-themes P3）：baked/scatter → MultiMesh 合批散布，node → 独立节点建筑。
+			var cat := PackRegistry.category(key)
+			if cat == "baked" or cat == "scatter":
 				batch_n += 1
-			elif ChunkManager.KAYKIT_NODES.has(key):
+			elif cat == "node":
 				node_n += 1
 			elif rref.begins_with("sdf_res:") or rref == "sdf_inline":
 				sdf_n += 1
@@ -74,13 +77,19 @@ func _init() -> void:
 		var deco: Node3D = slot["deco"]
 		for c in deco.get_children():
 			if c is MultiMeshInstance3D:
-				if String(c.name) != "ScatterShadows" and String(c.name) != "BuildingShadows":
-					mmi_instances += (c as MultiMeshInstance3D).multimesh.instance_count
+				if String(c.name) == "ScatterShadows" or String(c.name) == "BuildingShadows":
+					continue # 阴影贴片，不是本体
+				# 矩阵散布、程序化草地装饰(TerrainDeco)、边缘贴纸三源同池（chunk_manager.gd:_flush_batches）。
+				# 本断言只清点**矩阵散布**，按 scatter_key 元数据排除装饰(TerrainDeco.KEYS)与贴纸(sticker:)。
+				var skey := String((c as MultiMeshInstance3D).get_meta("scatter_key", ""))
+				if skey in TerrainDeco.KEYS or skey.begins_with("sticker:"):
+					continue
+				mmi_instances += (c as MultiMeshInstance3D).multimesh.instance_count
 			elif c is SdfProp:
 				sdf_nodes += 1
 			else:
 				kaykit_nodes += 1
-	fails += _check("合批实例总数 == 矩阵散布物数", mmi_instances, batch_n)
+	fails += _check("合批实例总数 == 矩阵散布物数（排除装饰/贴纸）", mmi_instances, batch_n)
 	fails += _check("建筑节点数 == 矩阵建筑数", kaykit_nodes, node_n)
 	fails += _check("SDF 物件节点数 == 矩阵 SDF 数", sdf_nodes, sdf_n)
 
