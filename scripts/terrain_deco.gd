@@ -1,8 +1,9 @@
 class_name TerrainDeco
 extends RefCounted
-## 草地顶面 3D 装饰散布（Pokopia 化 P6，docs/pokopia-block-design-analysis.md ⑥）：
-## 厚叶草簇 ×2 + 大头花丛，全是程序化低模 ArrayMesh——「细节感全由几何提供」，
-## 顶面贴图保持素净（P2 平色化不回退）。
+## 地表顶面 3D 装饰散布（Pokopia 化 P6 草地首发；pokopia-themes P2 扩到主题层）：
+## 草地=厚叶草簇 ×2 + 大头花丛；主题层按 tile 类型分发（海草/珊瑚/蕨叶/石子/冰晶/
+## 雪堆/麦茬，见 THEME_GROUPS）。全是程序化低模 ArrayMesh——「细节感全由几何提供」，
+## 顶面贴图保持素净（P2 平色化不回退）。结构面（石板/沥青/室内地板…）刻意不长。
 ##
 ## 分工：本类只管「哪个 tile 长什么、长在哪、什么姿态」（纯函数，headless 可单测）
 ## 和「三种 mesh 长什么样」；合批渲染完全复用 chunk_manager 的 _batch/_flush_batches
@@ -21,29 +22,58 @@ const FLOWER_FRACTION := 0.35  ## 花畦内草 tile 出花率
 const TUFT_BIG_FRACTION := 0.14    ## 大草簇：全体草 tile 出率
 const TUFT_SMALL_FRACTION := 0.30  ## 小草芽：全体草 tile 出率（最常见，最便宜）
 
+## —— 主题层散布（pokopia-themes P2）——
+## 按地表 tile 类型分发装饰组（P1 差距矩阵：11 个非草主题零装饰是「死寂感」头号来源，
+## docs/pokopia-themes-gap-matrix.md）。密度全部低于草地档（村庄 +11.9% 三角已是预算
+## 大头，真机未 benchmark）；结构面（石板/沥青/室内地板…）刻意不长——装饰该来自 items。
+## 表值 [[key, 累计出率], ...]：roll 依次比累计上限，pick 用（一格一株，与草地同约定）。
+const THEME_GROUPS := {
+	TerrainMap.T_SEAGRASS: [["deco_seaweed_a", 0.12], ["deco_seaweed_b", 0.30]],
+	TerrainMap.T_CORAL_SAND: [["deco_coral", 0.18]],
+	TerrainMap.T_FERN: [["deco_fern", 0.22]],
+	TerrainMap.T_VOLCANIC: [["deco_stones", 0.14]],
+	TerrainMap.T_RUBBLE: [["deco_stones", 0.10]],
+	TerrainMap.T_ICE: [["deco_ice_crystal", 0.10]],
+	TerrainMap.T_PACKED_SNOW: [["deco_ice_crystal", 0.04], ["deco_frost_tuft", 0.14]],
+	TerrainMap.T_SNOW: [["deco_ice_crystal", 0.03], ["deco_frost_tuft", 0.15]],
+	TerrainMap.T_FARM_FURROW: [["deco_stubble", 0.38]],
+	TerrainMap.T_LAWN_GRID: [["deco_tuft_b", 0.12]],
+}
+
 ## —— 姿态旋钮 ——
 const OFFSET_MAX := 0.6   ## tile 中心抖动半径（米）；tile 半宽 1m、崖顶 bevel 0.12，0.6 稳在平顶内
 const SCALE_MIN := 0.85
 const SCALE_MAX := 1.25
 
 ## 渲染键（chunk_manager._scatter_kind 按 "deco_" 前缀走程序化分支，不进 PackRegistry）
-const KEYS: Array[String] = ["deco_tuft_a", "deco_tuft_b", "deco_flower"]
+const KEYS: Array[String] = ["deco_tuft_a", "deco_tuft_b", "deco_flower",
+	"deco_seaweed_a", "deco_seaweed_b", "deco_coral", "deco_fern",
+	"deco_stones", "deco_ice_crystal", "deco_frost_tuft", "deco_stubble"]
 
 ## —— 落点决策（纯函数：只看 TerrainMap + hash，确定性，重刷不闪）——
 ## 返回 {} = 本 tile 不长；否则 { key, off: Vector2(米), yaw: float(度), scale: float }。
 ## hash 盐与物品外观抖动 hash(gt) 区分，避免「有石头的 tile 永远同款草」的相关性。
 static func pick(gt: Vector2i) -> Dictionary:
-	if TerrainMap.tile_type(gt) != TerrainMap.T_GRASS:
-		return {}
+	var tt := TerrainMap.tile_type(gt)
 	var hk := hash(Vector3i(gt.x, gt.y, 0xDEC0))
 	var roll := float(posmod(hk, 1000)) / 1000.0
 	var key := ""
-	if _in_flower_patch(gt) and roll < FLOWER_FRACTION:
-		key = "deco_flower"
-	elif roll < TUFT_BIG_FRACTION:
-		key = "deco_tuft_a"
-	elif roll < TUFT_BIG_FRACTION + TUFT_SMALL_FRACTION:
-		key = "deco_tuft_b"
+	if tt == TerrainMap.T_GRASS:
+		if _in_flower_patch(gt) and roll < FLOWER_FRACTION:
+			key = "deco_flower"
+		elif roll < TUFT_BIG_FRACTION:
+			key = "deco_tuft_a"
+		elif roll < TUFT_BIG_FRACTION + TUFT_SMALL_FRACTION:
+			key = "deco_tuft_b"
+		else:
+			return {}
+	elif THEME_GROUPS.has(tt):
+		for entry in THEME_GROUPS[tt]:
+			if roll < entry[1]:
+				key = entry[0]
+				break
+		if key == "":
+			return {}
 	else:
 		return {}
 	return {
@@ -80,6 +110,38 @@ static func mesh(key: String) -> ArrayMesh:
 				Color(0.21, 0.45, 0.26), Color(0.56, 0.80, 0.52))
 		"deco_flower":
 			m = _build_flower_cluster()
+		"deco_seaweed_a":
+			# 高海草：窄长近直立（水草向上飘），亮青绿——海草地表是浊橄榄，
+			# 同色系隐身坑（P6 实证）靠提亮+提饱和拉开
+			m = _build_tuft(5, 0.72, 0.26, 30.0, 1, 0.80, 0.22, 10.0,
+				Color(0.10, 0.42, 0.36), Color(0.46, 0.88, 0.62))
+		"deco_seaweed_b":
+			# 矮海草：3 叶贴地款
+			m = _build_tuft(3, 0.55, 0.22, 34.0, 0, 0.0, 0.0, 0.0,
+				Color(0.09, 0.36, 0.32), Color(0.36, 0.74, 0.55))
+		"deco_coral":
+			# 珊瑚簇：短宽外倾「枝片」扇形张开，暖珊瑚粉——珊瑚砂地是浅粉，
+			# 靠深一档的枝色+奶油尖立住
+			m = _build_tuft(5, 0.55, 0.36, 38.0, 1, 0.58, 0.30, 12.0,
+				Color(0.78, 0.34, 0.30), Color(0.99, 0.70, 0.52))
+		"deco_fern":
+			# 蕨叶丛：多叶长弧外拱（tilt 大=蕨的下垂弧），深绿——蕨地表读土黄，
+			# 深绿负责把「这是植被」喊出来
+			m = _build_tuft(7, 0.72, 0.26, 55.0, 2, 0.58, 0.22, 28.0,
+				Color(0.13, 0.36, 0.18), Color(0.44, 0.70, 0.34))
+		"deco_stubble":
+			# 麦茬束：短直立窄叶，秸秆黄（农田垄「种过东西」的证据）
+			m = _build_tuft(4, 0.50, 0.18, 16.0, 0, 0.0, 0.0, 0.0,
+				Color(0.52, 0.40, 0.16), Color(0.90, 0.79, 0.46))
+		"deco_frost_tuft":
+			# 霜枯草簇：雪里钻出来的枯草，深秸秆基+霜白蓝尖——白雪上白色几何隐身
+			# （雪堆方案实测阵亡），深基负责剪影、霜尖负责「结着霜」
+			m = _build_tuft(5, 0.46, 0.16, 40.0, 1, 0.52, 0.13, 12.0,
+				Color(0.42, 0.38, 0.26), Color(0.88, 0.92, 0.96))
+		"deco_stones":
+			m = _build_stones()
+		"deco_ice_crystal":
+			m = _build_ice_crystals()
 	_meshes[key] = m
 	return m
 
@@ -203,6 +265,61 @@ static func _flower(v: PackedVector3Array, n: PackedVector3Array, c: PackedColor
 	var cs := 0.048
 	_tri(v, n, c, at + Vector3(-cs, cy - at.y, -cs), at + Vector3(cs, cy - at.y, -cs), at + Vector3(cs, cy - at.y, cs), core_col, core_col, core_col)
 	_tri(v, n, c, at + Vector3(-cs, cy - at.y, -cs), at + Vector3(cs, cy - at.y, cs), at + Vector3(-cs, cy - at.y, cs), core_col, core_col, core_col)
+
+## 石子堆：3 颗矮四面体小石（3 底点 + 1 偏心顶点，只发 3 侧面，底面埋地不发）。
+## 火山岩/碎石共用：石色取中灰偏暖，比火山岩地表（暗炭）亮、比碎石地表（浅砾）暗，
+## 两边都有对比。逐面 flat shading 自带明暗差。
+static func _build_stones() -> ArrayMesh:
+	var v := PackedVector3Array()
+	var n := PackedVector3Array()
+	var c := PackedColorArray()
+	var spots := [
+		[Vector3(-0.16, 0.0, -0.10), 0.42, 0.34],   # [中心, 底半径, 高]
+		[Vector3(0.24, 0.0, 0.06), 0.30, 0.24],
+		[Vector3(-0.02, 0.0, 0.28), 0.22, 0.16],
+	]
+	for si in range(spots.size()):
+		var at: Vector3 = spots[si][0]
+		var r: float = spots[si][1]
+		var h: float = spots[si][2]
+		var col := Color(0.52, 0.50, 0.47).lerp(Color(0.38, 0.36, 0.34), 0.5 + _jig(si) * 0.5).srgb_to_linear()
+		var base: Array[Vector3] = []
+		for k in range(3):
+			var a := deg_to_rad(float(k) * 120.0 + float(si) * 47.0 + _jig(si * 3 + k) * 22.0)
+			base.append(at + Vector3(cos(a) * r * (1.0 + _jig(si + k) * 0.2), 0.0, sin(a) * r * (1.0 + _jig(si + k + 5) * 0.2)))
+		var apex := at + Vector3(_jig(si + 9) * r * 0.3, h, _jig(si + 13) * r * 0.3)
+		for k in range(3):
+			# 顶点序对齐 _tri 的绕序约定：底边 b→a、再到 apex，法线朝外
+			_tri(v, n, c, base[(k + 1) % 3], base[k], apex, col, col, col.lightened(0.12))
+	return _commit(v, n, c)
+
+## 冰晶簇：3 根四棱锥冰柱（方底 + 上尖），底深青尖近白——雪地/冰面同为浅色，
+## 靠底部深青把剪影踩住（同色系隐身坑的反制），微倾姿态像天然晶簇。
+static func _build_ice_crystals() -> ArrayMesh:
+	var v := PackedVector3Array()
+	var n := PackedVector3Array()
+	var c := PackedColorArray()
+	var base_col := Color(0.42, 0.72, 0.82).srgb_to_linear()
+	var tip_col := Color(0.94, 0.99, 1.0).srgb_to_linear()
+	var spots := [
+		[Vector3(-0.06, 0.0, -0.05), 0.14, 0.75, 8.0],   # [底心, 底半宽, 高, 倾角]
+		[Vector3(0.18, 0.0, 0.12), 0.11, 0.50, -14.0],
+		[Vector3(-0.20, 0.0, 0.15), 0.08, 0.34, 20.0],
+	]
+	for si in range(spots.size()):
+		var at: Vector3 = spots[si][0]
+		var r: float = spots[si][1]
+		var h: float = spots[si][2]
+		var rot := Basis(Vector3(0.0, 0.0, 1.0), deg_to_rad(spots[si][3])) # 绕 Z 微倾
+		var yaw := Basis(Vector3.UP, deg_to_rad(float(si) * 50.0))
+		var corners: Array[Vector3] = []
+		for k in range(4):
+			var a := deg_to_rad(float(k) * 90.0 + 45.0)
+			corners.append(at + yaw * (rot * Vector3(cos(a) * r, 0.0, sin(a) * r)))
+		var apex := at + yaw * (rot * Vector3(0.0, h, 0.0))
+		for k in range(4):
+			_tri(v, n, c, corners[(k + 1) % 4], corners[k], apex, base_col, base_col, tip_col)
+	return _commit(v, n, c)
 
 ## 确定性微扰 [-1,1]（同 flower_field 的 sin-hash 惯用法，无随机源、重建不闪）
 static func _jig(i: int) -> float:

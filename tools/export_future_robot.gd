@@ -68,6 +68,8 @@ static func build_terrain_bytes() -> PackedByteArray:
 	# 中央矮控制台（1 级金属板平台，金属壁 type-aware）
 	_ellipse_type(types, n, 37.5, 37.5, 3.5, 3.2, T_METAL_PLATE)
 	_ellipse_h(heights, n, 37.5, 37.5, 3.5, 3.2, 1)
+	# 台面内嵌发光砖（P4 清单 A：内圈对比层修「破洞」感，外圈金属板保侧壁）
+	_ellipse_type(types, n, 37.5, 37.5, 2.4, 2.1, T_GLOW_TILE)
 	# 四壁：房间边界 2 格厚墙环，抬高 WALL_H（金属舱壁 type-aware，不倒角）
 	_wall_ring(types, heights, n, X0, Z0, X1, Z1, 2, T_FUTURE_WALL, WALL_H)
 

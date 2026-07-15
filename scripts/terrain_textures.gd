@@ -133,7 +133,11 @@ const LAYER_TEX_PATHS: Array[String] = [
 const _WHITE := Color(1.0, 1.0, 1.0)
 
 ## 层 → 色调 tint（shader col = tint × tex/mean）。旧水彩层（草/土/石）沿用原调色板
-## 复现既有观感；P0 审定层已把 tint 烘进贴图，故用白，不二次上色（避免双重上色）。
+## 复现既有观感；P0 审定层已把 tint 烘进贴图，缺省白 = 不二次上色。
+## pokopia-themes P3 例外：烘色层里被 P1 差距矩阵点名「苍白」的一批设了非白 tint
+## （mean 白时 col=tint×tex，数学上就是干净的二次上色）。根因是渲染端照度 ~1.6×
+## （暖光 1.45+冷环境 0.64）把浅 albedo 推到裁剪、越浅越洗白——村庄草不洗是因为
+## tint 压深了 albedo。故修法=同样把这些层的 albedo 压深压饱和，量级见各行注释。
 static func layer_tints() -> PackedColorArray:
 	var t := PackedColorArray()
 	t.resize(LAYER_COUNT)
@@ -146,31 +150,31 @@ static func layer_tints() -> PackedColorArray:
 	t[LAYER_SNOW] = _WHITE
 	t[LAYER_TILE] = _WHITE
 	t[LAYER_CORAL] = _WHITE
-	t[LAYER_COARSE_SAND] = _WHITE
-	t[LAYER_CORAL_SAND] = _WHITE
-	t[LAYER_SEAGRASS] = _WHITE
-	t[LAYER_DEEP_BED] = _WHITE
-	t[LAYER_PACKED_SNOW] = _WHITE
-	t[LAYER_ICE] = _WHITE
-	t[LAYER_SLUSH] = _WHITE
-	t[LAYER_ROCK_SNOW] = _WHITE
+	t[LAYER_COARSE_SAND] = Color(1.08, 0.96, 0.80)  # 粗沙调金,与细沙拉开
+	t[LAYER_CORAL_SAND] = Color(1.06, 0.86, 0.80)   # 珊瑚砂推粉珊瑚调
+	t[LAYER_SEAGRASS] = Color(0.58, 0.95, 0.78)     # 海草地浊橄榄→青绿
+	t[LAYER_DEEP_BED] = Color(0.72, 1.0, 1.02)      # 深水床灰污→深青(读「深水」)
+	t[LAYER_PACKED_SNOW] = Color(0.88, 0.93, 1.02)  # 压实雪偏冷蓝,与雪原拉开
+	t[LAYER_ICE] = Color(0.80, 0.94, 1.08)         # 冰面青釉(雪调冷后原白冰反衬发黄)
+	t[LAYER_SLUSH] = Color(0.84, 0.79, 0.70)        # 雪泥脏暖灰,读「融过」
+	t[LAYER_ROCK_SNOW] = Color(0.76, 0.81, 0.90)    # 裸岩积雪压深偏蓝=有意的岩,非脏渍
 	t[LAYER_CRACKED_EARTH] = _WHITE
 	t[LAYER_VOLCANIC] = _WHITE
-	t[LAYER_MUD_BOG] = _WHITE
-	t[LAYER_FERN] = _WHITE
-	t[LAYER_RUBBLE] = _WHITE
-	t[LAYER_COBBLE] = _WHITE
-	t[LAYER_STONE_SLAB] = _WHITE
+	t[LAYER_MUD_BOG] = Color(1.20, 0.92, 0.66)      # 泥沼灰黑污渍→暖巧克力
+	t[LAYER_FERN] = Color(0.62, 0.92, 0.55)         # 蕨地土黄→苔绿(P1 矩阵头号色板项)
+	t[LAYER_RUBBLE] = Color(1.12, 1.05, 0.94)       # 碎石提暖,别再读阴影污渍
+	t[LAYER_COBBLE] = Color(1.10, 1.04, 0.92)       # 鹅卵石暖推,抵侧壁蓝环境光
+	t[LAYER_STONE_SLAB] = Color(1.10, 1.03, 0.90)   # 石板暖推(城台侧壁蓝灰失配主修)
 	t[LAYER_FARM_FURROW] = _WHITE
 	t[LAYER_MARBLE] = _WHITE
-	t[LAYER_MOSAIC] = _WHITE
+	t[LAYER_MOSAIC] = Color(1.12, 0.90, 0.76)       # 马赛克推陶土暖
 	t[LAYER_WOOD_FLOOR] = _WHITE
 	t[LAYER_ASPHALT] = _WHITE
 	t[LAYER_PAVER_BRICK] = _WHITE
 	t[LAYER_CROSSWALK] = _WHITE
 	t[LAYER_CONCRETE] = _WHITE
-	t[LAYER_LAWN_GRID] = _WHITE
-	t[LAYER_CARPET_RED] = _WHITE
+	t[LAYER_LAWN_GRID] = Color(0.56, 0.86, 0.44)    # 草坪格奶黄→草绿(城市唯一的绿)
+	t[LAYER_CARPET_RED] = Color(1.0, 0.62, 0.58)    # 地毯红抗过曝洗白,压回饱和红
 	t[LAYER_CARPET_BLUE] = _WHITE
 	t[LAYER_PUZZLE_MAT] = _WHITE
 	t[LAYER_CHECKER_TILE] = _WHITE

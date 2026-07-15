@@ -65,6 +65,9 @@ static func build_terrain_bytes() -> PackedByteArray:
 	# 中央矮灶台（1 级瓷砖平台，瓷砖壁 type-aware）
 	_ellipse_type(types, n, 37.5, 37.5, 3.5, 3.2, T_TILE)
 	_ellipse_h(heights, n, 37.5, 37.5, 3.5, 3.2, 1)
+	# 台面内嵌格纹（pokopia-themes P4 清单 A：顶面与地板同层读「破洞」，内圈换对比层；
+	# 外圈保留瓷砖 = type-aware 侧壁仍取边缘 tile 的瓷砖壁）
+	_ellipse_type(types, n, 37.5, 37.5, 2.4, 2.1, T_CHECKER_TILE)
 	# 四壁：房间边界 2 格厚墙环，抬高 WALL_H（白瓷砖墙 type-aware，不倒角）
 	_wall_ring(types, heights, n, X0, Z0, X1, Z1, 2, T_KITCHEN_WALL, WALL_H)
 

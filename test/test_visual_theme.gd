@@ -20,23 +20,32 @@ func _initialize() -> void:
 		"hospital":"res://tools/export_hospital.gd","future_robot":"res://tools/export_future_robot.gd",
 		"seafloor":"res://tools/export_seafloor.gd",
 	}
-	var ex = load(exporters[theme])
 	ItemCatalog.ensure_builtin()
 	TerrainMap.reset()
-	var r: Dictionary = TerrainMap.load_from_bytes(ex.build_terrain_bytes())
+	# 打包场景（village/forest）读 assets/terrain/<theme>.mltr；其余走 exporter 现产
+	var bytes: PackedByteArray
+	if theme in ["village", "forest"]:
+		var f := FileAccess.open("res://assets/terrain/%s.mltr" % theme, FileAccess.READ)
+		bytes = f.get_buffer(f.get_length())
+	else:
+		bytes = load(exporters[theme]).build_terrain_bytes()
+	var r: Dictionary = TerrainMap.load_from_bytes(bytes)
 	if not r["ok"]:
 		printerr("注入失败 ", theme, ": ", r.get("error","")); quit(1); return
-	# 光
+	# 光/环境与 world._setup_environment 的 Pokopia 化 P1 值对齐（冷影暖光色相分离）——
+	# harness 观感必须等于游戏内观感，否则差距取证失真。改 world 光照时此处要跟。
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-55.0,-40.0,0.0)
-	light.light_color = Color(1.0,0.96,0.86); light.light_energy = 1.25
+	light.light_color = Color(1.0,0.94,0.80); light.light_energy = 1.45
+	var sun_fwd := -light.basis.z
+	BlobShadow.sun_ground_dir = Vector3(sun_fwd.x, 0.0, sun_fwd.z).normalized()
 	root.add_child(light)
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.7,0.82,0.92)
+	e.background_color = Color(0.80, 0.86, 1.0)  # = world.SKY_HORIZON_COLOR
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.6,0.62,0.66); e.ambient_light_energy = 1.0
+	e.ambient_light_color = Color(0.62, 0.70, 0.92); e.ambient_light_energy = 0.64
 	env.environment = e; root.add_child(env)
 	# 地形
 	cm = ChunkManager.new(); root.add_child(cm)
@@ -49,10 +58,13 @@ func _initialize() -> void:
 	# AIMY：看向点的 y 偏移（默认 0=看渲染原点）。bend 曲率把远处地形卷成穹顶下沉，
 	# 取负值让相机多向下看、把 focus 处的地块从画面底部提到中央（QA 取景用，不影响观感判断）。
 	var aim_y := float(OS.get_environment("AIMY")) if OS.get_environment("AIMY")!="" else 0.0
-	camera.look_at(Vector3(0.0, aim_y, 0.0), Vector3.UP)
+	# look_at 在 _initialize 阶段静默不生效（global transform 未传播,rotation 保持 0=水平朝-Z）,
+	# 首轮 13 张截图因此全是水平机位。改显式 pitch 旋转:相机在 +Z 上方,绕 X 负转俯视原点。
+	camera.rotation_degrees.x = -rad_to_deg(atan2(camera.position.y - aim_y, camera.position.z))
 	var fp := OS.get_environment("FOCUS"); var ft := Vector2i(45,33)
 	if fp != "": ft = Vector2i(int(fp.split(",")[0]), int(fp.split(",")[1]))
 	var focus := TerrainMap.tile_center(ft)
+	print("CAMDIAG pos=", camera.position, " rotdeg=", camera.rotation_degrees, " pitch=", pitch, " dist=", dist, " aimy=", aim_y, " focus_tile=", ft, " focus_logical=", focus)
 	cm.rebuild()
 	set_meta("focus", focus)
 	process_frame.connect(_on_frame)

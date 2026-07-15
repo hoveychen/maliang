@@ -86,6 +86,8 @@ static func build_terrain_bytes() -> PackedByteArray:
 	# ── 地表分区（顶面语义）──
 	_ellipse_type(types, n, 18.5, 55.5, 11.0, 10.0, T_LAWN_GRID)   # 西南 公园草坪
 	_ellipse_type(types, n, 55.5, 55.5, 8.0, 7.0, T_LAWN_GRID)     # 东南 街心绿地
+	_ellipse_type(types, n, 24.5, 24.5, 5.0, 4.5, T_LAWN_GRID)     # 西北 口袋公园（P4 拼布）
+	_ellipse_type(types, n, 55.5, 40.5, 4.5, 4.0, T_LAWN_GRID)     # 东 口袋公园（P4 拼布）
 	# 人行道砖：沿主路两侧
 	_rect_type(types, n, 30, 8, 33, 66, T_PAVER_BRICK)
 	_rect_type(types, n, 42, 8, 45, 66, T_PAVER_BRICK)
