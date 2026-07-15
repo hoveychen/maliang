@@ -109,6 +109,12 @@ func _run_once() -> void:
 	fails += _check("measure_p95 warmup 透传", mp2.get("warmup"), 0.5)
 	fails += _check("measure_p95 window 透传", mp2.get("window"), 1.0)
 
+	print("[parse_command：tex_diag 纹理显存诊断开关]")
+	var td := DebugCmdServer.parse_command('{"op":"tex_diag","on":true}')
+	fails += _check("tex_diag ok", td.get("ok"), true)
+	fails += _check("tex_diag on", td.get("on"), true)
+	fails += _check("tex_diag on 缺省 false", DebugCmdServer.parse_command('{"op":"tex_diag"}').get("on"), false)
+
 	print("[parse_command：pick 引导点卡]")
 	var pk := DebugCmdServer.parse_command('{"op":"pick","optionId":"self"}')
 	fails += _check("pick ok", pk.get("ok"), true)
@@ -272,6 +278,16 @@ func _run_once() -> void:
 	fails += _check("measure_p95 采样中拒并发", r_busy.get("error"), "measure already running")
 	srv._sampler = null # 清掉上面那个未采满的长窗口采样器，免污染
 	Engine.max_fps = saved_fps
+
+	print("[_execute tex_diag：改写 Api 静态诊断位（真机 A/B 开关）]")
+	var td_saved := Api._tex_diag_downsample
+	var r_td := srv._execute(DebugCmdServer.parse_command('{"op":"tex_diag","on":true}'))
+	fails += _check("tex_diag 回包 on", r_td.get("on"), true)
+	fails += _check("tex_diag 置位生效", Api._tex_diag_downsample, true)
+	var r_td0 := srv._execute({"ok": true, "op": "tex_diag", "on": false})
+	fails += _check("tex_diag 关回包", r_td0.get("on"), false)
+	fails += _check("tex_diag 关生效", Api._tex_diag_downsample, false)
+	Api._tex_diag_downsample = td_saved # 还原，免污染同进程后续测试
 
 	vc.close(); vc.queue_free()
 	srv.queue_free()

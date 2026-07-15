@@ -90,6 +90,9 @@ static func parse_command(line: String) -> Dictionary:
 				return {"ok": false, "error": "teleport needs tileX,tileY or near"}
 			return {"ok": true, "op": "teleport", "tileX": int(dict.get("tileX", -1)),
 				"tileY": int(dict.get("tileY", -1)), "near": near}
+		"tex_diag":
+			# 运行时切纹理显存诊断开关（真机 A/B——env 传不进 Android app）。on 缺省 false。
+			return {"ok": true, "op": "tex_diag", "on": bool(dict.get("on", false))}
 		"measure_p95":
 			# 纹理显存诊断 A/B：在当前已加载世界固定画质档采一个 warmup+window 窗口的 p95 帧时。
 			# warmup/window 可选（默认 FrameSampler.WARMUP/WINDOW）。跨帧异步，采满在 _process 回。
@@ -224,6 +227,8 @@ func _execute(cmd: Dictionary) -> Dictionary:
 			return _do_scene(String(cmd["id"]))
 		"teleport":
 			return _do_teleport(cmd)
+		"tex_diag":
+			return _do_tex_diag(bool(cmd.get("on", false)))
 		"measure_p95":
 			return _do_measure_p95(cmd)
 		_:
@@ -455,6 +460,19 @@ func _do_reset_budget() -> Dictionary:
 		return {"ok": false, "error": "world 无 harness_reset_play_budget"}
 	w.call("harness_reset_play_budget")
 	return {"ok": true, "op": "reset_budget"}
+
+## tex_diag：运行时切纹理显存诊断开关。env 传不进 Android app（同 asr_harness 先例），故真机 A/B
+## 靠这条 op 改写 Api._tex_diag_downsample 静态位 + 清已解码纹理内存缓存（让随后进世界的图集按新
+## 开关重解码；磁盘缓存存原始 PNG 不受影响）。须在进世界【前】设，否则村民图集已缓存（clear 兜底）。
+func _do_tex_diag(on: bool) -> Dictionary:
+	Api._tex_diag_downsample = on
+	var cleared := 0
+	var host := _host()
+	if host != null:
+		var api_node: Variant = host.get("api")
+		if api_node != null and (api_node as Object).has_method("clear_tex_mem"):
+			cleared = int((api_node as Object).call("clear_tex_mem"))
+	return {"ok": true, "op": "tex_diag", "on": Api._tex_diag_downsample, "cache_cleared": cleared}
 
 ## measure_p95：纹理显存诊断 A/B 的采样入口。在当前已加载世界固定画质档起一个 FrameSampler，
 ## 测量期临时 uncap fps（照 Benchmark 先例——看真实帧时余量，避免 30fps cap 把帧时钳在 33ms 掩盖
