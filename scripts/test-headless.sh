@@ -69,6 +69,7 @@ UNIT_TESTS=(
   test_composed_prop
   test_build_parts
   test_menu_gate
+  test_menu_album
   test_cjk_font
   test_graphics_settings
   test_papercraft_toggle
