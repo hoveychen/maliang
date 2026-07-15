@@ -19,6 +19,12 @@ env = SConscript("godot-cpp/SConstruct")
 env.Append(CPPPATH=["src/", "sherpa-onnx/include/"])
 sources = Glob("src/*.cpp")
 
+# iOS 专属：麦克风权限桥（platform_ios.mm，Objective-C++，调 AVAudioSession）。
+# 其它平台不编 .mm（maliang_asr.cpp 里对该符号的引用也只在 TARGET_OS_IOS 下存在）。
+# AVFoundation 由 Godot 的 iOS 模板链接（音频驱动本就用它），静态库这里只产目标文件。
+if env["platform"] == "ios":
+    sources += Glob("src/*.mm")
+
 # iOS 是静态链接：本扩展编成 .a，sherpa/onnxruntime 由 Xcode 工程链（见 build 脚本）。
 # 其余平台动态链接，这里就要 sherpa 的动态库。
 if env["platform"] != "ios":
