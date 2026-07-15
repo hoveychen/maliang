@@ -1297,18 +1297,18 @@ func _select_item(item_id: String) -> void:
 	actions.add_theme_constant_override("separation", 10)
 	actions.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	# 摆到地块（普通物件走地面、贴纸走边缘——_begin_placement 内部按 mount 已分流）
-	actions.add_child(_detail_action_btn("摆到地块", "ic_pin", true,
+	actions.add_child(_detail_action_btn("摆到地块", "ic_place_ground", true,
 		func() -> void: _w._begin_placement(item_id)))
 	# 装到身上（仅贴纸）：依赖 self-stickers 落 main（player_attach）。未落地 → 灰置（设计 §7）。
 	if rref.begins_with("sticker:"):
 		var can_attach: bool = _w.has_method("_begin_self_attach") or _w.has_method("send_player_attach")
-		actions.add_child(_detail_action_btn("装到身上", "ic_sparkle", can_attach,
+		actions.add_child(_detail_action_btn("装到身上", "ic_wear", can_attach,
 			func() -> void:
 				if _w.has_method("_begin_self_attach"):
 					_w._begin_self_attach(item_id)))
 	# 扔掉（就近落地为可拾物品）：依赖 P5 服务端 handler（_throw_item）。未落地 → 灰置。
 	var can_throw: bool = _w.has_method("_throw_item")
-	actions.add_child(_detail_action_btn("扔掉", "ic_no", can_throw,
+	actions.add_child(_detail_action_btn("扔掉", "ic_trash", can_throw,
 		func() -> void:
 			if _w.has_method("_throw_item"):
 				_w._throw_item(item_id)))

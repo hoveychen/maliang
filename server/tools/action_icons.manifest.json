@@ -1,0 +1,23 @@
+{
+  "comment": "背包详情页动作按钮专用图标(backpack-thumb-polish P6)。老板反馈原 ic_pin/ic_no 都红、辨识度低。生成3个不同色的专用图标,纸艺贴纸风(ICON_STYLE_SUFFIX 自动追加)。不覆盖 ic_no/ic_pin/ic_sparkle(它们别处复用)。",
+  "assets": [
+    {
+      "id": "ic_trash",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute rounded teal-blue trash bin with an open lid and a small crumpled paper dropping into it, waste basket"
+    },
+    {
+      "id": "ic_place_ground",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a friendly cartoon hand gently setting a small yellow cube block down onto a green grassy tile, downward placing gesture"
+    },
+    {
+      "id": "ic_wear",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a happy round pink paper-doll character with a colorful star sticker stuck on its tummy, arms raised"
+    }
+  ]
+}
