@@ -1835,6 +1835,7 @@ func _process(delta: float) -> void:
 	_check_approach()
 	_step_portal()          # 踏进传送点半径 → enter_scene（黑幕 + 卸旧载新）
 	_step_transition(delta) # 过场黑幕推进（淡入/发报文/等区块/淡出）
+	_step_home(delta)       # 回家传送门过场推进（召唤门/走进/走出/消散）
 	tp = _prof_lap(tp, "approach")
 	_update_fairy(delta)
 	tp = _prof_lap(tp, "fairy")
@@ -3753,6 +3754,25 @@ var _tr_anim_t := 0.0                   ## 过场动画累计秒（帧步进/呼
 const PORTAL_MARKER_SPEC := "res://assets/sdf_props/portal_arch.json"
 var _portal_markers: Array = [] ## [{ node: SdfProp, logical: Vector2 }]
 
+## —— 回家传送门过场（home-portal-anim）——
+## 「回家」逃生舱从瞬移重做成「召唤门 → 走进 → 幕后传送 → 走出 → 门消散」的动画。
+## 临时门存 _home_portals（独立于 _portal_markers：换场景 _unload_scene 不误清、也绝不进 _portals，
+## 故 _step_portal 不理它、Mover 不参与脚本 lerp——被树围死也必定走完动画）。状态机见 _step_home；
+## 跨场景与同场景（软过场）共用 _step_transition 的黑幕中段。SdfProp 禁缩放（sdf_prop.gd 契约）、
+## shader 不透明无 alpha，故召唤/消散只能用 position.y 从地下升起/沉下（地面不透明网格天然裁掉埋下的部分）。
+enum { HP_IDLE, HP_RISE_NEAR, HP_WALK_IN, HP_CROSS_WAIT, HP_SOFT_BLACK, HP_WALK_OUT_WAIT, HP_WALK_OUT, HP_DISPEL }
+const HOME_WALK_DUR := 0.55          ## 走进/走出单程时长（秒）
+const HOME_RISE_DUR := 0.35          ## 门从地下升起/沉下时长（秒）
+const HOME_NEAR_MAX_R := 2           ## 近门离玩家最多几格；超了退脚下（逃生舱：保证卡死也能走进）
+const HOME_PORTAL_SINK := 3.6        ## 召唤前把门沉到地下的深度（拱高≈3.56，够藏住）
+const HOME_FAILSAFE := 12.0          ## 总超时兜底（秒）：强制收尾回原点，别把小朋友卡在动画里
+var _homing := false                 ## 回家动画进行中（锁玩家输入，见 _physics_process/_unhandled_input）
+var _home_phase := HP_IDLE           ## 当前阶段
+var _home_t := 0.0                   ## 阶段/总计时（失败兜底 HOME_FAILSAFE 用）
+var _home_from := Vector2.ZERO       ## 走进/走出 lerp 起点（逻辑坐标）
+var _home_to := Vector2.ZERO         ## 走进/走出 lerp 终点（逻辑坐标）
+var _home_portals: Array = []        ## 临时门 [{ node: SdfProp, logical: Vector2, rise: float }]
+
 ## 服务端下发的 portals → 运行期结构。非法条目跳过（坏一条不连坐整批）。
 static func parse_server_portals(list: Variant) -> Array:
 	if typeof(list) != TYPE_ARRAY:
@@ -3821,16 +3841,25 @@ func _clear_portal_markers() -> void:
 			(node as Node).queue_free()
 	_portal_markers.clear()
 
+## 回家传送门过场状态机推进（home-portal-anim）。P1 为占位骨架，各阶段逻辑在 P2-P7 逐步接入。
+func _step_home(_delta: float) -> void:
+	if not _homing:
+		return
+
+## 把一座拱门摆到渲染空间（渲染原点 = focus_logical），高度取所在 tile 的台阶高 + extra_y。
+## extra_y 给回家临时门做「从地下升起/沉下」的召唤/消散动画（负值=埋在地下，见 _step_home）。
+func _place_portal_node(node: Node3D, logical: Vector2, extra_y: float = 0.0) -> void:
+	var d := WorldGrid.shortest_delta(focus_logical, logical)
+	var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(logical))) * TerrainMap.STEP_HEIGHT
+	node.position = Vector3(d.x, ty + extra_y, d.y)
+
 ## 逐帧把拱门摆到渲染空间（渲染原点 = focus_logical），高度取所在 tile 的台阶高。
 func _update_portal_markers() -> void:
 	for m in _portal_markers:
 		var node: Variant = m.get("node", null)
 		if node == null or not is_instance_valid(node):
 			continue
-		var logical: Vector2 = m["logical"]
-		var d := WorldGrid.shortest_delta(focus_logical, logical)
-		var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(logical))) * TerrainMap.STEP_HEIGHT
-		(node as Node3D).position = Vector3(d.x, ty, d.y)
+		_place_portal_node(node as Node3D, m["logical"], 0.0)
 
 ## 过场黑幕推进：淡入 → 全黑后才发 enter_scene → 卸旧载新 → 区块铺完 → 淡出。
 func _step_transition(delta: float) -> void:
