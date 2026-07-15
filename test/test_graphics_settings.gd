@@ -24,8 +24,8 @@ func _init() -> void:
 	fails += _check("每键都有 subtitle", GraphicsSettings.SUBTITLES.size(), GraphicsSettings.all_keys().size())
 	fails += _check("每键的级名数=级数", _level_names_match(), true)
 
-	# 样式键（papercraft）：默认关、不进 benchmark 贪心的键集/起点
-	fails += _check("样式键默认关", d["papercraft"], 0)
+	# 样式键（papercraft）：默认开（纸艺风定版）、不进 benchmark 贪心的键集/起点
+	fails += _check("样式键默认开", d["papercraft"], 1)
 	fails += _check("样式键不在 KEYS", "papercraft" in GraphicsSettings.KEYS, false)
 	fails += _check("样式键在 all_keys", "papercraft" in GraphicsSettings.all_keys(), true)
 	fails += _check("all_max 不含样式键", GraphicsSettings.all_max().has("papercraft"), false)

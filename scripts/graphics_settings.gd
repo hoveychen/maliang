@@ -47,7 +47,7 @@ const LEVELS := {
 	"papercraft": 2,
 }
 
-## 默认 = 各键最高档（= LEVELS[key] - 1）。样式键例外：默认关（保持现有水彩风）。
+## 默认 = 各键最高档（= LEVELS[key] - 1）。样式键 papercraft 默认开（纸艺风为定版画风）。
 const DEFAULTS := {
 	"actor_shadows": 1,
 	"ground_shadows": 1,
@@ -58,7 +58,7 @@ const DEFAULTS := {
 	"prop_detail": 1,
 	"terrain_detail": 1,
 	"xray": 1,
-	"papercraft": 0,
+	"papercraft": 1,
 }
 
 ## 设置页每行的标题。

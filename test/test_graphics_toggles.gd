@@ -85,7 +85,7 @@ func _tick() -> void:
 			_check("恢复自动 → 无存档（交回 benchmark/backend）", GraphicsSettings.has_saved(), false)
 			_check("恢复自动 → 场景回默认(地面阴影重开)", scene.get("chunk_manager").get("_ground_shadows"), true)
 			_check("恢复自动 → 按钮跟着回最高档", (_gfx()["hi_res"] as Button).text, "高清")
-			_check("恢复自动 → 样式键回默认关", BendMat.papercraft_on(), false)
+			_check("恢复自动 → 样式键回默认开", BendMat.papercraft_on(), true)
 		22:
 			if _backup.is_empty():
 				PlayerProfile.clear()

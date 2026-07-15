@@ -88,7 +88,8 @@ func set_terrain_low_detail(on: bool) -> void:
 
 ## 纸艺风（画质页样式键）在地形/水面上的参数档。物品档见 BendMat.PAPER_PROPS。
 ## 地形无折面化（平面 quad）；水面的 bands 量化深度分层而非光照（见 water_surface.gdshader）。
-const PAPER_GROUND := {"paper_bands": 3.0, "paper_edge": 0.7, "paper_grain": 0.6, "paper_tone": 0.4}
+## paper_edge=0：折痕白描停用（含路沿/台阶的白切口线），同 BendMat.PAPER_PROPS，老板拍板删。
+const PAPER_GROUND := {"paper_bands": 3.0, "paper_edge": 0.0, "paper_grain": 0.6, "paper_tone": 0.4}
 const PAPER_WATER := {"paper_bands": 4.0, "paper_grain": 0.4, "paper_tone": 0.3}
 
 ## 与 low_detail 同款懒建记忆态；初值认 BendMat 的调试强制位（MALIANG_PAPERCRAFT=1）。

@@ -24,8 +24,10 @@ static var _papercraft := _env_forced
 static var _live: Array[WeakRef] = []
 
 ## 物品档纸艺参数（地形/水面各有自己的档，见 chunk_manager）。
+## paper_edge=0：折痕白描停用（白线在圆滖低多边形上断成白点，观感不好，老板拍板删掉）。
+## 折面/色阶/纸纹/卡纸色调保留——纸艺观感来自这些，不靠白线。
 const PAPER_PROPS := {
-	"paper_facet": 1.0, "paper_bands": 3.0, "paper_edge": 0.7,
+	"paper_facet": 1.0, "paper_bands": 3.0, "paper_edge": 0.0,
 	"paper_grain": 0.7, "paper_tone": 0.5,
 }
 
