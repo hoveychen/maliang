@@ -23,10 +23,7 @@ const CACHE_DIR := "user://asset_cache"
 var _tex_mem: Dictionary = {}
 
 ## 显存诊断开关（仅 debug 构建，照 BendMat 的 MALIANG_PAPERCRAFT 先例，release 一行不跑）。
-## 桌面/headless 用 MALIANG_TEX_DIAG=downsample 环境变量置位；真机（Android app 拿不到 shell env，
-## 同 asr_harness 先例）由 harness `tex_diag` op 运行时改写这个静态变量——须在进世界【前】设，否则
-## 村民图集已解码进 _tex_mem 缓存（clear_tex_mem 可清）。_decode_image_async 在 worker 里动态读它。
-## 置位时把走块压缩路径（gpu_compress=true）的图集在上传前长宽各减半
+## MALIANG_TEX_DIAG=downsample 时把走块压缩路径（gpu_compress=true）的图集在上传前长宽各减半
 ## （显存降 4×，接近块压缩本该省下的量级）。用来 A/B 隔离「未压缩村民图集是否是掉帧主因」：
 ## 村民照常渲染、draw call / 顶点数 / A* 寻路全不变，A（无开关）与 B（下采样）唯一变量就是纹理
 ## 显存/带宽。见 docs/../plans 与 _apply_tex_diag。运行时 Image.compress 在出货模板不可用（压缩器
@@ -37,13 +34,6 @@ func _ready() -> void:
 	var env := OS.get_environment("MALIANG_API_BASE")
 	if not env.is_empty():
 		base = env
-
-## 清空本会话已解码纹理内存缓存，返回清掉的条数（诊断 A/B 切换用：让随后 fetch 的图集按新开关
-## 重解码；磁盘缓存存的是原始 PNG，不动）。真机切 downsample 探针时由 harness tex_diag op 调。
-func clear_tex_mem() -> int:
-	var n := _tex_mem.size()
-	_tex_mem.clear()
-	return n
 
 ## hash → 磁盘缓存文件路径（user://asset_cache/<hash>）。
 func _cache_path(asset_hash: String) -> String:
