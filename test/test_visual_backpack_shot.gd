@@ -26,6 +26,8 @@ func _tick() -> void:
 			})
 		36:
 			scene.call("_open_app", "items") # 翻转+展开跨页 → 背包 4×4，逐件懒渲缩略图
+		70:
+			(scene.get("phone_ui") as PhoneUi)._select_item("house_1") # 左半页出详情（大图+名字+动作按钮+x5 角标）
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()

@@ -130,6 +130,20 @@ func _run(scene: Node) -> void:
 	_check(_count_badge_text(cell_aa) == "x3", "份数 3：出数量角标 x3")
 	_check(_count_badge_text(cell_bb) == "", "份数 1：不出数量角标")
 
+	# 详情面板（P4）：点格子→左半页出大图+名字+动作按钮；再开物品页回空态。
+	pui._select_item("aa")
+	_check(String(pui.get("_selected_item")) == "aa", "选中 aa：_selected_item 记录")
+	_check(pui.get("_detail_image") != null, "详情：大图控件就位")
+	var btn_texts := []
+	for c in (pui.get("_items_detail") as VBoxContainer).get_children():
+		if c is VBoxContainer:
+			for b in (c as VBoxContainer).get_children():
+				if b is Button:
+					btn_texts.append((b as Button).text)
+	_check(btn_texts.has("摆到地块"), "详情：有「摆到地块」动作按钮")
+	pui.open_app("items")
+	_check(String(pui.get("_selected_item")) == "", "重开物品页：详情回空态")
+
 	# 空背包：无物品仍不崩、出空态提示、只 1 页（空网格）
 	scene.set("bag", {})
 	pui.open_app("items")
