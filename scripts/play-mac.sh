@@ -69,7 +69,7 @@ else
   SIGN_IDENTITY="${SIGN_IDENTITY:--}"
   ENT="$ROOT/gdextension_asr/maliang.entitlements"
   FW="$APP/Contents/Frameworks/libmaliang_asr.macos.template_debug.framework"
-  echo "codesign（identity=$SIGN_IDENTITY）..."
+  echo "codesign（identity=${SIGN_IDENTITY}）..."
   codesign --force --options runtime -s "$SIGN_IDENTITY" \
     "$FW/libonnxruntime.1.24.4.dylib" "$FW/libsherpa-onnx-c-api.dylib" \
     "$FW/libmaliang_asr.macos.template_debug"
