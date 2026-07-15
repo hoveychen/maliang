@@ -34,6 +34,7 @@ UNIT_TESTS=(
   test_terrain_atlas
   test_scifi_items
   test_pack_registry
+  test_item_thumbnailer
   test_autotile
   test_occupancy_map
   test_pathfinder

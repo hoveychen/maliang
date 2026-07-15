@@ -151,6 +151,13 @@ func get_json(path: String) -> Dictionary:
 	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
 	return data if typeof(data) == TYPE_DICTIONARY else {}
 
+## 物品缩略图映射（item_id → 资产 hash）：公开只读端点，背包物品页混合来源的「服务端已烧图」半边
+## （docs/backpack-page-redesign-design.md §2）。失败/无图返回空字典，调用方回退客户端现场渲染。
+func fetch_item_icons() -> Dictionary:
+	var data := await get_json("/item-icons")
+	var icons: Variant = data.get("icons", {})
+	return icons if typeof(icons) == TYPE_DICTIONARY else {}
+
 ## 拉取指定世界状态（含角色）。失败返回空字典。
 func get_world(id: String) -> Dictionary:
 	var http := HTTPRequest.new()

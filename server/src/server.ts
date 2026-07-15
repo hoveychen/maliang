@@ -1055,6 +1055,12 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
     return { icons: store.listItemIcons() };
   });
+  // 公开只读映射（无 token）：游戏客户端背包物品页消费预烧缩略图。只回 item_id→资产 hash，
+  // 资产本身走公开 /assets/:hash；写入（POST /admin/item-icon）仍 admin 门禁、留给离线工具。
+  // （背包重做 §2：admin 门禁挡住了游戏客户端读服务端图，故开这条公开读半边。）
+  app.get('/item-icons', async () => {
+    return { icons: store.listItemIcons() };
+  });
   app.post<{
     Params: { id: string };
     Body: { pngBase64?: string } | null;
