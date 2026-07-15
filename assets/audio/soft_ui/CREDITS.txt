@@ -1,0 +1,24 @@
+界面音效来源与许可（soft_ui/）
+================================
+
+替换缘由：原 kenney_interface 那套 UI 音在手机外放偏硬/刺耳，过场音 scroll_001
+被听成“电流声”。全套 14 个界面音改为「轻柔纸感暖色」。
+
+--------------------------------------------------------------------------
+1) 点击 / 嘴巴“啵” / 滑音  —— click, select, pluck, pop, enter, exit,
+   mic_on, mic_off, page, whoosh
+   来源：UI Sound Effects Library — Little Robot Sound Factory
+         https://opengameart.org/content/ui-sound-effects-library
+   许可：CC-BY 3.0  ——  **需署名**
+   署名：Sound effects by Little Robot Sound Factory (www.littlerobotsoundfactory.com),
+         licensed under CC-BY 3.0.
+
+2) 暖调铃音  —— confirm, oops, bell, task
+   来源：UI Sound Effects (Button Clicks, User Feedback, Notifications)
+         https://opengameart.org/content/ui-sound-effects-button-clicks-user-feedback-notifications
+         （取自公有领域乐器采样库 VCSL / VSCO 2 CE）
+   许可：CC0 1.0（公有领域，无需署名）
+
+--------------------------------------------------------------------------
+处理：ffmpeg 转 44100Hz / 单声道 / 16-bit PCM WAV，未改电平（保留试听时的音色）。
+键→文件映射见 scripts/game_audio.gd 的 SFX 常量表。
