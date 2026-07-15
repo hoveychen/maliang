@@ -215,6 +215,7 @@ var _creation_cam := false         ## 创造视图相机特写态（推近仙子
 var _in_creation := false          ## 正在引导式创造（造角色或造物；期间语音/点选都是这次会话的答复）
 var _creation_goal := "character"  ## 这次引导在造什么（服务端 creation_prompt.goal）：character→降生蛋，prop→魔法熔炉，build→拼装台
 var _creation_category := ""       ## 本轮追问的类别（creation_prompt.category）；'recipient'（A2 给谁做的）时多加一张「随便啦」软退出卡
+var _creation_options: Array = []  ## 本轮追问的原始选项（[{id,label,iconAsset}]）——e2e harness 据此点卡应答（debug_cmd_server 快照读）
 # ── 积木式造物（build，docs/kids-thinking-build-from-parts.md）拼装台状态 ──
 var _build_blueprint_id := ""      ## 正在拼哪副蓝图（build_prompt.blueprintId）
 var _build_slot := ""              ## 当前要填的槽（build_prompt.slotId）——拼装台点亮它发光；与服务端 askedSlots.at(-1) 一致
@@ -1697,6 +1698,15 @@ func harness_pickup(tile_x: int, tile_y: int, edge_side := -1) -> bool:
 	if not online or backend == null:
 		return false
 	backend.send_item_pickup(world_id, Vector2i(tile_x, tile_y), edge_side)
+	return true
+
+## e2e 引导式造物：按 optionId 点一张引导卡（等同孩子点了那张卡），走现成 _on_creation_card
+## → send_creation_reply。仅在引导会话中有效（_in_creation）；不在引导返 false 让 harness 知道没生效。
+## card=null：跳过「扔进蛋/炉」动画（harness 无需视觉），其余与真人点卡一字不差。
+func harness_pick_option(option_id: String) -> bool:
+	if not _in_creation:
+		return false
+	_on_creation_card(option_id)
 	return true
 
 ## 清掉游玩时长冷却门（45min 玩满 → 10min 冷却模态挡住造物/交互），供 e2e 连测不被拦。
@@ -6167,6 +6177,7 @@ func _on_creation_prompt(data: Dictionary) -> void:
 	_creation_q.visible = true
 	_advance_creation_dots()
 	_creation_category = String(data.get("category", ""))
+	_creation_options = data.get("options", []) # 存原始选项供 e2e harness 点卡应答（快照读）
 	_build_creation_cards(data.get("options", []))
 	# A2「给谁做的」（docs/kids-thinking-made-for-whom.md）：recipient 是可跳过的软步骤——多加一张「随便啦」卡。
 	# 它走现成 send_creation_reply（optionId='recipient_skip'），服务端回落「给大家」，绝不进 creation_cancelled
@@ -6201,6 +6212,8 @@ func _on_build_prompt(data: Dictionary) -> void:
 	for opt in data.get("options", []):
 		if typeof(opt) == TYPE_DICTIONARY:
 			_build_option_refs[String((opt as Dictionary).get("id", ""))] = String((opt as Dictionary).get("renderRef", ""))
+	_creation_category = "build_slot" # 拼装填槽轮：harness 据此知道是零件盘
+	_creation_options = data.get("options", []) # 存原始零件选项供 e2e harness 点卡（快照读）
 	_build_creation_cards(data.get("options", []))
 	var asset := String(data.get("ttsAsset", ""))
 	if not asset.is_empty():
@@ -6784,6 +6797,7 @@ func _hide_creation_cards() -> void:
 	for d in _creation_dots.get_children():
 		d.queue_free()
 	_creation_step = 0
+	_creation_options = [] # 引导卡收起：清空选项快照（本轮已答完/退出）
 	_creation_cam = false # 松开特写：后续按 _locked（对话两景）或 GOD（已 _exit_interaction）复位
 	_layout_voice_wave(false) # 收听 HUD 回到居中底部原尺寸（普通对话没有大卡挡着）
 	if _creation_view != null:
