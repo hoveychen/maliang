@@ -65,6 +65,12 @@ func _test_onboarding_opts_out() -> int:
 	PlayerProfile.set_confirm_voice(true) # 开关开着——名字页也必须不理它
 	var ob: Control = load("res://scripts/onboarding.gd").new()
 	root.add_child(ob)
+	# committed 处理已按页路由（intro/avatar_chat/generate 三个开麦页各管各的提交态），
+	# 本段测的是名字页契约——先把页定位到 intro（与 test_onboarding_asr_gate 同款）。
+	for i in ob.PAGES.size():
+		if String(ob.PAGES[i]["kind"]) == "intro":
+			ob.page_idx = i
+			break
 	ob._voice.stop()
 	var vc: Object = ob.get("_vc")
 	f += _check("开关开着，名字页仍不进确认模式", vc.confirm_mode, false)
