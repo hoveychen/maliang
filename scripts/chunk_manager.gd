@@ -887,6 +887,7 @@ func _flush_batches(parent: Node3D, batches: Dictionary) -> void:
 			mm.set_instance_transform(i, arr[i])
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
+		mmi.set_meta("scatter_key", key)  # 散布种类 key（矩阵散布 / TerrainDeco 装饰 / sticker: 三源同池，元数据留痕供测试与调试区分）
 		mmi.material_override = info["mat"]
 		mmi.extra_cull_margin = CULL_MARGIN
 		# 散布物一律不投影：真机（Mali-G76）瓶颈是顶点吞吐，shadow pass 重画全部散布

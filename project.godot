@@ -25,6 +25,9 @@ HarnessCmd="*res://scripts/debug_cmd_server.gd"
 [audio]
 
 driver/enable_input=true
+; 输出缓冲 15→60ms：换场景那一帧同步重铺（chunk skin 真机 80-200ms）会饿死默认 15ms
+; 音频缓冲 → BGM 爆音/静态噪声。加大缓冲让 mix 挺过卡顿帧（隔离实验；治本仍需拆细 skin）。
+driver/output_latency=60
 general/ios/session_category=2
 
 [display]
