@@ -54,6 +54,12 @@ static func parse_command(line: String) -> Dictionary:
 			if not dict.has("x") or not dict.has("y"):
 				return {"ok": false, "error": "tap needs x,y"}
 			return {"ok": true, "op": "tap", "x": float(dict["x"]), "y": float(dict["y"])}
+		"pick":
+			# 引导式造物点卡（按 optionId 应答一轮 creation_prompt/build_prompt）。
+			var oid := String(dict.get("optionId", ""))
+			if oid.is_empty():
+				return {"ok": false, "error": "pick needs optionId"}
+			return {"ok": true, "op": "pick", "optionId": oid}
 		"pickup":
 			if not dict.has("tileX") or not dict.has("tileY"):
 				return {"ok": false, "error": "pickup needs tileX,tileY"}
@@ -191,6 +197,8 @@ func _execute(cmd: Dictionary) -> Dictionary:
 			return _do_talk_fairy()
 		"talk_npc":
 			return _do_talk_npc()
+		"pick":
+			return _do_pick(String(cmd["optionId"]))
 		"pickup":
 			return _do_pickup(int(cmd["tileX"]), int(cmd["tileY"]), int(cmd["edgeSide"]))
 		"reset_budget":
@@ -406,6 +414,15 @@ func _do_talk_npc() -> Dictionary:
 	return {"ok": ok, "op": "talk_npc", "entered": ok}
 
 ## pickup：拾起 tile 上一件物品进背包（走宿主 harness_pickup → 服务端 item_pickup），验复用提示需背包旧物。
+## pick：引导式造物按 optionId 点卡（走宿主 harness_pick_option → _on_creation_card → send_creation_reply）。
+## 仅引导会话中生效；不在引导（harness_pick_option 返 false）时 picked=false，harness 据此改走 say 开放答复。
+func _do_pick(option_id: String) -> Dictionary:
+	var w := _host()
+	if w == null or not w.has_method("harness_pick_option"):
+		return {"ok": false, "error": "world 无 harness_pick_option"}
+	var ok := bool(w.call("harness_pick_option", option_id))
+	return {"ok": ok, "op": "pick", "picked": ok}
+
 func _do_pickup(tile_x: int, tile_y: int, edge_side: int) -> Dictionary:
 	var w := _host()
 	if w == null or not w.has_method("harness_pickup"):

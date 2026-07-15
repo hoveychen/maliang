@@ -1700,6 +1700,15 @@ func harness_pickup(tile_x: int, tile_y: int, edge_side := -1) -> bool:
 	backend.send_item_pickup(world_id, Vector2i(tile_x, tile_y), edge_side)
 	return true
 
+## e2e 引导式造物：按 optionId 点一张引导卡（等同孩子点了那张卡），走现成 _on_creation_card
+## → send_creation_reply。仅在引导会话中有效（_in_creation）；不在引导返 false 让 harness 知道没生效。
+## card=null：跳过「扔进蛋/炉」动画（harness 无需视觉），其余与真人点卡一字不差。
+func harness_pick_option(option_id: String) -> bool:
+	if not _in_creation:
+		return false
+	_on_creation_card(option_id)
+	return true
+
 ## 清掉游玩时长冷却门（45min 玩满 → 10min 冷却模态挡住造物/交互），供 e2e 连测不被拦。
 ## 与 _step_play_budget 同口径重置本地预算 + 收遮罩 + 落盘；不碰服务端。
 func harness_reset_play_budget() -> void:

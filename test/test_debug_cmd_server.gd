@@ -41,6 +41,11 @@ class StubWorld extends Node:
 	func harness_teleport(tile: Vector2i, near: bool) -> bool:
 		teleports.append([tile, near])
 		return true
+	# 引导式造物点卡钩子（pick 命令路由记录）
+	var pick_calls := []
+	func harness_pick_option(option_id: String) -> bool:
+		pick_calls.append(option_id)
+		return true
 
 var _ran := false
 
@@ -95,6 +100,13 @@ func _run_once() -> void:
 		DebugCmdServer.parse_command('{"op":"teleport","near":true}').get("ok"), true)
 	fails += _check("teleport 缺参拒", DebugCmdServer.parse_command('{"op":"teleport"}').get("ok"), false)
 
+	print("[parse_command：pick 引导点卡]")
+	var pk := DebugCmdServer.parse_command('{"op":"pick","optionId":"self"}')
+	fails += _check("pick ok", pk.get("ok"), true)
+	fails += _check("pick op", pk.get("op"), "pick")
+	fails += _check("pick optionId", pk.get("optionId"), "self")
+	fails += _check("pick 缺 optionId 拒", DebugCmdServer.parse_command('{"op":"pick"}').get("ok"), false)
+	fails += _check("pick 空 optionId 拒", DebugCmdServer.parse_command('{"op":"pick","optionId":""}').get("ok"), false)
 	print("[parse_command：非法输入全部拒]")
 	fails += _check("空行拒", DebugCmdServer.parse_command("   ").get("ok"), false)
 	fails += _check("坏 JSON 拒", DebugCmdServer.parse_command("{not json").get("ok"), false)
@@ -198,6 +210,11 @@ func _run_once() -> void:
 	fails += _check("reset_budget 回包 ok", r_rb.get("ok"), true)
 	fails += _check("reset_budget 转调宿主一次", world.reset_budget_calls, 1)
 
+	print("[_execute pick：路由到宿主 harness_pick_option]")
+	var r_pk := srv._execute(DebugCmdServer.parse_command('{"op":"pick","optionId":"self"}'))
+	fails += _check("pick 回包 ok", r_pk.get("ok"), true)
+	fails += _check("pick picked", r_pk.get("picked"), true)
+	fails += _check("pick 转调宿主带 optionId", world.pick_calls, ["self"])
 	print("[_execute photo / scene：路由到宿主摄影钩子]")
 	var r_ph := srv._execute(DebugCmdServer.parse_command('{"op":"photo","hud":false,"pitch":30,"dist":20}'))
 	fails += _check("photo 回包 ok", r_ph.get("ok"), true)
