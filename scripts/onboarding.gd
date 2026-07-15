@@ -356,15 +356,20 @@ func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
 	_intro_status = UiAssets.icon_rect("ic_mic", 150.0)
 	box.add_child(_intro_status)
 
-	# 声波条：随 VAD 电平起伏，让 3 岁小朋友看出「我在听」（world.gd 同款信号源）
-	_intro_wave = HBoxContainer.new()
-	(_intro_wave as HBoxContainer).alignment = BoxContainer.ALIGNMENT_CENTER
-	(_intro_wave as HBoxContainer).add_theme_constant_override("separation", 10)
-	for i in WAVE_BARS:
-		var bar := ColorRect.new()
-		bar.color = Color(0.95, 0.55, 0.45)
-		bar.custom_minimum_size = Vector2(16.0, WAVE_MIN_H)
-		(_intro_wave as HBoxContainer).add_child(bar)
+	# 声波：共用 VoiceWave 控件（流动波，与 world 收听 HUD 同款），随 VAD 电平起伏，让 3 岁
+	# 小朋友看出「我在听」。开麦时才流动（旁白时落回静息，见 _process 里 active 门控）。
+	var vw := VoiceWave.new()
+	vw.bar_count = WAVE_BARS
+	vw.bar_width = 16.0
+	vw.bar_gap = 10.0
+	vw.bar_min_h = WAVE_MIN_H
+	vw.bar_max_h = WAVE_MAX_H
+	vw.bar_color = Color(0.95, 0.55, 0.45)
+	vw.gain = 6.0  # 沿用旧灵敏度（lvl*6）：小龄近场电平偏小，放大才够跳
+	vw.level_source = func() -> float: return _vc.level() if _vc != null else 0.0
+	vw.custom_minimum_size = Vector2(0.0, WAVE_MAX_H)  # VBox 给足高度，柱底对齐控件底
+	vw.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_intro_wave = vw
 	box.add_child(_intro_wave)
 
 	# 名字确认行：听完「你叫X对不对呀」后点 ✓/✗（初始隐藏）
@@ -381,22 +386,6 @@ func _build_intro(box: VBoxContainer, _p: Dictionary) -> void:
 
 func _is_intro_page() -> bool:
 	return page_idx >= 0 and page_idx < PAGES.size() and String(PAGES[page_idx]["kind"]) == "intro"
-
-## 声波条：开麦时随 VAD 电平起伏，关麦时落回静息。中间高两侧低，像个小山包。
-func _step_wave(delta: float) -> void:
-	if _intro_wave == null or not _intro_wave.is_inside_tree():
-		return
-	var lvl := (_vc.level() if _vc != null else 0.0)
-	var bars := _intro_wave.get_children()
-	for i in bars.size():
-		var bar := bars[i] as ColorRect
-		if bar == null:
-			continue
-		var falloff := 1.0 - absf(float(i) - float(bars.size() - 1) * 0.5) / float(bars.size())
-		var target := WAVE_MIN_H + (WAVE_MAX_H - WAVE_MIN_H) * clampf(lvl * 6.0, 0.0, 1.0) * falloff
-		var h := lerpf(bar.custom_minimum_size.y, target, clampf(delta * 12.0, 0.0, 1.0))
-		bar.custom_minimum_size = Vector2(16.0, h)
-
 
 ## 提交自我介绍：端侧转写 → 名字 + 确认音频。
 ## 端侧识别好的转写 → 服务端提名字/称呼（音频永不上传：服务端已无 ASR）。空转写就地重问。
@@ -559,7 +548,9 @@ func _process(delta: float) -> void:
 	if _is_intro_page() and not _intro_submitting and not _voice.playing and not _vc.must_wait_for_ready():
 		_vc.open()
 	_vc.step(delta)
-	_step_wave(delta)
+	# 声波只在聆听窗（麦开着）流动；旁白/等待时落回静息，别假装在听。
+	if _intro_wave is VoiceWave:
+		(_intro_wave as VoiceWave).active = _vc.is_open()
 	if _story_auto_t > 0.0 and not _flipping:
 		_story_auto_t -= delta
 		if _story_auto_t <= 0.0 and page_idx >= 0 and String(PAGES[page_idx]["kind"]) == "story":
