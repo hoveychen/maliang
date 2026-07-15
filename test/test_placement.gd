@@ -138,6 +138,55 @@ func _run_checks() -> void:
 	else:
 		print("  (跳过 tile 物品合法性：内置无 1×1 物)")
 
+	# ── D) 扔掉（背包重做 §5）：就近落地复用 item_place，捕获出站消息断言落点合法 ──────────
+	# _throw_item 只发消息不打网（_send 在 ws 未连时仅 emit sent 信号），故连 backend.sent 捕获。
+	var thrown: Array = []
+	var cap := func(obj: Dictionary) -> void: thrown.append(obj)
+	var be: Node = scene.get("backend")
+	be.sent.connect(cap)
+
+	# 空背包 → 不扔（无出站，物品留背包语义靠服务端，客户端此处直接早返回）
+	scene.set("online", true)
+	scene.set("bag", {})
+	scene.call("_throw_item", "sticker_sun")
+	_check("空背包扔掉=无出站", thrown.size(), 0)
+
+	# 离线 → 不扔
+	scene.set("online", false)
+	scene.set("bag", { "sticker_sun": 1 })
+	scene.call("_throw_item", "sticker_sun")
+	_check("离线扔掉=无出站", thrown.size(), 0)
+
+	# tile 物品：有货 + online → 发 item_place 到就近空 tile，无 edgeSide
+	var throw_id := _first_1x1_tile_item()
+	if throw_id != "":
+		scene.set("online", true)
+		scene.set("bag", { throw_id: 1 })
+		thrown.clear()
+		scene.call("_throw_item", throw_id)
+		_check("扔 tile 物品=发 1 条", thrown.size(), 1)
+		if thrown.size() == 1:
+			var m: Dictionary = thrown[0]
+			_check("消息类型 item_place", m.get("type"), "item_place")
+			_check("扔的是该物品", m.get("itemId"), throw_id)
+			_check("tile 物品无 edgeSide", m.has("edgeSide"), false)
+			var t := Vector2i(int(m.get("tileX")), int(m.get("tileY")))
+			_check("落点 tile 为空（可落地）", TerrainMap.tile_item_id(t).is_empty(), true)
+	else:
+		print("  (跳过扔 tile 物品：内置无 1×1 物)")
+
+	# 贴纸：发 item_place 带 edgeSide（走边缘落地）
+	thrown.clear()
+	scene.set("bag", { "sticker_sun": 1 })
+	scene.call("_throw_item", "sticker_sun")
+	_check("扔贴纸=发 1 条", thrown.size(), 1)
+	if thrown.size() == 1:
+		var ms: Dictionary = thrown[0]
+		_check("贴纸走 item_place", ms.get("type"), "item_place")
+		_check("贴纸带 edgeSide", ms.has("edgeSide"), true)
+
+	be.sent.disconnect(cap)
+
 func _tile_item_ids() -> Array:
 	var out := []
 	ItemCatalog.ensure_builtin()
