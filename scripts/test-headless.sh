@@ -22,6 +22,11 @@ export MALIANG_EDGE_TTS="${MALIANG_EDGE_TTS:-0}"
 # harness 命令口走回测专用端口：8577 常被 iproxy/adb forward 转发到真机调试设备占走，
 # 会让 test_harness_wire 环境性挂掉（backpack/menu 两条线都撞过）。
 export MALIANG_HARNESS_PORT="${MALIANG_HARNESS_PORT:-8579}"
+# user:// 沙箱：回测和真游戏共用 user://，多个测试会 clear()/整写 profile.json——开发机档案的
+# 角色字段（name/sprite_asset）被抹过两次（游戏被错误分流进 onboarding 才暴露）。macOS/Linux 的
+# user:// 都从 $HOME 解析，整套回测换一次性 HOME，测试怎么写档都碰不到真档案。
+export HOME="$(mktemp -d "${TMPDIR:-/tmp}/maliang-test-home.XXXXXX")"
+export XDG_DATA_HOME="$HOME/.local/share"
 
 echo "== import（刷新类缓存）=="
 "$GODOT" --headless --import --path "$ROOT" >/dev/null 2>&1

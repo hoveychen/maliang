@@ -29,6 +29,24 @@ func _init() -> void:
 	PlayerProfile.clear()
 	fails += _check("clear -> gone", PlayerProfile.exists(), false)
 
+	# 撕裂写恢复：save_profile 曾是截断式非原子写——并发读改写（游戏+巡检/测试同时在跑）里
+	# 读者撞上半截 JSON → load 得 {} → 下一次 read-modify-write 把 name/sprite 整档冲掉
+	# （开发机档案被抹三次的根因）。契约：主档存在但坏 → 从上一版备份恢复，绝不让 {} 流出去。
+	PlayerProfile.clear()
+	PlayerProfile.save_profile({"name": "朵朵", "sprite_asset": "abc"})
+	PlayerProfile.save_profile({"name": "朵朵", "sprite_asset": "abc", "intro_seen": true})
+	var fc := FileAccess.open(PlayerProfile.PATH, FileAccess.WRITE)
+	fc.store_string('{"name": "朵')  # 模拟撕裂：半个 JSON
+	fc = null
+	fails += _check("撕裂主档→从备份恢复 name", String(PlayerProfile.load_profile().get("name", "")), "朵朵")
+	PlayerProfile.save_play_budget(1.0, 0.0, 0.0)
+	fails += _check("损坏后一次保存不抹 name", String(PlayerProfile.load_profile().get("name", "")), "朵朵")
+	var pb_after: Variant = PlayerProfile.load_profile().get("play_budget", {})
+	fails += _check("损坏后保存带上 budget", float((pb_after as Dictionary).get("used_sec", 0.0)), 1.0)
+	# clear 必须连备份一起删：否则删档后 load 从 .bak 还魂
+	PlayerProfile.clear()
+	fails += _check("clear 后无还魂", PlayerProfile.load_profile().is_empty(), true)
+
 	# ensure_player_id：首次生成并写盘，二次调用稳定不变（设备端稳定 UUID）
 	PlayerProfile.clear()
 	var pid1 := PlayerProfile.ensure_player_id()
