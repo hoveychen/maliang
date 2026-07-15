@@ -3873,10 +3873,46 @@ func _dispel_home_portals() -> void:
 			(node as Node).queue_free()
 	_home_portals.clear()
 
-## 回家传送门过场状态机推进（home-portal-anim）。P1-P2 为占位骨架，各阶段逻辑在 P3-P7 逐步接入。
-func _step_home(_delta: float) -> void:
+## 切回家过场阶段并复位阶段计时（走进/走出的 lerp 进度按 _home_t 算）。
+func _home_set_phase(p: int) -> void:
+	_home_phase = p
+	_home_t = 0.0
+
+## 走进/走出：把 player["logical"] 从 _home_from smoothstep 插值到 _home_to。刻意**不设 _hop 标志**——
+## _update_paper_motion 的 _hop 分支会冻结位移速度、压掉 walk_bob；走正常分支才有踏步。返回 true=到位。
+func _step_home_walk(delta: float) -> bool:
+	if player.is_empty():
+		return true
+	_home_t += delta
+	var k := clampf(_home_t / HOME_WALK_DUR, 0.0, 1.0)
+	var seg := WorldGrid.shortest_delta(_home_from, _home_to)
+	player["logical"] = WorldGrid.wrap_pos(_home_from + seg * smoothstep(0.0, 1.0, k))
+	if k >= 1.0:
+		player["logical"] = _home_to
+		OccupancyMap.char_register(PLAYER_ID, _home_to, PLAYER_SPAN)
+		return true
+	return false
+
+## 回家传送门过场状态机推进（home-portal-anim）。走进/走出的走路逻辑在 P3 接入；
+## 召唤/跨场景/软过场/兜底在 P5-P7 逐步填满。
+func _step_home(delta: float) -> void:
 	if not _homing:
 		return
+	match _home_phase:
+		HP_WALK_IN:
+			if _step_home_walk(delta):
+				# 走到近门中心。P5 会在此触发 enter_scene(跨场景)/软过场(同场景)；
+				# P3 阶段暂直接消散收尾，便于单独验证「走进」这一段。
+				_home_set_phase(HP_DISPEL)
+		HP_WALK_OUT:
+			if _step_home_walk(delta):
+				_home_set_phase(HP_DISPEL)
+		HP_DISPEL:
+			_dispel_home_portals()
+			_home_phase = HP_IDLE
+			_homing = false
+		_:
+			pass
 
 ## 把一座拱门摆到渲染空间（渲染原点 = focus_logical），高度取所在 tile 的台阶高 + extra_y。
 ## extra_y 给回家临时门做「从地下升起/沉下」的召唤/消散动画（负值=埋在地下，见 _step_home）。
