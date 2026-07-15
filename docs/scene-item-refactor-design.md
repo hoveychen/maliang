@@ -115,13 +115,45 @@ entry×count：len u8 + item_id UTF-8 bytes
   （itemArg 朝向抖动是高熵字节，比预估略大，仍可忽略）。
 - **palette 内嵌 blob**：矩阵自包含（"一份矩阵重构世界"）——客户端另需的只有 palette
   所引用的 items 定义（场景进入时随包下发/按需拉取+缓存，见 §3.1）。
-- 255 个不同物品定义/场景的上限足够（内置 21 + 该场景造物种数）；palette 可在造物被
-  全部移除后压实回收。
+- 255 个不同物品定义/场景的上限对当前用量足够（内置 21 + 该场景造物种数）；palette 可在造物被
+  全部移除后压实回收。**上限已在 v3 抬到 65535**（palette >255 自动切 v3，见 §2.2.1）。
 - **多 tile 物品（民居 3×3 等）只写锚点 tile**；footprint 从实体行展开推导，被覆盖 tile 不写数据。
   朝向旋转 footprint。
 - **视觉抖动不入库**：散布树的每棵微缩放/精细朝向仍由 tile hash 确定性派生（保持现观感，
   [chunk_manager.gd:360](../scripts/chunk_manager.gd#L360) 同款算式），`item_arg` 只存语义朝向。
-- 边缘物品的参数平面（篱笆高度档等）留给 v3；边缘物世界高度默认取所在 tile `height`。
+- 边缘物品的参数平面（篱笆高度档等）留待后续格式扩展；边缘物世界高度默认取所在 tile `height`。
+
+### 2.2.1 `.mltr` v3 —— palette 上限 255→65535（itemRef/edge 升 u16，2026-07-12）
+
+单场景 palette 的种类上限本由 `item_ref` 的 u8 宽度锁死在 255（0 留给「无物品」）。
+v3 把 **`item_ref` 与 4 张边缘平面**（都是 palette 索引，共享同一张 palette）以及 **palette
+`count` 尾段字段** 从 u8 升到 **u16 小端**，把上限抬到 65535。`item_arg`（朝向）与地貌三平面
+（types/heights/depths）仍是 u8——它们与 palette 无关。
+
+**自适应，非一刀切**——编码器按 palette 长度选版本（`encodeTerrain`）：
+
+| palette 长度 | 写出版本 | 布局 |
+|---|---|---|
+| ≤ 255 | **v2** | 九平面全 u8、count u8（与旧版**逐字节一致**，存量场景零膨胀、零 churn） |
+| 256..65535 | **v3** | item_ref + 4 边缘各 2B、其余 1B、count u16 小端 |
+| > 65535 | 抛 `palette N > 65535` | —— |
+
+解码侧 `decodeTerrain` / 客户端 `TerrainMap.load_from_bytes` **v1/v2/v3 全兼容**：v3 靠版本位
+（`buf[4]==3`）分流，按每格 2B 读 u16；v2/v1 走原路径。字节体积：v3 → 11 + 14×5625 + palette
+≈ 78.8KB raw（5 张平面 1→2B），但 item_ref 低熵、4 边缘一期恒 0，gzip 后近乎无增量。
+
+**关键契约——两端字节对齐**：服务端 `DataView.setUint16(off, v, true)`（LE）编码，客户端
+`PackedByteArray.decode_u16`（LE）解码，必须逐字节对齐。这不是靠人肉保证——`server/test/gen_v3_fixture.ts`
+用服务端编码器产一个 v3 fixture（`test/fixtures/v3_crosscheck.mltr`，palette 256 + 高索引
+itemRef=256/edge=200），`test/test_terrain_v3_crosscheck.gd` 加载它断言客户端解出 it255/it199——
+这是唯一能抓出「字节序/偏移不一致」的真跨实现回归（客户端自造 blob 测不出，两端可能同错）。
+
+客户端 `_item_ref`/`_edges` 相应从 `PackedByteArray` 升 `PackedInt32Array`（Godot 无 Int16）。
+实现见合并提交 `35504c8`（itemref-u16）。
+
+> 触发条件提醒：这上限之前并不碍事——一个场景通常一个主题、约 12 种物品，154 内置是全局
+> 总数，单场景 palette 实际远不到 255。v3 是预先拆天花板，为「单场景需要同时搭 >255 种不同
+> 物品」的未来场景兜底。
 
 ### 2.3 明确不进矩阵的东西
 
