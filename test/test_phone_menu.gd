@@ -163,6 +163,14 @@ func _run(scene: Node) -> void:
 							big_icon = true
 	_check(btn_texts.has("摆到地块"), "详情：有「摆到地块」动作按钮(文字辅助)")
 	_check(big_icon, "详情：动作按钮图标够大(≥72px,P3)")
+	# P8：「再听一次」不再是大按钮，降级为大图右下角的念名喇叭 badge。
+	_check(not btn_texts.has("再听一次"), "P8：详情动作区不再有「再听一次」大按钮")
+	var has_voice_badge := false
+	for c in (pui.get("_items_detail") as VBoxContainer).get_children():
+		if not (c is VBoxContainer):  # 大图外框 img_box 是 Control（动作区才是 VBoxContainer）
+			if (c as Control).find_children("*", "Button", true, false).size() > 0:
+				has_voice_badge = true
+	_check(has_voice_badge, "P8：大图角落有念名喇叭 badge")
 	pui.open_app("items")
 	_check(String(pui.get("_selected_item")) == "", "重开物品页：详情回空态")
 

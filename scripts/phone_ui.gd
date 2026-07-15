@@ -1357,16 +1357,30 @@ func _select_item(item_id: String, host: VBoxContainer = null) -> void:
 		host.remove_child(c)
 		c.queue_free()
 	# 大图：贴纸本尊 / 缩略图缓存 / 礼盒占位；缺图时请求现渲，到货 _on_thumbnail_ready 按选中 id 换图。
+	# 大图装在一个定尺 Control 里，右下角叠一个念名小喇叭 badge（P8：把「再听一次」大按钮降级为角标）。
+	var img_box := Control.new()
+	img_box.custom_minimum_size = Vector2(200.0, 200.0)
+	img_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_detail_image = TextureRect.new()
-	_detail_image.custom_minimum_size = Vector2(200.0, 200.0)
+	_detail_image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_detail_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_detail_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_detail_image.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var tex := _item_best_texture(item_id, def, rref)
 	_detail_image.texture = tex if tex != null else UiAssets.tex("ic_gift")
 	if tex == null and not rref.begins_with("sticker:") and _thumbnailer != null:
 		_thumbnailer.request(item_id, def)  # 到货走 _on_thumbnail_ready 换 _detail_image
-	host.add_child(_detail_image)
+	img_box.add_child(_detail_image)
+	# 念名小喇叭 badge（P8）：点它让点点再念一遍（录音/预烧/运行时 TTS 三级回落，见 _speak_item_name）。
+	# 点选物品时本就自动念一次（本函数末尾）；这个 badge 是「想再听」的小入口，不再占一整行大按钮。
+	var voice_badge := UiAssets.icon_button("ic_note", 56.0)
+	voice_badge.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	voice_badge.offset_left = -60.0
+	voice_badge.offset_top = -60.0
+	voice_badge.offset_right = 0.0
+	voice_badge.offset_bottom = 0.0
+	voice_badge.pressed.connect(func() -> void: _speak_item_name(item_id, def))
+	img_box.add_child(voice_badge)
+	host.add_child(img_box)
 	# 名字
 	var name_label := Label.new()
 	name_label.text = String(def.get("name", "小玩意"))
@@ -1399,9 +1413,7 @@ func _select_item(item_id: String, host: VBoxContainer = null) -> void:
 	if rref.begins_with("composed:"):
 		actions.add_child(_detail_action_btn("拆开改改", "ic_retry", true,
 			func() -> void: _w._on_composed_item_tapped(item_id)))
-	# 再听一次：点点重念这件东西的名字（录音/预烧/运行时 TTS 三级回落，见 _speak_item_name）。
-	actions.add_child(_detail_action_btn("再听一次", "ic_note", true,
-		func() -> void: _speak_item_name(item_id, def)))
+	# 「再听一次」不再占一整行大按钮（P8）——降级为大图右下角的念名喇叭 badge（见上）。
 	host.add_child(actions)
 	# 点击物品即播：点点念出这件东西叫什么（点选即触发，backpack-redesign §6）。
 	_speak_item_name(item_id, def)
