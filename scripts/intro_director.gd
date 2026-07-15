@@ -325,16 +325,14 @@ func _nearest_villager_logical() -> Vector2:
 			best_pos = pos
 	return best_pos
 
-## 走路步的光环落点：朝最近小伙伴的方向、离玩家 WALK_DIST+1.5 处放一个点（走过去正好达标、也顺势带向靠近步）；
-## 没有小伙伴就默认往 +X 放一个够远的点。
+## 走路步的光环落点：落在玩家【面向镜头的前景】（屏幕下方开阔草地），离玩家 WALK_DIST+1.5。
+## 原来朝最近小伙伴放，但小伙伴多在玩家上方/身后 → 真机上环被角色立绘遮住、孩子不易看见（老板真机反馈）。
+## 相机在 focus + (sin(yaw),_,cos(yaw))*dist（world.gd _update_camera），logical.y=world.z，
+## 故「焦点→相机」的地面方向= Vector2(sin(_gest_yaw),cos(_gest_yaw))，即屏幕下方前景，落点最显眼不被遮。
 func _walk_goal(start: Vector2) -> Vector2:
-	var dir := Vector2(1.0, 0.0)
-	var vpos := _nearest_villager_logical()
-	if vpos != Vector2.INF:
-		var d := WorldGrid.shortest_delta(start, vpos)
-		if d.length() > 0.1:
-			dir = d.normalized()
-	return WorldGrid.wrap_pos(start + dir * (WALK_DIST + 1.5))
+	var yaw := float(_world.get("_gest_yaw")) if is_instance_valid(_world) else 0.0
+	var toward_cam := Vector2(sin(yaw), cos(yaw))
+	return WorldGrid.wrap_pos(start + toward_cam * (WALK_DIST + 1.5))
 
 ## 后台 fetch（fire-and-forget，跑到首个 await 即返回）：完成后存结果、置 _fetch_done。
 func _fetch_bg() -> void:
