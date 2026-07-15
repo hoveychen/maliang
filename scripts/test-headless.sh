@@ -65,6 +65,7 @@ UNIT_TESTS=(
   test_confirm_bar
   test_game_audio
   test_sdf_static_baker
+  test_sdf_bake_swap
   test_paper_idle
   test_paper_clips
   test_task_chip_portrait
