@@ -299,6 +299,23 @@ func _snapshot() -> Dictionary:
 		snap["pending_reuse"] = String((reuse as Dictionary).get("itemName", "")) if typeof(reuse) == TYPE_DICTIONARY else ""
 		# 招呼态（P3 验招呼链）：最近一次「对方先开口」的招呼词（收到 character_response(greeting) 时记）。
 		snap["last_greeting"] = String(w.get("_last_greeting") if w.get("_last_greeting") != null else "")
+		# 引导式造物态（e2e 验造物链）：_in_creation 置位 = 服务端下发了 creation_prompt/build_prompt，
+		# 正等孩子点卡或语音应答。harness 据 creation_options 决定点哪张卡（pick op），无卡则 say 开放答复。
+		var in_creation: Variant = w.get("_in_creation")
+		snap["in_creation"] = bool(in_creation) if in_creation != null else false
+		if snap["in_creation"]:
+			snap["creation_goal"] = String(w.get("_creation_goal") if w.get("_creation_goal") != null else "")
+			snap["creation_category"] = String(w.get("_creation_category") if w.get("_creation_category") != null else "")
+			var cq := w.get("_creation_q") as Label
+			snap["creation_question"] = cq.text if cq != null else ""
+			# 选项拍平成 [{id,label}]（去掉 iconAsset 等 harness 用不上的字段，回包精简）
+			var opts: Variant = w.get("_creation_options")
+			var out := []
+			if typeof(opts) == TYPE_ARRAY:
+				for o in (opts as Array):
+					if typeof(o) == TYPE_DICTIONARY:
+						out.append({"id": String((o as Dictionary).get("id", "")), "label": String((o as Dictionary).get("label", ""))})
+			snap["creation_options"] = out
 		# NPC 诊断（空村根因排查）：客户端 npcs 里到底有哪些角色——真村民 spawn 出来没有。
 		var npcs: Variant = w.get("npcs")
 		if typeof(npcs) == TYPE_ARRAY:
