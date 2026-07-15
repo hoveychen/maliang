@@ -143,10 +143,11 @@ export const AVATAR_FORBIDDEN_DESC = /(抱着|拿着|手持|举着|捧着|牵着
 
 /**
  * 头顶遮挡措辞（同为机器判据）：headTop 是贴纸装扮锚点槽，形象自带帽子/皇冠会跟贴纸打架
- * （老板 2026-07-15 定：头顶、双手都要留空）。「连帽衫」不误伤——那是穿的不是戴的，
- * 兜帽垂在脑后（describeAvatar prompt 里另有明文）。
+ * （老板 2026-07-15 定：头顶、双手都要留空）。
+ * 任何「帽」都拦——生产实测 LLM 会绕开「戴着」写「头顶别着…帽子」（2026-07-15 抽查漏网原文），
+ * 按动词枚举必漏；唯二白名单用环视放行：「连帽(衫)」是穿的、「兜帽/帽兜」垂在脑后是合规措辞。
  */
-export const AVATAR_FORBIDDEN_HEAD = /(戴着[^，。]{0,8}帽|头上戴|头顶戴|皇冠|头盔|草帽|棒球帽|遮阳帽|贝雷帽|头纱|发冠)/;
+export const AVATAR_FORBIDDEN_HEAD = /(皇冠|头盔|头纱|发冠|(?<![连兜])帽(?!衫|兜))/;
 
 /** 描述是否违反任一硬规则（持物/头顶遮挡）——LLM 产物的重试判据与单测共用。 */
 export function avatarDescForbidden(desc: string): boolean {
@@ -191,8 +192,12 @@ export function onboardingProfileNote(p: PlayerOnboardingProfile | undefined): s
   return bits.join('，');
 }
 
-/** 提前收工的口头信号（「就这样」类；含不耐烦——onboarding 无反悔语义，不想选=done）。 */
-const AVATAR_EARLY_DONE = /(就这样|好了|够了|够啦|可以了|不想选|不选了|算了)/;
+/**
+ * 提前收工的口头信号（「就这样」类；含不耐烦——onboarding 无反悔语义，不想选=done）。
+ * 导出给 /onboarding/avatar-chat 端点做确定性拦截：生产实测（2026-07-15）真 LLM 会无视
+ * prompt 里的「立刻画」连问 6 轮——终止性必须写死在端点，不靠 LLM 自觉（A1 refineTries 同款纪律）。
+ */
+export const AVATAR_EARLY_DONE = /(就这样|好了|够了|够啦|可以了|不想选|不选了|算了)/;
 
 /**
  * 形象引导一轮的【确定性】推进——mock 适配器与「LLM 失败/超时降级链」共用的同一实现
