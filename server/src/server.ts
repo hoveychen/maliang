@@ -86,7 +86,7 @@ import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
 import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
-import { composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
+import { AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
@@ -2153,6 +2153,10 @@ export async function generateCreationIcons(
     ...PROP_CREATION_OPTIONS.filter((o) => o.id.startsWith('prop_')).map((o) => ({ id: o.id, prompt: propIconPrompt(o.id) })),
     // 造贴纸专属图案(stk_ 前缀)：color 复用造角色同 id、不重复生成，与造物同理。
     ...STICKER_CREATION_OPTIONS.filter((o) => o.id.startsWith('stk_')).map((o) => ({ id: o.id, prompt: stickerIconPrompt(o.id) })),
+    // onboarding 形象选项图标(av_ 前缀，docs/onboarding-avatar-redesign-design.md §3.4)：
+    // 只生成图标类别（AVATAR_ICON_CATEGORIES）；color 类客户端渲染色块，不生图。
+    ...AVATAR_OPTIONS.filter((o) => (AVATAR_ICON_CATEGORIES as readonly string[]).includes(o.category))
+      .map((o) => ({ id: o.id, prompt: avatarIconPrompt(o.id) })),
   ];
   for (const job of jobs) {
     if (onlySet && !onlySet.has(job.id)) continue;
