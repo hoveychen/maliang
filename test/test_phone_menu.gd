@@ -81,6 +81,44 @@ func _run(scene: Node) -> void:
 	_check(phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_ALWAYS,
 		"跨页态跨页视口在更新")
 
+	# 背包 4×4 纵向翻页（backpack-redesign P2）：塞 20 件 → 2 页（16+4），验证网格列数/页数/圆点/snap。
+	var bag := {}
+	for i in 20:
+		bag["itm_%02d" % i] = 1
+	scene.set("bag", bag)
+	pui.open_app("items")
+	await scene.get_tree().process_frame  # 冲刷上一轮空背包页的延迟 queue_free，再数页数
+	var ipager: ScrollContainer = pui.get("_items_pager")
+	var ipages: VBoxContainer = pui.get("_items_pages_box")
+	var idots: VBoxContainer = pui.get("_items_dots")
+	_check(ipager != null and ipages != null and idots != null, "背包翻页容器/页箱/圆点就位")
+	_check(ipages != null and ipages.get_child_count() == 2, "20 件 → 2 页（16 件/页）")
+	var icols_ok := true
+	var icell_total := 0
+	if ipages != null:
+		for g in ipages.get_children():
+			if (g as GridContainer).columns != PhoneUi.ITEMS_COLS:
+				icols_ok = false
+			icell_total += (g as GridContainer).get_child_count()
+	_check(icols_ok, "每页网格 columns=%d" % PhoneUi.ITEMS_COLS)
+	_check(icell_total == 20, "两页格子总数 = 物品数 20")
+	_check(idots != null and idots.get_child_count() == 2 and idots.visible, "2 页 → 2 个纵向圆点、可见")
+	# 单页视口高定死一页：容器 min 高 = ITEMS_PAGE_H，snap 目标 = 页序 × 页高
+	_check(ipager != null and is_equal_approx(ipager.custom_minimum_size.y, PhoneUi.ITEMS_PAGE_H),
+		"翻页容器高 = ITEMS_PAGE_H（固定单页高）")
+	# 翻到第 2 页：设当前页 + 步进若干帧（真帧让布局落定，翻页容器才知道可滚范围），滚动应贴到 1×页高
+	pui.set("_items_page", 1)
+	for _f in 40:
+		await scene.get_tree().process_frame
+		pui.tick(0.05)
+	_check(ipager != null and absi(ipager.scroll_vertical - int(round(PhoneUi.ITEMS_PAGE_H))) <= 3,
+		"翻到第 2 页：纵向滚动 snap 到 1×页高（%d≈%d）" % [ipager.scroll_vertical, int(round(PhoneUi.ITEMS_PAGE_H))])
+	# 空背包：无物品仍不崩、出空态提示、只 1 页（空网格）
+	scene.set("bag", {})
+	pui.open_app("items")
+	_check((pui.get("_items_empty") as Label).visible, "空背包：空态提示可见")
+	_check((pui.get("_items_dots") as VBoxContainer).get_child_count() <= 1, "空背包：≤1 页无圆点")
+
 	pui.close_app()
 	_check(phone.state == PaperPhone.State.FRONT, "返回后回正面态")
 	_check(String(pui.get("_phone_open_app")) == "", "返回后 open_app 清空")
