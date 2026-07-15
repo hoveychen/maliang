@@ -4440,6 +4440,9 @@ func intro_asr_blocked() -> bool:
 func intro_listen_begin() -> void:
 	if _intro_listening:
 		return
+	# iOS 麦权限被拒 → 盖引导层 + 暂停树，**不**置监听标志：解除后重新调用即自愈。
+	if MicPermission.enforce(get_tree()):
+		return
 	_intro_heard = false
 	_intro_listening = true
 	_intro_listen_vad = VoiceVad.new()

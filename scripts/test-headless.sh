@@ -121,6 +121,7 @@ UNIT_TESTS=(
   test_paper_phone
   test_paper_book
   test_asr_guard
+  test_mic_permission
   test_interaction_fsm
   test_adaptive_fps_cap
   test_paper_xray_gate
