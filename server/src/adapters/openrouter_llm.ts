@@ -238,6 +238,7 @@ ${abilityLines}
 - chat 时不要 behaviorScript。
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - 小朋友说「告诉X…」「帮我跟X说…」是带话：用 deliver_message（to=X，message=要带的话），不要用 move_to——光走过去话就丢了。
+- 小朋友让你「去找X」「去叫X过来」「把X喊来」「去找X一起玩」是让你走过去把 X 找来：必须 kind=command，用 chat_with（character_name=X）。哪怕话里带个「玩」字也【绝不是】闲聊——你嘴上答应「好呀我去找他」却不给指令，就成了原地空口承诺（说要去、人没动、对话也不关），这正是要避免的。真要去就把指令给上。
 - follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。${createLine}${stickerLine}${playLine}${guideLine}
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
