@@ -10,6 +10,8 @@ extends RefCounted
 ## （POST /onboarding/profile，见 docs/onboarding-avatar-redesign-design.md §2.5）。
 
 const PATH := "user://profile.json"
+const BAK_PATH := "user://profile.json.bak"  ## 上一版（save 时轮转，load 损坏兜底）
+const TMP_PATH := "user://profile.json.tmp"  ## 原子写中转（写满再 rename 顶替主档）
 
 static func exists() -> bool:
 	return FileAccess.file_exists(PATH)
@@ -22,26 +24,52 @@ static func has_character() -> bool:
 	var p := load_profile()
 	return not String(p.get("name", "")).is_empty() or not String(p.get("sprite_asset", "")).is_empty()
 
-## 读档案；缺失/损坏返回空字典。
+## 读档案；缺失返回空字典。主档【存在但坏】（撕裂写/写一半崩溃/并发读改写撞上半截 JSON）
+## 时退上一版备份——绝不能把 {} 流出去：所有 save_* 都是 read-modify-write，{} 一旦被
+## 当作基底再落盘，name/sprite_asset 就整档冲掉（开发机档案被抹三次的根因，见 test）。
 static func load_profile() -> Dictionary:
-	var f := FileAccess.open(PATH, FileAccess.READ)
+	var d: Variant = _read_json(PATH)
+	if d != null:
+		return d
+	if FileAccess.file_exists(PATH):
+		var bak: Variant = _read_json(BAK_PATH)
+		if bak != null:
+			return bak
+	return {}
+
+## 读 JSON 字典；null=读不到/解析失败（与「合法的空字典 {}」区分——把 {} 当损坏会
+## 让 load 错误回退 .bak，clear 掉的 graphics 就还魂了，test_graphics_settings 抓过）。
+static func _read_json(path: String) -> Variant:
+	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
-		return {}
+		return null
 	var data: Variant = JSON.parse_string(f.get_as_text())
 	if typeof(data) != TYPE_DICTIONARY:
-		return {}
+		return null
 	return data
 
+## 原子落盘：写满 tmp 再 rename 顶替（同目录 rename 原子）——读者永远只见完整 JSON，
+## 不再有「截断式 WRITE 写一半」的窗口。顶替前把上一版挪去 .bak 供 load 的损坏兜底。
 static func save_profile(p: Dictionary) -> void:
-	var f := FileAccess.open(PATH, FileAccess.WRITE)
+	var f := FileAccess.open(TMP_PATH, FileAccess.WRITE)
 	if f == null:
-		push_warning("玩家档案写入失败: %s" % PATH)
+		push_warning("玩家档案写入失败: %s" % TMP_PATH)
 		return
 	f.store_string(JSON.stringify(p, "  "))
+	f.close()
+	if FileAccess.file_exists(PATH):
+		DirAccess.rename_absolute(ProjectSettings.globalize_path(PATH),
+			ProjectSettings.globalize_path(BAK_PATH))
+	var err := DirAccess.rename_absolute(ProjectSettings.globalize_path(TMP_PATH),
+		ProjectSettings.globalize_path(PATH))
+	if err != OK:
+		push_warning("玩家档案落盘失败(rename=%d): %s" % [err, PATH])
 
+## 删档连 .bak/.tmp 一起：否则删完 load 从备份还魂。
 static func clear() -> void:
-	if exists():
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(PATH))
+	for path in [PATH, BAK_PATH, TMP_PATH]:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 ## 档案 → 形象描述（设置页「换形象」与 onboarding 兜底共用，防两处文案漂移；
 ## 风格/朝向后缀由服务端生图管线统一拼接）。
