@@ -199,6 +199,25 @@ static func _prim_total(config: Dictionary) -> int:
 		n += int(rope.segments)
 	return n
 
+## 判定一只 parse 好的造物是否「真静止」——除呼吸外无任何动画，可安全烘焙成静态 mesh。
+## 动画源共四类（见 SdfAnimator.advance / _apply_body / _ropes_step）：
+##   ① locomotion.type ≠ none（walker 迈步 / hopper 蹲跳 / flyer 振翅）
+##   ② 任一部件 group == "head"（点头摇头）
+##   ③ 任一部件带非空 spin（风车叶/陀螺持续旋转）
+##   ④ ropes 非空（飘带/穗子摆动）
+## 四类全无才算静止；none 分支仅剩 _breath_xf 的微幅呼吸（sin×0.02m），烘焙到静止姿态丢弃可忽略。
+static func is_static(config: Dictionary) -> bool:
+	if str(config.locomotion.type) != "none":
+		return false
+	if not (config.ropes as Array).is_empty():
+		return false
+	for part in config.parts:
+		if str(part.get("group", "body")) == "head":
+			return false
+		if not (part.get("spin", {}) as Dictionary).is_empty():
+			return false
+	return true
+
 ## 由 parse 产物搭建静止姿态骨架。
 ## 返回 {"prims": Array[SdfMath.Prim], "meta": {...}}；meta 记录动画所需的一切索引与骨长：
 ##   body: [{"idx", "rest": Transform3D, "group"}]

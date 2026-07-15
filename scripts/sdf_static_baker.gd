@@ -45,6 +45,12 @@ static func bake_spec(spec: Dictionary) -> ArrayMesh:
 	if not cfg.ok:
 		push_warning("SdfStaticBaker spec 不合法: %s" % cfg.error)
 		return null
+	return bake_config(cfg)
+
+## 已 parse 的 cfg → 烘焙 ArrayMesh。逐顶点投影/AO/取色是纯 CPU 重活（"秒级"成本主轴），
+## 除 ArrayMesh 走 RenderingServer 命令队列外无场景树依赖，可在 WorkerThreadPool 后台线程跑
+## （SdfBakeSwap 用它异步烘焙运行时造物，避免主线程卡顿）。cfg 需 cfg.ok；调用方自证。
+static func bake_config(cfg: Dictionary) -> ArrayMesh:
 	var rig := SdfSpec.build_rig(cfg)
 	var prims: Array = rig.prims
 	var shell := SdfMeshBuilder.build(prims, SHELL_DENSITY)

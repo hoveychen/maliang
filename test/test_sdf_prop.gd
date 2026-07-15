@@ -152,6 +152,41 @@ func _init() -> void:
 	var aabb14 := SdfMath.rest_aabb(SdfSpec.build_rig(c1_4).prims)
 	fails += _check("AABB 随 scale 变大", aabb14.size.y > aabb1.size.y + 0.1, true)
 
+	# ---- is_static 判据（真静止才可烘焙）：四类动画源各一反例 + 纯静物正例 ----
+	var st_pure := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "box", "pos": [0, 0.5, 0], "size": [1, 1, 1], "color": 0}],
+	})
+	fails += _check("纯静物 → static", SdfSpec.is_static(st_pure), true)
+	var st_walker := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "sphere", "pos": [0, 1, 0], "color": 0}],
+		"locomotion": {"type": "walker", "legs": 4},
+	})
+	fails += _check("走兽 → 非static", SdfSpec.is_static(st_walker), false)
+	var st_hopper := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "sphere", "pos": [0, 1, 0], "color": 0}],
+		"locomotion": {"type": "hopper", "hop_h": 0.5},
+	})
+	fails += _check("蹦跳 → 非static", SdfSpec.is_static(st_hopper), false)
+	var st_spin := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "box", "pos": [0, 1, 0], "size": [0.6, 0.1, 0.1], "color": 0, "spin": 1.5}],
+	})
+	fails += _check("风车(spin) → 非static", SdfSpec.is_static(st_spin), false)
+	var st_head := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "sphere", "pos": [0, 1, 0], "color": 0, "group": "head"}],
+	})
+	fails += _check("花头(head) → 非static", SdfSpec.is_static(st_head), false)
+	var st_rope := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "box", "pos": [0, 1, 0], "size": [1, 1, 1], "color": 0}],
+		"ropes": [{"anchor": [0, 1, 0], "segments": 3, "seg_len": 0.2, "r": 0.05, "color": 0}],
+	})
+	fails += _check("飘带(rope) → 非static", SdfSpec.is_static(st_rope), false)
+
 	if fails == 0:
 		print("sdf_prop tests PASS")
 	else:
