@@ -49,6 +49,7 @@ UNIT_TESTS=(
   test_onboarding_bgm_mute
   test_onboarding_asr_gate
   test_onboarding_vad
+  test_onboarding_avatar_chat
   test_voice_vad
   test_voice_capture
   test_voice_confirm

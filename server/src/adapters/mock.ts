@@ -2,11 +2,14 @@ import type { ServiceAdapters, ImageBlob, AudioBlob, VideoBlob, ClipName } from 
 import { fallbackVoice } from '../voice_catalog.ts';
 import {
   BASE_ABILITIES,
+  type AvatarAttrs,
+  type AvatarGuideState,
   type CharacterSpec,
   type CreationAttrs,
   type CreationCategory,
   type CreationState,
   type ExtractedMemory,
+  type GuideAvatarResult,
   type GuideBuildResult,
   type GuideCreationResult,
   type IntentContext,
@@ -17,6 +20,7 @@ import {
   type SessionCompactionContext,
 } from '../types.ts';
 import { CREATION_OPTIONS, optionsByCategory, sizeToScale, inferSizeFromText } from '../creation_options.ts';
+import { composeAvatarDesc, deterministicGuideAvatar } from '../avatar_options.ts';
 import type { CreatureSize } from '../creation_options.ts';
 import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
 import { STICKER_CREATION_OPTIONS, STICKER_CREATION_ASK, stickerOptionsByCategory, composeStickerDesc, stickerIconPrompt } from '../sticker_creation_options.ts';
@@ -403,6 +407,17 @@ export function createMockAdapters(): ServiceAdapters {
         const next: CreationCategory = !attrs.kind ? 'kind' : 'color';
         const optionIds = stickerOptionsByCategory(next).slice(0, 4).map((o) => o.id);
         return { replyText: STICKER_CREATION_ASK[next], done: false, question: STICKER_CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
+      },
+      async guideAvatar(state: AvatarGuideState, childInput: string): Promise<GuideAvatarResult> {
+        // 形象引导 mock = 确定性推进的共用实现（它同时是服务端 LLM 失败的降级链，一处实现两处用）
+        return deterministicGuideAvatar(state, childInput);
+      },
+      async describeAvatar(attrs: AvatarAttrs): Promise<string> {
+        return composeAvatarDesc(attrs);
+      },
+      async refineAvatar(description: string, childRequest: string): Promise<string> {
+        // 确定性：原描述 + 修改要求（真实 LLM 会把修改融进原文）
+        return `${description}。按小朋友的要求调整：${childRequest}`;
       },
       async guideBuild(state: CreationState, childInput: string): Promise<GuideBuildResult> {
         if (CANCEL_WORDS.test(childInput)) return { replyText: CANCEL_LINE, done: false, cancelled: true };

@@ -5,6 +5,7 @@ import { effectiveAbilities, DEFAULT_SCENE } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
 import { wishFor } from './wishes.ts';
 import { pickGreeting } from './greetings.ts';
+import { onboardingProfileNote } from './avatar_options.ts';
 import { planGuide, listGuideTargets } from './guide.ts';
 import { matchByName } from './names.ts';
 
@@ -94,6 +95,8 @@ export async function respondToTranscript(
     activeTask,
     taskCandidate,
     wishContext,
+    // onboarding 档案喜好摘要（点点/村民都注入——对话都走本函数）：无档案为 undefined，零 token
+    childProfile: onboardingProfileNote(store.getOnboardingProfile(playerId)),
     // 稳定缓存键：绑 world×角色×玩家，做 OpenRouter sticky routing 命中 prompt cache（同一对话连续命中）。
     cacheKey: `${worldId}:${characterId}:${playerId}`,
   });

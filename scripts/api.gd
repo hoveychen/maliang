@@ -168,10 +168,11 @@ func get_world(id: String) -> Dictionary:
 	return data if typeof(data) == TYPE_DICTIONARY else {}
 
 ## POST JSON → JSON。失败/非 200 返回空字典。
-func post_json(path: String, body: Dictionary) -> Dictionary:
+## timeout_sec 可按调用方收紧（如 onboarding 对话一轮 15s 就该降级，不值得陪满 40s）。
+func post_json(path: String, body: Dictionary, timeout_sec := REQUEST_TIMEOUT_SEC) -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)
-	http.timeout = REQUEST_TIMEOUT_SEC # 服务端 hang 时不让界面永久转圈（见常量注释）
+	http.timeout = timeout_sec # 服务端 hang 时不让界面永久转圈（见常量注释）
 	var err := http.request(base + path, PackedStringArray(["Content-Type: application/json"]),
 		HTTPClient.METHOD_POST, JSON.stringify(body))
 	if err != OK:

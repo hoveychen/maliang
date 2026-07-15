@@ -412,6 +412,12 @@ export interface IntentContext {
   wishContext?: string;
   /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing，命中 prompt cache。 */
   cacheKey?: string;
+  /**
+   * 玩家 onboarding 档案摘要（喜好接线，docs/onboarding-avatar-redesign-design.md §2.5）：
+   * 称呼/喜欢的图案/主色/形象创作原话——注入后点点/村民能自然提起（「你不是最喜欢小恐龙嘛」）。
+   * 由 onboardingProfileNote(store.getOnboardingProfile(playerId)) 生成，无档案则 undefined。
+   */
+  childProfile?: string;
 }
 
 /** session 超长压缩（compactSession）的上下文：把较旧轮次压成一段中文摘要，session 内继续对话时注入。 */
@@ -697,4 +703,82 @@ export function newCreationState(goal: CreationGoal = 'character', blueprintId?:
   const state: CreationState = { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0, dialog: [] };
   if (goal === 'build' && blueprintId) state.build = { blueprintId, filled: {}, askedSlots: [] };
   return state;
+}
+
+// ── 玩家形象 onboarding：点点引导式创作（见 docs/onboarding-avatar-redesign-design.md）──────
+// 与引导式造角色（CreationState 一族）平行，但走无状态 HTTP 多轮（onboarding 在进世界前，无 WS），
+// 状态由客户端每轮全量带回。类别是玩家外观专属（发型/衣服/图案/配饰），与 CreationCategory 刻意分开。
+
+/** onboarding 形象对话可问的类别。color 客户端渲染色块，其余类别有图标（P3 生成）。 */
+export type AvatarCategory = 'gender' | 'hairstyle' | 'outfit' | 'color' | 'motif' | 'accessory';
+
+/** 形象选项库里的一个候选项（形状同 CreationOption，类别域不同）。 */
+export interface AvatarOption {
+  id: string;
+  category: AvatarCategory;
+  label: string;
+  iconAsset: string;
+}
+
+/**
+ * onboarding 形象对话累积的属性。开放语音优先：小朋友说「我要会发光的头发」时
+ * hairstyle 存原话，不归一成库里的词——个性化的来源之一。落不进类别的外观点进 extras。
+ */
+export interface AvatarAttrs {
+  gender?: string;      // 男生/女生（生图必需，第一问）
+  hairstyle?: string;   // 发型
+  outfit?: string;      // 衣服风格
+  color?: string;       // 主色
+  motifs: string[];     // 喜欢的图案元素（可多个；一律转译为穿戴元素，绝不手持）
+  accessory?: string;   // 小配饰
+  extras: string[];     // 其他外观点（开放语音聊出的）
+}
+
+/** onboarding 形象对话状态：无状态 HTTP 多轮，客户端每轮全量带回，服务端不落会话。 */
+export interface AvatarGuideState {
+  attrs: AvatarAttrs;
+  askedCategories: string[]; // 已问过的类别（mock 确定性解析用；LLM 路径靠 dialog 自带上下文）
+  turnCount: number;         // 兜底：超上限强制 done
+  dialog: ChatTurn[];        // child=小朋友、npc=点点，整段回放给 guide LLM
+  childName?: string;        // 名字页前移后已知，点点喊着名字引导
+}
+
+/** onboarding 形象对话的初始空状态。 */
+export function newAvatarGuideState(childName?: string): AvatarGuideState {
+  const state: AvatarGuideState = { attrs: { motifs: [], extras: [] }, askedCategories: [], turnCount: 0, dialog: [] };
+  if (childName) state.childName = childName;
+  return state;
+}
+
+/**
+ * guideAvatar 一轮的产物：要么继续追问（question+options），要么攒够去画（done）。
+ * 刻意没有 cancelled——onboarding 必须产出形象，小朋友不耐烦时 LLM 直接 done 用已知属性画（零挫败）。
+ * done 后的外观描述由 describeAvatar 单独合成（硬规则 prompt），不在此结果里。
+ */
+export interface GuideAvatarResult {
+  replyText: string;                    // 点点这轮说的话（TTS 念出，含问题与选项口播）
+  done: boolean;
+  question?: string;                    // done=false：追问的问题
+  category?: AvatarCategory;            // done=false：本轮问的类别
+  optionIds?: string[];                 // done=false：候选项 id（2–4）
+  updatedAttrs?: Partial<AvatarAttrs>;  // 从本轮输入解析出的属性更新（motifs/extras 为增量后全量）
+}
+
+/**
+ * 玩家 onboarding 档案（§2.5，老板拍板当期接线）：onboarding 完成时客户端全量上报落库。
+ * 键 = playerId（设备端稳定 UUID，同 players 表）。独立表、不并进 Player——world_info 的
+ * Player upsert 是整行覆盖（server.ts world_info handler），并进去会被抹掉。
+ * 隐私边界：只存结构化属性+文本，不存录音（音频本就不上行）。
+ * 本地 user://profile.json 照旧是主档（离线可玩的根基），这里是服务端副本：
+ * 管理台可见 + 世界里点点/村民 LLM prompt 注入喜好（P5）+ 换设备恢复的地基。
+ */
+export interface PlayerOnboardingProfile {
+  playerId: string;
+  name: string;
+  nickname: string;
+  attrs: AvatarAttrs;          // 结构化答案（含开放语音原话）
+  visualDescription: string;   // LLM 合成的最终外观描述
+  refineNotes: string[];       // 照镜子环孩子提的修改原话（个性化金矿：「头发要长一点」）
+  spriteAsset: string;         // 最终采纳的形象资产 hash
+  createdAt: string;           // ISO 时间；客户端带上，服务端不取墙上时钟
 }

@@ -195,7 +195,15 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
       chats,
       // 玩家形象的 idle 动画状态（形象在设备档案，动画按 spriteAsset hash 绑定）
       spriteAnim: player.spriteAsset ? (store.getSpriteAnim(player.spriteAsset) ?? { status: 'none' }) : { status: 'none' },
+      // onboarding 档案（结构化属性+最终描述+refine 原话；无档案为 null——additive 字段，管理台旧页面不受影响）
+      onboarding: store.getOnboardingProfile(player.id) ?? null,
     };
+  });
+
+  // onboarding 档案总表（docs/onboarding-avatar-redesign-design.md §2.5：管理台可见每个孩子的档案）
+  app.get('/debug/api/onboarding-profiles', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    return { profiles: store.listOnboardingProfiles() };
   });
 
   // 世界列表（计数摘要）
