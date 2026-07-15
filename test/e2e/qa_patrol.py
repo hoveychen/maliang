@@ -40,13 +40,16 @@ TRANSIENT_Q = {"施法中…", "施法中", "拼上啦…", "拼好啦！"}
 
 
 class Patrol:
-    def __init__(self, h, rng, allow_create, log):
+    def __init__(self, h, rng, allow_create, log, shots=False):
         self.h = h
         self.rng = rng
         self.allow_create = allow_create
         self.log = log
+        self.shots = shots
+        self._last_shot = 0.0
         self.anomalies = []
         self.actions = {}
+        self.soft_fails = {}
         self.steps = 0
         self._last_ws = None
         self._trans_since = None
@@ -89,7 +92,9 @@ class Patrol:
             self._think_since = None
 
     def do(self, name, fn, expect_err=()):
-        """执行一步动作并核对回包；预期内错误（如 gate_closed）不算异常。"""
+        """执行一步动作并核对回包；预期内错误（如 gate_closed）不算异常。
+        ok=false 但无 error 文本 = 宿主「没做成」（如 talk_npc 此刻没有可对话村民）——
+        属环境态不是缺陷，计 soft-fail 不进异常。"""
         self.bump(name)
         self.log(f"[{self.steps}] {name}")
         try:
@@ -99,7 +104,9 @@ class Patrol:
             return {}
         if isinstance(r, dict) and r.get("ok") is False:
             err = str(r.get("error", ""))
-            if not any(x in err for x in expect_err):
+            if not err:
+                self.soft_fails[name] = self.soft_fails.get(name, 0) + 1
+            elif not any(x in err for x in expect_err):
                 self.note("reply_error", f"{name}: {err}")
         return r or {}
 
@@ -107,16 +114,41 @@ class Patrol:
     def step(self):
         s = self.h._state_soft()
         if not s:
-            raise HarnessError("state 读不到（连接/进程问题）")
+            # 单次读挂先重连再试（对端单连接模型下可能被新连接顶掉/瞬断）——别一口断言进程死了。
+            try:
+                self.h.reconnect(retries=3, delay=1.0)
+                s = self.h._state_soft()
+            except HarnessError:
+                pass
+        if not s:
+            raise HarnessError("state 读不到（重连后仍失败：连接/进程问题）")
         self.watch(s)
 
-        # menu：只有全屏进入钮 → 点进世界
-        if not s.get("scene_id") and not s.get("vc_open"):
+        # 周期截图挪到这里（而非主循环）：过场/地形重铺期间做 viewport 读回，
+        # 带窗 Metal 实例会被直接打死（隔离实验 3/3 复现；无 --shots 同参数 103 步存活）。
+        if self.shots and time.time() - self._last_shot > 30 and not s.get("transitioning"):
+            try:
+                self.h.screenshot(max_dim=640)
+            except HarnessError:
+                pass
+            self._last_shot = time.time()
+
+        # 不在 world（scene_id 空）：只可能是 menu / onboarding / loading——world 专属 op
+        # 一个都不能发（发了必报「world 无 harness_*」，5min 能刷出几十条假异常，踩过）。
+        if not s.get("scene_id"):
             ui = self.do("ui", lambda: self.h.ui())
-            btns = [e for e in ui.get("elements", []) if e.get("kind") == "button"]
-            if btns:
-                self.do("click_enter", lambda: self.h.click_ui(path=btns[0]["path"]))
+            menu_btns = [e for e in ui.get("elements", []) if e.get("kind") == "button"
+                         and e.get("viewport") == "root" and "/Menu" in e.get("path", "")]
+            if menu_btns:
+                self.do("click_enter", lambda: self.h.click_ui(path=menu_btns[0]["path"]))
                 time.sleep(3)
+                return
+            # onboarding/loading：不在巡检范围。记一次（只一次）等它自己走完或人工介入。
+            if not getattr(self, "_warned_not_world", False):
+                self._warned_not_world = True
+                self.note("not_in_world",
+                          "scene_id 为空且不是 menu（onboarding/loading？）——巡检只覆盖 world，等待中")
+            time.sleep(2)
             return
 
         # 起名子模式：给个名字收尾
@@ -204,6 +236,7 @@ def write_report(path, patrol, minutes, started):
         f"- 时间：{time.strftime('%Y-%m-%d %H:%M', time.localtime(started))} 起，计划 {minutes} 分钟",
         f"- 步数：{patrol.steps}",
         f"- 异常：{len(patrol.anomalies)} 条",
+        f"- soft-fail（宿主没做成，非缺陷）：{sum(patrol.soft_fails.values())} 次 {patrol.soft_fails or ''}",
         "",
         "## 动作分布",
         "",
@@ -239,19 +272,12 @@ def main():
     h.start_trace(tdir)
     log = print
 
-    patrol = Patrol(h, rng, args.allow_create, log)
+    patrol = Patrol(h, rng, args.allow_create, log, shots=args.shots)
     started = time.time()
     deadline = started + args.minutes * 60
-    last_shot = 0.0
     fatal = False
     try:
         while time.time() < deadline:
-            if args.shots and time.time() - last_shot > 30:
-                try:
-                    h.screenshot(max_dim=640)
-                except HarnessError:
-                    pass
-                last_shot = time.time()
             patrol.step()
     except HarnessError as e:
         patrol.note("conn_lost", f"巡检中断：{e}")

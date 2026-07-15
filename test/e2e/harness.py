@@ -79,6 +79,17 @@ class Harness:
             self._trace_fp.close()
             self._trace_fp = None
 
+    def reconnect(self, retries=3, delay=1.0):
+        """只重建 socket（trace 不动）。对端是单连接模型（新连接顶掉旧的）——被顶/瞬断后用它复位。"""
+        if self.sock:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+            self.sock = None
+        self.buf = b""
+        self.connect(retries=retries, delay=delay)
+
     # ── 轨迹录制 ──
     def start_trace(self, trace_dir):
         """开录：此后每条命令+应答追加到 <dir>/trace.jsonl，截图落同目录。"""
