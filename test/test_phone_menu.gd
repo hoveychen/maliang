@@ -13,6 +13,19 @@ func _check(cond: bool, msg: String) -> void:
 		printerr("  ✗ ", msg)
 		_fails += 1
 
+## 详情面板动作按钮的文字集合（P3 图上字下：文字在按钮内层 Label）。
+func _btn_texts_of(detail: VBoxContainer) -> Array:
+	var texts := []
+	if detail == null:
+		return texts
+	for c in detail.get_children():
+		if c is VBoxContainer:  # 动作按钮竖排
+			for b in (c as VBoxContainer).get_children():
+				if b is Button:
+					for lbl in (b as Button).find_children("*", "Label", true, false):
+						texts.append((lbl as Label).text)
+	return texts
+
 ## 背包格的数量角标文字（P3）：直属 Label 子节点=数量圆角标；无则返回空串。
 func _count_badge_text(cell: Control) -> String:
 	for c in cell.get_children():
@@ -62,7 +75,7 @@ func _run(scene: Node) -> void:
 					cols_ok = false
 				icon_total += g.get_child_count()
 	_check(cols_ok, "每页网格 columns=%d" % PhoneUi.PHONE_GRID_COLS)
-	_check(icon_total == 5, "图标总数 = 已实装 app 数 5（home/flowers/items/quiet/settings）")
+	_check(icon_total == 6, "图标总数 = 已实装 app 数 6（home/flowers/items/stickers/quiet/settings）")
 
 	var cover: Control = pui.get("_screen_cover")
 	_check(cover != null and cover.visible, "停靠常驻=熄屏黑屏")
@@ -77,7 +90,7 @@ func _run(scene: Node) -> void:
 
 	# 打开各 app：翻转到跨页、只显示该页
 	var pages: Dictionary = pui.get("_album_pages")
-	for id in ["home", "flowers", "items", "settings"]:
+	for id in ["home", "flowers", "items", "stickers", "settings"]:
 		scene._open_app(id)
 		_check(String(pui.get("_phone_open_app")) == id, "打开 app: %s" % id)
 		_check(phone.state == PaperPhone.State.SPREAD, "%s：翻转到跨页态" % id)
@@ -152,6 +165,26 @@ func _run(scene: Node) -> void:
 	_check(big_icon, "详情：动作按钮图标够大(≥72px,P3)")
 	pui.open_app("items")
 	_check(String(pui.get("_selected_item")) == "", "重开物品页：详情回空态")
+
+	# 贴纸抽成独立 app（P7）：bag 里造物 + 贴纸混着放，物品页只收造物、贴纸页只收贴纸。
+	# 用真实内置贴纸 id（mount=='edge'）+ 一个造物占位 id。物品页 1 格（cc）、贴纸页 1 格（sticker_sun）。
+	scene.set("bag", { "sticker_sun": 1, "cc": 2 })
+	pui.open_app("items")
+	await scene.get_tree().process_frame
+	var items_cells := 0
+	for g in (pui.get("_items_pages_box") as VBoxContainer).get_children():
+		items_cells += (g as GridContainer).get_child_count()
+	_check(items_cells == 1, "物品页排除贴纸：只剩造物 cc 1 格（贴纸 sticker_sun 抽走，P7 分流）")
+	pui.open_app("stickers")
+	await scene.get_tree().process_frame
+	var sgrid: GridContainer = pui.get("_stickers_grid")
+	_check(sgrid != null and sgrid.get_child_count() == 1, "贴纸页拥有网格只 1 张（sticker_sun）")
+	_check(not (pui.get("_stickers_empty") as Label).visible, "有贴纸：贴纸页空态隐藏")
+	# 选中贴纸 → 详情落在贴纸页 detail 宿主、出「装到身上」（只贴纸有）。
+	pui._select_item("sticker_sun", pui.get("_stickers_detail"))
+	var s_texts := _btn_texts_of(pui.get("_stickers_detail") as VBoxContainer)
+	_check(s_texts.has("装到身上"), "贴纸详情：出「装到身上」动作")
+	_check(s_texts.has("摆到地块") and s_texts.has("扔掉"), "贴纸详情：也有「摆到地块」「扔掉」")
 
 	# 空背包：无物品仍不崩、出空态提示、只 1 页（空网格）
 	scene.set("bag", {})

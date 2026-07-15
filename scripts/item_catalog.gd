@@ -47,6 +47,11 @@ static func get_def(id: String) -> Dictionary:
 static func has_def(id: String) -> bool:
 	return _defs.has(id)
 
+## 某实体是否为边缘贴纸（mount=='edge'）：背包分流用（贴纸走贴纸 app，其余走物品 app）。
+## 未知 id（服务端未下发定义的造物）按 tile 处理 → 不是贴纸，留在物品页。
+static func is_edge(id: String) -> bool:
+	return String(get_def(id).get("mount", "tile")) == "edge"
+
 ## 内置贴纸实体 id 清单（mount=='edge'）：贴纸小铺货架数据源（phone_ui）。
 static func sticker_ids() -> Array:
 	ensure_builtin()
