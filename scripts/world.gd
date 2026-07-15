@@ -164,6 +164,13 @@ var _tap_marker: MeshInstance3D = null
 var _tap_marker_logical := Vector2.ZERO
 var _tap_marker_t := 0.0
 
+# intro 教学视觉指引（Bug②）：地面脉动光环 + 话筒 HUD 提示，由 IntroDirector 各教学步开关。
+var _intro_hint: MeshInstance3D = null   ## 目标地面/村民脚下的脉动光环
+var _intro_hint_logical := Vector2.ZERO
+var _intro_hint_active := false
+var _intro_hint_t := 0.0                 ## 呼吸相位
+var _intro_mic_hint := false             ## 说话步：亮底部话筒+声波 HUD（放行 _update_voice_wave）
+
 # M2 语音交互（近身开放麦：无按钮，VAD 自动断句）——编排收敛到 VoiceCapture 模块（见 _vc）
 var backend: Backend
 var _vc: VoiceCapture               ## 开放麦编排（mic+VAD+端侧/服务端ASR+自听防护+BGM门控），与 onboarding 共用
@@ -2039,6 +2046,7 @@ func _process(delta: float) -> void:
 	_update_home_portals()     # 回家临时门随世界滚动 + 按 rise 从地下升起/沉下
 	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
+	_update_intro_hint(delta)
 	_update_refine_indicator(delta)
 	_update_place_ghost()
 	_update_voice_wave(delta)
@@ -2869,7 +2877,8 @@ func _layout_voice_wave(creation: bool) -> void:
 
 ## 只管收听 HUD 的显隐（选中角色时显示）：声波起伏由 VoiceWave 自跑，隐藏时它自动停。
 func _update_voice_wave(_delta: float) -> void:
-	var active := selected != null and is_instance_valid(selected)
+	# intro 说话教学步没有 selected（不走近身对话），靠 _intro_mic_hint 放行，让"话筒亮了"这句旁白有对应画面。
+	var active := (selected != null and is_instance_valid(selected)) or _intro_mic_hint
 	if voice_wave.visible != active:
 		voice_wave.visible = active
 
@@ -4758,6 +4767,55 @@ func intro_show_scenery() -> void:
 	if chunk_manager != null:
 		chunk_manager.set_props_shown(int(_gfx_levels.get("prop_anim", 1)) > 0)
 		chunk_manager.set_ground_shadows(int(_gfx_levels.get("ground_shadows", 1)) > 0)
+
+## ── intro 教学视觉指引（Bug②）──────────────────────────────────────────
+## 幼儿只听旁白容易发懵、盯着空地不知道要干嘛——每个教学步配一个看得见的目标：走路/靠近亮地面脉动光环，
+## 说话亮底部话筒+声波 HUD。纯客户端视觉、无声、不改 fsm，由 IntroDirector 各教学步开关。
+func intro_hint_at(logical: Vector2, color: Color) -> void:
+	if _intro_hint == null:
+		_intro_hint = MeshInstance3D.new()
+		var m := CylinderMesh.new()  # 扁圆片贴地（复用 _tap_marker 同款，_place_on_bent_ground 已验稳）
+		m.top_radius = 0.85
+		m.bottom_radius = 0.85
+		m.height = 0.06
+		_intro_hint.mesh = m
+		var mat := StandardMaterial3D.new()
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_intro_hint.material_override = mat
+		add_child(_intro_hint)
+	(_intro_hint.material_override as StandardMaterial3D).albedo_color = color
+	_intro_hint_logical = logical
+	_intro_hint_active = true
+	_intro_hint_t = 0.0
+	_intro_hint.visible = true
+
+## 说话步：亮话筒+声波 HUD（地面环收掉，二者不同框）。
+func intro_hint_mic() -> void:
+	_hide_intro_ground_hint()
+	_intro_mic_hint = true
+
+## 收掉全部 intro 教学指引（步间切换 / skip / 教学结束都调）。
+func intro_hint_clear() -> void:
+	_hide_intro_ground_hint()
+	_intro_mic_hint = false
+
+func _hide_intro_ground_hint() -> void:
+	_intro_hint_active = false
+	if _intro_hint != null:
+		_intro_hint.visible = false
+
+## 每帧脉动 + 随世界滚动贴地（环面最短位移，与 _tap_marker 同套）。
+func _update_intro_hint(delta: float) -> void:
+	if not _intro_hint_active or _intro_hint == null:
+		return
+	_intro_hint_t += delta
+	var d := WorldGrid.shortest_delta(focus_logical, _intro_hint_logical)
+	var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(_intro_hint_logical))) * TerrainMap.STEP_HEIGHT
+	_place_on_bent_ground(_intro_hint, Vector3(d.x, ty + 0.05, d.y))
+	var pulse := 0.5 + 0.5 * sin(_intro_hint_t * 3.5)  # 呼吸 0..1
+	_intro_hint.scale = Vector3(0.8 + pulse * 0.4, 1.0, 0.8 + pulse * 0.4)
+	(_intro_hint.material_override as StandardMaterial3D).albedo_color.a = 0.4 + pulse * 0.45
 
 ## 压测负载退场：取消驱动它的 ambient 执行器（按引用同一性，别让 step 撞上已释放节点）、注销占用、
 ## 释放节点、出 npcs 数组。bench_ 前缀成批识别。

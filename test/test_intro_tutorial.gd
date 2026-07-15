@@ -18,6 +18,8 @@ var target := Vector2.ZERO     ## 目标 demo 村民逻辑坐标
 var have_target := false
 var villager_emoted := false   ## 全程锁存：任一 demo 村民被近身触发过挥手/点头
 var fairy_spoke_during_intro := false ## 全程锁存：intro 未结束时点点是否闲聊过（greet/idle）——应恒 false
+var hint_ring_shown := false   ## 全程锁存：走路/靠近步的地面脉动光环出现过（Bug②视觉指引）
+var mic_hint_shown := false    ## 全程锁存：说话步话筒+声波 HUD 被亮起过（Bug②视觉指引）
 var swing_t := 0.0
 
 func _initialize() -> void:
@@ -73,6 +75,12 @@ func _tick() -> void:
 	# 必须闭嘴，否则两个音源叠着孩子一句听不清（Bug①）。锁存：intro 未 done 时 _fairy_greeted 一旦为真即失败。
 	if intro != null and not bool(intro.call("is_done")) and bool(scene.get("_fairy_greeted")):
 		fairy_spoke_during_intro = true
+	# Bug②视觉指引锁存：教学步会亮地面脉动光环(走路/靠近)与话筒 HUD(说话)
+	var hint_node: Variant = scene.get("_intro_hint")
+	if hint_node is Node3D and (hint_node as Node3D).visible:
+		hint_ring_shown = true
+	if scene.get("_intro_mic_hint") == true:
+		mic_hint_shown = true
 	if intro != null and bool(intro.call("is_done")):
 		done = true
 		_finish()
@@ -82,6 +90,8 @@ func _finish() -> void:
 	_check("教学:开口被本地 VAD 检测到", bool(scene.call("intro_heard_speech")), true)
 	_check("教学:村民被近身触发挥手 emote", villager_emoted, true)
 	_check("Bug①:intro 期间点点不抢旁白(环境闲聊被 gate)", fairy_spoke_during_intro, false)
+	_check("Bug②:走路/靠近步亮过地面脉动光环", hint_ring_shown, true)
+	_check("Bug②:说话步亮过话筒+声波 HUD", mic_hint_shown, true)
 	_check("编排器完成转正", done, true)
 	_check("首次演完标记 intro_seen（false→true）", PlayerProfile.intro_seen(), true)
 	var demos := 0
