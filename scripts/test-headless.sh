@@ -43,6 +43,7 @@ UNIT_TESTS=(
   test_ball_replication_buffer
   test_behavior_executor
   test_edge_tts
+  test_tts_prebuffer
   test_fairy_voice
   test_npc_wish_voice
   test_prebaked_voice
