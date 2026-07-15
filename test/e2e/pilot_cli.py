@@ -11,7 +11,7 @@
   pilot_cli.py tap 491 638 / drag x1 y1 x2 y2 --ms 400 / long-press x y / pinch x y --scale 0.5
   pilot_cli.py click --text "确认" / click --path /root/...
   pilot_cli.py phone open / phone app items / phone close
-  pilot_cli.py pick self / accept / talk-fairy / talk-npc / inject / reset-budget
+  pilot_cli.py pick self / accept / talk-fairy / talk-npc / inject / reset-budget / reset-intro
   pilot_cli.py scene forest / teleport 30 40 / teleport --near
   pilot_cli.py wait-world                  # 等 ws_open+npc≥8+vc_ready（进世界后必等）
   pilot_cli.py wait --key in_creation --truthy --timeout 30
@@ -89,7 +89,7 @@ def main():
     p.add_argument("tile_x", type=int, nargs="?")
     p.add_argument("tile_y", type=int, nargs="?")
     p.add_argument("--near", action="store_true")
-    for name in ("inject", "accept", "replay", "retry", "talk-fairy", "talk-npc", "reset-budget"):
+    for name in ("inject", "accept", "replay", "retry", "talk-fairy", "talk-npc", "reset-budget", "reset-intro"):
         sub.add_parser(name)
     p = sub.add_parser("wait-world")
     p.add_argument("--timeout", type=float, default=120.0, dest="wtimeout")

@@ -159,7 +159,7 @@ static func parse_command(line: String) -> Dictionary:
 			if dict.has("quality"):
 				scap["quality"] = float(dict["quality"])
 			return scap
-		"inject", "state", "accept", "replay", "retry", "talk_fairy", "talk_npc", "reset_budget":
+		"inject", "state", "accept", "replay", "retry", "talk_fairy", "talk_npc", "reset_budget", "reset_intro":
 			return {"ok": true, "op": op}
 		_:
 			return {"ok": false, "error": "unknown op: %s" % op}
@@ -294,6 +294,8 @@ func _execute(cmd: Dictionary) -> Dictionary:
 			return _do_pickup(int(cmd["tileX"]), int(cmd["tileY"]), int(cmd["edgeSide"]))
 		"reset_budget":
 			return _do_reset_budget()
+		"reset_intro":
+			return _do_reset_intro(bool(cmd.get("nav", true)))
 		"photo":
 			return _do_photo(cmd)
 		"scene":
@@ -826,6 +828,23 @@ func _do_reset_budget() -> Dictionary:
 		return {"ok": false, "error": "world 无 harness_reset_play_budget"}
 	w.call("harness_reset_play_budget")
 	return {"ok": true, "op": "reset_budget"}
+
+## reset_intro：清「已看过 intro」标志 + 置 IntroDirector.pending，让下次进世界重跑建造演出+教学。
+## 真机验 intro 的入口——设备已 onboarded + 有画质档 → should_run 为假不会自发跑 intro，而华为 SELinux
+## 把 run-as 挡死（改不了 profile）、pm clear 又会清角色。保留画质档 → 走教学变体、不跑长 benchmark。
+## nav 默认 true：写完档切回菜单，点进入即重跑（menu 会按 should_run 重新置 pending，与此处冗余但一致）。
+## 单测传 nav=false 免切场景（测试不过帧，deferred change_scene 不该扰断言）。
+func _do_reset_intro(nav: bool) -> Dictionary:
+	var p := PlayerProfile.load_profile()
+	p["intro_seen"] = false
+	PlayerProfile.save_profile(p)
+	IntroDirector.pending = true
+	if nav:
+		var tree := get_tree()
+		if tree != null:
+			tree.change_scene_to_file("res://menu.tscn")
+	return {"ok": true, "op": "reset_intro",
+		"intro_seen": PlayerProfile.intro_seen(), "pending": IntroDirector.pending}
 
 func _do_confirm_key(op: String) -> Dictionary:
 	var vc := _vc()

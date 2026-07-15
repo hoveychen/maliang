@@ -608,6 +608,18 @@ func _run_once() -> void:
 	current_scene = prev_scene
 	auto_srv.queue_free()
 
+	# reset_intro：清「已看过 intro」标志 + 置 pending，让下次进世界重跑建造演出+教学
+	# （真机改不了 profile 时的入口：华为 run-as 被 SELinux 挡、又不想 pm clear 清角色）。
+	# nav=false 免切场景（测试不过帧，deferred change_scene 不该扰乱断言）。
+	print("[_execute reset_intro：清 intro_seen 置 pending]")
+	var pp := PlayerProfile.load_profile(); pp["intro_seen"] = true; PlayerProfile.save_profile(pp)
+	IntroDirector.pending = false
+	var r_ri := srv._execute({"op": "reset_intro", "nav": false})
+	fails += _check("reset_intro 回包 ok", r_ri.get("ok"), true)
+	fails += _check("reset_intro 清 intro_seen=false", PlayerProfile.intro_seen(), false)
+	fails += _check("reset_intro 置 pending=true", IntroDirector.pending, true)
+	fails += _check("reset_intro parse 接受(无参白名单)", DebugCmdServer.parse_command('{"op":"reset_intro"}').get("ok"), true)
+
 	vc.close(); vc.queue_free()
 	srv.queue_free()
 	world.queue_free()
