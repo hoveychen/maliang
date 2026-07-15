@@ -41,6 +41,23 @@ export function PlayerDetailPage() {
             </dl>
           </div>
 
+          <h2 className="sect">创建形象档案（onboarding）</h2>
+          {!data.onboarding ? <div className="empty">没有 onboarding 档案（老档案或还没走完新版创建流程）</div> : (
+            <div className="panel">
+              <dl className="kv">
+                <dt>性别</dt><dd>{data.onboarding.attrs.gender || '—'}</dd>
+                <dt>发型</dt><dd>{data.onboarding.attrs.hairstyle || '—'}</dd>
+                <dt>衣服</dt><dd>{data.onboarding.attrs.outfit || '—'}</dd>
+                <dt>主色</dt><dd>{data.onboarding.attrs.color || '—'}</dd>
+                <dt>喜欢的图案</dt><dd>{data.onboarding.attrs.motifs.length > 0 ? data.onboarding.attrs.motifs.join('、') : '—'}</dd>
+                <dt>配饰</dt><dd>{data.onboarding.attrs.accessory || '—'}</dd>
+                <dt>开放语音原话</dt><dd>{data.onboarding.attrs.extras.length > 0 ? data.onboarding.attrs.extras.map((e, i) => <span className="badge" key={i} style={{ marginRight: 6 }}>{e}</span>) : '—'}</dd>
+                <dt>照镜子修改</dt><dd>{data.onboarding.refineNotes.length > 0 ? data.onboarding.refineNotes.map((e, i) => <span className="badge pine" key={i} style={{ marginRight: 6 }}>{e}</span>) : '—'}</dd>
+                <dt>最终外观描述</dt><dd>{data.onboarding.visualDescription || '—'}</dd>
+              </dl>
+            </div>
+          )}
+
           <h2 className="sect">会话史（{data.visits.length}）</h2>
           {data.visits.length === 0 ? <div className="empty">还没来过</div> : (
             <table className="grid">
