@@ -76,7 +76,7 @@ func _tick() -> void:
 			_check("背包回一份", int((scene.get("bag") as Dictionary).get("i1", 0)), 1)
 			_check("横幅提示收进册子", (scene.get("banner") as Label).text.contains("收进"), true)
 		11:
-			_check("物品页上架背包物品", ((scene.get("phone_ui") as PhoneUi).get("_items_grid") as GridContainer).get_child_count(), 1)
+			_check("物品页上架背包物品", _items_cell_count(scene.get("phone_ui") as PhoneUi), 1)
 			# 物品页点击再摆出（克隆语义：同实体反复引用）：现在点物品进放置模式，
 			# 幽灵停在默认合法位，按「放这里」= _confirm_placement 才发 item_place（placement-p1）。
 			scene.call("_begin_placement", "i1")
@@ -94,7 +94,7 @@ func _tick() -> void:
 			_check("再摆落地", TerrainMap.tile_item_id(second_tile), "i1")
 		15:
 			# 上一帧 queue_free 的旧格子已清，此时才好数物品页
-			_check("物品页清空", ((scene.get("phone_ui") as PhoneUi).get("_items_grid") as GridContainer).get_child_count(), 0)
+			_check("物品页清空", _items_cell_count(scene.get("phone_ui") as PhoneUi), 0)
 			# 拾起判定负例：内置物品（矩阵里的树/石）与空 tile 都不可拾
 			var builtin_tile := _find_builtin_tile()
 			if builtin_tile.x >= 0:
@@ -112,6 +112,16 @@ func _tick() -> void:
 			quit(fails)
 
 ## 模拟服务端摆放广播：palette 无 i1 则 append，edits 挂引用；version 严格 +1。
+## 背包总格数 = 4×4 纵向翻页各页网格格子之和（backpack-redesign P2：_items_grid 已换成 _items_pages_box）。
+func _items_cell_count(pui: PhoneUi) -> int:
+	var box := pui.get("_items_pages_box") as VBoxContainer
+	if box == null:
+		return -1
+	var n := 0
+	for g in box.get_children():
+		n += (g as GridContainer).get_child_count()
+	return n
+
 func _apply_place_patch(tile: Vector2i) -> void:
 	var pal := TerrainMap.palette()
 	var ref := pal.find("i1") + 1

@@ -1,0 +1,621 @@
+{
+  "voice": "zh-CN-YunxiaNeural",
+  "lines": [
+    {
+      "id": "tree_puff_a",
+      "text": "蓬蓬树·甲"
+    },
+    {
+      "id": "tree_puff_b",
+      "text": "蓬蓬树·乙"
+    },
+    {
+      "id": "tree_puff_c",
+      "text": "蓬蓬树·丙"
+    },
+    {
+      "id": "bush_puff",
+      "text": "圆灌木"
+    },
+    {
+      "id": "rock_0",
+      "text": "岩石·甲"
+    },
+    {
+      "id": "rock_1",
+      "text": "岩石·乙"
+    },
+    {
+      "id": "rock_2",
+      "text": "岩石·丙"
+    },
+    {
+      "id": "tuft_0",
+      "text": "草丛·甲"
+    },
+    {
+      "id": "tuft_1",
+      "text": "草丛·乙"
+    },
+    {
+      "id": "house_0",
+      "text": "蓝顶民居"
+    },
+    {
+      "id": "house_1",
+      "text": "红顶民居"
+    },
+    {
+      "id": "house_2",
+      "text": "黄顶民居"
+    },
+    {
+      "id": "house_3",
+      "text": "绿顶民居"
+    },
+    {
+      "id": "well",
+      "text": "水井"
+    },
+    {
+      "id": "windmill",
+      "text": "风车"
+    },
+    {
+      "id": "walking_hut",
+      "text": "走路小屋"
+    },
+    {
+      "id": "hop_mailbox",
+      "text": "蹦跳信箱"
+    },
+    {
+      "id": "nodding_flower",
+      "text": "点头花"
+    },
+    {
+      "id": "pinwheel",
+      "text": "纸风车"
+    },
+    {
+      "id": "paper_note",
+      "text": "纸条"
+    },
+    {
+      "id": "crayon",
+      "text": "蜡笔"
+    },
+    {
+      "id": "village_sign",
+      "text": "村口路牌"
+    },
+    {
+      "id": "robot_animated",
+      "text": "机器人"
+    },
+    {
+      "id": "robot_enemy",
+      "text": "守卫机器人"
+    },
+    {
+      "id": "robot_flying",
+      "text": "飞行机器人"
+    },
+    {
+      "id": "robot_legs_gun",
+      "text": "巡逻机器人"
+    },
+    {
+      "id": "robot_flying_gun",
+      "text": "哨戒机"
+    },
+    {
+      "id": "robot_large",
+      "text": "大型机器人"
+    },
+    {
+      "id": "mech",
+      "text": "机甲"
+    },
+    {
+      "id": "scifi_hangar",
+      "text": "机库"
+    },
+    {
+      "id": "scifi_generator",
+      "text": "发电机"
+    },
+    {
+      "id": "scifi_satellite",
+      "text": "卫星天线"
+    },
+    {
+      "id": "scifi_barrel",
+      "text": "燃料桶"
+    },
+    {
+      "id": "scifi_crystals",
+      "text": "能量晶簇"
+    },
+    {
+      "id": "toy_bear",
+      "text": "玩具熊"
+    },
+    {
+      "id": "toy_bed_single",
+      "text": "单人床"
+    },
+    {
+      "id": "toy_bed_bunk",
+      "text": "双层床"
+    },
+    {
+      "id": "toy_bookcase",
+      "text": "书架"
+    },
+    {
+      "id": "toy_sofa",
+      "text": "沙发"
+    },
+    {
+      "id": "toy_chair",
+      "text": "圆背椅"
+    },
+    {
+      "id": "toy_table",
+      "text": "桌子"
+    },
+    {
+      "id": "toy_coffee_table",
+      "text": "茶几"
+    },
+    {
+      "id": "toy_lamp",
+      "text": "落地灯"
+    },
+    {
+      "id": "toy_plant",
+      "text": "盆栽"
+    },
+    {
+      "id": "toy_tv",
+      "text": "电视机"
+    },
+    {
+      "id": "toy_box",
+      "text": "纸箱"
+    },
+    {
+      "id": "city_shop_a",
+      "text": "临街商铺·甲"
+    },
+    {
+      "id": "city_shop_b",
+      "text": "临街商铺·乙"
+    },
+    {
+      "id": "city_shop_c",
+      "text": "临街商铺·丙"
+    },
+    {
+      "id": "city_shop_d",
+      "text": "临街商铺·丁"
+    },
+    {
+      "id": "city_shop_e",
+      "text": "临街商铺·戊"
+    },
+    {
+      "id": "city_shop_f",
+      "text": "临街商铺·己"
+    },
+    {
+      "id": "city_shop_g",
+      "text": "临街商铺·庚"
+    },
+    {
+      "id": "city_tower_a",
+      "text": "高楼·甲"
+    },
+    {
+      "id": "city_tower_b",
+      "text": "高楼·乙"
+    },
+    {
+      "id": "city_tower_c",
+      "text": "高楼·丙"
+    },
+    {
+      "id": "city_tower_d",
+      "text": "高楼·丁"
+    },
+    {
+      "id": "city_tower_e",
+      "text": "高楼·戊"
+    },
+    {
+      "id": "kit_fridge",
+      "text": "冰箱"
+    },
+    {
+      "id": "kit_stove",
+      "text": "灶台"
+    },
+    {
+      "id": "kit_sink",
+      "text": "水槽"
+    },
+    {
+      "id": "kit_microwave",
+      "text": "微波炉"
+    },
+    {
+      "id": "kit_cabinet",
+      "text": "橱柜"
+    },
+    {
+      "id": "kit_cabinet_drawer",
+      "text": "抽屉柜"
+    },
+    {
+      "id": "kit_coffee",
+      "text": "咖啡机"
+    },
+    {
+      "id": "kit_blender",
+      "text": "榨汁机"
+    },
+    {
+      "id": "kit_toaster",
+      "text": "烤面包机"
+    },
+    {
+      "id": "kit_hood",
+      "text": "抽油烟机"
+    },
+    {
+      "id": "kit_bar",
+      "text": "吧台"
+    },
+    {
+      "id": "kit_stool",
+      "text": "吧凳"
+    },
+    {
+      "id": "mv_home_a",
+      "text": "民居·甲"
+    },
+    {
+      "id": "mv_home_b",
+      "text": "民居·乙"
+    },
+    {
+      "id": "mv_blacksmith",
+      "text": "铁匠铺"
+    },
+    {
+      "id": "mv_market",
+      "text": "集市"
+    },
+    {
+      "id": "mv_tavern",
+      "text": "酒馆"
+    },
+    {
+      "id": "mv_church",
+      "text": "教堂"
+    },
+    {
+      "id": "mv_windmill",
+      "text": "风车"
+    },
+    {
+      "id": "mv_watermill",
+      "text": "水车"
+    },
+    {
+      "id": "mv_lumbermill",
+      "text": "伐木场"
+    },
+    {
+      "id": "mv_mine",
+      "text": "矿场"
+    },
+    {
+      "id": "mv_well",
+      "text": "水井"
+    },
+    {
+      "id": "mk_castle",
+      "text": "城堡"
+    },
+    {
+      "id": "mk_barracks",
+      "text": "兵营"
+    },
+    {
+      "id": "mk_archery",
+      "text": "箭馆"
+    },
+    {
+      "id": "mk_tower_a",
+      "text": "塔楼·甲"
+    },
+    {
+      "id": "mk_tower_b",
+      "text": "塔楼·乙"
+    },
+    {
+      "id": "mk_tower_base",
+      "text": "塔基"
+    },
+    {
+      "id": "mk_catapult",
+      "text": "投石塔"
+    },
+    {
+      "id": "mk_gate",
+      "text": "城门"
+    },
+    {
+      "id": "mk_gate_closed",
+      "text": "闭合城门"
+    },
+    {
+      "id": "mk_wall",
+      "text": "城墙"
+    },
+    {
+      "id": "mk_wall_corner",
+      "text": "城墙拐角"
+    },
+    {
+      "id": "mk_watchtower",
+      "text": "瞭望塔"
+    },
+    {
+      "id": "sea_fish_a",
+      "text": "小鱼·甲"
+    },
+    {
+      "id": "sea_fish_b",
+      "text": "小鱼·乙"
+    },
+    {
+      "id": "sea_fish_c",
+      "text": "热带鱼"
+    },
+    {
+      "id": "sea_dolphin",
+      "text": "海豚"
+    },
+    {
+      "id": "sea_whale",
+      "text": "鲸鱼"
+    },
+    {
+      "id": "sea_manta",
+      "text": "蝠鲼"
+    },
+    {
+      "id": "sea_shark",
+      "text": "鲨鱼"
+    },
+    {
+      "id": "snow_snowman",
+      "text": "雪人"
+    },
+    {
+      "id": "snow_snowman_hat",
+      "text": "戴帽雪人"
+    },
+    {
+      "id": "snow_tree_a",
+      "text": "雪松·甲"
+    },
+    {
+      "id": "snow_tree_b",
+      "text": "雪松·乙"
+    },
+    {
+      "id": "snow_tree_c",
+      "text": "雪松·丙"
+    },
+    {
+      "id": "snow_tree_lit",
+      "text": "装饰雪树"
+    },
+    {
+      "id": "snow_reindeer",
+      "text": "驯鹿"
+    },
+    {
+      "id": "snow_sled",
+      "text": "雪橇"
+    },
+    {
+      "id": "snow_pile",
+      "text": "雪堆"
+    },
+    {
+      "id": "snow_present_a",
+      "text": "礼物盒·方"
+    },
+    {
+      "id": "snow_present_b",
+      "text": "礼物盒·圆"
+    },
+    {
+      "id": "snow_nutcracker",
+      "text": "胡桃夹子"
+    },
+    {
+      "id": "hosp_bed",
+      "text": "病床"
+    },
+    {
+      "id": "hosp_bed_wide",
+      "text": "双人病床"
+    },
+    {
+      "id": "hosp_bedside",
+      "text": "床头柜"
+    },
+    {
+      "id": "hosp_visitor_chair",
+      "text": "陪护椅"
+    },
+    {
+      "id": "hosp_wait_bench",
+      "text": "候诊椅"
+    },
+    {
+      "id": "hosp_nurse_desk",
+      "text": "护士站"
+    },
+    {
+      "id": "hosp_doc_chair",
+      "text": "医生椅"
+    },
+    {
+      "id": "hosp_sink",
+      "text": "洗手池"
+    },
+    {
+      "id": "hosp_med_cabinet",
+      "text": "药品柜"
+    },
+    {
+      "id": "hosp_supply_cabinet",
+      "text": "器械柜"
+    },
+    {
+      "id": "hosp_waste_bin",
+      "text": "医疗垃圾桶"
+    },
+    {
+      "id": "hosp_floor_lamp",
+      "text": "落地灯"
+    },
+    {
+      "id": "roman_arch",
+      "text": "拱门"
+    },
+    {
+      "id": "roman_wall",
+      "text": "石墙"
+    },
+    {
+      "id": "roman_wall_corner",
+      "text": "石墙拐角"
+    },
+    {
+      "id": "roman_watchtower",
+      "text": "哨塔"
+    },
+    {
+      "id": "roman_tower",
+      "text": "石塔"
+    },
+    {
+      "id": "roman_tower_b",
+      "text": "瞭望石塔"
+    },
+    {
+      "id": "roman_column_base",
+      "text": "石柱基"
+    },
+    {
+      "id": "roman_fort",
+      "text": "罗马要塞"
+    },
+    {
+      "id": "cn_pagoda",
+      "text": "宝塔"
+    },
+    {
+      "id": "cn_archway",
+      "text": "牌坊"
+    },
+    {
+      "id": "cn_pavilion",
+      "text": "古亭"
+    },
+    {
+      "id": "cn_shrine",
+      "text": "神龛"
+    },
+    {
+      "id": "dino_trex",
+      "text": "霸王龙"
+    },
+    {
+      "id": "dino_raptor",
+      "text": "迅猛龙"
+    },
+    {
+      "id": "dino_triceratops",
+      "text": "三角龙"
+    },
+    {
+      "id": "dino_parasaur",
+      "text": "鸭嘴龙"
+    },
+    {
+      "id": "dino_stego",
+      "text": "剑龙"
+    },
+    {
+      "id": "dino_apato",
+      "text": "腕龙"
+    },
+    {
+      "id": "sticker_sun",
+      "text": "太阳贴纸"
+    },
+    {
+      "id": "sticker_flower",
+      "text": "花朵贴纸"
+    },
+    {
+      "id": "sticker_star",
+      "text": "星星贴纸"
+    },
+    {
+      "id": "sticker_rainbow",
+      "text": "彩虹贴纸"
+    },
+    {
+      "id": "sticker_heart",
+      "text": "爱心贴纸"
+    },
+    {
+      "id": "sticker_butterfly",
+      "text": "蝴蝶贴纸"
+    },
+    {
+      "id": "sticker_moon",
+      "text": "月亮贴纸"
+    },
+    {
+      "id": "sticker_cloud",
+      "text": "云朵贴纸"
+    },
+    {
+      "id": "sticker_strawberry",
+      "text": "草莓贴纸"
+    },
+    {
+      "id": "sticker_smile",
+      "text": "笑脸贴纸"
+    },
+    {
+      "id": "sticker_flag",
+      "text": "小旗贴纸"
+    },
+    {
+      "id": "sticker_mushroom",
+      "text": "蘑菇贴纸"
+    }
+  ]
+}

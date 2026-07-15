@@ -5416,6 +5416,30 @@ func _end_placement() -> void:
 	if _place_view != null:
 		_place_view.visible = false
 
+## 扔掉（背包重做设计 §5）：把背包里一份物品扔到玩家身边就近一格，落地成可再捡回的物品。
+## 与「摆到地块」不同：无幽灵预览、即时抛出。复用 item_place——占用图只在客户端，故就近找空位
+## 在客户端算好，服务端只做权威落地（bag 扣减 + tile 编辑广播）。找不到合法位就落自己脚下兜底，
+## 贴纸附近无可贴边则保守不扔（物品留背包）。
+func _throw_item(item_id: String) -> void:
+	if int(bag.get(item_id, 0)) < 1 or not online:
+		return
+	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
+	var want := WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(2.0, 1.0)))
+	var is_edge := String(ItemCatalog.get_def(item_id).get("mount", "tile")) == "edge"
+	if is_edge:
+		var espot := _find_sticker_spot(want)
+		if espot.z < 0:
+			return # 附近没边可贴 → 扔不出去（保守：不落，物品留背包）
+		backend.send_item_place(world_id, item_id, Vector2i(espot.x, espot.y), 0.0, espot.z)
+	else:
+		var spot := _find_item_spot(want)
+		if spot.x < 0:
+			spot = WorldGrid.to_tile(WorldGrid.wrap_pos(anchor)) # 兜底：落自己脚下
+		backend.send_item_place(world_id, item_id, spot, 0.0)
+	if game_audio != null:
+		game_audio.play_sfx("pluck") # 从册子里拈出来扔掉
+	_close_phone() # 收手机看落地（幂等，同时退近身相机）
+
 ## 放置 HUD：底部一排大按钮（转一转/收起来/放这里）+ 顶部提示条。全屏透明容器不吃点击，
 ## 只有按钮吃——空地点击照样穿透到 _unhandled_input 去挪幽灵（placement-p1 §3.1）。
 func _build_placement_view(host: CanvasLayer) -> void:

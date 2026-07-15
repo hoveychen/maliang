@@ -13,6 +13,13 @@ func _check(cond: bool, msg: String) -> void:
 		printerr("  ✗ ", msg)
 		_fails += 1
 
+## 背包格的数量角标文字（P3）：直属 Label 子节点=数量圆角标；无则返回空串。
+func _count_badge_text(cell: Control) -> String:
+	for c in cell.get_children():
+		if c is Label:
+			return (c as Label).text
+	return ""
+
 func _initialize() -> void:
 	var scene: Node = load("res://main.tscn").instantiate()
 	root.add_child(scene)
@@ -80,6 +87,70 @@ func _run(scene: Node) -> void:
 				_check(not (pages[pid] as Control).visible, "%s：其它页 %s 隐藏" % [id, pid])
 	_check(phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_ALWAYS,
 		"跨页态跨页视口在更新")
+
+	# 背包 2×4 纵向翻页（backpack-redesign P2，方案二改 2 列）：塞 20 件 → 按 ITEMS_PER_PAGE 分页，
+	# 验证网格列数/页数/圆点/snap。页数从常量推导，改列数不再破断言。
+	var bag := {}
+	for i in 20:
+		bag["itm_%02d" % i] = 1
+	scene.set("bag", bag)
+	pui.open_app("items")
+	await scene.get_tree().process_frame  # 冲刷上一轮空背包页的延迟 queue_free，再数页数
+	var epages := int(ceil(20.0 / float(PhoneUi.ITEMS_PER_PAGE)))  # 20 件 @ 8/页 = 3 页
+	var ipager: ScrollContainer = pui.get("_items_pager")
+	var ipages: VBoxContainer = pui.get("_items_pages_box")
+	var idots: VBoxContainer = pui.get("_items_dots")
+	_check(ipager != null and ipages != null and idots != null, "背包翻页容器/页箱/圆点就位")
+	_check(ipages != null and ipages.get_child_count() == epages, "20 件 → %d 页（%d 件/页）" % [epages, PhoneUi.ITEMS_PER_PAGE])
+	var icols_ok := true
+	var icell_total := 0
+	if ipages != null:
+		for g in ipages.get_children():
+			if (g as GridContainer).columns != PhoneUi.ITEMS_COLS:
+				icols_ok = false
+			icell_total += (g as GridContainer).get_child_count()
+	_check(icols_ok, "每页网格 columns=%d" % PhoneUi.ITEMS_COLS)
+	_check(icell_total == 20, "各页格子总数 = 物品数 20")
+	_check(idots != null and idots.get_child_count() == epages and idots.visible, "%d 页 → %d 个纵向圆点、可见" % [epages, epages])
+	# 单页视口高定死一页：容器 min 高 = ITEMS_PAGE_H，snap 目标 = 页序 × 页高
+	_check(ipager != null and is_equal_approx(ipager.custom_minimum_size.y, PhoneUi.ITEMS_PAGE_H),
+		"翻页容器高 = ITEMS_PAGE_H（固定单页高）")
+	# 翻到第 2 页：设当前页 + 步进若干帧（真帧让布局落定，翻页容器才知道可滚范围），滚动应贴到 1×页高
+	pui.set("_items_page", 1)
+	for _f in 40:
+		await scene.get_tree().process_frame
+		pui.tick(0.05)
+	_check(ipager != null and absi(ipager.scroll_vertical - int(round(PhoneUi.ITEMS_PAGE_H))) <= 3,
+		"翻到第 2 页：纵向滚动 snap 到 1×页高（%d≈%d）" % [ipager.scroll_vertical, int(round(PhoneUi.ITEMS_PAGE_H))])
+	# 数量角标（P3）：份数>1 出圆角标、=1 不出；格子已去文字名（不含物品名 Label）。
+	scene.set("bag", { "aa": 3, "bb": 1 })
+	pui.open_app("items")
+	await scene.get_tree().process_frame
+	var g0: GridContainer = (pui.get("_items_pages_box") as VBoxContainer).get_child(0) as GridContainer
+	var cell_aa: Control = g0.get_child(0) as Control  # "aa" 排在 "bb" 前
+	var cell_bb: Control = g0.get_child(1) as Control
+	_check(_count_badge_text(cell_aa) == "x3", "份数 3：出数量角标 x3")
+	_check(_count_badge_text(cell_bb) == "", "份数 1：不出数量角标")
+
+	# 详情面板（P4）：点格子→左半页出大图+名字+动作按钮；再开物品页回空态。
+	pui._select_item("aa")
+	_check(String(pui.get("_selected_item")) == "aa", "选中 aa：_selected_item 记录")
+	_check(pui.get("_detail_image") != null, "详情：大图控件就位")
+	var btn_texts := []
+	for c in (pui.get("_items_detail") as VBoxContainer).get_children():
+		if c is VBoxContainer:
+			for b in (c as VBoxContainer).get_children():
+				if b is Button:
+					btn_texts.append((b as Button).text)
+	_check(btn_texts.has("摆到地块"), "详情：有「摆到地块」动作按钮")
+	pui.open_app("items")
+	_check(String(pui.get("_selected_item")) == "", "重开物品页：详情回空态")
+
+	# 空背包：无物品仍不崩、出空态提示、只 1 页（空网格）
+	scene.set("bag", {})
+	pui.open_app("items")
+	_check((pui.get("_items_empty") as Label).visible, "空背包：空态提示可见")
+	_check((pui.get("_items_dots") as VBoxContainer).get_child_count() <= 1, "空背包：≤1 页无圆点")
 
 	pui.close_app()
 	_check(phone.state == PaperPhone.State.FRONT, "返回后回正面态")

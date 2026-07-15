@@ -37,6 +37,7 @@ UNIT_TESTS=(
   test_terrain_atlas
   test_scifi_items
   test_pack_registry
+  test_item_thumbnailer
   test_autotile
   test_occupancy_map
   test_pathfinder
@@ -195,6 +196,7 @@ run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
 run_test test_task_hint_ask        --fixed-fps 10 --quit-after 60
 run_test test_visual_props         --fixed-fps 10 --quit-after 120
 run_test test_placement            --fixed-fps 10 --quit-after 40
+run_test test_item_voice           --fixed-fps 10 --quit-after 60
 run_test test_casting_placeholder  --fixed-fps 10 --quit-after 120
 run_test test_prop_creation_cards  --fixed-fps 10 --quit-after 90
 run_test test_build_cards           --fixed-fps 10 --quit-after 90
