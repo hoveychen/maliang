@@ -158,9 +158,15 @@ export function stripAvatarOptionIds(s: string): string {
   return s.replace(/\bav_[a-z0-9_]+/g, '');
 }
 
-/** 描述是否违反任一硬规则（持物/头顶遮挡）——LLM 产物的重试判据与单测共用。 */
+/**
+ * 占手姿势措辞（老板 2026-07-15 追加）：handL/handR 也是贴纸装扮锚点、且将来角色要能拿东西——
+ * 叉腰/合十/交叠这类姿势把手「用掉」了。唯一合规姿势：双手自然垂在身体两侧。
+ */
+export const AVATAR_FORBIDDEN_POSE = /(叉腰|合十|交叠|抱胸|抱臂|插兜|插着口袋|插口袋|背在身后|放在身前|十指相扣|托腮|捂着)/;
+
+/** 描述是否违反任一硬规则（持物/头顶遮挡/占手姿势）——LLM 产物的重试判据与单测共用。 */
 export function avatarDescForbidden(desc: string): boolean {
-  return AVATAR_FORBIDDEN_DESC.test(desc) || AVATAR_FORBIDDEN_HEAD.test(desc);
+  return AVATAR_FORBIDDEN_DESC.test(desc) || AVATAR_FORBIDDEN_HEAD.test(desc) || AVATAR_FORBIDDEN_POSE.test(desc);
 }
 
 /**
