@@ -84,6 +84,21 @@ func _run(thumb: ItemThumbnailer, api: StubApi, dummy: Texture2D) -> void:
 	thumb.request("", {})
 	_check(true, "空 id 请求不崩")
 
+	# 5) preheat(P2):命中服务端图的预拉入缓存;无服务端图的跳过(不预渲、省 GPU)
+	thumb.set_server_icons({ "srv_item": "hashX", "srv_item2": "hashX" })
+	var calls_before := api.calls
+	thumb.preheat([
+		{ "id": "srv_item2", "def": {} },                          # 有服务端图 → 预热拉图
+		{ "id": "no_srv", "def": { "renderRef": "nope:xyz" } },    # 无服务端图 → 跳过不预渲
+	])
+	await _await_id("srv_item2")
+	_check(thumb.has_cached("srv_item2"), "preheat:命中服务端图 → 预拉入缓存")
+	_check(api.calls == calls_before + 1, "preheat:只拉命中服务端图那件(不批量渲染)")
+	await process_frame
+	await process_frame
+	_check(not _resolved.has("no_srv"), "preheat:无服务端图的物品被跳过(不预渲、不占 GPU)")
+	_check(not thumb.has_cached("no_srv"), "preheat:跳过项不入缓存")
+
 	thumb.teardown()
 	print("item_thumbnailer: fails=%d" % _fails)
 	quit(_fails)

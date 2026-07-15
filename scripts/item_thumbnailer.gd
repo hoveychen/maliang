@@ -63,6 +63,19 @@ func request(item_id: String, def: Dictionary) -> void:
 	if not _busy:
 		_pump()
 
+## 预热：对命中服务端图的物品提前入队拉纹理（便宜，只走 fetch_texture + 磁盘缓存），
+## 消除开背包页时"礼盒→真图"的可见延迟。**不预渲无服务端图的造物**（端侧渲染贵、占 GPU，
+## 留到开页时才懒渲）。开手机/背包刷新时调；已缓存/在途的跳过，幂等。
+func preheat(entries: Array) -> void:
+	for e in entries:
+		var d := e as Dictionary
+		var id := String(d.get("id", ""))
+		if id.is_empty() or _cache.has(id) or _inflight.has(id):
+			continue
+		if String(_server_icons.get(id, "")).is_empty():
+			continue # 无服务端图 → 不预热（端侧渲染留到开页懒渲，别在这批量吃 GPU）
+		request(id, d.get("def", {}))
+
 ## 队列泵：一次只解析一件（服务端图不占 GPU，渲染逐帧节流），串行避开连续渲染停滞。
 func _pump() -> void:
 	_busy = true

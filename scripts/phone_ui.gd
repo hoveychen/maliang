@@ -142,6 +142,19 @@ func _load_item_icons() -> void:
 	var icons: Dictionary = await _w.api.fetch_item_icons()
 	if _thumbnailer != null:
 		_thumbnailer.set_server_icons(icons)
+		_preheat_bag_icons()  # 图 map 到手立刻预热背包里命中服务端图的物品（不等开页）
+
+## 预热背包里命中服务端图的物品缩略图（P2）：拿到 server-icon map / bag 变化时调，
+## 让孩子翻到物品页前真图已进缓存，开页即显真图而非"礼盒→真图"跳变。无服务端图的造物不预热。
+func _preheat_bag_icons() -> void:
+	if _thumbnailer == null or _w == null:
+		return
+	var entries := []
+	for item_id in _w.bag:
+		if int(_w.bag[item_id]) > 0:
+			entries.append({ "id": String(item_id), "def": ItemCatalog.get_def(String(item_id)) })
+	if not entries.is_empty():
+		_thumbnailer.preheat(entries)
 
 ## 缩略图到达：把对应格的图标原地换成真图（tex==null=解析失败，保持礼盒占位不动）。
 ## 按 item_id 找当前格节点——翻页/刷新后旧节点可能已释放，is_instance_valid 兜底。
@@ -1121,6 +1134,7 @@ func refresh_items() -> void:
 		_items_pages_box.remove_child(c)
 		c.queue_free()
 	_item_glyphs.clear()  # 旧格节点将释放，清收货登记（缩略图到货时按新登记找节点）
+	_preheat_bag_icons()  # bag 变了（拾/摆/扔/新造）→ 预热新增物品的服务端图，别等开页
 	var ids := []
 	for item_id in _w.bag:
 		if int(_w.bag[item_id]) > 0:
