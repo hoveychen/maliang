@@ -985,6 +985,10 @@ func _update_fairy(delta: float) -> void:
 	var step := d.normalized() * minf(speed * delta, d.length())
 	fairy["logical"] = WorldGrid.wrap_pos(fairy["logical"] + step)
 	fairy["hover"] = FAIRY_HOVER + sin(_fairy_drift_t * 2.2) * 0.3
+	# intro 建造演出期间点点的嗓子归 IntroNarrator 独占：她照常飘（上面已更新位置），但不闲聊、不扫 POI——
+	# 否则 greet/guide_hint/idle 会压在编排旁白上，两个音源叠着孩子一句听不清（Bug①）。
+	if _intro_active:
+		return
 	if not _fairy_guide.is_empty():
 		_update_fairy_bubble(fairy) # 引路中：挂气泡，但不闲聊、不扫 POI（别在带路途中被风车勾走）
 	elif _fairy_poi.is_empty():
@@ -1205,10 +1209,12 @@ func _fairy_ambient(delta: float, fairy: Dictionary) -> void:
 
 ## 村民心愿漏话：服务端下发台词，模块自己按距离/冷却/全局间隔决定谁在什么时候嘟囔一句。
 ## 仙子正在说话时全员闭嘴（正向门禁在 _fairy_ambient 里）——两个声源叠着谁也听不清。
+## intro 建造演出期间同理闭嘴：编排旁白(IntroNarrator)是另一路音源，村民漏话会压上去（Bug①）。
 func _update_npc_wishes(delta: float) -> void:
 	if npc_wish_voice == null or player.is_empty():
 		return
-	var engaged := InteractionFsm.player_engaged(_fsm_inputs()) \
+	var engaged := _intro_active \
+			or InteractionFsm.player_engaged(_fsm_inputs()) \
 			or (fairy_voice != null and fairy_voice.is_playing())
 	npc_wish_voice.update(delta, npcs, player["logical"], engaged)
 
