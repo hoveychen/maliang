@@ -1816,6 +1816,9 @@ func _red_flower_count() -> int:
 	return int(wallet.get("flowers", 0))
 
 func _physics_process(delta: float) -> void:
+	# 回家过场中：玩家由 _step_home 脚本驱动走进/走出传送门，吞掉方向键，别让手动操控抢位。
+	if _homing:
+		return
 	# 方向键直接驱动玩家（桌面调试；与点击移动同一 Mover 规则）
 	var input := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	if input != Vector2.ZERO and not player.is_empty():
@@ -1908,6 +1911,7 @@ func _process(delta: float) -> void:
 	_check_approach()
 	_step_portal()          # 踏进传送点半径 → enter_scene（黑幕 + 卸旧载新）
 	_step_transition(delta) # 过场黑幕推进（淡入/发报文/等区块/淡出）
+	_step_home(delta)       # 回家传送门过场推进（召唤门/走进/走出/消散）
 	tp = _prof_lap(tp, "approach")
 	_update_fairy(delta)
 	tp = _prof_lap(tp, "fairy")
@@ -1994,6 +1998,7 @@ func _process(delta: float) -> void:
 	_update_npc_notice(delta)  # 近身空闲村民偶尔转头看玩家打招呼（在 reposition 后跑，paper_walk 已更新）
 	_update_npc_wishes(delta)  # 近身村民偶尔漏一句心愿（3D 定位音，走近才听清）
 	_update_portal_markers()   # 传送门拱随世界滚动（与角色同一套环面最短位移）
+	_update_home_portals()     # 回家临时门随世界滚动 + 按 rise 从地下升起/沉下
 	tp = _prof_lap(tp, "npcs")
 	_update_tap_marker(delta)
 	_update_refine_indicator(delta)
@@ -2873,6 +2878,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	# benchmark 采样期：吞掉一切玩家输入（点击移动/手势/缩放），玩家不动→相机不动→可复现帧。
 	# 注：将来若把「家长长按跳过 intro」接到输入，须让它绕过这道门（否则采样期跳不了）。
 	if _bench_freeze:
+		return
+	# 回家过场中：玩家被脚本驱动走进/走出传送门，吞掉点击移动/手势/缩放，别让点击抢位或起新移动。
+	if _homing:
 		return
 	# 观演/游戏态：StageAgent 全权调度演出，吞掉一切玩家输入（点击移动/进对话/手势/缩放）。
 	# 唯一例外——「点角色」这类游戏规则（躲猫猫抓人/点选）仍要探测：命中被 watch 的演员即上行 tap 事件。
@@ -3826,6 +3834,27 @@ var _tr_anim_t := 0.0                   ## 过场动画累计秒（帧步进/呼
 const PORTAL_MARKER_SPEC := "res://assets/sdf_props/portal_arch.json"
 var _portal_markers: Array = [] ## [{ node: SdfProp, logical: Vector2 }]
 
+## —— 回家传送门过场（home-portal-anim）——
+## 「回家」逃生舱从瞬移重做成「召唤门 → 走进 → 幕后传送 → 走出 → 门消散」的动画。
+## 临时门存 _home_portals（独立于 _portal_markers：换场景 _unload_scene 不误清、也绝不进 _portals，
+## 故 _step_portal 不理它、Mover 不参与脚本 lerp——被树围死也必定走完动画）。状态机见 _step_home；
+## 跨场景与同场景（软过场）共用 _step_transition 的黑幕中段。SdfProp 禁缩放（sdf_prop.gd 契约）、
+## shader 不透明无 alpha，故召唤/消散只能用 position.y 从地下升起/沉下（地面不透明网格天然裁掉埋下的部分）。
+enum { HP_IDLE, HP_RISE_NEAR, HP_WALK_IN, HP_CROSS_WAIT, HP_SOFT_BLACK, HP_WALK_OUT_WAIT, HP_WALK_OUT, HP_DISPEL }
+const HOME_WALK_DUR := 0.55          ## 走进/走出单程时长（秒）
+const HOME_RISE_DUR := 0.35          ## 门从地下升起/沉下时长（秒）
+const HOME_NEAR_MAX_R := 2           ## 近门离玩家最多几格；超了退脚下（逃生舱：保证卡死也能走进）
+const HOME_PORTAL_SINK := 3.6        ## 召唤前把门沉到地下的深度（拱高≈3.56，够藏住）
+const HOME_FAILSAFE := 12.0          ## 总超时兜底（秒）：强制收尾回原点，别把小朋友卡在动画里
+var _homing := false                 ## 回家动画进行中（锁玩家输入，见 _physics_process/_unhandled_input）
+var _home_cross := false             ## 本次回家是否跨场景（true=enter_scene 换场景；false=同场景软过场）
+var _home_phase := HP_IDLE           ## 当前阶段
+var _home_t := 0.0                   ## 当前阶段计时（走进/走出 lerp 进度、升起进度按它算，切阶段清零）
+var _home_total_t := 0.0             ## 整段过场累计秒（超时兜底 HOME_FAILSAFE 用，跨阶段不清零）
+var _home_from := Vector2.ZERO       ## 走进/走出 lerp 起点（逻辑坐标）
+var _home_to := Vector2.ZERO         ## 走进/走出 lerp 终点（逻辑坐标）
+var _home_portals: Array = []        ## 临时门 [{ node: SdfProp, logical: Vector2, rise: float }]
+
 ## 服务端下发的 portals → 运行期结构。非法条目跳过（坏一条不连坐整批）。
 static func parse_server_portals(list: Variant) -> Array:
 	if typeof(list) != TYPE_ARRAY:
@@ -3894,16 +3923,217 @@ func _clear_portal_markers() -> void:
 			(node as Node).queue_free()
 	_portal_markers.clear()
 
+## 召唤一座临时回家门：初始埋在地下（rise=0），随后由 _step_home 的升起/沉下阶段推进 rise。
+## 门只是装饰，绝不进 _portals（_step_portal 不理它、Mover 不参与脚本 lerp）。返回门记录字典。
+func _summon_home_portal(tile: Vector2i) -> Dictionary:
+	var prop := SdfProp.from_json_file(PORTAL_MARKER_SPEC)
+	if prop == null:
+		push_warning("[home] 回家门 spec 载入失败：%s" % PORTAL_MARKER_SPEC)
+		return {}
+	add_child(prop)
+	var rec := { "node": prop, "logical": WorldGrid.from_tile_center(tile), "rise": 0.0 }
+	_home_portals.append(rec)
+	_place_portal_node(prop, rec["logical"], -HOME_PORTAL_SINK) # 先埋地下，避免召唤当帧闪现半空
+	return rec
+
+## 逐帧把临时回家门摆到渲染空间，按各自 rise∈[0,1] 从地下升起（extra_y = -(1-rise)*sink）。
+## SdfProp 禁缩放，故用 position.y 平移做召唤/消散，地面不透明网格天然裁掉埋在下面的部分。
+func _update_home_portals() -> void:
+	for rec in _home_portals:
+		var node: Variant = rec.get("node", null)
+		if node == null or not is_instance_valid(node):
+			continue
+		var rise := clampf(float(rec.get("rise", 1.0)), 0.0, 1.0)
+		_place_portal_node(node as Node3D, rec["logical"], -(1.0 - rise) * HOME_PORTAL_SINK)
+
+## 消散并释放所有临时回家门（沉下动画由 HP_DISPEL 阶段先把 rise 推回 0 再调用）。
+func _dispel_home_portals() -> void:
+	for rec in _home_portals:
+		var node: Variant = rec.get("node", null)
+		if node != null and is_instance_valid(node):
+			(node as Node).queue_free()
+	_home_portals.clear()
+
+## 切回家过场阶段并复位阶段计时（走进/走出的 lerp 进度按 _home_t 算）。
+func _home_set_phase(p: int) -> void:
+	_home_phase = p
+	_home_t = 0.0
+
+## 走进/走出：把 player["logical"] 从 _home_from smoothstep 插值到 _home_to。刻意**不设 _hop 标志**——
+## _update_paper_motion 的 _hop 分支会冻结位移速度、压掉 walk_bob；走正常分支才有踏步。返回 true=到位。
+func _step_home_walk(delta: float) -> bool:
+	if player.is_empty():
+		return true
+	_home_t += delta
+	var k := clampf(_home_t / HOME_WALK_DUR, 0.0, 1.0)
+	var seg := WorldGrid.shortest_delta(_home_from, _home_to)
+	player["logical"] = WorldGrid.wrap_pos(_home_from + seg * smoothstep(0.0, 1.0, k))
+	if k >= 1.0:
+		player["logical"] = _home_to
+		OccupancyMap.char_register(PLAYER_ID, _home_to, PLAYER_SPAN)
+		return true
+	return false
+
+## 给所有临时门设升起进度（同一时刻只有一座活动门：升起时是近门、走出时是远门）。
+func _set_home_portals_rise(v: float) -> void:
+	var r := clampf(v, 0.0, 1.0)
+	for rec in _home_portals:
+		rec["rise"] = r
+
+## 回家走进/走出的落脚点：给定位置正前方约 2 格找可走空位（看得见「走一步」）；那一带被挡就返回原位
+## （走 0 步）。逃生舱铁律：走进/走出是直线 lerp、不寻路、终点必可走，被树围死也走得完（≤2 格、直线穿过）。
+func _home_step_spot(from_pos: Vector2) -> Vector2:
+	var here := WorldGrid.to_tile(from_pos)
+	var max_d := float(HOME_NEAR_MAX_R) * WorldGrid.TILE_SIZE + 0.1
+	for d in [Vector2i(0, -1), Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1)]:
+		var spot := _find_free_spot(WorldGrid.from_tile_center(here + d * 2), PLAYER_SPAN)
+		if WorldGrid.shortest_delta(from_pos, spot).length() <= max_d:
+			return spot
+	return from_pos
+
+## 起动回家传送门过场：召唤近门（玩家正前方可走格）→ 走进 → (跨场景)enter_scene /(同场景)软过场 → 走出 → 消散。
+func _begin_homing(cross: bool) -> void:
+	# 清掉会干扰过场/镜头的在飞态：摆放/试用直接丢弃；在交互中就退出——否则走路镜头会锁在
+	# NPC 身上（焦点分支 _locked 优先于 player），玩家走出画面外。
+	if _placing:
+		_end_placement()
+	if _refine_active:
+		_end_refine()
+	if selected != null:
+		_exit_interaction()
+	_cancel_player_move()
+	_clear_approach()
+	_home_cross = cross
+	_homing = true
+	_home_total_t = 0.0
+	_home_from = player["logical"]
+	var near := _home_step_spot(player["logical"])
+	_home_to = near
+	_summon_home_portal(WorldGrid.to_tile(near))
+	_home_set_phase(HP_RISE_NEAR)
+	if game_audio != null:
+		game_audio.play_sfx("whoosh")
+
+## 强制收尾回家过场（兜底/异常）：清临时门、解锁，玩家留在当前逻辑位。
+func _abort_homing() -> void:
+	_dispel_home_portals()
+	_home_phase = HP_IDLE
+	_homing = false
+
+## 超时兜底：不管卡在哪个阶段，强制把玩家硬着陆到原点、清门、收黑幕、解锁——
+## 宁可硬跳也不能把小朋友永久卡在动画/黑屏里（逃生舱的底线）。
+func _force_finish_homing() -> void:
+	push_warning("[home] 回家过场超时（%.1fs），强制收尾" % _home_total_t)
+	if not player.is_empty():
+		OccupancyMap.char_unregister(PLAYER_ID)
+		var spot := _find_free_spot(WorldGrid.from_tile_center(HOME_TILE), PLAYER_SPAN)
+		player["logical"] = spot
+		OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+		focus_logical = spot
+	_dispel_home_portals()
+	_fade_target = 0.0        # 收黑幕（_step_transition 会把 _fade_a 淡回 0）
+	_transitioning = false
+	_home_phase = HP_IDLE
+	_homing = false
+
+## 同场景回家软过场：直接驱动 _step_transition 的黑幕（_pending_scene 留空→不发换场景报文），
+## 全黑时刻再把玩家瞬移到原点（黑幕遮住），召远门、定走出端点，然后淡出、走出。复用同一张
+## 水彩+仙子 loading 遮罩，与跨场景观感一致；需求 2：村里回家也走完整动画，不再静默 snap。
+func _begin_soft_home() -> void:
+	_transitioning = true
+	_transition_t = 0.0
+	_fade_target = 1.0
+	_pending_scene = ""            # 空→_step_transition 全黑时不发任何报文
+	_await_skin = false
+	_arrive_tile = Vector2i(-1, -1)
+	if game_audio != null:
+		game_audio.play_sfx("whoosh")
+	_home_set_phase(HP_SOFT_BLACK)
+
+## 软过场全黑时刻的重定位：把玩家（和跟随的仙子）搬到原点空位，销近门、在落点召远门（揭幕即立），
+## 定走出端点。全在黑幕背后发生，瞬移不穿帮。
+func _relocate_home_and_summon_far() -> void:
+	if player.is_empty():
+		return
+	OccupancyMap.char_unregister(PLAYER_ID)
+	var spot := _find_free_spot(WorldGrid.from_tile_center(HOME_TILE), PLAYER_SPAN)
+	player["logical"] = spot
+	OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+	focus_logical = spot
+	var fairy := _find_fairy()
+	if not fairy.is_empty():
+		fairy["logical"] = WorldGrid.wrap_pos(focus_logical + Vector2(2.6, 1.8))
+	_dispel_home_portals() # 近门先销
+	var rec := _summon_home_portal(WorldGrid.to_tile(spot))
+	if not rec.is_empty():
+		rec["rise"] = 1.0 # 远门立着（玩家从里走出）
+	_home_from = player["logical"]
+	_home_to = _home_step_spot(player["logical"])
+
+## 回家传送门过场状态机推进（home-portal-anim）。
+## RISE_NEAR(门升起) → WALK_IN(走进) → 跨场景 CROSS_WAIT(黑幕换场景) / 同场景软过场(P6) → WALK_OUT(走出) → DISPEL(门沉下消散)。
+func _step_home(delta: float) -> void:
+	if not _homing:
+		return
+	_home_total_t += delta
+	if _home_total_t > HOME_FAILSAFE: # 卡死兜底：任何阶段超时都硬着陆回原点
+		_force_finish_homing()
+		return
+	match _home_phase:
+		HP_RISE_NEAR:
+			_home_t += delta
+			_set_home_portals_rise(_home_t / HOME_RISE_DUR)
+			if _home_t >= HOME_RISE_DUR:
+				_home_set_phase(HP_WALK_IN)
+		HP_WALK_IN:
+			if _step_home_walk(delta):
+				if _home_cross:
+					enter_scene(HOME_SCENE, HOME_TILE) # 跨场景：黑幕接管，_on_scene_entered 落原点+接走出
+					_home_set_phase(HP_CROSS_WAIT)
+				else:
+					_begin_soft_home() # 同场景软过场（P6 填入黑幕；P5 未接线走不到这里）
+		HP_CROSS_WAIT:
+			# 黑幕/换场景由 _step_transition + _on_scene_entered 接管：那边销近门、在落点召远门、
+			# 把玩家坐门上、定走出端点。等过场彻底收尾（不再 _transitioning）再走出。
+			if not _transitioning:
+				_home_set_phase(HP_WALK_OUT)
+		HP_SOFT_BLACK:
+			# 同场景软过场：等黑幕全黑再瞬移到原点（遮住），召远门、定走出端点，然后淡出。
+			if _fade_a >= 1.0:
+				_relocate_home_and_summon_far()
+				_fade_target = 0.0
+				_home_set_phase(HP_WALK_OUT_WAIT)
+		HP_WALK_OUT_WAIT:
+			# 等黑幕淡出（露出站在门里的玩家）再迈步走出。
+			if _fade_a <= 0.0:
+				_home_set_phase(HP_WALK_OUT)
+		HP_WALK_OUT:
+			if _step_home_walk(delta):
+				_home_set_phase(HP_DISPEL)
+		HP_DISPEL:
+			_home_t += delta
+			_set_home_portals_rise(1.0 - _home_t / HOME_RISE_DUR) # 门沉回地下
+			if _home_t >= HOME_RISE_DUR:
+				_dispel_home_portals()
+				_home_phase = HP_IDLE
+				_homing = false
+		_:
+			pass
+
+## 把一座拱门摆到渲染空间（渲染原点 = focus_logical），高度取所在 tile 的台阶高 + extra_y。
+## extra_y 给回家临时门做「从地下升起/沉下」的召唤/消散动画（负值=埋在地下，见 _step_home）。
+func _place_portal_node(node: Node3D, logical: Vector2, extra_y: float = 0.0) -> void:
+	var d := WorldGrid.shortest_delta(focus_logical, logical)
+	var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(logical))) * TerrainMap.STEP_HEIGHT
+	node.position = Vector3(d.x, ty + extra_y, d.y)
+
 ## 逐帧把拱门摆到渲染空间（渲染原点 = focus_logical），高度取所在 tile 的台阶高。
 func _update_portal_markers() -> void:
 	for m in _portal_markers:
 		var node: Variant = m.get("node", null)
 		if node == null or not is_instance_valid(node):
 			continue
-		var logical: Vector2 = m["logical"]
-		var d := WorldGrid.shortest_delta(focus_logical, logical)
-		var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(logical))) * TerrainMap.STEP_HEIGHT
-		(node as Node3D).position = Vector3(d.x, ty, d.y)
+		_place_portal_node(node as Node3D, m["logical"], 0.0)
 
 ## 过场黑幕推进：淡入 → 全黑后才发 enter_scene → 卸旧载新 → 区块铺完 → 淡出。
 func _step_transition(delta: float) -> void:
@@ -4187,25 +4417,15 @@ func enter_scene(scene_id: String, arrive_tile := Vector2i(-1, -1)) -> void:
 ## 落在原点空位；已在 village 或离线（无换场景数据）→ 就地把玩家（和跟随的仙子）挪回原点
 ## 附近空位解卡，不发换场景报文。
 func _go_home() -> void:
+	if _transitioning or _homing or _stage_active:
+		return # 过场/回家进行中，或演出/游戏态：忽略（别把跑着的游戏一个人传走）
 	_close_phone() # 传送前先收起手机（近身相机/遮罩一并还原）
-	if online and backend != null and _scene_id != HOME_SCENE:
-		enter_scene(HOME_SCENE, HOME_TILE) # 跨场景：过场遮罩接管画面，_on_scene_entered 落在原点
-		return
-	# 已在家 / 离线：没有换场景数据，就地解卡——先停掉当前移动/接近，把玩家搬回原点附近空位。
 	if player.is_empty():
 		return
-	_cancel_player_move()
-	_clear_approach()
-	if game_audio != null:
-		game_audio.play_sfx("whoosh")
-	OccupancyMap.char_unregister(PLAYER_ID)
-	var spot := _find_free_spot(WorldGrid.from_tile_center(HOME_TILE), PLAYER_SPAN)
-	player["logical"] = spot
-	OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
-	focus_logical = spot
-	var fairy := _find_fairy()
-	if not fairy.is_empty():
-		fairy["logical"] = WorldGrid.wrap_pos(focus_logical + Vector2(2.6, 1.8))
+	if online and backend != null and _scene_id != HOME_SCENE:
+		_begin_homing(true) # 跨场景：召唤门 → 走进 → enter_scene 落原点 → 走出 → 门消散
+	else:
+		_begin_homing(false) # 同场景/离线：软过场（黑幕遮住原地瞬移 → 走出），不发换场景报文
 
 ## 收到 scene_entered：卸载当前场景的角色/物件 → 上新地形并重铺区块 → 生成新场景角色/物件
 ## → 按该场景玩家最后位置落位。顺序保证「地形在 chunk 重铺、角色/玩家落位之前就位」
@@ -4260,6 +4480,15 @@ func _on_scene_entered(data: Dictionary) -> void:
 	var fairy := _find_fairy()
 	if not fairy.is_empty():
 		fairy["logical"] = WorldGrid.wrap_pos(focus_logical + Vector2(2.6, 1.8))
+	# 回家过场（跨场景）：黑幕后销毁旧场景的近门、在落点召唤远门（揭幕即立着），把玩家坐在门上、
+	# 定走出端点。揭幕后玩家从门里走出到相邻空位，再由 HP_DISPEL 让门沉下消失。
+	if _homing and _home_phase == HP_CROSS_WAIT and not player.is_empty():
+		_dispel_home_portals() # 近门在旧场景，销掉（黑幕遮着不穿帮）
+		var rec := _summon_home_portal(WorldGrid.to_tile(player["logical"]))
+		if not rec.is_empty():
+			rec["rise"] = 1.0
+		_home_from = player["logical"]              # 从门里
+		_home_to = _home_step_spot(player["logical"]) # 走到相邻空位
 	# 新场景就位后向服务端重报地点名（意图 LLM 认新场景的 POI）。
 	if online:
 		_send_world_info()
