@@ -105,13 +105,20 @@ func _ready() -> void:
 	if not OS.is_debug_build():
 		set_process(false)
 		return
+	# 端口可被 MALIANG_HARNESS_PORT 覆盖：桌面拍摄/回归与真机调试并存时 8577 常被 iproxy/adb
+	# forward 转发到真机占走（IPv6 通配监听会把 127.0.0.1 的连接也吃掉）——桌面驱动换口，
+	# 避免命令赛跑打到别人的设备上（踩过：拍 menu 相册时 tap/screencap 打进了 iOS 诊断机）。
+	var port := PORT
+	var env_port := OS.get_environment("MALIANG_HARNESS_PORT")
+	if not env_port.is_empty() and env_port.is_valid_int():
+		port = int(env_port)
 	_server = TCPServer.new()
-	var err := _server.listen(PORT, "127.0.0.1")
+	var err := _server.listen(port, "127.0.0.1")
 	if err != OK:
-		push_warning("[harness] TCP 命令口监听失败(port=%d): %d" % [PORT, err])
+		push_warning("[harness] TCP 命令口监听失败(port=%d): %d" % [port, err])
 		_server = null
 		return
-	print("[harness] debug 命令口就绪 127.0.0.1:%d（adb forward tcp:%d tcp:%d 后连）" % [PORT, PORT, PORT])
+	print("[harness] debug 命令口就绪 127.0.0.1:%d（adb forward tcp:%d tcp:%d 后连）" % [port, port, port])
 
 func _exit_tree() -> void:
 	if _peer != null:

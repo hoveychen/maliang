@@ -29,6 +29,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from naming_e2e import Harness, HarnessError  # noqa: E402
 
 GODOT = "/Applications/Godot.app/Contents/MacOS/Godot"
+# 桌面拍摄专用口：8577 常被 iproxy/adb forward 转发到真机调试设备（IPv6 通配监听连 127.0.0.1
+# 也吃），赛跑会把 tap/screencap 打到别人设备上。桌面一律走 8578（MALIANG_HARNESS_PORT）。
+SHOOT_PORT = 8578
 ROOT = Path(__file__).resolve().parents[2]
 # user:// 按项目名解析（project.godot 的 application/config/name=马良小世界），不是仓库名。
 USERDATA = Path.home() / "Library/Application Support/Godot/app_userdata/马良小世界"
@@ -180,10 +183,11 @@ def main():
 
     proc = None
     if not args.attach:
+        env = dict(os.environ, MALIANG_HARNESS_PORT=str(SHOOT_PORT))
         proc = subprocess.Popen(
             [GODOT, "--path", str(ROOT), "--resolution", args.resolution],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    h = Harness()
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+    h = Harness(port=SHOOT_PORT)
     try:
         h.connect(retries=40, delay=0.5)
         if args.attach:
