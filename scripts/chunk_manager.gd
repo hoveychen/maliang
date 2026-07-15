@@ -463,6 +463,14 @@ func _spawn_static_sdf(parent: Node3D, def: Dictionary, rref: String, pos: Vecto
 	prop.visible = _props_shown  # 沿用画质开关态（chunk 重铺不打回默认）
 	parent.add_child(prop)
 	prop.enable_wander(float(def.get("wander", 0.0)), seed_v)
+	# 真静止造物（loco.none∧无spin∧无head∧无ropes）：异步烘焙成零成本静态 mesh 换掉 live，
+	# 省掉每帧逐顶点吸附（成本主轴）。会动的造物 bake_and_swap 内部判非静止即原样保留 live。
+	# 烘出的静态 mesh 是普通实例、不进 perf_props → 不再被「会动的物件」开关波及（如烘焙树，恒显）。
+	# 走绝对节点路径取 autoload 单例（其全局名在 headless --script 编译期不可用，见 sdf_bake_swap.gd）；
+	# 取不到（如离屏缩略图渲染无此单例）则不烘焙、prop 保持 live，属安全降级。
+	var bake_swap := get_node_or_null(^"/root/SdfBakeSwap")
+	if bake_swap != null:
+		bake_swap.bake_and_swap(prop)
 
 ## 组合物（积木式造物，renderRef 'composed:'）：读 spec 的零件树，画骨架 + 每零件一片子 quad。
 ## 纸片扁平、正对相机——不套 yaw（纸艺四支柱：正对俯角、禁 yaw 侧摆），底边落在地面。
