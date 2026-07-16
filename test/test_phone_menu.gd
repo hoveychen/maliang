@@ -339,6 +339,20 @@ func _run(scene: Node) -> void:
 			and phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED,
 		"收起后跨页停更、正面渲一帧熄屏黑底后自动停（UPDATE_ONCE）")
 
+	# ── 兜底护栏（stuck-scrim）：手机一进停靠态就强制收遮罩 ─────────────────────────
+	# 真机偶发卡死：某次开/关/装扮动画被打断，收尾没跑到，遮罩 _phone_scrim（盖在左下角手机
+	# 热区按钮之上、MOUSE_FILTER_STOP）留在 visible=true。此后点停靠的手机 → 点击被遮罩吞掉，
+	# _toggle_album 永不触发 → 手机点不开（重启才好）。护栏：连 paper_phone.state_changed，
+	# 一进 DOCKED 无条件隐藏遮罩，任何收起路径（含被打断的）都逃不掉。
+	scene._toggle_album()  # 开 → 正面态，遮罩亮
+	_check(phone.state == PaperPhone.State.FRONT and (scene.get("_phone_scrim") as Control).visible,
+		"护栏前置：开手机后遮罩亮")
+	(scene.get("_phone_scrim") as Control).visible = true  # 人为制造「收尾漏关」的卡死前置态
+	phone.dock(false)      # 直接进停靠态（同步 emit state_changed）
+	_check(phone.state == PaperPhone.State.DOCKED, "护栏：手机进停靠态")
+	_check(not (scene.get("_phone_scrim") as Control).visible,
+		"护栏：进停靠态强制收遮罩（否则遮罩吞掉左下角手机按钮点击→点不开）")
+
 	# 回家 app：跨页有「回家」按钮；点回家 → 启动传送门过场动画（软过场：召门→走进→黑幕→走出，
 	# 见 home-portal-anim）。这里只验按钮接线启动了动画；完整落位/黑幕/消散由 test_home_soft、
 	# test_home_cross、test_home_edge 覆盖（那三个逐帧驱动到动画走完）。
