@@ -35,6 +35,9 @@ var event_sink: Callable = Callable(Input, "parse_input_event")
 ## 在飞手势（同一时刻至多一个）：{kind,t,ms,...}。手势跨帧发事件序列，完成时才回包——
 ## 期间新到的命令留在 _rx 不执行，天然形成顺序语义（驱动方一问一答不乱序）。
 var _gesture: Dictionary = {}
+## phone 命令等落定：发起动作后挂这里，每帧查 paper_phone.is_settling()，落定/超时才回包。
+## action-based——不靠调用方卡 sleep，改了开合/翻页动画时长也不 flake。
+var _phone_wait: Dictionary = {}
 
 static func make(world: Node) -> DebugCmdServer:
 	var s := DebugCmdServer.new()
@@ -209,6 +212,8 @@ func _process(delta: float) -> void:
 	# 手势推进放在最前：即便 TCP 口没起来（单测直接调 start_gesture）也要能走完。
 	if not _gesture.is_empty():
 		_step_gesture(delta)
+	if not _phone_wait.is_empty():
+		_step_phone_wait(delta)
 	if _server == null:
 		return
 	# 只保一个活连接：新连接进来时顶掉旧的（e2e 脚本一次一个客户端）。
@@ -253,6 +258,15 @@ func _handle_line(line: String) -> void:
 		var err := start_gesture(cmd)
 		if not err.is_empty():
 			_reply({"ok": false, "error": err})
+		return
+	# phone op 异步：发起开/关/翻页后，等手机动画落定（is_settling=false）再回包——
+	# 调用方 phone→shot 无需卡 sleep，也不会拍到搬移半途的画面（action-based）。
+	if String(cmd.get("op", "")) == "phone":
+		var pr := _execute(cmd) # 发起动作：_do_phone 内部同帧触发状态切换动画
+		if not bool(pr.get("ok", false)):
+			_reply(pr)
+			return
+		_phone_wait = {"result": pr, "elapsed": 0.0}
 		return
 	_reply(_execute(cmd))
 
@@ -439,6 +453,23 @@ func _step_gesture(delta: float) -> void:
 		_gesture = {}
 		_reply({"ok": true, "op": String(g["op"]), "done": true, "ms": int(g["ms"])})
 
+## phone 命令落定推进：每帧查手机是否还在播开/关/翻页动画，落定或超时（3s 兜底）才回包。
+## 判据是「动画有没有播完」而非固定时长——改了 MOVE_DUR/FLIP_DUR 也不用改这里。
+func _step_phone_wait(delta: float) -> void:
+	_phone_wait["elapsed"] = float(_phone_wait["elapsed"]) + delta
+	var settling := false
+	var w := _host()
+	if w != null:
+		var pp: Variant = w.get("paper_phone")
+		if pp != null and pp is Object and is_instance_valid(pp) and (pp as Object).has_method("is_settling"):
+			settling = bool(pp.call("is_settling"))
+	if settling and float(_phone_wait["elapsed"]) < 3.0:
+		return
+	var res: Dictionary = _phone_wait["result"]
+	res["settled"] = not settling # 超时未落定=false，方便调用方察觉异常
+	_phone_wait = {}
+	_reply(res)
+
 ## state：一份可断言的状态快照。世界字段用 get() 读（避免对 Node 的 unsafe 属性访问告警）。
 func _snapshot() -> Dictionary:
 	var snap := {"ok": true, "op": "state"}
@@ -547,6 +578,9 @@ func _snapshot() -> Dictionary:
 		if pu != null and pu is Object and is_instance_valid(pu):
 			var app: Variant = (pu as Object).get("_phone_open_app")
 			snap["phone_app"] = String(app) if app != null else ""
+			# 手机开/关/翻页动画是否还在播（action-based 等待用：wait --key phone_settling --falsy）。
+			var pp: Variant = w.get("paper_phone")
+			snap["phone_settling"] = bool(pp.call("is_settling")) if (pp != null and pp is Object and is_instance_valid(pp) and (pp as Object).has_method("is_settling")) else false
 		# 摆放模式：等落位确认时 AI 需知道幽灵在哪、合不合法。
 		var placing: Variant = w.get("_placing")
 		snap["placing"] = bool(placing) if placing != null else false

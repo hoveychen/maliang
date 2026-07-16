@@ -487,10 +487,15 @@ func _animate_flip(fold_to: float, yaw_to: float) -> void:
 	scale = Vector3.ONE * _hand_scale
 	var fold_from := _fold_deg
 	var yaw_from := _yaw_deg
-	_tween = create_tween()
+	_tween = create_tween().set_parallel(true)
 	_tween.tween_method(func(t: float) -> void:
 		_apply_pose(lerpf(fold_from, fold_to, t), lerpf(yaw_from, yaw_to, t)),
 		0.0, 1.0, FLIP_DUR).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# 翻转恒在持机位发生：DOCKED→FRONT 的搬移 tween 若被打断（开手机后立刻开 app，
+	# _kill_tween 掐断未走完的搬移），position 会卡在半路。这里把它并行收回 _hand_pos，
+	# 否则跨页/正面会停在停靠位与持机位之间的随机位置（时左时右，取决于打断时机）。
+	_tween.tween_property(self, "position", _hand_pos, FLIP_DUR) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 ## 停靠位↔持机位搬移：位移+缩放并行 tween（带一点回弹的"拿起/放回"手感）；
 ## fold_back=true 时（从跨页收）合拢+翻回正面与搬移并行。
@@ -552,6 +557,11 @@ func fit_dock(cam: Camera3D, fill: float, ndc: Vector2, dist := 0.42) -> void:
 
 func _tween_running() -> bool:
 	return _tween != null and _tween.is_valid() and _tween.is_running()
+
+## 是否正在播状态切换动画（开/关/翻页搬移未落定）。harness 据此 action-based 等待，
+## 不靠卡 sleep 时长——改了动画时长/参数，等待逻辑照样对。
+func is_settling() -> bool:
+	return _tween_running()
 
 ## 停靠态低频刷一帧正面屏（时钟走字用；渲染一次自动回 DISABLED）。
 func refresh_dock_screen() -> void:
