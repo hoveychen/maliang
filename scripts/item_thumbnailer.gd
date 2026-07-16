@@ -16,8 +16,11 @@ signal thumbnail_ready(item_id: String, tex: Texture2D)
 
 const VP_SIZE := 256               ## 缩略图边长（正方形透明底）
 const SETTLE_FRAMES := 8           ## 每件渲染前等的帧数（够 SDF 顶点吸附/姿态摆定）
-const CAM_ELEV_DEG := 28.0         ## 相机俯角（近似游戏内斜俯视）
-const CAM_AZIM_DEG := 35.0
+const WARMUP_FRAMES := 6           ## 首渲额外预热帧（own_world_3d 视口首帧常空/未收敛，多等再取）
+const STALL_WAIT_CAP := 4          ## fit 循环里连续「没渲好」等待的上限（超了判这次渲不出，交退化校验拒）
+const CAM_ELEV_DEG := 45.0         ## 相机俯角：45° hero 3/4 视角（28° 太低会看到帽/顶的底面像飞碟「屁股」，
+                                   ## 60° 太高把火箭这类高瘦物压扁；45° 对圆顶物与高瘦物都好，探针 6 角对比选定）
+const CAM_AZIM_DEG := 30.0
 const FIT_MARGIN := 1.25           ## AABB 初始取景留白
 const FIT_PASSES := 5              ## 自动取景迭代上限
 const FIT_TARGET := 0.66           ## 目标：可见内容占视口边长比例
@@ -114,7 +117,7 @@ func _ensure_stage() -> bool:
 	_vp.size = Vector2i(VP_SIZE, VP_SIZE)
 	_vp.transparent_bg = true
 	_vp.own_world_3d = true
-	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED # 按需强制单帧刷新（_grab_fresh），避开 UPDATE_ALWAYS 连续渲染下 get_image 拿陈/冻结帧
 	_vp.msaa_3d = Viewport.MSAA_4X
 	_host.add_child(_vp)
 
@@ -170,30 +173,81 @@ func _render_def(def: Dictionary) -> Image:
 	var center: Vector3 = framing["center"]
 	var dir: Vector3 = framing["dir"]
 	var img: Image = null
-	# 自动取景反馈闭环：渲一帧→量实际填充像素→调相机距离命中目标占比→再渲。
+	# 节点姿态/顶点吸附先摆定（transform 吸收 + 动画摆定）。
+	for _i in range(SETTLE_FRAMES + WARMUP_FRAMES):
+		await tree.process_frame
+	# 自动取景反馈闭环：强制渲一新帧→量实际填充像素→调相机距离命中目标占比→再渲。
+	# 关键护栏：只按**可信** used_rect（够大）调距——空/极小 = 没渲好，据它缩放会把相机怼进物体
+	# （满帧纯色）或无限后退（全空）。此时只重取、绝不乱动相机。
+	var stall_waits := 0
 	for pass_i in range(FIT_PASSES):
-		for _i in range(SETTLE_FRAMES):
-			await tree.process_frame
-		img = _vp.get_texture().get_image()
+		img = await _grab_fresh(tree)
 		var used := img.get_used_rect()
-		if used.size == Vector2i.ZERO:
-			var back := (_cam.position - center).length() * 2.0
-			_cam.position = center + dir * back
-			_cam.look_at(center, Vector3.UP)
+		var credible := used.size.x >= VP_SIZE * 0.1 and used.size.y >= VP_SIZE * 0.1
+		if not credible:
+			stall_waits += 1
+			if stall_waits > STALL_WAIT_CAP:
+				break # 等够了还是空/极小 → 这次渲不出，退出交由退化校验拒掉（不缓存，下次重试）
+			for _i in range(SETTLE_FRAMES):
+				await tree.process_frame
 			continue
 		var span := float(maxi(used.size.x, used.size.y))
 		var target := float(VP_SIZE) * FIT_TARGET
-		if pass_i == FIT_PASSES - 1 or absf(span - target) < VP_SIZE * 0.06:
+		if absf(span - target) < VP_SIZE * 0.06:
 			break
 		var dist := (_cam.position - center).length()
-		var new_dist := clampf(dist * span / target, 0.4, 200000.0)
-		_cam.position = center + dir * new_dist
+		_cam.position = center + dir * clampf(dist * span / target, 0.4, 200000.0)
 		_cam.look_at(center, Vector3.UP)
+		for _i in range(SETTLE_FRAMES):
+			await tree.process_frame
 	for c in _stage.get_children():
 		c.queue_free()
-	if img == null or img.get_used_rect().get_area() < 64:
+	# 退化帧校验：空 / 满不透明（无透明剪影=相机怼进物体内） / 纯色低方差 一律拒——
+	# 返回 null 让调用方回退礼盒占位，且 _pump 不缓存 null → 下次开页重试（视口暖了多半就好）。
+	if img == null or not _valid_render(img):
 		return null
 	return _trim(img)
+
+## 强制视口渲一张**新**帧再读：设 UPDATE_ONCE → 等一帧让它排入渲染 → 等 frame_post_draw 画完 → 取图。
+## 这是治「连续渲染 SubViewport 冻结在旧帧、get_image 拿陈帧」的关键：每次取图都保证是相机当前姿态的新帧。
+func _grab_fresh(tree: SceneTree) -> Image:
+	_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	await tree.process_frame
+	await RenderingServer.frame_post_draw
+	return _vp.get_texture().get_image()
+
+## 渲染是否合格（挡退化帧）：非空 + 有透明剪影（不是满帧=相机在物内） + 有色彩方差（不是纯色帧）。
+func _valid_render(img: Image) -> bool:
+	var used := img.get_used_rect()
+	if used.get_area() < 64:
+		return false
+	var st := _img_stats(img, used)
+	if float(st["alpha_frac"]) > 0.97:
+		return false # 满帧不透明 = 没有物体轮廓外的透明区 = 相机怼进物体内部/贴太近
+	if float(st["var"]) < 0.0015:
+		return false # 色彩方差过低 = 纯色帧
+	return true
+
+## 诊断:图内容统计(均色/方差/不透明占比)——判纯色/黑帧(退化)vs 真图。
+func _img_stats(img: Image, used: Rect2i) -> Dictionary:
+	if used.size == Vector2i.ZERO:
+		return {"mean": Vector3.ZERO, "var": 0.0, "alpha_frac": 0.0}
+	var n := 0; var opaque := 0
+	var sum := Vector3.ZERO; var sumsq := 0.0
+	var step := maxi(1, used.size.x / 24)
+	for y in range(used.position.y, used.position.y + used.size.y, step):
+		for x in range(used.position.x, used.position.x + used.size.x, step):
+			var c := img.get_pixel(x, y)
+			n += 1
+			if c.a > 0.5:
+				opaque += 1
+				var v := Vector3(c.r, c.g, c.b)
+				sum += v; sumsq += v.dot(v)
+	if opaque == 0:
+		return {"mean": Vector3.ZERO, "var": 0.0, "alpha_frac": 0.0}
+	var mean := sum / float(opaque)
+	var variance := sumsq / float(opaque) - mean.dot(mean)
+	return {"mean": mean, "var": variance, "alpha_frac": float(opaque) / float(n)}
 
 ## renderRef 分发（与 chunk_manager 同规则，但单体实例化，不合批/不占地）。
 func _make_node(def: Dictionary, rref: String, key: String, cat: String) -> Node3D:

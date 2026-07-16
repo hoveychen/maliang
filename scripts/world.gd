@@ -5406,6 +5406,8 @@ func _on_item_created(data: Dictionary) -> void:
 	var item_id := String(item.get("id", ""))
 	ItemCatalog.set_defs([item]) # 新实体先入目录（patch 回来才认得 renderRef/spec）
 	_prewarm_sticker_assets([item]) # 造贴纸:预热网络贴图(打包贴纸/造物无 @ 前缀,跳过)
+	if phone_ui != null:
+		phone_ui.prewarm_item(item_id, item) # thumb-polish P2:造物落地即端侧预渲缩略图入缓存,翻物品页不见礼盒一闪
 	thinking_label.visible = false
 	# 点点这一拍统一走 _offer_naming：能起名就问名字（name_ask），起不了名才退回求夸（create_done）——
 	# 二选一，别在这里先 create_done 又叠 name_ask（GLOBAL_GAP 会把后一句吞掉）。见 §2.2。

@@ -164,6 +164,16 @@ func _preheat_bag_icons() -> void:
 	if not entries.is_empty():
 		_thumbnailer.preheat(entries)
 
+## 刚造好的造物立即预渲缩略图入缓存（thumb-polish P2）：孩子造完翻到物品页时真图已就绪，
+## 不见"礼盒一闪→真图"。与 preheat 不同：这里就一件、且**不跳过无服务端图的造物**——造物本就没
+## 服务端图，正是要端侧现渲的对象；一件的 GPU 开销可接受（world._on_item_created 造物落地时调）。
+func prewarm_item(item_id: String, def: Dictionary) -> void:
+	if _thumbnailer == null or item_id.is_empty() or def.is_empty():
+		return
+	if String(def.get("renderRef", "")).begins_with("sticker:"):
+		return # 贴纸走本尊贴图，不用离屏渲
+	_thumbnailer.request(item_id, def)
+
 ## 缩略图到达：把对应格的图标原地换成真图（tex==null=解析失败，保持礼盒占位不动）。
 ## 按 item_id 找当前格节点——翻页/刷新后旧节点可能已释放，is_instance_valid 兜底。
 func _on_thumbnail_ready(item_id: String, tex: Texture2D) -> void:
