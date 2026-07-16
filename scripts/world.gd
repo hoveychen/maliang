@@ -1452,6 +1452,13 @@ func _setup_hud() -> void:
 	camera.add_child(paper_phone)
 	paper_phone.attach_light_rig() # 自带暖灯挂相机（手机层与世界太阳互相隔离）
 	paper_phone.create_screens(PhoneUi.FRONT_PX, PhoneUi.SPREAD_PX)
+	# 兜底护栏：手机一进停靠态就无条件收遮罩。遮罩 _phone_scrim 盖在左下角手机热区按钮之上
+	# （MOUSE_FILTER_STOP），语义=「手机开着才该在」。真机偶发某次开/关/装扮动画被打断、收尾没
+	# 跑到，遮罩留在 visible=true → 点停靠的手机被它吞掉、_toggle_album 永不触发 → 点不开（重启
+	# 才好）。此处把「停靠即收遮罩」钉在状态源头，任何收起路径（含被打断的）都逃不掉。
+	paper_phone.state_changed.connect(func(s: int) -> void:
+		if s == PaperPhone.State.DOCKED and _phone_scrim != null:
+			_phone_scrim.visible = false)
 	# 白卡纸壳贴图（角部带圆角 alpha 镂空=die-cut 剪影）；缺资产时保持程序化白卡纸占位
 	var shell_front := UiAssets.tex("phone3d_front_shell")
 	if shell_front != null:
