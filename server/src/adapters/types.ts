@@ -45,6 +45,9 @@ export interface LLMAdapter {
   designCharacter(intentText: string, byFairy: boolean): Promise<CharacterSpec>;
   /** 按小朋友的描述设计一只 SDF 可动物件/建筑（走路小屋、蹦蹦邮筒…），产物必须过 validateSdfPropSpec。 */
   designSdfProp(intentText: string): Promise<SdfPropSpec>;
+  /** 把一个英文/拼音物件名（存量造物遗留的 snake_case，如 red_mushroom）译成幼儿看得懂的短中文名词。
+   *  只用于回填存量造物名（一次性）；已是中文的名字调用方不该传进来。 */
+  translateToChineseName(name: string): Promise<string>;
   routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult>;
   /** 引导式造角色一轮：给累积状态 + 本轮输入（幼儿点的选项 label 或说的话），返回继续追问或攒够去造。 */
   guideCreation(state: CreationState, childInput: string): Promise<GuideCreationResult>;

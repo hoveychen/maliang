@@ -156,7 +156,7 @@ export function createMockAdapters(): ServiceAdapters {
         if (ring) parts.push({ shape: 'torus', pos: [0, 1.95, 0.1], R: 0.3, r: 0.08, arc: 180, color: 0, blend: 0.1 });
         if (curvy) parts.push({ shape: 'bezier', pos: [0.4, 0.95, 0], b: [0.2, 0.4], c: [0.5, 0.7], r0: 0.06, r1: 0.03, color: 0, blend: 0.08 });
         return {
-          name: 'mock_prop',
+          name: '模型道具',
           palette: ['#e8b04b', '#f4ead4'],
           blend: 0.26,
           outline: 0.04,
@@ -166,6 +166,15 @@ export function createMockAdapters(): ServiceAdapters {
           // 体型档：从意图文本确定性推断→倍率（与真实路径同 sizeToScale），客户端整体缩放
           scale: sizeToScale(inferSizeFromText(intentText)),
         };
+      },
+      async translateToChineseName(name: string): Promise<string> {
+        // mock：确定性译名。命中常见词表就用词表，否则给个稳定的中文兜底（测试断言中文即可）。
+        const table: Record<string, string> = {
+          red_mushroom: '红蘑菇', colorful_rocket: '彩色火箭', spinning_pinwheel: '小风车',
+          wooden_stool: '小木凳', wooden_ladder: '小木梯', mystery_hopper: '蹦蹦盒',
+          spinning_mini_house: '转转小屋', drifting_rocket: '飘飘火箭',
+        };
+        return table[name] ?? '小玩意';
       },
       async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
         // 点名让别的角色执行：转写里出现花名册角色名 → performer（真实实现由 LLM 判断语气）

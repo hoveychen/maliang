@@ -104,7 +104,7 @@ export function validateSdfPropSpec(raw: unknown): SdfPropValidation {
   if (typeof raw !== 'object' || raw === null) return { ok: false, error: 'spec 不是对象' };
   const r = raw as Record<string, unknown>;
 
-  const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 32) : 'prop';
+  const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 32) : '小玩意';
 
   if (!Array.isArray(r.palette) || r.palette.length === 0) return { ok: false, error: 'palette 为空' };
   const palette: string[] = [];
