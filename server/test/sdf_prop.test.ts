@@ -7,6 +7,9 @@ import { buildServer } from '../src/server.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { validateSdfPropSpec, fallbackSdfPropSpec } from '../src/sdf_prop.ts';
+import { SDF_PROP_SYSTEM } from '../src/adapters/openrouter_llm.ts';
+
+const CJK = /[一-鿿]/;
 
 // ---- 校验器：与客户端 sdf_spec.gd 同规则 ----
 
@@ -223,4 +226,39 @@ test('validateSdfPropSpec: spin 简写/对象归一化，零轴拒收', () => {
     parts: [{ shape: 'sphere', pos: [0, 0.5, 0], r: 0.2, color: 0, spin: { axis: [0, 0, 0] } }],
   });
   assert.equal(bad.ok, false);
+});
+
+// ---- 造物名必须是中文（幼儿看得懂）：prompt 契约 + 兜底名 ----
+// 背景：SDF_PROP_SYSTEM 原 schema 要求 name 为「英文snake_case」，导致所有造物在物品页/背包
+// 显示成 red_mushroom / pinwheel 等英文，3 岁孩子看不懂。改为要求短中文名。这几条锁死回归。
+
+test('SDF_PROP_SYSTEM: name 字段要求短中文名，绝不再要英文 snake_case', () => {
+  assert.ok(!SDF_PROP_SYSTEM.includes('英文snake_case'), 'prompt 不该再要英文 snake_case 名');
+  assert.ok(SDF_PROP_SYSTEM.includes('短中文名'), 'prompt 该明确要求短中文名');
+  // 两个内联示例的 name 必须是中文（示例即 LLM 的模仿模板，英文示例会把它带偏）。
+  // 只认后跟真实 hex 调色板的示例块——schema 定义行的 palette 是占位符 "#rrggbb"，排除掉。
+  const exampleNames = [...SDF_PROP_SYSTEM.matchAll(/\{"name":"([^"]+)","palette":\["#[0-9a-fA-F]{6}"/g)].map((m) => m[1]);
+  assert.ok(exampleNames.length >= 2, '至少两个示例');
+  for (const nm of exampleNames) {
+    assert.ok(CJK.test(nm), `示例 name「${nm}」应为中文`);
+    assert.ok(!/[a-zA-Z_]/.test(nm), `示例 name「${nm}」不该含英文/下划线`);
+  }
+});
+
+test('validateSdfPropSpec: 缺 name 兜底为中文', () => {
+  const res = validateSdfPropSpec({
+    palette: ['#e8b04b'], parts: [{ shape: 'sphere', pos: [0, 0.5, 0], r: 0.3, color: 0 }],
+    locomotion: { type: 'none' }, ropes: [],
+  });
+  assert.ok(res.ok);
+  if (res.ok) assert.ok(CJK.test(res.spec.name), `缺名兜底应为中文，实为「${res.spec.name}」`);
+});
+
+test('validateSdfPropSpec: 保留 LLM 给的中文名', () => {
+  const res = validateSdfPropSpec({
+    name: '红蘑菇', palette: ['#e8b04b'],
+    parts: [{ shape: 'sphere', pos: [0, 0.5, 0], r: 0.3, color: 0 }],
+    locomotion: { type: 'none' }, ropes: [],
+  });
+  assert.ok(res.ok && res.spec.name === '红蘑菇');
 });

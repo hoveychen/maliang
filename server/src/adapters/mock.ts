@@ -156,7 +156,7 @@ export function createMockAdapters(): ServiceAdapters {
         if (ring) parts.push({ shape: 'torus', pos: [0, 1.95, 0.1], R: 0.3, r: 0.08, arc: 180, color: 0, blend: 0.1 });
         if (curvy) parts.push({ shape: 'bezier', pos: [0.4, 0.95, 0], b: [0.2, 0.4], c: [0.5, 0.7], r0: 0.06, r1: 0.03, color: 0, blend: 0.08 });
         return {
-          name: 'mock_prop',
+          name: '模型道具',
           palette: ['#e8b04b', '#f4ead4'],
           blend: 0.26,
           outline: 0.04,

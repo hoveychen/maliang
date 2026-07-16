@@ -65,9 +65,9 @@ const FALLBACK_VISUAL = 'a cute small round animal friend with a happy smiling f
 
 // SDF 可动物件设计师：~15 行 JSON 描述一只由基本体融合而成、会动的物件/建筑。
 // schema 与客户端 scripts/sdf_spec.gd 对应；产物经 validateSdfPropSpec 校验，坏了走兜底。
-const SDF_PROP_SYSTEM = `你是幼儿园游戏「maliang」的物件设计师。小朋友描述一个物件/小建筑（小花、风车、纸、笔、路牌、小房子…），你用若干基本形状拼出它。引擎会把形状无缝融合成一个圆润整体，并按配置生成微动画/旋转件/绳子，需要时才生成腿或翅膀。
+export const SDF_PROP_SYSTEM = `你是幼儿园游戏「maliang」的物件设计师。小朋友描述一个物件/小建筑（小花、风车、纸、笔、路牌、小房子…），你用若干基本形状拼出它。引擎会把形状无缝融合成一个圆润整体，并按配置生成微动画/旋转件/绳子，需要时才生成腿或翅膀。
 严格只输出 JSON，无 markdown、无多余文字。schema：
-{"name":"英文snake_case","palette":["#rrggbb",… 2-4个],"blend":0.1~0.35,"outline":0.04,
+{"name":"短中文名(2~6字，孩子看得懂的中文名词，如「红蘑菇」「小风车」「彩虹伞」；绝不要英文/拼音/snake_case)","palette":["#rrggbb",… 2-4个],"blend":0.1~0.35,"outline":0.04,
  "parts":[{"shape":"sphere|capsule|cone|box|torus|bezier","pos":[x,y,z],"color":调色板索引,
    球:"r"; 胶囊:"r","len"; 圆头锥:"r1","r2","h"; 盒:"size":[宽,高,深];
    环/圈/轮子/甜甜圈/把手/光环/方向盘: "shape":"torus","R":大半径,"r":管粗,"arc":弧度(默认180=整圈,90=半圈开口把手);孔默认朝+Z正对镜头,放平成地上呼啦圈/车轮加"rot":[90,0,0];开口(arc<180)默认朝下-Y,用rot转向;
@@ -85,9 +85,9 @@ const SDF_PROP_SYSTEM = `你是幼儿园游戏「maliang」的物件设计师。
 - walker 的 hip_h 与身体底部齐平；hopper/flyer 不长腿。
 - 明快温暖的配色；绝不包含暴力、恐怖、武器、成人内容。
 示例（弯茎小花，用 bezier 弯茎+torus 花环+球花心，安静物品）：
-{"name":"curvy_flower","palette":["#7bc47f","#e07a9c","#f2c14e"],"blend":0.1,"outline":0.04,"parts":[{"shape":"bezier","pos":[0,0,0],"b":[0.08,0.55],"c":[0.28,1.0],"r0":0.06,"r1":0.035,"color":0},{"shape":"torus","pos":[0.28,1.06,0.02],"R":0.22,"r":0.07,"arc":180,"color":1,"group":"head"},{"shape":"sphere","pos":[0.28,1.06,0.04],"r":0.12,"color":2,"group":"head"}],"locomotion":{"type":"none"},"ropes":[]}
+{"name":"弯茎小花","palette":["#7bc47f","#e07a9c","#f2c14e"],"blend":0.1,"outline":0.04,"parts":[{"shape":"bezier","pos":[0,0,0],"b":[0.08,0.55],"c":[0.28,1.0],"r0":0.06,"r1":0.035,"color":0},{"shape":"torus","pos":[0.28,1.06,0.02],"R":0.22,"r":0.07,"arc":180,"color":1,"group":"head"},{"shape":"sphere","pos":[0.28,1.06,0.04],"r":0.12,"color":2,"group":"head"}],"locomotion":{"type":"none"},"ropes":[]}
 示例（小风车，安静物品+旋转叶）：
-{"name":"pinwheel","palette":["#e8574b","#f2c14e","#6e4a32"],"blend":0.1,"outline":0.035,"parts":[{"shape":"capsule","pos":[0,0.62,0],"r":0.05,"len":1.05,"color":2,"blend":0.06},{"shape":"cone","pos":[0,1.42,0.1],"r1":0.05,"r2":0.15,"h":0.28,"color":0,"spin":{"pivot":[0,1.2,0.1],"axis":[0,0,1],"rate":0.55}},{"shape":"cone","pos":[0.22,1.2,0.1],"r1":0.05,"r2":0.15,"h":0.28,"rot":[0,0,-90],"color":1,"spin":{"pivot":[0,1.2,0.1],"axis":[0,0,1],"rate":0.55}}],"locomotion":{"type":"none"},"ropes":[]}`;
+{"name":"小风车","palette":["#e8574b","#f2c14e","#6e4a32"],"blend":0.1,"outline":0.035,"parts":[{"shape":"capsule","pos":[0,0.62,0],"r":0.05,"len":1.05,"color":2,"blend":0.06},{"shape":"cone","pos":[0,1.42,0.1],"r1":0.05,"r2":0.15,"h":0.28,"color":0,"spin":{"pivot":[0,1.2,0.1],"axis":[0,0,1],"rate":0.55}},{"shape":"cone","pos":[0.22,1.2,0.1],"r1":0.05,"r2":0.15,"h":0.28,"rot":[0,0,-90],"color":1,"spin":{"pivot":[0,1.2,0.1],"axis":[0,0,1],"rate":0.55}}],"locomotion":{"type":"none"},"ropes":[]}`;
 
 /** 每个能力喂给意图 LLM 的说明（能力名=一句用途 + params 形状）。 */
 const ABILITY_DESC: Record<string, string> = {
@@ -199,7 +199,7 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     }
     const checked = validateSdfPropSpec(raw);
     const size = sizeToScale(inferSizeFromText(intentText));
-    if (!checked.ok) return { ...fallbackSdfPropSpec('mystery_hopper'), scale: size };
+    if (!checked.ok) return { ...fallbackSdfPropSpec('神奇小玩意'), scale: size };
     // 体型档倍率由 size 统管（LLM 按中性参考尺寸设计，见 SDF_PROP_SYSTEM），覆写 validate 的默认 1.0
     return { ...checked.spec, scale: size };
   }
