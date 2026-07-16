@@ -43,6 +43,7 @@ UNIT_TESTS=(
   test_scifi_items
   test_pack_registry
   test_item_thumbnailer
+  test_item_3d_viewer
   test_autotile
   test_occupancy_map
   test_pathfinder

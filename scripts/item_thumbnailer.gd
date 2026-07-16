@@ -249,8 +249,22 @@ func _img_stats(img: Image, used: Rect2i) -> Dictionary:
 	var variance := sumsq / float(opaque) - mean.dot(mean)
 	return {"mean": mean, "var": variance, "alpha_frac": float(opaque) / float(n)}
 
+## 公开静态：按 def 造一个可渲染的 3D 节点（贴纸/无 3D 返回 null）。缩略图离屏渲染与
+## 详情页 live 3D 查看器（Item3DViewer）共用这一份 renderRef 分发，避免两处重复。
+static func build_item_node(def: Dictionary) -> Node3D:
+	var rref := String(def.get("renderRef", ""))
+	if rref.begins_with("sticker:"):
+		return null # 贴纸是扁平薄片，不进 3D 查看
+	var key := rref.get_slice(":", 1)
+	var cat := PackRegistry.category(key)
+	return _make_node(def, rref, key, cat)
+
+## 节点世界空间 AABB（详情查看器取景/居中用；缩略图取景也用）。
+static func item_node_aabb(node: Node3D) -> AABB:
+	return _node_aabb(node)
+
 ## renderRef 分发（与 chunk_manager 同规则，但单体实例化，不合批/不占地）。
-func _make_node(def: Dictionary, rref: String, key: String, cat: String) -> Node3D:
+static func _make_node(def: Dictionary, rref: String, key: String, cat: String) -> Node3D:
 	if rref == "sdf_inline":
 		var spec: Variant = def.get("spec", null)
 		if typeof(spec) != TYPE_DICTIONARY:
@@ -283,7 +297,7 @@ func _make_node(def: Dictionary, rref: String, key: String, cat: String) -> Node
 	return null
 
 ## SdfProp 在离屏 SubViewport 里判不到主窗相机会被挂起——摘 enabler、强制常驻进程，保证吸附着色。
-func _prep_sdf(prop: SdfProp) -> SdfProp:
+static func _prep_sdf(prop: SdfProp) -> SdfProp:
 	if prop == null:
 		return null
 	for c in prop.get_children():
@@ -312,7 +326,7 @@ func _frame_camera(node: Node3D) -> Dictionary:
 	return { "center": center, "dir": dir }
 
 ## 递归合并所有 VisualInstance3D 的世界空间 AABB。
-func _node_aabb(node: Node3D) -> AABB:
+static func _node_aabb(node: Node3D) -> AABB:
 	var out := AABB()
 	var has := false
 	var stack: Array = [node]
