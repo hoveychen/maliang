@@ -1132,6 +1132,34 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       throw e;
     }
   });
+  // 管理端点：存量造物名回填中文（item-cn-names）。老 prop prompt 让 name 出英文 snake_case
+  // （red_mushroom…），物品页/背包显示成英文幼儿看不懂。新造物已出中文；这条把存量英文名的造物
+  // 逐个用 LLM 译成短中文名回写 upsertItem + 广播 item_updated。幂等：已是中文的跳过。
+  // ?world=<id> 限定单个世界；缺省全世界。必须配 MALIANG_ADMIN_TOKEN。
+  app.post<{ Querystring: { world?: string } }>('/admin/backfill-item-names', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const worldFilter = req.query.world;
+    const CJK = /[一-鿿]/;
+    const results: { id: string; world: string; old: string; name?: string; skipped?: string }[] = [];
+    for (const w of store.listWorlds().filter((x) => !worldFilter || x.id === worldFilter)) {
+      for (const def of store.listWorldItems(w.id)) {
+        if (CJK.test(def.name)) { results.push({ id: def.id, world: w.id, old: def.name, skipped: 'already cn' }); continue; }
+        let cn = '';
+        try { cn = (await adapters.llm.translateToChineseName(def.name)).trim(); } catch { cn = ''; }
+        if (!cn || !CJK.test(cn)) { results.push({ id: def.id, world: w.id, old: def.name, skipped: 'translate failed' }); continue; }
+        const old = def.name;
+        def.name = cn.slice(0, 12);
+        store.upsertItem(def);
+        hub.broadcast(w.id, { type: 'item_updated', worldId: w.id, item: def });
+        results.push({ id: def.id, world: w.id, old, name: def.name });
+      }
+    }
+    return { count: results.length, renamed: results.filter((r) => r.name).length, results };
+  });
+
   // 剧本造物：prop.create(desc) 走造物管线出 spec 并落 items 实体行（sdf_inline，不进矩阵
   // 不占 tile——演出指令流照旧客户端临时渲染，演完即散），不扣小红花（非付费造角色）。
   // 审核挡/校验败/异常一律返回 null，execCommand 侧转 stage_abort。

@@ -167,6 +167,15 @@ export function createMockAdapters(): ServiceAdapters {
           scale: sizeToScale(inferSizeFromText(intentText)),
         };
       },
+      async translateToChineseName(name: string): Promise<string> {
+        // mock：确定性译名。命中常见词表就用词表，否则给个稳定的中文兜底（测试断言中文即可）。
+        const table: Record<string, string> = {
+          red_mushroom: '红蘑菇', colorful_rocket: '彩色火箭', spinning_pinwheel: '小风车',
+          wooden_stool: '小木凳', wooden_ladder: '小木梯', mystery_hopper: '蹦蹦盒',
+          spinning_mini_house: '转转小屋', drifting_rocket: '飘飘火箭',
+        };
+        return table[name] ?? '小玩意';
+      },
       async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
         // 点名让别的角色执行：转写里出现花名册角色名 → performer（真实实现由 LLM 判断语气）
         const named = (ctx.worldCharacters ?? []).find((c) => transcript.includes(c.name));

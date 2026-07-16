@@ -204,6 +204,17 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     return { ...checked.spec, scale: size };
   }
 
+  async translateToChineseName(name: string): Promise<string> {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: '你把一个玩具/物件的英文或拼音名字，译成幼儿园小朋友看得懂的短中文名词（2~6 字）。只回中文名字本身，不要标点、引号、解释、拼音。例：red_mushroom→红蘑菇，colorful_rocket→彩色火箭，spinning_pinwheel→小风车。' },
+      { role: 'user', content: name },
+    ];
+    const out = (await this.#client.chatText(this.#model, messages, {})).trim();
+    // 兜底：抽出中文段（去掉可能夹带的引号/空白/说明），失败留原文交由上层判定
+    const m = out.match(/[一-鿿]{1,12}/);
+    return m ? m[0] : out.slice(0, 12);
+  }
+
   async routeIntent(transcript: string, ctx: IntentContext): Promise<IntentResult> {
     // 能力集已由调用方（voice.ts 的 effectiveAbilities）算好：基础集 ∪ 角色自带，仙子再减去走动类。
     // 这里不能再擅自并回 BASE_ABILITIES——那会把仙子刚被摘掉的 move_to/follow 又塞回她的 prompt。
