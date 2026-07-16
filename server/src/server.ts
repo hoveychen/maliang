@@ -2477,6 +2477,8 @@ export interface ActorPresence {
   tile?: TilePos;
   /** 贴纸锚点（design §5 actors 流转发）：让「别人看到的我」也吃真锚点，老档缺省走对端 alpha 兜底。 */
   anchors?: CharacterAnchors;
+  /** 身上贴的贴纸（placement-interaction §3.3 A）：随 actors 流转发，让别人看到「我」戴的贴纸。 */
+  attachments?: Array<{ slot: 'headTop' | 'handL' | 'handR'; itemId: string }>;
 }
 
 /** 夹紧不可信的上报 anchors（world_info.profile 是设备端自报）：三点齐全且 x,y 有限才收、坐标夹到 [0,1]；否则 undefined。 */
@@ -2556,6 +2558,7 @@ export function presenceOf(store: WorldStore, worldId: string, sceneId: string, 
     voiceId: voiceForPlayer(playerId, p?.gender),
     tile: store.getPlayerTile(worldId, sceneId, playerId),
     ...(p?.anchors ? { anchors: p.anchors } : {}),
+    ...(p?.attachments && p.attachments.length ? { attachments: p.attachments } : {}),
   };
 }
 
@@ -2900,6 +2903,8 @@ export async function handleWsMessage(
     if (typeof msg.playerId === 'string' && msg.playerId && msg.profile) {
       const p = msg.profile;
       const anchors = sanitizeAnchors(p.anchors); // 设备端自报，夹紧后随 Player 落库供 presence 转发（design §5）
+      // 贴纸是服务端权威（player_attach 写入），profile 不带——upsert 必须保留旧 attachments，否则重连即被抹掉。
+      const prev = store.getPlayer(msg.playerId);
       const player: Player = {
         id: msg.playerId,
         name: String(p.name ?? ''),
@@ -2909,6 +2914,7 @@ export async function handleWsMessage(
         spriteAsset: String(p.spriteAsset ?? ''),
         createdAt: String(p.createdAt ?? ''),
         ...(anchors ? { anchors } : {}),
+        ...(prev?.attachments && prev.attachments.length ? { attachments: prev.attachments } : {}),
       };
       if (player.name !== '' || player.spriteAsset !== '') store.upsertPlayer(player);
     }
@@ -2949,6 +2955,8 @@ export async function handleWsMessage(
       voiceId: session.playerId ? voiceForPlayer(session.playerId, store.getPlayer(session.playerId)?.gender) : '',
       bag: store.getBag(worldId, session.playerId),
       activeTask: store.getActiveTask(worldId, session.playerId),
+      // 自己身上的贴纸（服务端权威）：重连/重启后客户端据此把「我」的贴纸补回来（placement-interaction §3.3 A）
+      attachments: session.playerId ? (store.getPlayer(session.playerId)?.attachments ?? []) : [],
       // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按点点旁降生）
       playerPos: session.playerId ? store.getPlayerTile(worldId, msg.sceneId ?? DEFAULT_SCENE, session.playerId) : undefined,
     }));
@@ -3462,6 +3470,58 @@ export async function handleWsMessage(
     store.saveCharacter(char);
     hub?.broadcastScene(worldId, char.sceneId ?? DEFAULT_SCENE, {
       type: 'character_attach', worldId, sceneId: char.sceneId ?? DEFAULT_SCENE, characterId, slot, itemId,
+    });
+    socket.send(JSON.stringify({ type: 'bag_update', worldId, bag: store.getBag(worldId, session.playerId) }));
+    return;
+  }
+
+  // 贴自己贴纸：挂/摘（placement-interaction §3.3 方案 A）。与 character_attach 同语义(贴扣摘还换替换)，
+  // 但目标是「我」自己的 Player 行、服务端权威落库；按当前场景定向广播 player_attach（含发起者，靠广播落地渲染），
+  // 并经 presenceOf 让后进同场景的人也看到。摘下 itemId=null。
+  if (msg.type === 'player_attach') {
+    const worldId = msg.worldId ?? '';
+    const slot = String(msg.slot ?? '');
+    const itemId = msg.itemId === undefined || msg.itemId === null || msg.itemId === '' ? null : String(msg.itemId);
+    if (slot !== 'headTop' && slot !== 'handL' && slot !== 'handR') {
+      socket.send(JSON.stringify({ type: 'error', error: 'bad slot' }));
+      return;
+    }
+    const player = session.playerId ? store.getPlayer(session.playerId) : undefined;
+    if (!player) {
+      socket.send(JSON.stringify({ type: 'error', error: 'player not found' }));
+      return;
+    }
+    const list = player.attachments ?? [];
+    const existing = list.find((a) => a.slot === slot);
+    if (itemId !== null) {
+      const def = getBuiltinItem(itemId);
+      if (!def || def.mount !== 'edge') {
+        socket.send(JSON.stringify({ type: 'error', error: 'not a sticker' }));
+        return;
+      }
+      if ((store.getBag(worldId, session.playerId)[itemId] ?? 0) < 1) {
+        socket.send(JSON.stringify({ type: 'error', error: 'item not in bag' }));
+        return;
+      }
+      store.bagTake(worldId, session.playerId, itemId);
+      if (existing) {
+        store.bagAdd(worldId, session.playerId, existing.itemId); // 换装：旧贴纸回背包
+        existing.itemId = itemId;
+        player.attachments = list;
+      } else {
+        player.attachments = [...list, { slot, itemId }];
+      }
+    } else {
+      if (!existing) {
+        socket.send(JSON.stringify({ type: 'error', error: 'slot empty' }));
+        return;
+      }
+      store.bagAdd(worldId, session.playerId, existing.itemId);
+      player.attachments = list.filter((a) => a.slot !== slot);
+    }
+    store.upsertPlayer(player);
+    hub?.broadcastScene(worldId, session.currentScene, {
+      type: 'player_attach', worldId, sceneId: session.currentScene, playerId: session.playerId, slot, itemId,
     });
     socket.send(JSON.stringify({ type: 'bag_update', worldId, bag: store.getBag(worldId, session.playerId) }));
     return;

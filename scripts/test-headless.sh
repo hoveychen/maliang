@@ -118,6 +118,7 @@ UNIT_TESTS=(
   test_sticker_edges
   test_sticker_asset_render
   test_character_anchors
+  test_self_stickers
   test_fairy_anchors
   test_forest_scene
   test_forest_reach

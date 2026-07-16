@@ -869,7 +869,8 @@ func _apply_player_sprite() -> void:
 	var asset := String(prof.get("sprite_asset", ""))
 	var a: Variant = prof.get("anchors")
 	var anchors: Dictionary = a if typeof(a) == TYPE_DICTIONARY else {}
-	_apply_player_sprite_to(player["node"] as PaperCharacter, asset, anchors)
+	# 传入 _my_attachments：真立绘就位后按正确尺寸重挂贴纸（换形象/首次上线都走这条）。
+	_apply_player_sprite_to(player["node"] as PaperCharacter, asset, anchors, _my_attachments)
 	# 老档案（本次修复前造的角色）只有 sprite_asset 没有 anchors：按 hash 现算一次并落档（设计 §2.3）。
 	if not asset.is_empty() and anchors.is_empty():
 		_backfill_player_anchors(asset)
@@ -893,7 +894,7 @@ func _backfill_player_anchors(asset: String) -> void:
 ## 别人看到的我 = 我看到的我。node 可能中途被销毁（换场景/离场），每步 is_instance_valid 守卫。
 ## fire-and-forget 调用（不 await）：跑到首个 await 就返回，图到了再替换占位。
 ## anchors 可选：本地玩家从设备档案传入（真·vision 锚点）；远端玩家副本无档案、留空走 alpha 兜底。
-func _apply_player_sprite_to(node: PaperCharacter, asset: String, anchors := {}) -> void:
+func _apply_player_sprite_to(node: PaperCharacter, asset: String, anchors := {}, attachments := []) -> void:
 	if is_instance_valid(node) and not anchors.is_empty():
 		node.set_anchors(anchors) # 锚点与贴图解耦：先灌（离线/图未到也生效），贴纸后到自动重摆
 	if asset.is_empty() or not is_instance_valid(node):
@@ -907,6 +908,9 @@ func _apply_player_sprite_to(node: PaperCharacter, asset: String, anchors := {})
 	node.offset = Vector2(0.0, float(tex.get_height()) / 2.0)
 	node.modulate = Color.WHITE
 	BlobShadow.attach(node, clampf(float(tex.get_width()) * node.pixel_size * 0.38, 0.4, 1.4))
+	# 立绘尺寸已定：按正确尺寸挂上身上的贴纸（自己=_my_attachments，远端=presence.attachments）。
+	if not attachments.is_empty():
+		_apply_attachments_list(node, attachments)
 	# 试点：玩家形象静态就位后，后台轮询 idle 动画，就绪则静态切动画（世界高度保持 5 单位）
 	_poll_idle_anim(node, asset, 5.0, 0.0)
 
@@ -2275,8 +2279,10 @@ func _apply_replicated(id: String, pos: Vector2, t: int, now_local: int, is_play
 		# presence 通常已经先把副本立起来了；这里是兜底（快照丢了/本端还没收到 join）。
 		var p: Dictionary = _presence.get(id, {})
 		var panch: Variant = p.get("anchors")
+		var patts: Variant = p.get("attachments")
 		ra = _spawn_remote_actor(id, pos, String(p.get("spriteAsset", "")), String(p.get("name", "")),
-			panch if typeof(panch) == TYPE_DICTIONARY else {})
+			panch if typeof(panch) == TYPE_DICTIONARY else {},
+			patts if typeof(patts) == TYPE_ARRAY else [])
 		_remote_actors[id] = ra
 	(ra["buf"] as RemoteActorBuffer).push(t, pos, now_local)
 
@@ -2297,13 +2303,14 @@ func _halt_npc_for_replication(n: Dictionary) -> void:
 
 ## 远端玩家 avatar 的渲染副本。先用占位立起来（网络往返期间也得有个人在那儿），
 ## 拿到 presence 的 spriteAsset 就换成那个小朋友的真实立绘（与本地玩家同一套归一化）。
-func _spawn_remote_actor(id: String, pos: Vector2, sprite := "", disp_name := "", anchors := {}) -> Dictionary:
+func _spawn_remote_actor(id: String, pos: Vector2, sprite := "", disp_name := "", anchors := {}, attachments := []) -> Dictionary:
 	var node := PaperCharacter.new()
 	add_child(node)
 	var label := disp_name if not disp_name.is_empty() else id
 	node.setup(critter_tex, Color(0.86, 0.92, 1.0), label) # setup 内部归一尺寸 + 挂脚下暗斑
 	# anchors 由 presence 转发（服务端 §5）：别人看到的我，贴纸位吃真锚点；缺省（老档）留空走 alpha 兜底。
-	_apply_player_sprite_to(node, sprite, anchors) # fire-and-forget：空 asset 直接返回，图到了替换占位
+	# attachments 同经 presence 转发：别人看到我戴的贴纸，真立绘就位后按正确尺寸挂上（见 _apply_player_sprite_to）。
+	_apply_player_sprite_to(node, sprite, anchors, attachments) # fire-and-forget：空 asset 直接返回，图到了替换占位
 	return { "node": node, "logical": pos, "id": id, "buf": RemoteActorBuffer.new(), "is_remote": true }
 
 ## 在场名单（进世界/换场景一次性下发）：把同场景的其他小朋友立起来——包括站着不动的。
@@ -2333,8 +2340,10 @@ func _upsert_presence(a: Dictionary) -> void:
 	if tile is Dictionary and (tile as Dictionary).has("tileX"):
 		pos = Vector2(float(tile["tileX"]), float(tile["tileY"]))
 	var anch: Variant = a.get("anchors")
+	var atts: Variant = a.get("attachments")
 	_remote_actors[pid] = _spawn_remote_actor(pid, pos, String(a.get("spriteAsset", "")), String(a.get("name", "")),
-		anch if typeof(anch) == TYPE_DICTIONARY else {})
+		anch if typeof(anch) == TYPE_DICTIONARY else {},
+		atts if typeof(atts) == TYPE_ARRAY else [])
 
 ## 别人造出了新伙伴：本端就地降生（否则要重进场景才看得到它）。
 func _on_character_spawned(data: Dictionary) -> void:
@@ -2940,6 +2949,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not aid.is_empty():
 					_stage.on_local_tap(aid)
 		return
+	# 自贴装扮态（self-stickers）：给自己贴纸时吞掉世界点击（走路/拾取/跟随/缩放/手势都停），
+	# 交互全交给底部贴纸盘（在 CanvasLayer 上层，按钮先吃命中）；点盘外空白 = 退出装扮。
+	if _dress_self:
+		if event is InputEventScreenTouch or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
+			if not event.pressed:
+				_end_dress_self()
+		return
 	# 放置模式（placement-p1）：单指点地 → 幽灵挪到该 tile（贴纸吸附最近边）；吞掉走路/拾取/
 	# 跟随/缩放，交互都交给底部 HUD。双指相机手势本模式下不接（避免幽灵与镜头抢手）。
 	if _placing:
@@ -3467,9 +3483,11 @@ func _build_talk_view(host: CanvasLayer) -> void:
 # 对话态底部两段式：第一段列背包贴纸（点选进第二段），第二段列三个槽位（头顶/左手/右手）。
 # 贴上/摘下都是发 character_attach 等广播落地（服务端权威扣还背包）。
 
-var _sticker_view: Control          ## 贴纸盘容器（NPC 对话态显示）
+var _sticker_view: Control          ## 贴纸盘容器（NPC 对话态 / 自贴装扮态显示）
 var _sticker_row: HBoxContainer     ## 动态格子行
 var _sticker_pick := ""             ## 已选中的贴纸实体 id（空=贴纸选择段）
+var _dress_self := false            ## 自贴装扮态（贴纸 app 详情「装到身上」进入）：贴纸盘对着玩家自己
+var _my_attachments: Array = []     ## 自己身上贴的贴纸权威副本（world_state 下发/player_attach 增量维护，供换形象/重挂）
 const STICKER_SLOTS := [["headTop", "头顶"], ["handL", "左手"], ["handR", "右手"]]
 
 # ── 放置模式（placement-p1 §3.1/§3.2）────────────────────────────────────────
@@ -3526,7 +3544,12 @@ func _refresh_sticker_view() -> void:
 		return
 	for c in _sticker_row.get_children():
 		c.queue_free()
-	var target := selected
+	# 目标：自贴装扮态=玩家自己；否则=对话中的 NPC（selected）。
+	var target: PaperCharacter = null
+	if _dress_self:
+		target = player.get("node") as PaperCharacter if not player.is_empty() else null
+	else:
+		target = selected
 	if target == null or not online or _in_creation:
 		_sticker_view.visible = false
 		return
@@ -3535,7 +3558,8 @@ func _refresh_sticker_view() -> void:
 		if int(bag[item_id]) > 0 and _sticker_tex(String(item_id)) != null:
 			ids.append(String(item_id))
 	ids.sort()
-	if ids.is_empty() and _sticker_pick.is_empty():
+	# NPC 态：无贴纸且未选中即隐藏；自贴态：始终显示（至少给个「收起」键退出装扮）。
+	if not _dress_self and ids.is_empty() and _sticker_pick.is_empty():
 		_sticker_view.visible = false
 		return
 	_sticker_view.visible = true
@@ -3551,6 +3575,13 @@ func _refresh_sticker_view() -> void:
 				game_audio.play_sfx("bell")
 				_refresh_sticker_view())
 			_sticker_row.add_child(card)
+		if _dress_self: # 自贴态：末尾一个「✓ 收起」键退出装扮
+			var done := Button.new()
+			done.custom_minimum_size = Vector2(120.0, 120.0)
+			UiAssets.style_card_button(done, 20.0)
+			done.text = "✓"
+			done.pressed.connect(_end_dress_self)
+			_sticker_row.add_child(done)
 	else:
 		for pair in STICKER_SLOTS:
 			var slot_btn := Button.new()
@@ -3569,12 +3600,20 @@ func _refresh_sticker_view() -> void:
 		_sticker_row.add_child(back)
 
 ## 选了槽位：发 attach（服务端扣包+广播，本端等广播落地渲染），回到贴纸选择段。
+## 自贴态发 player_attach（贴自己），NPC 态发 character_attach（贴对话对象）。
 func _on_sticker_slot(slot: String) -> void:
-	var d := _find_npc_dict(selected) if selected != null else {}
-	var cid := String(d.get("id", ""))
-	if cid.is_empty() or _sticker_pick.is_empty():
+	if _sticker_pick.is_empty():
 		return
-	backend.send_character_attach(world_id, cid, slot, _sticker_pick)
+	if _dress_self:
+		if player.is_empty():
+			return
+		backend.send_player_attach(world_id, slot, _sticker_pick)
+	else:
+		var d := _find_npc_dict(selected) if selected != null else {}
+		var cid := String(d.get("id", ""))
+		if cid.is_empty():
+			return
+		backend.send_character_attach(world_id, cid, slot, _sticker_pick)
 	game_audio.play_sfx("pop")
 	_sticker_pick = ""
 	_refresh_sticker_view()
@@ -3606,6 +3645,29 @@ func _resolve_sticker_tex(item_id: String) -> Texture2D:
 			ChunkManager.cache_sticker_asset(hash, tex)
 	return tex
 
+## 把一次 attach/detach 落到某节点（itemId 空/null=摘该槽）。attach/detach 共用一条路径。
+## 走 _resolve_sticker_tex（异步）：仙子现造的贴纸 renderRef sticker:@<hash> 冷缓存时要向服务端拉取，
+## 只查本地 PackRegistry 会漏渲染（与 _on_character_attach 原路径一致，别回归）。
+func _render_attach(node: PaperCharacter, slot: String, item_v: Variant) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	if item_v == null or String(item_v).is_empty():
+		node.detach_sticker(slot)
+		return
+	var tex := await _resolve_sticker_tex(String(item_v))
+	if tex != null and is_instance_valid(node):
+		node.attach_sticker(slot, tex)
+
+## 把一次 attach/detach 增量并进 attachments 列表副本（item_id 空=摘该槽）。纯函数，便于回测。
+static func _merge_attach(list: Array, slot: String, item_id: String) -> Array:
+	var out: Array = []
+	for a in list:
+		if typeof(a) == TYPE_DICTIONARY and String((a as Dictionary).get("slot", "")) != slot:
+			out.append(a)
+	if not item_id.is_empty():
+		out.append({ "slot": slot, "itemId": item_id })
+	return out
+
 ## character_attach 广播落地：按 id 现查角色副本（勿持引用），挂/摘贴纸。
 func _on_character_attach(data: Dictionary) -> void:
 	if String(data.get("sceneId", "village")) != _scene_id:
@@ -3613,23 +3675,86 @@ func _on_character_attach(data: Dictionary) -> void:
 	var npc := _find_npc_by_id(String(data.get("characterId", "")))
 	if npc == null:
 		return
+	_render_attach(npc, String(data.get("slot", "")), data.get("itemId"))
+
+## player_attach 广播落地（含自己，同 character_attach 哲学：靠广播落地渲染）。
+## 自己=挂到玩家节点并维护 _my_attachments（换形象重挂用）；别人=挂到远端副本并更新 presence。
+func _on_player_attach(data: Dictionary) -> void:
+	if String(data.get("sceneId", _scene_id)) != _scene_id:
+		return
+	var pid := String(data.get("playerId", ""))
 	var slot := String(data.get("slot", ""))
 	var item_v: Variant = data.get("itemId")
-	if item_v == null or String(item_v).is_empty():
-		npc.detach_sticker(slot)
-		return
-	var tex := await _resolve_sticker_tex(String(item_v))
-	if tex != null:
-		npc.attach_sticker(slot, tex)
+	var item_id := String(item_v) if (item_v != null and not String(item_v).is_empty()) else ""
+	if pid == backend.player_id:
+		_my_attachments = _merge_attach(_my_attachments, slot, item_id)
+		if not player.is_empty():
+			_render_attach(player["node"] as PaperCharacter, slot, item_v)
+		if _dress_self:
+			_refresh_sticker_view() # 背包数变了，贴纸盘跟着刷
+	else:
+		if _presence.has(pid):
+			_presence[pid]["attachments"] = _merge_attach(_presence[pid].get("attachments", []), slot, item_id)
+		var ra: Dictionary = _remote_actors.get(pid, {})
+		if not ra.is_empty():
+			_render_attach(ra.get("node") as PaperCharacter, slot, item_v)
 
 ## 角色降生时应用已有贴纸（attachments 随角色整对象下发）。
 func _apply_attachments(npc: PaperCharacter, c: Dictionary) -> void:
-	for a in c.get("attachments", []):
+	_apply_attachments_list(npc, c.get("attachments", []))
+
+## 把 attachments 列表挂到某节点（先清 3 槽再挂，按当前立绘尺寸；itemId 无效则跳过）。
+## 换形象/真立绘就位后重挂用——立绘尺寸变了需按新尺寸重算贴纸大小。
+func _apply_attachments_list(node: PaperCharacter, list: Array) -> void:
+	if not is_instance_valid(node):
+		return
+	for pair in STICKER_SLOTS:
+		node.detach_sticker(String(pair[0]))
+	for a in list:
 		if typeof(a) != TYPE_DICTIONARY:
 			continue
 		var tex := await _resolve_sticker_tex(String((a as Dictionary).get("itemId", "")))
 		if tex != null:
-			npc.attach_sticker(String((a as Dictionary).get("slot", "")), tex)
+			node.attach_sticker(String((a as Dictionary).get("slot", "")), tex)
+
+## 把 _my_attachments 挂到本地玩家节点（world_state 下发/真立绘就位后调，按当前尺寸重挂）。
+func _apply_player_attachments() -> void:
+	if player.is_empty():
+		return
+	_apply_attachments_list(player["node"] as PaperCharacter, _my_attachments)
+
+## 从手机「贴纸」app 详情里点「装到身上」进入（placement-interaction §3.3 入口 b）：
+## 手机已把这张贴纸选好（item_id 传进来），所以直接预置 _sticker_pick 进「选身上哪个槽」段。
+## 收起手机跨页停靠、近身相机框住玩家、亮自贴盘。装扮态吞世界点击（见 _unhandled_input），
+## 点盘外空白 = 退出装扮；选完一个槽发 player_attach 后 _sticker_pick 清空、回到可再贴/✓收起段。
+func _begin_self_attach(item_id: String) -> void:
+	if player.is_empty() or not online:
+		return
+	if _sticker_tex(item_id) == null:
+		return # 不是贴纸/未注册贴图：装不上，直接不进装扮态
+	if selected != null:
+		_exit_interaction() # 万一开手机前正对着 NPC：先退干净，装扮只对自己
+	if paper_phone != null and paper_phone.state != PaperPhone.State.DOCKED:
+		paper_phone.dock()
+		phone_ui.set_screen_off(true)
+		paper_phone.refresh_dock_screen()
+	if _phone_scrim != null:
+		_phone_scrim.visible = false # 装扮态不用遮罩（会盖住贴纸盘按钮），改由 _unhandled_input 吞点击
+	_dress_self = true
+	_sticker_pick = item_id # 手机已选好这张 → 直接进选槽段
+	_enter_phone_cam() # 幂等：把玩家框在屏上好贴
+	_refresh_sticker_view()
+
+## 退出装扮：还原相机、隐藏贴纸盘。
+func _end_dress_self() -> void:
+	if not _dress_self:
+		return
+	_dress_self = false
+	_sticker_pick = ""
+	_exit_phone_cam()
+	if game_audio != null:
+		game_audio.play_sfx("exit")
+	_refresh_sticker_view()
 
 ## 点了表情盘某格：本端立即演 + 发给服务端转发（对端在我的副本上演同款）。
 func _on_talk_emote_card(action: String) -> void:
@@ -3782,6 +3907,7 @@ func _setup_backend() -> void:
 	backend.bag_update.connect(_on_bag_update)
 	backend.sticker_bought.connect(_on_sticker_bought)
 	backend.character_attach.connect(_on_character_attach)
+	backend.player_attach.connect(_on_player_attach) # 自己/别人的贴纸挂摘广播（self-stickers）
 	backend.sticker_denied.connect(_on_sticker_denied)
 	backend.gen_denied.connect(_on_reward_denied)
 	backend.failed.connect(_on_failed)
@@ -7847,6 +7973,10 @@ func _on_world_state(data: Dictionary) -> void:
 	_apply_bag(data.get("bag"))
 	_set_active_task(data.get("activeTask"))
 	_restore_player_pos(data.get("playerPos"))
+	# 自己身上的贴纸（boot/重连补回，服务端权威）：记副本 + 挂到玩家节点（真立绘就位后 _apply_player_sprite_to 会按正确尺寸重挂）。
+	var atts: Variant = data.get("attachments")
+	_my_attachments = atts if typeof(atts) == TYPE_ARRAY else []
+	_apply_player_attachments()
 
 ## 把玩家搬回上次离开时的 tile。只在引导窗口内生效（_player_restore_pending）：
 ## 断线重连也会收到 world_state，那时小朋友早已走开，再搬人就是凭空瞬移。
