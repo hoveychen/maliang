@@ -27,6 +27,7 @@ description: 用 AI 当玩家驱动马良小世界——替代真人完成点击
 4. **说话有门禁**：`say` 回 `fed:false/gate_closed` = 对方在说话或没开麦。先 `wait-banner`（TTS 放完）再重说；反复 say 会堆积 ASR 队列。看 `state.fsm_state`/`mic_open` 判断当下能不能说。
 5. **`say` 之前必须先 `inject`**（换 ScriptedAsr），且必须**进世界后**才 inject（menu/标题页会报 no active VoiceCapture）。onboarding 页也有 VC，可以 inject。
 6. 连测被 45min 冷却门拦住 → `reset-budget`。
+7. **等状态、别卡时长（action-based）**：动作触发的动画/异步用**状态谓词**等它落定，不要 `sleep <固定秒数>` 硬赌——`wait-world`/`wait-banner`/`wait --key <字段> --truthy|--falsy`（如 `--key phone_settling --falsy`、`--key transitioning --falsy`）、或本身就阻塞到落定的命令（`phone`）。卡 sleep 的脚本会在动画参数一改就整批 flake（血泪：`phone open`+`phone app` 背靠背瞬发把搬移动画掐断，手机停半路时左时右——根子就是没等落定）。
 
 ## 2. 感知
 
@@ -44,7 +45,7 @@ description: 用 AI 当玩家驱动马良小世界——替代真人完成点击
 **造物（guided-creation 多轮）**：对点点 `say "点点，帮我造一个火箭"` → `wait --key in_creation --truthy` → 循环：`state` 看 `creation_options` **有卡就 `pick <id>`**（category=recipient 时选 self），**无卡（开放问句）就 `say` 肯定应答**；`creation_question` ∈ {施法中…, 拼上啦…, 拼好啦！} 是过渡字幕不是新问句。直到 `bag_size` 增长或 `naming_item` 置位。
 **起名**：`naming_item` 非空后 `say "<名字>"` → 进确认模式（`vc_confirming`）→ `accept`。
 
-**手机**：`phone open` → `phone app items|stickers|flowers|settings` → 屏内元素用 `ui` 枚举（viewport=PhoneScreen）+ `click --path`；翻页用 `swipe`。收起 `phone close`。
+**手机**：`phone open` → `phone app items|stickers|flowers|settings` → 屏内元素用 `ui` 枚举（viewport=PhoneScreen）+ `click --path`；翻页用 `swipe`。收起 `phone close`。`phone` 命令是 **action-based** 的：发起后会**阻塞到手机开/关/翻页动画真正落定**（回包带 `settled:true`）才返回，所以 `phone app` 后**直接 `shot` 即可，不用 `sleep`**——命令没返回=动画还没停。别再 `phone open` 完立刻 `phone app`+`sleep` 硬等：那样只是碰运气，且早期版本会把搬移动画掐断导致手机停在半路（时左时右）。
 
 **移动**：点地走路 `tap <地面坐标>`；按住跟随 `long-press --ms 1500`；跨场景 `scene forest` 后等 `transitioning=false`；找机位 `teleport --near` / `teleport 30 40`。
 
