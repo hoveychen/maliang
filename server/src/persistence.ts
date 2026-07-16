@@ -2,12 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, ItemDef, MemoryItem, Player, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
-import { ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import { FAIRY_VOICE } from './voice_catalog.ts';
 import { creationItemDef, getBuiltinItem } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
-import type { ImageBlob } from './adapters/types.ts';
+import type { ClipName, ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { sanitizeLevels, type DeviceSample, type Levels } from './device_profile.ts';
 
@@ -86,6 +87,19 @@ export interface SpriteAnimRecord {
   status: 'pending' | 'ready' | 'failed';
   animAsset?: string;
   meta?: SpriteSheetMeta;
+  /**
+   * 图集版本。缺省 = 1 = 单段 idle（本字段上线前的老记录）；2 = 三段 idle/moving/talking。
+   * 回填据此判断哪些 ready 记录需要重跑（见 backfillCharacterAnimations）。
+   */
+  version?: number;
+  /**
+   * 段名 → 该段原始绿幕 mp4 的资产 hash。
+   *
+   * 留着原片是有意的：视频是花钱生成的（每段约 $0.046），而图集的帧率/分辨率/打包方式
+   * 都还会变（比如日后把抽帧从 8fps 提到原片的原生帧率）。存了原片，重打图集就是一次纯
+   * 本地 ffmpeg，零成本；不存就得重新向 Seedance 买一遍。原片不下发给客户端。
+   */
+  clipVideos?: Partial<Record<ClipName, string>>;
 }
 
 /** scenes 表的一行（列名 snake_case；terrain blob 单独走 getSceneTerrain，不在此）。 */
@@ -167,6 +181,8 @@ export class WorldStore {
       this.#migrateLegacyPlayerPositions();
       this.#migrateLegacyEntityScenes();
       this.#migrateVisitsDevice();
+      this.#migrateFairyAbilities(); // 存量仙子补新增能力（create_sticker / play_game / guide_to / guide_stop）
+      this.#migrateFairyPersona(); // 存量仙子改名换人设（小神仙 → 点点，神笔的笔灵）
       this.#loadAssets();
       this.#loadSpriteAnims();
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
@@ -182,6 +198,65 @@ export class WorldStore {
     const cols = this.#db.prepare('PRAGMA table_info(visits)').all() as { name: string }[];
     if (!cols.some((c) => c.name === 'device')) {
       this.#db.exec('ALTER TABLE visits ADD COLUMN device TEXT');
+    }
+  }
+
+  /**
+   * 给存量世界的仙子补【后续新增】的能力（create_sticker=fairy-stickers、play_game=realtime-primitives P5、guide_to/guide_stop=fairy-guide）。
+   * seedFairy 只在建世界时跑（新世界自带），老库里的仙子从 DB 读能力、缺哪条就不认对应意图（「做个贴纸」「我们来踢球」）。
+   * 幂等：把缺的能力补齐，非仙子/已齐全的跳过；只 UPDATE 真改到的行（getCharacter 直读 DB，无内存 Map 需刷新）。
+   */
+  #migrateFairyAbilities(): void {
+    const REQUIRED = ['create_sticker', 'play_game', 'guide_to', 'guide_stop'];
+    const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
+    const upd = this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?');
+    for (const r of rows) {
+      let c: Character;
+      try {
+        c = JSON.parse(r.data) as Character;
+      } catch {
+        continue;
+      }
+      if (!c.isFairy) continue;
+      const abilities = Array.isArray(c.abilities) ? c.abilities : [];
+      const missing = REQUIRED.filter((a) => !abilities.includes(a));
+      if (missing.length === 0) continue;
+      c.abilities = [...abilities, ...missing];
+      upd.run(JSON.stringify(c), r.id);
+    }
+  }
+
+  /**
+   * 存量世界的仙子改名换人设：「小神仙」→「点点」（神笔的笔灵，见 docs/fairy-persona-design.md）。
+   *
+   * 名字进 LLM 的 system prompt（characterName/personality），老库不迁移的话，生产上她会继续
+   * 自称「小神仙」、继续按旧人设说话——新客户端念的是点点，服务端答的是小神仙，当场分裂。
+   *
+   * 幂等：名字已是 FAIRY_NAME 且 personality 已是新版就跳过。
+   * 刻意**不动** spriteAsset——立绘替换走 POST /worlds/:id/fairy-sprite（P2），迁移只管文字人设。
+   */
+  #migrateFairyPersona(): void {
+    const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
+    const upd = this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?');
+    for (const r of rows) {
+      let c: Character;
+      try {
+        c = JSON.parse(r.data) as Character;
+      } catch {
+        continue;
+      }
+      if (!c.isFairy) continue;
+      // voiceId 也要迁移：它驱动【动态对话 replyText】的实时 TTS，老库存的是旧音色（Xiaoyi）。
+      // 不迁移的话，存量世界里预制台词是新音色（客户端 WAV 已重烧）、实时对话却还是旧音色，当场分裂。
+      if (c.name === FAIRY_NAME && c.personality === FAIRY_PERSONALITY && c.voiceId === FAIRY_VOICE) continue;
+      c.name = FAIRY_NAME;
+      c.personality = FAIRY_PERSONALITY;
+      c.voiceId = FAIRY_VOICE;
+      // 顺手清掉历史残留：她拿到 move_to/deliver_message 也兑现不了（effectiveAbilities 恒剔除）。
+      c.abilities = (Array.isArray(c.abilities) ? c.abilities : []).filter(
+        (a) => !LOCOMOTION_ABILITIES.includes(a),
+      );
+      upd.run(JSON.stringify(c), r.id);
     }
   }
 
@@ -312,6 +387,12 @@ export class WorldStore {
         option_id TEXT PRIMARY KEY,
         asset_hash TEXT NOT NULL
       );
+      -- 玩家 onboarding 档案（docs/onboarding-avatar-redesign-design.md §2.5）：键=playerId。
+      -- 独立于 players 表——world_info 的 Player upsert 是整行覆盖，并进去会被抹掉。
+      CREATE TABLE IF NOT EXISTS player_onboarding (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL
+      );
       -- 物品实体外观缩略图：物品在服务端没有图片，全靠客户端按 renderRef 现场渲染。
       -- debug 后台要看物品长什么样，就让客户端把每个 ItemDef 渲染成一张 PNG 上传（内容
       -- 寻址存进 assets），这里按 item id 记它的 hash。内置 def 与语音造物共用一张表。
@@ -337,6 +418,14 @@ export class WorldStore {
         PRIMARY KEY (world_id, player_id)
       );
       CREATE TABLE IF NOT EXISTS player_tasks (
+        world_id TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (world_id, player_id)
+      );
+      -- 玩家已发现的玩法（造物/造角色/玩游戏…）：村民只漏【还没被发现】的心愿，
+      -- 发现一个就再没人念叨它——「已发现的不再提」是发现感成立的前提（见 wishes.ts）。
+      CREATE TABLE IF NOT EXISTS player_discovered (
         world_id TEXT NOT NULL,
         player_id TEXT NOT NULL,
         data TEXT NOT NULL,
@@ -962,6 +1051,38 @@ export class WorldStore {
     return rows.map((r) => ({ playerId: r.player_id, wallet: coerceWallet(JSON.parse(r.data)).wallet }));
   }
 
+  /** 某玩家在某世界已发现的玩法（wishes.ts 的 ability 名）。没有行 = 什么都还没发现。 */
+  getDiscovered(worldId: string, playerId: string): string[] {
+    const row = this.#db
+      .prepare('SELECT data FROM player_discovered WHERE world_id = ? AND player_id = ?')
+      .get(worldId, this.#walletKey(playerId)) as { data: string } | undefined;
+    if (!row) return [];
+    try {
+      const raw: unknown = JSON.parse(row.data);
+      return Array.isArray(raw) ? raw.filter((a): a is string => typeof a === 'string') : [];
+    } catch {
+      return []; // 行损坏当作没发现过：最坏结果是村民多念叨一次，不该因此崩
+    }
+  }
+
+  /**
+   * 记一个玩法为「已发现」。返回 true 表示这是【第一次】发现它——
+   * 调用方据此决定要不要重发漏话（心愿池变了）+ 判定心愿达成。已发现过则原样返回 false、不写库。
+   */
+  addDiscovered(worldId: string, playerId: string, ability: string): boolean {
+    if (!this.#worldExists(worldId)) return false;
+    const cur = this.getDiscovered(worldId, playerId);
+    if (cur.includes(ability)) return false;
+    cur.push(ability);
+    this.#db
+      .prepare(
+        'INSERT INTO player_discovered (world_id, player_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(world_id, player_id) DO UPDATE SET data = excluded.data',
+      )
+      .run(worldId, this.#walletKey(playerId), JSON.stringify(cur));
+    return true;
+  }
+
   getActiveTask(worldId: string, playerId: string): ActiveTask | null {
     const row = this.#db
       .prepare('SELECT data FROM player_tasks WHERE world_id = ? AND player_id = ?')
@@ -995,7 +1116,7 @@ export class WorldStore {
 
   /**
    * 世界里的角色。传 sceneId 则只返回该场景的角色（缺 sceneId 的存量角色按 DEFAULT_SCENE 归入），
-   * 但仙女恒在——她跨场景跟随玩家，任何场景查询都带上她（委托候选/花名册在调用点各自排除 isFairy）；
+   * 但点点恒在——她跨场景跟随玩家，任何场景查询都带上她（委托候选/花名册在调用点各自排除 isFairy）；
    * 不传 = 全世界所有场景（保持既有调用点行为不变）。
    */
   listCharacters(worldId: string, sceneId?: string): Character[] {
@@ -1046,7 +1167,7 @@ export class WorldStore {
     return true;
   }
 
-  /** 玩家在某世界某场景的最后位置。没去过 → undefined（客户端按小神仙旁降生）。 */
+  /** 玩家在某世界某场景的最后位置。没去过 → undefined（客户端按点点旁降生）。 */
   getPlayerTile(worldId: string, sceneId: string, playerId: string): TilePos | undefined {
     const row = this.#db
       .prepare('SELECT tile_x, tile_y FROM player_positions WHERE world_id = ? AND scene_id = ? AND player_id = ?')
@@ -1092,6 +1213,23 @@ export class WorldStore {
     };
     backfill('characters');
     backfill('props');
+  }
+
+  /** 落/更新玩家 onboarding 档案（键=playerId；整对象 UPSERT 一行，重跑 onboarding 覆盖旧档）。 */
+  saveOnboardingProfile(profile: PlayerOnboardingProfile): void {
+    this.#db
+      .prepare('INSERT INTO player_onboarding (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+      .run(profile.playerId, JSON.stringify(profile));
+  }
+
+  getOnboardingProfile(playerId: string): PlayerOnboardingProfile | undefined {
+    const row = this.#db.prepare('SELECT data FROM player_onboarding WHERE id = ?').get(playerId) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as PlayerOnboardingProfile) : undefined;
+  }
+
+  listOnboardingProfiles(): PlayerOnboardingProfile[] {
+    const rows = this.#db.prepare('SELECT data FROM player_onboarding').all() as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as PlayerOnboardingProfile);
   }
 
   /** 登记/更新玩家档案（首见即建，再见即更）。整对象 UPSERT 一行。 */
@@ -1430,9 +1568,27 @@ export class WorldStore {
     this.#persistSpriteAnims();
   }
 
-  setSpriteAnimReady(spriteHash: string, animAsset: string, meta: SpriteSheetMeta): void {
-    this.#spriteAnims.set(spriteHash, { status: 'ready', animAsset, meta });
+  /**
+   * 置 ready。extra 带图集版本与三段原片的资产 hash（v2 路径必传；v1 老路径不传，
+   * 记录里就没有 version/clipVideos，回填会认出它是老版本并重跑）。
+   */
+  setSpriteAnimReady(
+    spriteHash: string,
+    animAsset: string,
+    meta: SpriteSheetMeta,
+    extra?: { version?: number; clipVideos?: Partial<Record<ClipName, string>> },
+  ): void {
+    this.#spriteAnims.set(spriteHash, { status: 'ready', animAsset, meta, ...extra });
     this.#persistSpriteAnims();
+  }
+
+  /** 所有「存有三段原片」的立绘 hash —— repack-all 的工作清单（v1 老记录没有原片，不在内）。 */
+  listSpriteAnimsWithClips(): string[] {
+    const out: string[] = [];
+    for (const [hash, rec] of this.#spriteAnims) {
+      if (rec.status === 'ready' && rec.clipVideos) out.push(hash);
+    }
+    return out;
   }
 
   setSpriteAnimFailed(spriteHash: string): void {

@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 
 /** 内置手写剧本（Plan 2 的 LLM 生成层上线前的样本 + 回归基线）。 */
-export const SCREENPLAYS = ['hide_and_seek', 'three_act_play'] as const;
+export const SCREENPLAYS = ['hide_and_seek', 'three_act_play', 'soccer', 'eagle_and_chicks'] as const;
 export type ScreenplayName = (typeof SCREENPLAYS)[number];
 
 const cache = new Map<string, string>();

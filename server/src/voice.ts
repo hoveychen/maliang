@@ -1,17 +1,13 @@
-import type { ServiceAdapters, AudioBlob } from './adapters/types.ts';
+import type { ServiceAdapters } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import type { Character, ChatTurn, VoiceResponse } from './types.ts';
-import { effectiveAbilities } from './types.ts';
+import { effectiveAbilities, DEFAULT_SCENE } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
+import { wishFor } from './wishes.ts';
 import { pickGreeting } from './greetings.ts';
-
-export interface VoiceInput {
-  worldId: string;
-  characterId: string;
-  /** 说话的玩家（设备端稳定 UUID；空串=未上报玩家的历史/旧客户端，记忆落未绑定桶）。 */
-  playerId: string;
-  audio: AudioBlob;
-}
+import { onboardingProfileNote } from './avatar_options.ts';
+import { planGuide, listGuideTargets } from './guide.ts';
+import { matchByName } from './names.ts';
 
 const RECENT_TURNS = 6; // 旧路径兜底：调用方没给 session 历史时，回喂持久 chat_turns 的近 N 条（child+npc 各算一条）
 
@@ -20,20 +16,6 @@ export class CharacterNotFoundError extends Error {
     super(`character not found: ${worldId}/${characterId}`);
     this.name = 'CharacterNotFoundError';
   }
-}
-
-/**
- * 语音输入编排（见 docs/m2-voice-plan.md）：
- * ASR(音频→文字) → 意图路由(闲聊/指令) → 文字审核 → TTS(文字→音频) → 更新 memory/chat_history。
- * 返回 VoiceResponse 供 WS 推 character_response。
- */
-export async function handleVoice(
-  input: VoiceInput,
-  adapters: ServiceAdapters,
-  store: WorldStore,
-): Promise<VoiceResponse> {
-  const transcript = await adapters.asr.transcribe(input.audio);
-  return respondToTranscript(input.worldId, input.characterId, input.playerId, transcript, adapters, store);
 }
 
 /**
@@ -72,7 +54,7 @@ export async function respondToTranscript(
   const character = store.getCharacter(worldId, characterId);
   if (!character) throw new CharacterNotFoundError(worldId, characterId);
 
-  // 花名册：当前场景里其他可指挥的角色（不含自己、不含小神仙——她悬浮不走地面寻路）。
+  // 花名册：当前场景里其他可指挥的角色（不含自己、不含点点——她悬浮不走地面寻路）。
   // sceneId 缺省=全世界（老调用点行为不变）；给了则不把别场景的角色列进「小蓝跟我来」的候选。
   const roster = store
     .listCharacters(worldId, sceneId)
@@ -82,14 +64,29 @@ export async function respondToTranscript(
   // 委托：进行中的给 LLM 提醒；没有进行中的生成候选让 LLM 挑时机发起（模板池确定性生成，按当前场景挑目标）
   const activeTask = store.getActiveTask(worldId, playerId) ?? undefined;
   const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, playerId, store, Math.random, sceneId) ?? undefined;
+  // 这个角色当下的心愿背景：它刚在旁边自言自语漏过这件事，小朋友多半就是为这个凑上来的——
+  // 注入后它被搭话时能自然接上自己的念想。仙子不认领心愿（她是兑现心愿的人，不是许愿的人）。
+  const wishContext = character.isFairy
+    ? undefined
+    : wishFor(
+        characterId,
+        store.getDiscovered(worldId, playerId),
+        store.getWallet(worldId, playerId).flowers > 0, // 买不起就不勾（与漏话/委托候选同一口径）
+      )?.context;
 
   // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），带 kind 注入（分组）。
   const memories = store.getMemories(characterId, playerId).map((m) => ({ text: m.text, kind: m.kind }));
+  const abilities = effectiveAbilities(character);
+  // 引路候选只对有 guide_to 的角色（小仙子）算：村民带不了路，白搭 prompt token。
+  const guideTargets = abilities.includes('guide_to')
+    ? listGuideTargets(store, worldId, sceneId ?? character.sceneId ?? DEFAULT_SCENE)
+    : undefined;
   const intent = await adapters.llm.routeIntent(transcript, {
     characterName: character.name,
     personality: character.personality,
     // 基础集 ∪ 角色自带；小仙子减去需要走动的能力——她不会走，给了也兑现不了
-    abilities: effectiveAbilities(character),
+    abilities,
+    guideTargets,
     recentHistory: sessionCtx?.history ?? store.getRecentTurns(characterId, playerId, RECENT_TURNS),
     sessionSummary: sessionCtx?.summary,
     memory: memories,
@@ -97,6 +94,9 @@ export async function respondToTranscript(
     locations: store.getLocations(worldId, sceneId),
     activeTask,
     taskCandidate,
+    wishContext,
+    // onboarding 档案喜好摘要（点点/村民都注入——对话都走本函数）：无档案为 undefined，零 token
+    childProfile: onboardingProfileNote(store.getOnboardingProfile(playerId)),
     // 稳定缓存键：绑 world×角色×玩家，做 OpenRouter sticky routing 命中 prompt cache（同一对话连续命中）。
     cacheKey: `${worldId}:${characterId}:${playerId}`,
   });
@@ -129,10 +129,38 @@ export async function respondToTranscript(
       if (desc) response.characterRequest = desc;
       intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'create_character');
     }
+    // create_sticker 同理：摘走交给 WS 层异步造贴纸（sticker_pending/item_created 推送）。仅小仙子会发。
+    const stickerCmd = intent.behaviorScript.commands.find((c) => c.type === 'create_sticker');
+    if (stickerCmd) {
+      const desc = String(stickerCmd.params?.description ?? '').trim();
+      if (desc) response.stickerRequest = desc;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'create_sticker');
+    }
+    // play_game 同理：摘走交给 WS 层——LLM 生成剧本→过 typecheck→startStage 开演（stage_begin 广播）。仅小仙子会发。
+    const gameCmd = intent.behaviorScript.commands.find((c) => c.type === 'play_game');
+    if (gameCmd) {
+      const desc = String(gameCmd.params?.game ?? '').trim();
+      if (desc) response.gameRequest = desc;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'play_game');
+    }
+    // guide_to 同理：不是 BehaviorExecutor 的指令（她不吃移动脚本）——摘走，算成 GuidePlan 下发给客户端引路状态机。
+    // 算不出计划（目标不存在/太远）就【不发 guide】，只留 LLM 那句口头回应：绝不能应下「好呀跟我来」却没人动。
+    const guideCmd = intent.behaviorScript.commands.find((c) => c.type === 'guide_to');
+    if (guideCmd) {
+      const plan = planGuide(store, worldId, sceneId ?? character.sceneId ?? DEFAULT_SCENE, guideCmd.params ?? {});
+      if (plan) response.guide = plan;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'guide_to');
+    }
+    // guide_stop：小朋友说「不去了」→ 取消进行中的引路。纯信号，无 params。
+    const guideStopCmd = intent.behaviorScript.commands.find((c) => c.type === 'guide_stop');
+    if (guideStopCmd) {
+      response.guideStop = true;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'guide_stop');
+    }
     if (intent.behaviorScript.commands.length > 0) {
       response.behaviorScript = intent.behaviorScript;
       // 执行者：小朋友点名让别的角色做（「小蓝跟我来」）→ 脚本挂到那个角色；缺省挂正在对话的角色
-      const performer = intent.performerName ? findByName(roster, intent.performerName) : undefined;
+      const performer = intent.performerName ? matchByName(roster, intent.performerName) : undefined;
       if (performer) {
         response.performerId = performer.id;
         const target = store.getCharacter(worldId, performer.id);
@@ -145,11 +173,15 @@ export async function respondToTranscript(
       }
     }
   }
-  // 造角色/造物入口：不在这里合成/发普通回应，交给 WS 层的引导会话（guideCreation/guideProp）驱动——
+  // 造角色/造物/造贴纸入口：不在这里合成/发普通回应，交给 WS 层的引导会话（guideCreation/guideProp/guideSticker）驱动——
   // 由它合成仙子的问句 TTS 并下发 creation_prompt（含图标选项），避免入口这轮重复出声。
-  if (response.characterRequest || response.propRequest) return response;
-  // LLM 在这句回应里发起了委托候选 → 设为进行中，随 character_response 下发给客户端做提示
-  if (intent.offerTask && taskCandidate) {
+  if (response.characterRequest || response.propRequest || response.stickerRequest || response.gameRequest) return response;
+  // 小朋友说「不想做了」→ 清掉进行中委托，随回应通知客户端撤提示 chip（优先于回带/发起）。
+  if (intent.abandonTask && activeTask) {
+    store.setActiveTask(worldId, playerId, null);
+    response.taskCleared = true;
+  } else if (intent.offerTask && taskCandidate) {
+    // LLM 在这句回应里发起了委托候选 → 设为进行中，随 character_response 下发给客户端做提示
     store.setActiveTask(worldId, playerId, taskCandidate);
     response.task = taskCandidate;
   } else if (activeTask) {
@@ -252,19 +284,6 @@ export async function greetCharacter(
   const tts = await adapters.tts.synthesize(line, character.voiceId);
   response.ttsAsset = store.putAsset(tts);
   return response;
-}
-
-/** 花名册按名字找角色：先精确，再互相包含（ASR 可能多字/少字，如「小蓝呀」↔「小蓝」）。 */
-function findByName(
-  roster: { id: string; name: string }[],
-  name: string,
-): { id: string; name: string } | undefined {
-  const n = name.trim();
-  if (!n) return undefined;
-  return (
-    roster.find((c) => c.name === n) ??
-    roster.find((c) => c.name.includes(n) || n.includes(c.name))
-  );
 }
 
 /** 回合收尾：把这轮对话写入 chat_turns（按玩家），并持久化角色状态（behaviorScript 变更）。 */

@@ -15,6 +15,8 @@ let cmdSeq = 0;
 let issued = 0;
 let subSeq = 0;
 let hudSeq = 0;
+let rgSeq = 0;
+let ballSeq = 0;
 let mainResolved = false;
 let finished = false;
 const pendingCmds = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -93,6 +95,13 @@ port.on('message', (m: HostToWorkerMsg) => {
 
 // ---- Stage SDK(沙箱内可见的对象) ----
 
+interface SdkRegion {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly r: number;
+}
+
 interface SdkActor {
   readonly id: string;
   readonly name: string;
@@ -127,6 +136,11 @@ function onEvent(ev: string, ...rest: unknown[]): () => void {
     const [a, b, dist, fn] = rest as [SdkActor, SdkActor, number, () => void];
     return subscribe('near', { a: a.id, b: b.id, dist }, fn);
   }
+  if (ev === 'enter') {
+    // obj 可以是角色或球——只用它的 id（位置从复制流查），故按「带 id 的东西」取。
+    const [obj, region, fn] = rest as [{ id: string }, SdkRegion, () => void];
+    return subscribe('enter', { obj: obj.id, x: region.x, y: region.y, r: region.r }, fn);
+  }
   if (ev === 'tap') {
     const [a, fn] = rest as [SdkActor, () => void];
     return subscribe('tap', { actorId: a.id }, fn);
@@ -156,6 +170,13 @@ const stage = {
     return typeof r?.text === 'string' ? r.text : '';
   },
   end: (result?: Record<string, unknown>) => finish(result),
+  region: (area: { x: number; y: number; r: number }): SdkRegion => ({ id: `rg${++rgSeq}`, x: area.x, y: area.y, r: area.r }),
+  // 球：spawn 广播给客户端落位（host 取初始所有权），落位 ack 后返回句柄。踢球是客户端玩家动作，不在此。
+  spawnBall: async (at: unknown) => {
+    const id = `ball${++ballSeq}`;
+    await sendCmd('spawn_ball', { id, at });
+    return { id, reset: (a: unknown) => sendCmd('ball_reset', { id, at: a }) };
+  },
   prop: {
     create: (desc: string, near: unknown) =>
       sendCmd('prop_create', { desc, near: typeof near === 'object' && near !== null && 'id' in near ? (near as SdkActor).id : near }),

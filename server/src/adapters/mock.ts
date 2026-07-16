@@ -1,21 +1,31 @@
-import type { ServiceAdapters, ImageBlob, AudioBlob, VideoBlob } from './types.ts';
+import type { ServiceAdapters, ImageBlob, AudioBlob, VideoBlob, ClipName } from './types.ts';
 import { fallbackVoice } from '../voice_catalog.ts';
 import {
   BASE_ABILITIES,
+  type AvatarAttrs,
+  type AvatarGuideState,
   type CharacterSpec,
   type CreationAttrs,
   type CreationCategory,
   type CreationState,
   type ExtractedMemory,
+  type GuideAvatarResult,
+  type GuideBuildResult,
   type GuideCreationResult,
   type IntentContext,
   type IntentResult,
   type MemoryExtractionContext,
+  type ScreenplayDraft,
+  type ScreenplayGenContext,
   type SessionCompactionContext,
 } from '../types.ts';
 import { CREATION_OPTIONS, optionsByCategory, sizeToScale, inferSizeFromText } from '../creation_options.ts';
+import { avatarDescForbidden, composeAvatarDesc, deterministicGuideAvatar } from '../avatar_options.ts';
 import type { CreatureSize } from '../creation_options.ts';
 import { PROP_CREATION_OPTIONS, PROP_CREATION_ASK, propOptionsByCategory, composePropDesc } from '../prop_creation_options.ts';
+import { STICKER_CREATION_OPTIONS, STICKER_CREATION_ASK, stickerOptionsByCategory, composeStickerDesc, stickerIconPrompt } from '../sticker_creation_options.ts';
+import { findBlueprint, requiredSlots } from '../build_blueprints.ts';
+import { partsForSlot } from '../part_library.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
 
 // 1x1 透明 PNG，作为生图占位。（须是合法 PNG：Godot 客户端会真解码，CRC 错会拒收；
@@ -46,6 +56,7 @@ const CREATION_ASK: Record<CreationCategory, string> = {
   personality: '它是什么性格的呀？',
   name: '给它起个名字吧，你想叫它什么？',
   motion: '（造角色不问会不会动）', // 占位：motion 是造物专属类别
+  recipient: '这个呀，是给谁做的呀？', // A2：recipient 由 promptRecipient 就地组装，不经 guide；此处仅满足 Record 完整性
 };
 
 // 引导式创造里小朋友反悔的说法（真实实现由 LLM 判语义；mock 用关键词模拟同一个 cancelled 信号）。
@@ -70,10 +81,45 @@ function audioStub(): AudioBlob {
   return { bytes: Uint8Array.from([0x52, 0x49, 0x46, 0x46]), mime: 'audio/wav' };
 }
 
-function videoStub(): VideoBlob {
-  // 极小的占位视频（mock idle 动画）。真实由 Seedance 产出 mp4。
-  return { bytes: Uint8Array.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]), mime: 'video/mp4' };
+function videoStub(clip: ClipName): VideoBlob {
+  // 极小的占位视频（mock 动画段）。真实由 Seedance 产出 mp4。
+  // 末字节按段名区分：资产库是内容寻址的，三段字节若相同会塌成同一个 hash，
+  // 就测不出「每段的原片都各自入库」了。
+  const tag = { idle: 0x69, moving: 0x6d, talking: 0x74 }[clip];
+  return {
+    bytes: Uint8Array.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, tag]),
+    mime: 'video/mp4',
+  };
 }
+
+// mock generateScreenplay 用的两段最小剧本源码（已知对着 stage_sdk.d.ts 过 typecheck；
+// screenplay_gen.test.ts 会断言它们通过 checkScreenplay，回归时不会静默变坏）。
+// cast 都为空——只用球/区域/玩家，不依赖村民数量，测试确定性最高。
+const MOCK_SOCCER_SCREENPLAY = `const center = (stage.params.center as Spot | undefined) ?? { x: 75, y: 75 };
+const goal = stage.region((stage.params.goal as { x: number; y: number; r: number } | undefined) ?? { x: 20, y: 75, r: 6 });
+const ball = await stage.spawnBall(center);
+const board = stage.hud.score('进球');
+await stage.narrate('我们来踢球啦！把球踢进门就得分哦，靠近球就能踢！');
+const timer = stage.hud.countdown(Number(stage.params.gameSec ?? 60));
+await new Promise<void>((resolve) => {
+  let over = false;
+  timer.onDone(() => { if (!over) { over = true; resolve(); } });
+  stage.on('enter', ball, goal, () => {
+    if (over) return;
+    board.add(1);
+    stage.hud.toast('进球啦！');
+    void ball.reset(center);
+  });
+});
+timer.cancel();
+stage.end({ winner: '大家', praise: '踢得真棒，下次再来玩！' });`;
+
+const MOCK_CHASE_SCREENPLAY = `await stage.narrate('我们来玩个游戏吧！');
+if (stage.player) {
+  await stage.player.say('我准备好啦！');
+}
+await stage.sleep(Number(stage.params.gameSec ?? 3));
+stage.end({ winner: '大家', praise: '玩得真开心，下次再玩！' });`;
 
 /** mock 适配器：不调用任何外部服务，跑通整条编排闭环。 */
 export function createMockAdapters(): ServiceAdapters {
@@ -100,15 +146,21 @@ export function createMockAdapters(): ServiceAdapters {
           : hop
             ? { type: 'hopper', hop_h: 0.45, rate: 1.5, speed: 0.9 }
             : { type: 'walker', legs: 4, leg_r: 0.1, hip_h: 0.6, stance: [0.45, 0.4], speed: 0.8 };
+        // 环/弯管关键词 → 确定性追加 torus/bezier 部件（真实实现由 LLM 自由拼）
+        const ring = /(圈|环|甜甜圈|轮|光环|呼啦圈|镯)/.test(intentText);
+        const curvy = /(茎|藤|彩带|尾巴|拱|钩|弯)/.test(intentText);
+        const parts: SdfPropSpec['parts'] = [
+          { shape: 'box', pos: [0, 0.95, 0], size: [0.9, 0.7, 0.8], color: 1 },
+          { shape: 'sphere', pos: [0, 1.5, 0.2], r: 0.22, color: 0, blend: 0.15 },
+        ];
+        if (ring) parts.push({ shape: 'torus', pos: [0, 1.95, 0.1], R: 0.3, r: 0.08, arc: 180, color: 0, blend: 0.1 });
+        if (curvy) parts.push({ shape: 'bezier', pos: [0.4, 0.95, 0], b: [0.2, 0.4], c: [0.5, 0.7], r0: 0.06, r1: 0.03, color: 0, blend: 0.08 });
         return {
           name: 'mock_prop',
           palette: ['#e8b04b', '#f4ead4'],
           blend: 0.26,
           outline: 0.04,
-          parts: [
-            { shape: 'box', pos: [0, 0.95, 0], size: [0.9, 0.7, 0.8], color: 1 },
-            { shape: 'sphere', pos: [0, 1.5, 0.2], r: 0.22, color: 0, blend: 0.15 },
-          ],
+          parts,
           locomotion,
           ropes: [{ pos: [0, 1.2, -0.45], segments: 3, r: 0.06, len: 0.2, color: 0 }],
           // 体型档：从意图文本确定性推断→倍率（与真实路径同 sizeToScale），客户端整体缩放
@@ -119,7 +171,7 @@ export function createMockAdapters(): ServiceAdapters {
         // 点名让别的角色执行：转写里出现花名册角色名 → performer（真实实现由 LLM 判断语气）
         const named = (ctx.worldCharacters ?? []).find((c) => transcript.includes(c.name));
         const performerName = named?.name;
-        // 造角色意图（仅拥有 create_character 能力的角色，如小神仙）：想要一个新的活伙伴。
+        // 造角色意图（仅拥有 create_character 能力的角色，如点点）：想要一个新的活伙伴。
         // 放在 create_prop 前：生物类关键词优先归造角色，避免「变一只小猫」被当造物。
         if (
           ctx.abilities.includes('create_character')
@@ -136,7 +188,57 @@ export function createMockAdapters(): ServiceAdapters {
             emotion: 'happy',
           };
         }
-        // 造物意图（仅拥有 create_prop 能力的角色，如小神仙）：「变/造/做 一个X」
+        // 造贴纸意图（仅拥有 create_sticker 能力的角色，如点点）：出现「贴纸/贴画」。
+        // 放在 create_prop 前：「做个贴纸」的「做个」也会命中造物，贴纸关键词优先归造贴纸。
+        if (ctx.abilities.includes('create_sticker') && /(贴纸|贴画|贴贴)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好呀，我们来做贴纸！',
+            behaviorScript: {
+              commands: [{ type: 'create_sticker', params: { description: transcript } }],
+              loop: false,
+            },
+            emotion: 'happy',
+          };
+        }
+        // 玩游戏意图（仅拥有 play_game 能力的角色，如点点）：想玩多人小游戏。
+        // 放在 create_prop 前：「做个游戏」的「做个」也会命中造物，游戏关键词优先归 play_game。
+        if (ctx.abilities.includes('play_game') && /(踢球|玩球|老鹰抓小鸡|捉迷藏|丢手绢|一起玩|玩游戏|做游戏|玩个游戏|做个游戏|来玩)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好呀，我们来玩！',
+            behaviorScript: {
+              commands: [{ type: 'play_game', params: { game: transcript } }],
+              loop: false,
+            },
+            emotion: 'happy',
+          };
+        }
+        // 停止引路（仅小仙子）：放在 guide_to 前——「不去了」也含「去」，先判否定。
+        if (ctx.abilities.includes('guide_stop') && /(不去了|不用带|别带|不想去)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好，那我们不去啦。',
+            behaviorScript: { commands: [{ type: 'guide_stop', params: {} }], loop: false },
+            emotion: 'happy',
+          };
+        }
+        // 引路意图（仅小仙子）：「带我去X」「我想找X」。名字从 guideTargets 里认（LLM 版由 prompt 约束）。
+        if (ctx.abilities.includes('guide_to') && /(带我去|带我找|我想去|我要去|我想找|在哪)/.test(transcript)) {
+          const hit = (ctx.guideTargets ?? []).find((t) => transcript.includes(t.name));
+          if (hit) {
+            const params = hit.kind === 'character' ? { character_name: hit.name } : { location_name: hit.name };
+            return {
+              kind: 'command',
+              replyText: '好呀，跟我来！',
+              behaviorScript: { commands: [{ type: 'guide_to', params }], loop: false },
+              emotion: 'happy',
+            };
+          }
+          // 目标不在候选里：老实说不知道，不硬应下（对齐 prompt 里的「不要编」规则）
+          return { kind: 'chat', replyText: '我也不知道那在哪儿呀。', emotion: 'think' };
+        }
+        // 造物意图（仅拥有 create_prop 能力的角色，如点点）：「变/造/做 一个X」
         if (ctx.abilities.includes('create_prop') && /(变出|变一|造一|做一个|做个)/.test(transcript)) {
           return {
             kind: 'command',
@@ -199,6 +301,10 @@ export function createMockAdapters(): ServiceAdapters {
             },
             emotion: 'happy',
           };
+        }
+        // 放弃委托：有进行中委托 + 反悔词 → abandonTask（mock 用关键词模拟真 LLM 的语义判定）
+        if (ctx.activeTask && /(不想做|不做了|不帮|算了|放弃|不想要了)/.test(transcript)) {
+          return { kind: 'chat', replyText: '好呀，那我们做点别的吧！', emotion: 'happy', abandonTask: true };
         }
         // 委托发起：有候选且小朋友问「有什么要帮忙的」→ offerTask
         if (ctx.taskCandidate && /(帮忙|任务|做什么|帮你)/.test(transcript)) {
@@ -283,6 +389,104 @@ export function createMockAdapters(): ServiceAdapters {
         const optionIds = propOptionsByCategory(next).slice(0, 4).map((o) => o.id);
         return { replyText: PROP_CREATION_ASK[next], done: false, question: PROP_CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
       },
+      async guideSticker(state: CreationState, childInput: string): Promise<GuideCreationResult> {
+        if (CANCEL_WORDS.test(childInput)) return { replyText: CANCEL_LINE, done: false, cancelled: true };
+        // 造贴纸 mock：从输入按图标 label 认属性（kind 图案/color 颜色），凑够 kind 或超轮即造。
+        const attrs = { ...state.attrs, traits: [...state.attrs.traits] };
+        const updated: Partial<CreationAttrs> = {};
+        const text = childInput.trim();
+        for (const o of STICKER_CREATION_OPTIONS) {
+          if (!text.includes(o.label)) continue;
+          if (o.category === 'kind' && !attrs.kind) { attrs.kind = o.label; updated.kind = o.label; }
+          else if (o.category === 'color' && !attrs.color) { attrs.color = o.label; updated.color = o.label; }
+        }
+        const early = /(就这样|好了|够了|够啦|可以了)/.test(text);
+        const enough = !!attrs.kind; // 有图案就能造（颜色可选）
+        const forced = state.turnCount >= 5;
+        if (early || enough || forced) {
+          const desc = composeStickerDesc(attrs);
+          return { replyText: `好呀，我这就做出${desc}！`, done: true, description: desc, updatedAttrs: updated };
+        }
+        // 追问下一个缺失类别（kind→color）
+        const next: CreationCategory = !attrs.kind ? 'kind' : 'color';
+        const optionIds = stickerOptionsByCategory(next).slice(0, 4).map((o) => o.id);
+        return { replyText: STICKER_CREATION_ASK[next], done: false, question: STICKER_CREATION_ASK[next], category: next, optionIds, updatedAttrs: updated };
+      },
+      async guideAvatar(state: AvatarGuideState, childInput: string): Promise<GuideAvatarResult> {
+        // 形象引导 mock = 确定性推进的共用实现（它同时是服务端 LLM 失败的降级链，一处实现两处用）
+        return deterministicGuideAvatar(state, childInput);
+      },
+      async describeAvatar(attrs: AvatarAttrs): Promise<string> {
+        return composeAvatarDesc(attrs);
+      },
+      async refineAvatar(description: string, childRequest: string): Promise<string> {
+        // 违规要求（持物/头顶物）不予并入——原描述原样返回（与真实实现同契约：
+        // 不满足不合规的要求，胜过把「帽」漏给生图）。合法要求确定性拼接。
+        if (avatarDescForbidden(childRequest)) return description;
+        return `${description}。按小朋友的要求调整：${childRequest}`;
+      },
+      async guideBuild(state: CreationState, childInput: string): Promise<GuideBuildResult> {
+        if (CANCEL_WORDS.test(childInput)) return { replyText: CANCEL_LINE, done: false, cancelled: true };
+        const build = state.build;
+        const bp = build ? findBlueprint(build.blueprintId) : undefined;
+        // 蓝图丢了（不该发生）：兜底 done，绝不把孩子卡在半开会话里
+        if (!build || !bp) return { replyText: '我们下次再拼好不好？', done: true };
+        // 确定性推进：正在问的槽 = 上一轮问过的最后一个槽（advanceBuild 会在本函数返回后把 slotId 记进 askedSlots）。
+        const filled = { ...build.filled };
+        let filledDelta: { slotId: string; partId: string } | undefined;
+        const askedSlot = build.askedSlots.at(-1);
+        if (askedSlot && !filled[askedSlot]) {
+          const slot = bp.slots.find((s) => s.slotId === askedSlot);
+          if (slot) {
+            const compatible = partsForSlot(slot.accept);
+            // 输入含某兼容零件的中文名（点选路径传的是 name）→ 填它；否则含该零件语义类（category，如「轮子」，
+            // 语音路径孩子答功能词）→ 填该类第一个兼容零件；都不含则不填、继续追问同一个槽。
+            const match =
+              compatible.find((p) => childInput.includes(p.name)) ??
+              compatible.find((p) => childInput.includes(p.category));
+            if (match) {
+              filled[askedSlot] = match.id;
+              filledDelta = { slotId: askedSlot, partId: match.id };
+            }
+          }
+        }
+        // 早停 / 必填槽全满 / 超轮 → 落成
+        const early = /(就这样|好了|够了|够啦|可以了|拼好了|完成了)/.test(childInput);
+        const missing = requiredSlots(bp).filter((s) => !filled[s.slotId]);
+        const forced = state.turnCount >= 5;
+        if (early || missing.length === 0 || forced) {
+          return { replyText: `好啦，我们的${bp.name}拼好啦！`, done: true, filled: filledDelta };
+        }
+        // 追问下一个未填必填槽的 functionHint（只问功能，选项是该槽兼容零件）
+        const next = missing[0];
+        const optionIds = partsForSlot(next.accept).map((p) => p.id);
+        return {
+          replyText: `${next.functionHint}？`,
+          done: false,
+          question: next.functionHint,
+          slotId: next.slotId,
+          optionIds,
+          filled: filledDelta,
+        };
+      },
+      async designSticker(intentText: string): Promise<{ name: string; prompt: string }> {
+        // mock：确定性从中文描述里认图案 label → 贴纸名 + 英文扁平贴纸生图 prompt（真实接 LLM 自由理解）
+        const kindOpt = STICKER_CREATION_OPTIONS.find((o) => o.category === 'kind' && intentText.includes(o.label));
+        const colorOpt = STICKER_CREATION_OPTIONS.find((o) => o.category === 'color' && intentText.includes(o.label));
+        const kindLabel = kindOpt?.label ?? '图案';
+        const name = `${colorOpt?.label ?? ''}${kindLabel}贴纸`;
+        // prompt 走英文图案描述（图案 id → STICKER_ICON_PROMPTS），颜色用英文 id 前缀，喂 generateIcon。
+        const kindPrompt = kindOpt ? stickerIconPrompt(kindOpt.id) : 'a cute flat sticker';
+        const prompt = colorOpt ? `${colorOpt.id} colored ${kindPrompt}` : kindPrompt;
+        return { name, prompt };
+      },
+      async generateScreenplay(ctx: ScreenplayGenContext): Promise<ScreenplayDraft | null> {
+        // mock：按关键词确定性返回一段【已知过 typecheck】的最小剧本（真实实现走强模型 + typecheck 重试环）。
+        // 两个变体 cast 都为空（只用球/区域/玩家），buildStageOptsFromDraft 不依赖村民数量，测试稳定。
+        const wantsBall = /(球|踢)/.test(ctx.gameDesc);
+        const code = wantsBall ? MOCK_SOCCER_SCREENPLAY : MOCK_CHASE_SCREENPLAY;
+        return { code, cast: [] };
+      },
       async extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]> {
         // mock：确定性地扫整段会话的每轮「我叫X」「我喜欢X」抽要点并分类，去重后返回（真实接 LLM 自由判断）
         const child = ctx.turns.map((t) => t.child).join('\n');
@@ -314,17 +518,6 @@ export function createMockAdapters(): ServiceAdapters {
         return inferSizeFromText(visualDescription);
       },
     },
-    asr: {
-      async transcribe(_audio: AudioBlob): Promise<string> {
-        return '你好呀'; // mock：固定转写；真实走 sherpa-onnx
-      },
-      openStream() {
-        return {
-          feed(_chunk: Uint8Array): void { /* mock：忽略分片 */ },
-          async finish(): Promise<string> { return '你好呀'; },
-        };
-      },
-    },
     tts: {
       async synthesize(_text: string, _voiceId: string): Promise<AudioBlob> {
         return audioStub();
@@ -344,8 +537,8 @@ export function createMockAdapters(): ServiceAdapters {
       },
     },
     video: {
-      async generateIdleAnimation(_sprite: ImageBlob): Promise<VideoBlob> {
-        return videoStub();
+      async generateClip(_sprite: ImageBlob, clip: ClipName): Promise<VideoBlob> {
+        return videoStub(clip);
       },
     },
     orientation: {

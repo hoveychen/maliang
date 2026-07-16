@@ -15,9 +15,25 @@ run/main_scene="res://menu.tscn"
 config/features=PackedStringArray("4.6", "Mobile")
 config/icon="res://icon.png"
 
+[autoload]
+
+; app 级端侧语音 e2e harness 命令口（docs/voice-e2e-harness-design.md）：从 App 启动就常驻、跨
+; menu/onboarding/world，好让 onboarding 的语音流程也能 e2e。debug 门禁在脚本 _ready 内——release
+; 一行不跑、绝不开 TCP 口。autoload 名 HarnessCmd 有意与 class_name DebugCmdServer 区分（避免全局名冲突）。
+HarnessCmd="*res://scripts/debug_cmd_server.gd"
+
+; 真静止 SDF 造物异步烘焙成零成本静态 mesh 的单例（docs 见 scene-item-refactor / grep SdfBakeSwap）：
+; 自带 _process 轮询在途 WorkerThreadPool 烘焙、_exit_tree 排干。autoload 名 SdfBakeSwap 无 class_name
+; 冲突（脚本已去 class_name）。app 级常驻，仅在 world 造物落位时被 chunk_manager 调用，空闲零开销。
+SdfBakeSwap="*res://scripts/sdf_bake_swap.gd"
+
 [audio]
 
 driver/enable_input=true
+; 输出缓冲 15→60ms：换场景那一帧同步重铺（chunk skin 真机 80-200ms）会饿死默认 15ms
+; 音频缓冲 → BGM 爆音/静态噪声。加大缓冲让 mix 挺过卡顿帧（隔离实验；治本仍需拆细 skin）。
+driver/output_latency=60
+general/ios/session_category=2
 
 [display]
 
@@ -28,11 +44,19 @@ window/size/viewport_height=720
 
 enabled=PackedStringArray("res://addons/maliang_asr/plugin.cfg")
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
+window/stretch/aspect="expand"
 window/handheld/orientation=1
+
+[gui]
+
+; 全局默认字体：站酷快乐体（圆润童趣）为主 + 霞鹜文楷全字形兜底（见其 .import 的 fallbacks）。
+; 之前全 UI 中文没有任何自带字体，靠 allow_system_fallback 回落到系统 CJK 字体——iOS 的系统
+; 字体回落对 CJK 不稳，渲染成豆腐块（□□□）。打包字体后中文不再依赖 iOS 系统回落。
+theme/custom_font="uid://cniqcuskmc3gj"
 
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
 renderer/rendering_method="mobile"
+renderer/rendering_method.ios="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true

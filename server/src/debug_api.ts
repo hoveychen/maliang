@@ -175,8 +175,20 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
   // 玩家详情：档案 + 会话史 + 各角色对 TA 的记忆 + 与各角色的对话
   app.get<{ Params: { id: string } }>('/debug/api/players/:id', async (req, reply) => {
     if (!guard(req, reply)) return reply;
-    const player = store.getPlayer(req.params.id);
-    if (!player) return reply.code(404).send({ error: 'player not found' });
+    const stored = store.getPlayer(req.params.id);
+    const onboardingProfile = store.getOnboardingProfile(req.params.id);
+    // 刚建完形象还没进过世界的孩子只在 player_onboarding（players 表要 world_info 才 upsert）：
+    // 用 onboarding 档案合成最小 Player，详情页不 404、能看到 TA 的创建档案。
+    if (!stored && !onboardingProfile) return reply.code(404).send({ error: 'player not found' });
+    const player = stored ?? {
+      id: req.params.id,
+      name: onboardingProfile!.name,
+      nickname: onboardingProfile!.nickname,
+      gender: '',
+      color: onboardingProfile!.attrs.color ?? '',
+      spriteAsset: onboardingProfile!.spriteAsset,
+      createdAt: onboardingProfile!.createdAt,
+    };
     const visits = store.listVisits().filter((v) => v.playerId === player.id);
     const memories: { worldId: string; characterId: string; characterName: string; items: unknown[] }[] = [];
     const chats: { worldId: string; characterId: string; characterName: string; turns: unknown[] }[] = [];
@@ -195,7 +207,15 @@ export function registerDebugApi(app: FastifyInstance, store: WorldStore, authed
       chats,
       // 玩家形象的 idle 动画状态（形象在设备档案，动画按 spriteAsset hash 绑定）
       spriteAnim: player.spriteAsset ? (store.getSpriteAnim(player.spriteAsset) ?? { status: 'none' }) : { status: 'none' },
+      // onboarding 档案（结构化属性+最终描述+refine 原话；无档案为 null——additive 字段，管理台旧页面不受影响）
+      onboarding: onboardingProfile ?? null,
     };
+  });
+
+  // onboarding 档案总表（docs/onboarding-avatar-redesign-design.md §2.5：管理台可见每个孩子的档案）
+  app.get('/debug/api/onboarding-profiles', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    return { profiles: store.listOnboardingProfiles() };
   });
 
   // 世界列表（计数摘要）

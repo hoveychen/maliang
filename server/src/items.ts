@@ -14,6 +14,7 @@
 import type { ItemDef, } from './types.ts';
 import { GRID_TILES } from './types.ts';
 import type { SdfPropSpec } from './sdf_prop.ts';
+import type { ComposedSpec } from './build_blueprints.ts';
 import { scaleToSize } from './creation_options.ts';
 import { T_PATH, T_WATER, TerrainFormatError, argYawDeg, type Terrain } from './terrain.ts';
 
@@ -264,6 +265,48 @@ export function creationItemDef(worldId: string, id: string, spec: SdfPropSpec):
     blocking: true,
     pathOk: true,
     wander: spec.locomotion && spec.locomotion.type !== 'none' ? 1.2 : 0,
+  };
+}
+
+/**
+ * 造贴纸的实体行（fairy-stickers）：与内置 sticker() 同为 mount:'edge' 薄片，但贴图来自网络资产哈希
+ * 而非打包资源——renderRef 用 `sticker:@<hash>` 约定（内置是 `sticker:<name>`）。客户端边缘/角色锚点
+ * 取图路径见 skey 是否以 '@' 打头分流（打包 load_resource vs api.fetch_texture）。
+ * footprint/blocking/wander 对边缘物无意义（恒 1×1/false/0），与内置贴纸一致。
+ */
+export function creationStickerDef(worldId: string, id: string, name: string, assetHash: string): ItemDef {
+  return {
+    id,
+    worldId,
+    name: name || '贴纸',
+    renderRef: `sticker:@${assetHash}`,
+    footprintW: 1,
+    footprintH: 1,
+    blocking: false,
+    pathOk: true,
+    wander: 0,
+    mount: 'edge',
+  };
+}
+
+/**
+ * 积木式造物的实体行（B1，docs/kids-thinking-build-from-parts.md §3.1）：renderRef='composed:'，
+ * spec 存「骨架 + 零件树」（ComposedSpec），永久保留可拆改结构，绝不拍平成一张图。
+ * 摆放/拾取/背包全走 items 现成通路（万物皆物品）；客户端 ComposedProp 渲染器（P4）读 spec 画多片子 quad。
+ * footprint 先给 1×1（P4 客户端按蓝图定最终占地）；组合物挡路、可压路面（与造物 createPropAsync 同档）。
+ */
+export function creationBuildDef(worldId: string, id: string, name: string, spec: ComposedSpec): ItemDef {
+  return {
+    id,
+    worldId,
+    name: name || '拼装作品',
+    renderRef: 'composed:',
+    spec,
+    footprintW: 1,
+    footprintH: 1,
+    blocking: true,
+    pathOk: true,
+    wander: 0,
   };
 }
 

@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import type { ServiceAdapters, ASRStream } from './adapters/types.ts';
+import type { ServiceAdapters } from './adapters/types.ts';
 import { createAdapters } from './adapters/factory.ts';
 import { loadConfig } from './config.ts';
 import { WorldStore } from './persistence.ts';
@@ -71,28 +71,36 @@ interface DeviceReport {
 import { createCharacter, generateSprite, generateIconAsset, ModerationError } from './orchestrator.ts';
 import { detectCharacterAnchors } from './anchors.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
-import { generateIdleAnimation, triggerIdleAnimation, backfillIdleAnimations, type ToSpriteSheet } from './idle_animation.ts';
+import { generateCharacterAnimation, triggerCharacterAnimation, backfillCharacterAnimations, repackFromStoredClips, type ToSpriteSheet } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
 import { decodeTerrain, encodeTerrain } from './terrain.ts';
-import { BUILTIN_ITEMS, creationItemDef, getBuiltinItem, validateTerrainItems } from './items.ts';
+import { BUILTIN_ITEMS, creationItemDef, creationStickerDef, creationBuildDef, getBuiltinItem, validateTerrainItems } from './items.ts';
+import { matchBlueprint, findBlueprint, type ComposedPart, type ComposedSpec } from './build_blueprints.ts';
+import { findPart, partsForSlot } from './part_library.ts';
 import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrain_edit.ts';
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type Player, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
-import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale } from './creation_options.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
+import { avatarDescForbidden, stripAvatarOptionIds, AVATAR_EARLY_DONE, AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
+import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
-import { completeTaskOnEvent, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWishRefine, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { pickComplaint, REFINE_HINT, REFINE_HINT_2 } from './refinements.ts';
+import { wishFor, IDLE_DOING, reuseHint } from './wishes.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
-import { StageDirector, type StageStartOpts } from './stage_session.ts';
+import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
 import { buildDebut, DebutError } from './stage_debut.ts';
+import { buildStageOptsFromDraft } from './screenplay_gen.ts';
 import { SCREENPLAYS, type ScreenplayName } from './screenplays.ts';
 import type { StagePropMaker } from './stage_types.ts';
+import { POS_TAG_REPORT, decodeReport, encodeRelay } from './pos_codec.ts';
 
 export interface ServerDeps {
   adapters?: ServiceAdapters;
@@ -114,14 +122,14 @@ function sniffImageMime(b: Uint8Array): string {
   return 'image/png';
 }
 
-/** 在世界中央种一个小神仙（默认能造角色）。 */
+/** 在世界中央种一个点点（默认能造角色）。 */
 export function seedFairy(worldId: string): Character {
   return {
     id: randomUUID(),
     worldId,
     isFairy: true,
-    name: '小神仙',
-    personality: '温柔的小神仙，能按小朋友的想法创造新伙伴。',
+    name: FAIRY_NAME,
+    personality: FAIRY_PERSONALITY,
     voiceId: FAIRY_VOICE,
     appearance: { visualDescription: FAIRY_VISUAL_DESC, spriteAsset: '', scale: 1.2 },
     memory: [],
@@ -130,7 +138,9 @@ export function seedFairy(worldId: string): Character {
     behaviorScript: { commands: [{ type: 'wait', params: { duration: 1 } }], loop: true },
     position: WORLD_CENTER_TILE,
     sceneId: DEFAULT_SCENE,
-    abilities: ['move_to', 'deliver_message', 'create_character', 'create_prop'],
+    // 不含 move_to / deliver_message：effectiveAbilities 对 isFairy 恒剔除 LOCOMOTION_ABILITIES，
+    // 留在数组里只是历史残留（她拿到也兑现不了——笔没有腿）。
+    abilities: ['create_character', 'create_prop', 'create_sticker', 'play_game', 'guide_to', 'guide_stop'],
     relationships: {},
   };
 }
@@ -267,14 +277,14 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { ok: true, levels: levels ?? sample.levels, samples: store.listDeviceLevels(sample.gpu, sample.benchVersion).length };
   });
 
-  // 新建世界（种入小神仙）
+  // 新建世界（种入点点）
   app.post('/worlds', async () => {
     const world = store.createWorld();
     store.addCharacter(seedFairy(world.id));
     return { id: world.id, characters: characterListView(store, world.id) };
   });
 
-  // 拉世界状态。固定的 "default" 世界不存在时自动创建并种入小神仙
+  // 拉世界状态。固定的 "default" 世界不存在时自动创建并种入点点
   // （初始村民由 seed 脚本生成；客户端默认加载 default 世界）。
   app.get<{ Params: { id: string } }>('/worlds/:id', async (req, reply) => {
     let world = store.getWorld(req.params.id);
@@ -294,7 +304,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     };
   });
 
-  // 为世界里的小神仙补一张真实 sprite。幂等：已有则跳过；?force=true 强制重生成；
+  // 为世界里的点点补一张真实 sprite。幂等：已有则跳过；?force=true 强制重生成；
   // body 带 pngBase64 时直接存该图（部署验收过的候选，确定性替换，隐含 force）。
   app.post<{
     Params: { id: string };
@@ -325,7 +335,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (anchors) fairy.appearance.anchors = anchors;
     store.saveCharacter(fairy);
     // 试点：静态立绘先返回，idle 动画后台异步补（客户端轮询 /sprite-anim/:hash）
-    triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
+    triggerCharacterAnimation(adapters, store, hash, toSpriteSheet);
     return { id: fairy.id, spriteAsset: hash, regenerated: true };
   });
 
@@ -618,7 +628,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
           // 裁后是全新 hash（无动画记录）→ 触发一次按新分辨率重生成
           if (!regenTriggered.has(hash)) {
             regenTriggered.add(hash);
-            triggerIdleAnimation(adapters, store, hash, toSpriteSheet);
+            triggerCharacterAnimation(adapters, store, hash, toSpriteSheet);
           }
         }
         characters.push({ id: c.id, name: c.name, prev, spriteAsset: hash, changed });
@@ -627,18 +637,31 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { count: characters.length, regenerated: regenTriggered.size, characters };
   });
 
-  // onboarding 玩家形象：描述（由问题答案拼装）→ 生图 → 资产 hash。不建角色——
+  // onboarding 玩家形象：描述（引导对话 LLM 合成，或降级链本地拼装）→ 生图 → 资产 hash。不建角色——
   // 玩家档案在设备端，资产内容寻址共享。描述过文字审核（防客户端篡改）。
-  app.post<{ Body: { visualDescription?: string } | null }>('/player-sprite', async (req, reply) => {
-    const desc = (req.body?.visualDescription ?? '').trim();
+  // 照镜子·改一改（docs/onboarding-avatar-redesign-design.md §2.4）：带 refineFrom+refineRequest 时
+  // 先 LLM 把小朋友点名的修改并进描述再生图；产物描述随返回体带回，客户端下一轮 refine 接着用。
+  app.post<{ Body: { visualDescription?: string; refineFrom?: string; refineRequest?: string } | null }>('/player-sprite', async (req, reply) => {
+    let desc = (req.body?.visualDescription ?? '').trim();
+    const refineFrom = (req.body?.refineFrom ?? '').trim().slice(0, 600);
+    const refineRequest = (req.body?.refineRequest ?? '').trim().slice(0, 200);
+    if (refineFrom.length > 0 && refineRequest.length > 0) {
+      try {
+        desc = (await adapters.llm.refineAvatar(refineFrom, refineRequest)).trim();
+      } catch {
+        // LLM 挂了：合法要求原样追加（不丢孩子的话）；要求本身违规（持物/头顶物）→ 原描述照旧
+        desc = avatarDescForbidden(refineRequest) ? refineFrom : `${refineFrom}。按小朋友的要求调整：${refineRequest}`;
+      }
+    }
     if (desc.length === 0) return reply.code(400).send({ error: 'visualDescription required' });
+    desc = stripAvatarOptionIds(desc); // 同 avatar-chat：存量档案/上一轮描述可能带 av_ 代号
     const check = await adapters.moderation.moderateText(desc);
     if (!check.allowed) return reply.code(400).send({ error: 'moderation blocked' });
     const gen = await generateSprite(adapters, desc, store);
     // 试点：玩家形象静态先返回，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
-    triggerIdleAnimation(adapters, store, gen.hash, toSpriteSheet);
+    triggerCharacterAnimation(adapters, store, gen.hash, toSpriteSheet);
     // anchors 随返回体进设备档案（玩家档案在 user://profile.json，服务端够不着，见设计 §2.3）
-    return { spriteAsset: gen.hash, anchors: gen.anchors ?? undefined };
+    return { spriteAsset: gen.hash, anchors: gen.anchors ?? undefined, visualDescription: desc };
   });
 
   // 存量玩家档案补算锚点（设计 §2.3）：老档案只有 spriteAsset 没有 anchors，客户端发现缺失时
@@ -654,17 +677,12 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { spriteAsset: hash, anchors };
   });
 
-  // onboarding 自我介绍：转写（客户端直送或送 PCM 走服务端 ASR）→ LLM 提取名字/称呼
-  // → TTS 复述确认音频。提取不到名字返回空串，客户端播预制 retry 重问（多轮）。
+  // onboarding 自我介绍：客户端端侧识别好的转写 → LLM 提取名字/称呼 → TTS 复述确认音频。
+  // 提取不到名字返回空串，客户端播预制 retry 重问（多轮）。识别一律在端侧完成，本路由只收文本。
   app.post<{
-    Body: { transcript?: string; pcmBase64?: string; rate?: number } | null;
-  }>('/onboarding/intro', { bodyLimit: 8 * 1024 * 1024 }, async (req) => {
-    let transcript = (req.body?.transcript ?? '').trim();
-    if (transcript.length === 0 && req.body?.pcmBase64) {
-      const bytes = Uint8Array.from(Buffer.from(req.body.pcmBase64, 'base64'));
-      const mime = `audio/L16;rate=${req.body.rate ?? 16000}`;
-      transcript = (await adapters.asr.transcribe({ bytes, mime })).trim();
-    }
+    Body: { transcript?: string } | null;
+  }>('/onboarding/intro', async (req) => {
+    const transcript = (req.body?.transcript ?? '').trim();
     if (transcript.length === 0) return { transcript: '', name: '', nickname: '' };
     const prof = await adapters.llm.extractProfile(transcript);
     if (!prof.name && !prof.nickname) return { transcript, name: '', nickname: '' };
@@ -678,6 +696,91 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       confirmTtsAsset: hash,
       confirmMime: audio.mime,
     };
+  });
+
+  // ── onboarding 形象引导对话（docs/onboarding-avatar-redesign-design.md §2.2/§3.1）──
+  // 无状态 HTTP 多轮：客户端每轮把 state（attrs/askedCategories/turnCount/dialog）全量带回，
+  // 服务端跑一轮 guideAvatar、归并增量后把新 state 原样返给客户端下轮再带来——服务端零会话。
+  // LLM 挂了退 deterministicGuideAvatar 静态题序（§3.3 降级链：绝不卡小朋友）。
+  app.post<{ Body: Record<string, unknown> | null }>('/onboarding/avatar-chat', async (req) => {
+    const body = req.body ?? {};
+    const state = sanitizeAvatarState(body);
+    const childInput = cleanStr(body.childInput, 200);
+    let r: GuideAvatarResult;
+    if (AVATAR_EARLY_DONE.test(childInput)) {
+      // 「就这样/不想选了」确定性收工——生产实测真 LLM 会无视 prompt 连问 6 轮（2026-07-15 抽查），
+      // 终止性写死在端点，不靠 LLM 自觉（A1 refineTries 同款纪律）。已知属性直接去画。
+      r = { replyText: '好嘞，点点这就把你画进魔法世界！', done: true };
+    } else {
+      try {
+        r = await adapters.llm.guideAvatar(state, childInput);
+      } catch (err) {
+        console.warn(`guideAvatar 失败，退确定性题序：${String(err)}`);
+        r = deterministicGuideAvatar(state, childInput);
+      }
+    }
+    // 状态归并在服务端做（客户端只存不算）。motifs/extras 契约为「增量后全量」，整组替换。
+    const attrs: AvatarAttrs = { ...state.attrs, motifs: [...state.attrs.motifs], extras: [...state.attrs.extras] };
+    const u = r.updatedAttrs;
+    if (u) {
+      if (u.gender) attrs.gender = u.gender;
+      if (u.hairstyle) attrs.hairstyle = u.hairstyle;
+      if (u.outfit) attrs.outfit = u.outfit;
+      if (u.color) attrs.color = u.color;
+      if (u.accessory) attrs.accessory = u.accessory;
+      if (u.motifs) attrs.motifs = u.motifs;
+      if (u.extras) attrs.extras = u.extras;
+    }
+    const dialog = [...state.dialog];
+    if (childInput) dialog.push({ role: 'child', text: childInput, ts: Date.now() });
+    dialog.push({ role: 'npc', text: r.replyText, ts: Date.now() });
+    const nextState: AvatarGuideState = {
+      attrs,
+      askedCategories: r.category ? [...state.askedCategories, r.category] : state.askedCategories,
+      turnCount: state.turnCount + 1,
+      dialog: dialog.slice(-24),
+      ...(state.childName ? { childName: state.childName } : {}),
+    };
+    if (r.done) {
+      // 外观描述合成（§2.3 硬规则在 LLM prompt 内）；LLM 挂/被审核拒 → 确定性模板兜底（必然安全）
+      let description = '';
+      try {
+        description = (await adapters.llm.describeAvatar(attrs, nextState.dialog)).trim();
+      } catch {
+        // 走兜底
+      }
+      if (description.length === 0) description = composeAvatarDesc(attrs);
+      description = stripAvatarOptionIds(description); // 生产实测 LLM 会把 av_ 选项代号抄进描述
+      const check = await adapters.moderation.moderateText(description);
+      if (!check.allowed) description = composeAvatarDesc(attrs);
+      return { replyText: r.replyText, done: true, description, state: nextState };
+    }
+    // 选项卡：id→label+iconAsset（图标未生成为空串，客户端回落文字卡/色块）
+    const options = (r.optionIds ?? []).flatMap((id) => {
+      const o = findAvatarOption(id);
+      return o ? [{ id: o.id, label: o.label, iconAsset: store.getCreationIcon(o.id) }] : [];
+    });
+    return { replyText: r.replyText, done: false, question: r.question ?? r.replyText, category: r.category, options, state: nextState };
+  });
+
+  // onboarding 档案落库（§2.5）：完成时客户端全量上报。键=playerId（设备端稳定 UUID），
+  // 幂等可覆盖（重跑 onboarding/换形象都重报）。本地 user://profile.json 仍是主档，这里是副本。
+  app.post<{ Body: Record<string, unknown> | null }>('/onboarding/profile', async (req, reply) => {
+    const body = req.body ?? {};
+    const playerId = cleanStr(body.playerId, 64);
+    if (playerId.length === 0) return reply.code(400).send({ error: 'playerId required' });
+    const profile: PlayerOnboardingProfile = {
+      playerId,
+      name: cleanStr(body.name, 20),
+      nickname: cleanStr(body.nickname, 20),
+      attrs: sanitizeAvatarState(body).attrs,
+      visualDescription: cleanStr(body.visualDescription, 600),
+      refineNotes: cleanStrArr(body.refineNotes, 4, 120),
+      spriteAsset: cleanStr(body.spriteAsset, 64),
+      createdAt: cleanStr(body.createdAt, 40),
+    };
+    store.saveOnboardingProfile(profile);
+    return { ok: true };
   });
 
   // SDF 可动物件：描述 → LLM 设计 spec（~15 行 JSON）→ 服务端校验 → 下发。
@@ -763,8 +866,52 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (existing?.status === 'pending' || (existing?.status === 'ready' && !force)) {
       return { spriteHash: req.params.hash, status: existing.status, triggered: false };
     }
-    void generateIdleAnimation(adapters, store, req.params.hash, toSpriteSheet);
+    void generateCharacterAnimation(adapters, store, req.params.hash, toSpriteSheet);
     return { spriteHash: req.params.hash, status: 'pending', triggered: true };
+  });
+
+  // 从已存原片重打图集：不碰视频生成 = 零成本。
+  //
+  // 用法：想换图集参数（例如把抽帧从 8fps 提到原片的原生帧率、或改 cellH）时，改
+  // sprite_sheet.ts 的默认值 → 部署 → 打这个端点。三段原片是生成当时一并入库的
+  // （SpriteAnimRecord.clipVideos），所以重打是纯本地 ffmpeg，不用重新向 Seedance 买。
+  // 刻意不开放 fps/cellH 查询参数：参数只有一个来源（代码里的默认值），否则线上会出现
+  // 一批「用某次请求的临时参数打出来的」图集，谁也说不清它是按什么打的。
+  //
+  // 没有原片（v1 老记录）→ 409，调用方该走 /generate（要花钱）。
+  app.post<{ Params: { hash: string } }>('/admin/sprite-anim/:hash/repack', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const ok = await repackFromStoredClips(store, req.params.hash, toSpriteSheet);
+    if (!ok) {
+      return reply.code(409).send({ error: 'no stored clip videos; use /generate instead' });
+    }
+    const rec = store.getSpriteAnim(req.params.hash);
+    return { spriteHash: req.params.hash, animAsset: rec?.animAsset, meta: rec?.meta };
+  });
+
+  // 批量重打：遍历所有存有原片的立绘，逐个 repack。串行（ffmpeg 吃 CPU，并发会把容器压垮）。
+  // fire-and-forget：立即返回待处理条数，进度看日志。
+  app.post('/admin/sprite-anim/repack-all', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const hashes = store.listSpriteAnimsWithClips();
+    void (async () => {
+      let done = 0;
+      for (const h of hashes) {
+        try {
+          if (await repackFromStoredClips(store, h, toSpriteSheet)) done++;
+        } catch (err) {
+          console.warn(`repack 失败 sprite=${h}:`, err instanceof Error ? err.message : err);
+        }
+      }
+      console.log(`repack-all 完成：${done}/${hashes.length}`);
+    })();
+    return { pending: hashes.length };
   });
 
   // 只读状态后台（P6）：/debug/state 出 JSON 全量快照，/debug 出单页 dashboard 渲染它。
@@ -917,6 +1064,12 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
     return { icons: store.listItemIcons() };
   });
+  // 公开只读映射（无 token）：游戏客户端背包物品页消费预烧缩略图。只回 item_id→资产 hash，
+  // 资产本身走公开 /assets/:hash；写入（POST /admin/item-icon）仍 admin 门禁、留给离线工具。
+  // （背包重做 §2：admin 门禁挡住了游戏客户端读服务端图，故开这条公开读半边。）
+  app.get('/item-icons', async () => {
+    return { icons: store.listItemIcons() };
+  });
   app.post<{
     Params: { id: string };
     Body: { pngBase64?: string } | null;
@@ -996,7 +1149,9 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       return null;
     }
   };
-  const stages = new StageDirector(hub, makeStageProp);
+  // 全局并发演出上限(worker 内存/线程防线):环境变量 MAX_CONCURRENT_STAGES 覆盖缺省。
+  const maxStages = Number(process.env.MAX_CONCURRENT_STAGES) || DEFAULT_MAX_CONCURRENT_STAGES;
+  const stages = new StageDirector(hub, makeStageProp, maxStages);
 
   // 管理端点：拿一个手写剧本在指定世界开演（试演/真机验收用；Plan 2 上线后由语音意图触发）。
   // 演出广播给世界里所有连接，孩子的平板会直接进观演态——所以世界里得先有人。
@@ -1013,6 +1168,8 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
         return reply.code(400).send({ error: `screenplay must be one of ${SCREENPLAYS.join(', ')}` });
       }
       if (stages.activeIn(req.params.id)) return reply.code(409).send({ error: '这个世界正在演出' });
+      // 全局并发上限:太多世界在演出就先拒(503),别把 worker 撑爆。前端可提示「稍等再玩」。
+      if (stages.atCapacity()) return reply.code(503).send({ error: '同时演出太多了，稍等一下再开演' });
       let opts: StageStartOpts;
       try {
         opts = buildDebut(store, hub, req.params.id, name as ScreenplayName, req.body?.sceneId);
@@ -1033,18 +1190,41 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const connKey = randomUUID(); // 每连接一个限流 key
     const session = newVoiceSession(); // 边录边传：本连接的语音分片缓冲
     // 能力协商：客户端自带 TTS（edge-tts）时连接 URL 带 ?clientTts=1，本连接全程跳过服务端合成。
-    session.clientTts = (req.query as { clientTts?: string } | undefined)?.clientTts === '1';
+    const q = req.query as { clientTts?: string; posbin?: string } | undefined;
+    session.clientTts = q?.clientTts === '1';
+    // 位置流二进制：客户端 ?posbin=1 声明，服务端据此对本连接收发二进制位置流；回执经 world_state.posBin。
+    session.posBin = q?.posbin === '1';
     // 连接层设备信息（activity 快照的服务端半段）：muvee 是反代，真实 IP 在 x-forwarded-for。
     session.connIp = clientIp(req);
     const ua = req.headers['user-agent'];
     if (typeof ua === 'string' && ua) session.connUa = ua.slice(0, 512);
-    socket.on('message', (raw: Buffer) => {
+    socket.on('message', (raw: Buffer, isBinary?: boolean) => {
+      session.lastSeenMs = Date.now(); // 二进制帧也算活跃(不进 handleWsMessage 就不会刷新)
+      // 二进制帧 = 位置流(唯一二进制上行);其余全走 JSON 文本。首字节 tag 兜底校验。
+      if (isBinary && raw.length > 0 && raw[0] === POS_TAG_REPORT) {
+        try {
+          const d = decodeReport(raw);
+          // worldId 不在二进制帧里:位置流只发生在 world_info 入 hub 之后,由 hub 决定归属。
+          applyPositionsReport({ worldId: hub?.worldOf(connKey) ?? '', sceneId: d.sceneId, t: d.t, chars: d.chars, player: d.player }, socket, store, session, connKey, hub, stages);
+        } catch (e) {
+          app.log.warn(`[posbin] 解码位置流失败: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        return;
+      }
       void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session, hub, stages);
     });
-    // 连接断开时释放可能仍持有的限流名额（录到一半断线），并 flush 会话记忆兜底（前端没发 leave_world 就掉线）
+    // 心跳空闲扫描：新客户端会发 ping 刷新 lastSeen；超时无任何消息即判半开连接，
+    // terminate 触发下面的 close 处理清 hub 幽灵（含 host 重选）+ 释限流位。老客户端永不误杀（见 isConnectionDead）。
+    const heartbeatSweep = setInterval(() => {
+      if (isConnectionDead(session, Date.now())) {
+        app.log.info(`[hb] 连接 ${connKey.slice(0, 8)} 心跳超时，断开`);
+        socket.terminate();
+      }
+    }, HEARTBEAT_SWEEP_MS);
+    heartbeatSweep.unref?.(); // 不因这个定时器阻止进程优雅退出
+    // 连接断开时 flush 会话记忆兜底（前端没发 leave_world 就掉线）
     socket.on('close', () => {
-      if (session.gate) { session.gate.release(); session.gate = null; }
-      session.active = false;
+      clearInterval(heartbeatSweep);
       notifyHubLeave(hub, connKey, stages, session.playerId);
       void endSessionVisit(session, adapters, store, Date.now());
     });
@@ -1052,7 +1232,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
 
   // 存量回填：把造角色流程上线前预种的村民补上 idle 动画（fire-and-forget，只在真实进程开，不阻塞启动）。
   if (deps.backfillOnBoot) {
-    const n = backfillIdleAnimations(adapters, store, toSpriteSheet);
+    const n = backfillCharacterAnimations(adapters, store, toSpriteSheet);
     if (n > 0) app.log.info(`idle 动画存量回填：触发 ${n} 个角色`);
     // 音色回填：voiceId 不在 edge 目录里的老角色按 id 稳定哈希落主力池，仙子固定 Xiaoyi（幂等，同步很快）。
     const nv = backfillVoices(store);
@@ -1131,21 +1311,23 @@ export async function maybeCompactVisit(
   }
 }
 
-/** 边说边识别的单连接语音会话：voice_start 开识别流，voice_chunk 随到随发，voice_end finish 拿转写走 respondToTranscript。 */
+/**
+ * 单连接语音会话。识别一律在客户端端侧完成（Android 插件 / macOS GDExtension 的 sherpa），
+ * 服务端只收 voice_transcript 的成品文本——服务端 ASR 已整条退役，不再有边说边识别的音频会话。
+ */
 export interface VoiceSession {
-  active: boolean;
   worldId: string;
   characterId: string;
   /** 当前玩家 id（设备端稳定 UUID，随消息上报）：供记忆/Visit 按玩家归属（P3/P4 消费）。 */
   playerId: string;
-  asr: ASRStream | null;
-  gate: { release: () => void } | null;
   /** 进行中的会话（world_info 起、leave_world/close 收尾）；每轮对话增量累积其中，结束批量抽记忆。 */
   visit: VisitState | null;
   /** 进行中的引导式造角色会话（对小仙子说造角色即开启）；期间语音/点选都当造角色答复，见 advanceCreation。 */
   creation: CreationState | null;
   /** 客户端自带 TTS（edge-tts 直连微软）：WS 连接 URL 带 ?clientTts=1 时置位，服务端全程跳过合成只发文本+voiceId。 */
   clientTts: boolean;
+  /** 位置流二进制帧：客户端连接 URL 带 ?posbin=1 时置位。收发高频位置流走二进制(见 pos_codec)，老客户端留 JSON。 */
+  posBin: boolean;
   /** 连接层设备信息（activity 快照的服务端半段）：握手时从 req 取，world_info 建 Visit 时并入。 */
   connIp?: string;
   connUa?: string;
@@ -1154,10 +1336,40 @@ export interface VoiceSession {
    * getLocations/委托候选/角色物件下发都按它过滤（消化「委托指向别场景」的边界）。
    */
   currentScene: string;
+  /** 心跳：上次收到本连接任意消息的时刻（ms）。空闲扫描据此判半开连接。 */
+  lastSeenMs: number;
+  /**
+   * 本连接是否证明过会发 app 层 ping（新客户端）。
+   * 只对 pingCapable 的连接做「超时即断」——老客户端不发 ping、静止时零流量，
+   * 绝不能被误判为死连接踢掉（它们也没自动重连兜底）。
+   */
+  pingCapable: boolean;
+  /**
+   * B3 复用提示去重（reuse-name §3.1）：本会话已提过的「`${itemId}:${ability}` 配对」。
+   * 点点只在「背包旧物 × 眼前需求」命中且本会话没提过时点一句——记在这里，避免同一旧物反复念。
+   */
+  reuseHinted: Set<string>;
 }
 
 export function newVoiceSession(): VoiceSession {
-  return { active: false, worldId: '', characterId: '', playerId: '', asr: null, gate: null, visit: null, creation: null, clientTts: false, currentScene: DEFAULT_SCENE };
+  return { worldId: '', characterId: '', playerId: '', visit: null, creation: null, clientTts: false, posBin: false, currentScene: DEFAULT_SCENE, lastSeenMs: Date.now(), pingCapable: false, reuseHinted: new Set() };
+}
+
+/** 服务端 ASR 退役后被废弃的 WS 消息类型：收到即静默丢弃（见 handleWsMessage 末尾）。 */
+const RETIRED_VOICE_TYPES = new Set(['voice_input', 'voice_start', 'voice_chunk', 'voice_end', 'voice_cancel']);
+
+/** 心跳：多久没任何消息判半开连接（三个客户端 ping 周期）。 */
+export const HEARTBEAT_TIMEOUT_MS = 30_000;
+/** 心跳：连接层扫描间隔。 */
+export const HEARTBEAT_SWEEP_MS = 10_000;
+
+/**
+ * 半开连接判定（抽出供单测）：仅对证明过会发 ping 的新客户端做超时判死。
+ * 老客户端不发 ping（pingCapable=false）、静止时零流量，绝不能被误杀——它们没自动重连兜底，
+ * 一旦被踢就彻底掉线卡住。真实死连接仍由 TCP close 走原有 close 处理清理，与本判定无关。
+ */
+export function isConnectionDead(session: VoiceSession, now: number): boolean {
+  return session.pingCapable && now - session.lastSeenMs > HEARTBEAT_TIMEOUT_MS;
 }
 
 const VISIT_FLUSH_THRESHOLD = 20; // 单角色累积超此轮数即中途 flush，兜底长会话掉线全丢
@@ -1243,6 +1455,133 @@ async function pushPraiseTts(
   await pushLineTts(socket, adapters, store, praiseLine(task, settle), npc?.voiceId ?? 'cn-child-default', clientTts);
 }
 
+/**
+ * 下发当前场景每个村民的漏话候选（心愿池随 discovered 变化，所以按玩家算、不能挂在 Character 上）。
+ *
+ * 下发的是【整个 leaks 数组】而不是一句：客户端自己轮换着播，省掉「播一句问一次」的往返。
+ * 播不播、什么时候播、离多远播多响，全是客户端的事（漏话是环境音，见 npc_wish_voice.gd）。
+ * 仙子不在列——她的台词是构建期预制 WAV（离线可用、零成本），走 FairyVoice 那条路。
+ */
+function pushWishes(
+  socket: { send: (data: string) => void },
+  store: WorldStore,
+  worldId: string,
+  playerId: string,
+  sceneId: string,
+  session?: VoiceSession, // 传了才算复用提示（要它的本会话去重集；同一连接的 world_info/换场景才传）
+): void {
+  const discovered = store.getDiscovered(worldId, playerId);
+  const canAfford = store.getWallet(worldId, playerId).flowers > 0; // 买不起就不勾（见 WishDef.costsFlower）
+  const activeAbilities = new Set<string>(); // 眼前「有需求」的活跃能力（村民在漏的心愿 + 已认领委托）
+  const wishes = store
+    .listCharacters(worldId, sceneId)
+    .filter((c) => !c.isFairy)
+    .map((c) => {
+      const wish = wishFor(c.id, discovered, canAfford);
+      if (wish) activeAbilities.add(wish.ability);
+      return {
+        characterId: c.id,
+        voiceId: c.voiceId,
+        // 心愿池空（玩法全发现/都买不起）→ 给纯氛围自语，让世界还有活气，但不再勾任何玩法
+        lines: wish ? wish.leaks : IDLE_DOING,
+      };
+    });
+  // 已认领的心愿委托也算一个活跃需求（村民已被搭话、心愿变委托，但漏话池可能已因 discovered 刷掉那句）。
+  const task = store.getActiveTask(worldId, playerId);
+  if (task?.type === 'wish' && task.wishAbility) activeAbilities.add(task.wishAbility);
+
+  // 复用提示（reuse-name §3.1）：三条件全满足才挂——① 背包有 kind 命中旧物 ② 眼前有需求语境 ③ 本会话没提过。
+  // 判定是纯函数 reuseHint；命中就记进 session 去重集（避免同一旧物反复念），并挂到 npc_wishes 下发。
+  // 冷却/不叠声由客户端 ambient 通道兜（同 wish-leak 门禁，见 world.gd）。
+  let hint: { itemId: string; itemName: string } | undefined;
+  if (session) {
+    const resolve = store.itemResolver(worldId);
+    const bag = Object.entries(store.getBag(worldId, playerId))
+      .filter(([, n]) => n > 0)
+      .map(([id]) => resolve(id))
+      .filter((d): d is ItemDef => !!d);
+    const h = reuseHint([...activeAbilities], bag, session.reuseHinted);
+    if (h) {
+      session.reuseHinted.add(`${h.itemId}:${h.ability}`);
+      hint = { itemId: h.itemId, itemName: h.itemName };
+    }
+  }
+  // discovered 一并下发：仙子的引路提示门禁（world.gd 的 _guide_used）本来只记「本次进世界」，
+  // 重启就忘 → 明明用过引路了她还在念叨，正好砸了「已发现的不再提」这条承诺。
+  // 持久口径在服务端，客户端据此初始化。
+  socket.send(JSON.stringify({ type: 'npc_wishes', worldId, sceneId, wishes, discovered, reuseHint: hint }));
+}
+
+/**
+ * 一个玩法【真正成功】了（造出了东西 / 开了一局游戏 / 仙子答应带路）——心愿闭环的唯一入口。
+ *
+ * 两件事：
+ * ① 记进 discovered：此后全世界再没人漏这个心愿的话（「已发现的不再提」，见 wishes.ts）。
+ * ② 若进行中的委托正是盼着它的那个心愿 → 盖章 + 让【许愿的那个村民】用自己的音色道谢。
+ *    这一步是满足感的闭环：小朋友帮了忙，得有人认出来并激动。少了它，漏话就只是句怪话。
+ *
+ * 复用 task_complete 报文 = 客户端零改动就有现成的盖章庆祝演出。
+ */
+async function fulfillAbility(
+  socket: { send: (data: string) => void },
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  worldId: string,
+  playerId: string,
+  ability: string,
+  clientTts = false,
+  sceneId = DEFAULT_SCENE,
+  refine?: { itemRef: string; size: CreatureSize }, // A1：造物类带体型 → 开「试用」两段化；不带则一段完成
+  recipient?: RecipientRef, // A2：这次造物是给谁做的——recipient=character 且没走心愿盖章时，对方用自己音色道谢
+): Promise<void> {
+  store.addDiscovered(worldId, playerId, ability);
+  // 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md）：造物类心愿造成功后不当场盖章——
+  // 先开「试用」：村民走过去用、发现「还差一点」，小朋友调对体型再盖章。只对 pending 的匹配 wish 生效。
+  if (refine) {
+    const trial = beginWishTrial(worldId, playerId, ability, refine.itemRef, refine.size, store);
+    if (trial) {
+      const npc = store.getCharacter(worldId, trial.task.npcId);
+      const complaint = pickComplaint(trial.dir);
+      // 客户端据此高亮那件东西 + 出「变大/变小」箭头 + 播仙子问句（预制 WAV），村民抱怨走下面 TTS 通道。
+      socket.send(JSON.stringify({
+        type: 'wish_trial', worldId, sceneId,
+        npcId: trial.task.npcId, itemRef: refine.itemRef,
+        refineDir: trial.dir, fromSize: refine.size,
+        complaint, voiceId: npc?.voiceId ?? '', fairyHint: REFINE_HINT,
+      }));
+      // 村民用自己音色漏那句「还差一点」（与道谢同一条 TTS 通道）。
+      await pushLineTts(socket, adapters, store, complaint, npc?.voiceId ?? 'cn-child-default', clientTts);
+      // 玩法已被发现（addDiscovered 上面已写）→ 漏话池刷新（与一段完成一致，避免已发现的还在漏）。
+      pushWishes(socket, store, worldId, playerId, sceneId);
+      return; // 试用中：不盖章，等 wish_refine 调对/达上限才结算
+    }
+  }
+  const done = completeWishOnAbility(worldId, playerId, ability, store);
+  if (done) {
+    socket.send(JSON.stringify({
+      type: 'task_complete',
+      task: done.task,
+      stampStyle: done.task.stampStyle,
+      flowerGained: done.flowerGained,
+      wallet: done.wallet,
+    }));
+    await pushPraiseTts(socket, adapters, store, worldId, done.task, done, clientTts);
+  }
+  // A2 交付话术（docs/kids-thinking-made-for-whom.md §4.1）：这次造物是【给某个村民】做的、且没走心愿盖章
+  // （!done——若本就是在兑现该村民心愿，上面 trial/done 已用它的音色说过话，两支合流，此处不再重复）→
+  // 那个村民用【自己的音色】道谢，让「东西是为某个人做的」被听见（与 wish-leak 同一条 pushLineTts 通道）。
+  else if (recipient?.kind === 'character' && recipient.characterId) {
+    const rc = store.getCharacter(worldId, recipient.characterId);
+    if (rc && !rc.isFairy) {
+      await pushLineTts(socket, adapters, store, recipientThanksLine(rc.name), rc.voiceId || 'cn-child-default', clientTts);
+    }
+  }
+  // 无条件重发漏话：心愿池此刻至少有两种变法——① 刚发现的玩法出池（「已发现的不再提」），
+  // ② 造物刚花掉最后一朵花，costsFlower 的心愿集体买不起了（见 WishDef.costsFlower）。
+  // ②不伴随 discovered 变化，所以不能只在「首次发现」时重发。
+  pushWishes(socket, store, worldId, playerId, sceneId);
+}
+
 /** 造物/造角色余额检查：至少 1 朵小红花才放行。 */
 function hasFlower(store: WorldStore, worldId: string, playerId: string): boolean {
   return store.getWallet(worldId, playerId).flowers >= 1;
@@ -1258,7 +1597,7 @@ async function denyForNoFlowers(
   store: WorldStore,
   worldId: string,
   playerId: string,
-  kind: 'prop' | 'character',
+  kind: 'prop' | 'character' | 'sticker',
   clientTts = false,
 ): Promise<void> {
   const line = flowerDeniedLine();
@@ -1272,7 +1611,8 @@ async function denyForNoFlowers(
     }
   }
   socket.send(JSON.stringify({
-    type: kind === 'prop' ? 'prop_denied' : 'gen_denied',
+    // sticker 复用造物的 prop_denied UX（都进背包、都要攒花），character 走 gen_denied。
+    type: kind === 'character' ? 'gen_denied' : 'prop_denied',
     reason: 'no_flowers',
     message: line,
     ttsAsset,
@@ -1282,6 +1622,142 @@ async function denyForNoFlowers(
 }
 
 /** 引导式创造会话入口（造角色/造物共用）：先卡余额（0 花不进会话，仙子引导），够花再开会话推进第一轮。 */
+// ── A2「给谁做的」（fit-to-user，docs/kids-thinking-made-for-whom.md）：造物会话最前的 recipient 预问步 ──
+const RECIPIENT_SELF_ID = 'self';
+const RECIPIENT_EVERYONE_ID = 'everyone';
+const RECIPIENT_SKIP_ID = 'recipient_skip'; // 客户端「随便啦」软退出：回落（不记 recipient），不卡流程、不进 creation_cancelled
+const RECIPIENT_QUESTION = '这个呀，是给谁做的呀？';
+/** CreatureSize → 中文档标签（与图标库 size label 一致，让 recipient 预填的 size 与点选路径同口径）。 */
+const SIZE_LABEL: Record<CreatureSize, string> = { small: '小', medium: '中', big: '大' };
+
+/** A2 交付：给某村民做的东西造好时，那个村民用自己音色道谢的一句话（稳定哈希选一句，避免每次都一样）。 */
+const RECIPIENT_THANKS_LINES = [
+  '谢谢你给我做的！我好喜欢呀～',
+  '哇，这是给我的呀？我太开心啦，谢谢你！',
+  '给我做的呢！我要好好收着，谢谢你呀～',
+  '是给我用的吗？正合适呢，谢谢你！',
+];
+function recipientThanksLine(name: string): string {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return RECIPIENT_THANKS_LINES[h % RECIPIENT_THANKS_LINES.length];
+}
+
+/**
+ * recipient 预问步的一屏选项：当前场景村民（用各自立绘当图标）+ 自己 + 大家（软步骤，客户端另加「随便啦」跳过）。
+ * 与 kind/color 的静态图标库唯一的结构差异——候选是运行时在场角色，故就地组装、不进 CREATION_OPTIONS。
+ */
+async function promptRecipient(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  fairyId: string,
+  leadIn: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  goal: CreationGoal,
+): Promise<void> {
+  const sceneId = session.currentScene;
+  const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
+  const villagers = store.listCharacters(worldId, sceneId)
+    .filter((c) => !c.isFairy)
+    .map((c) => ({ id: c.id, label: c.name, iconAsset: c.appearance.spriteAsset }));
+  const options = [
+    { id: RECIPIENT_SELF_ID, label: '我自己', iconAsset: '' },
+    ...villagers,
+    { id: RECIPIENT_EVERYONE_ID, label: '大家', iconAsset: '' },
+  ];
+  // 入口那句应答（leadIn）接在问句前一次念完，避免两条消息各自起播互相抢断（与 advanceCreation 同策）。
+  const spoken = leadIn ? `${leadIn}${RECIPIENT_QUESTION}` : RECIPIENT_QUESTION;
+  let ttsAsset = '';
+  if (!session.clientTts) {
+    try {
+      ttsAsset = store.putAsset(await adapters.tts.synthesize(spoken, fairyVoice));
+    } catch (err) {
+      console.warn(`recipient 追问 TTS 失败（不阻塞，客户端可显示文字）：${String(err)}`);
+    }
+  }
+  socket.send(JSON.stringify({
+    type: 'creation_prompt',
+    goal,
+    replyText: spoken,
+    question: RECIPIENT_QUESTION,
+    category: 'recipient',
+    options,
+    ttsAsset,
+    voiceId: fairyVoice,
+  }));
+}
+
+/**
+ * 把 recipient 预问步的答复（点选 optId：self/everyone/skip/角色id；或语音 spokenText）解析成 RecipientRef。
+ * 认不出 / 「随便啦」/ 空 → null（回落，不记 recipient，绝不卡流程，见设计 §3.1）。
+ */
+function resolveRecipient(
+  optId: string,
+  spokenText: string,
+  worldId: string,
+  sceneId: string,
+  store: WorldStore,
+): RecipientRef | null {
+  const id = (optId ?? '').trim();
+  if (id) {
+    if (id === RECIPIENT_SELF_ID) return { kind: 'self', label: '自己' };
+    if (id === RECIPIENT_EVERYONE_ID) return { kind: 'everyone', label: '大家' };
+    if (id === RECIPIENT_SKIP_ID) return null;
+    const c = store.getCharacter(worldId, id);
+    if (c && !c.isFairy) return { kind: 'character', characterId: c.id, label: c.name };
+    return null; // 认不出的 id：回落
+  }
+  const t = (spokenText ?? '').trim();
+  if (!t) return null;
+  if (/(我自己|自己|给我|我的|我要)/.test(t)) return { kind: 'self', label: '自己' };
+  if (/(大家|所有人|谁都|每个人|大伙)/.test(t)) return { kind: 'everyone', label: '大家' };
+  const hit = store.listCharacters(worldId, sceneId).filter((c) => !c.isFairy).find((c) => c.name && t.includes(c.name));
+  if (hit) return { kind: 'character', characterId: hit.id, label: hit.name };
+  return null; // 说了句认不出的话：回落（那句话仍是暂存的 request 在驱动 LLM，不浪费）
+}
+
+/**
+ * 收到 recipient 答复：解析 → 记进 attrs（character 时按对方体型预填 size 默认，这是 A2 硬保底）→ 用入口
+ * 暂存的 request 继续正常属性追问（advanceCreation）。leadIn 已在 promptRecipient 念过，这里不再传。
+ */
+async function handleRecipientReply(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  fairyId: string,
+  optId: string,
+  spokenText: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  spawn?: SpawnCtx,
+): Promise<void> {
+  const state = session.creation;
+  if (!state) return;
+  const req = state.pendingRequest ?? '';
+  state.pendingRequest = undefined; // 消费掉暂存的入口话；此后 pendingRequest===undefined，不再当 recipient 步
+  if (!state.askedCategories.includes('recipient')) state.askedCategories.push('recipient');
+  const rec = resolveRecipient(optId, spokenText, worldId, session.currentScene, store);
+  if (rec) {
+    state.attrs.recipient = rec;
+    // 硬保底（§3.2）：recipient=character → 读对方体型档预填 size 默认，「给小兔子做的帽子默认就小」肉眼可见。
+    // self/everyone 没有内在体型，不预填——size 仍走正常追问，未答则 sizeToScale 回落 medium。
+    if (rec.kind === 'character' && !state.attrs.size) {
+      const sz = recipientDefaultSize(rec, (cid) => store.getCharacter(worldId, cid)?.appearance.size);
+      state.attrs.size = SIZE_LABEL[sz];
+    }
+  }
+  // 喂给 advanceCreation 的 childInput：
+  //  - 认出了 recipient（点选/语音「大家」）→ 用入口暂存的话驱动属性追问，不吞掉「我想要一只小猫」。
+  //  - 没认出（点「随便啦」/说了句不是 recipient 的话）→ 入口话 + 这句一起喂：既保住入口意图，又让 guide
+  //    能从这句里判出「算了不要了」这类取消（recipient 步不吞掉取消意图）。点选跳过时 spokenText 为空，只用入口话。
+  const childInput = rec
+    ? (req || spokenText)
+    : (spokenText.trim() ? `${req} ${spokenText}`.trim() : req);
+  await advanceCreation(socket, session, worldId, fairyId, childInput, adapters, store, '', spawn);
+}
+
 async function openCreationSession(
   socket: { send: (data: string) => void },
   session: VoiceSession,
@@ -1292,17 +1768,92 @@ async function openCreationSession(
   store: WorldStore,
   leadIn = '', // 入口那轮 routeIntent 生成的仙子应答句（缺陷 ②：此前被丢弃）
   goal: CreationGoal = 'character',
-  spawn?: SpawnCtx, // 造角色的降生上下文（落在发起者身边 + 广播给同场景的人）
+  blueprintId?: string, // goal==='build' 时：拼哪副蓝图（matchBlueprint 命中的整体）
 ): Promise<void> {
+  // 注：造角色的降生上下文（spawn）不在此传——recipient 预问步把首轮 advanceCreation 推迟到 handleRecipientReply，
+  // 那里用同连接的 spawnCtx() 现算（等价且正确），故 openCreationSession 不再需要 spawn 参数。
   if (!hasFlower(store, worldId, session.playerId)) {
-    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, goal === 'prop' ? 'prop' : 'character', session.clientTts);
+    // 拼装（build）与造物（prop）共用 prop_denied 拒绝 UX（都进背包、都要攒花）。
+    const denyKind = goal === 'character' ? 'character' : goal === 'sticker' ? 'sticker' : 'prop';
+    await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, denyKind, session.clientTts);
     return;
   }
-  session.creation = newCreationState(goal);
+  session.creation = newCreationState(goal, blueprintId);
   // 仙子最近帮这个小朋友造过的东西：注入 guide，「帮我造刚才的小动物」这类指代能对上
   const creations = store.getMemories(fairyId, session.playerId).filter((m) => m.kind === 'creation');
   if (creations.length > 0) session.creation.recentCreations = creations.slice(-5).map((m) => m.text);
-  await advanceCreation(socket, session, worldId, fairyId, request, adapters, store, leadIn, spawn);
+  // 积木拼装走 advanceBuild（按功能追问填槽）；造角色/物/贴纸走 advanceCreation（追问属性）。
+  if (goal === 'build') {
+    await advanceBuild(socket, session, worldId, fairyId, request, adapters, store, leadIn);
+  } else {
+    // A2「给谁做的」：造角色/物/贴纸在追问属性【之前】先问一句 recipient（软步骤）。把入口那句意图暂存进
+    // pendingRequest，等收到 recipient 答复（handleRecipientReply）再喂 advanceCreation 继续——recipient
+    // 步不吞掉「我想要一只小猫」。build 不走此步（它有自己的按功能追问骨架）。
+    session.creation.pendingRequest = request;
+    await promptRecipient(socket, session, worldId, fairyId, leadIn, adapters, store, goal);
+  }
+}
+
+/**
+ * play_game 异步落地（realtime-primitives P5）：口语游戏 → 小仙子先出声应下 → LLM 生成【真 TS】剧本
+ * → 过 typecheck（失败带错回喂重生成）→ buildStageOptsFromDraft 映射真实村民 → StageDirector.startStage 开演。
+ * 与造物/造角色不同：游戏【不扣小红花】（自由玩）。
+ * 兜底顺序讲究：先判「能不能开」（世界在否/已在演出/并发满）再出声应下——避免先说「好呀我们来玩」又紧跟
+ * 「其实正在玩呢」自相矛盾；确定能开才应下（应答句先行，别在强模型 codegen 的几秒里干等）。
+ * 生成失败 / 人不够 / 生成期间被别人抢先 → 一句温柔口头兜底，不开演、不炸。
+ */
+export async function startGameAsync(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  fairyId: string,
+  gameDesc: string,
+  leadIn: string, // routeIntent 生成的仙子应答句（如「好呀，我们来玩！」）
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  hub?: WorldHub,
+  stages?: StageDirector,
+): Promise<void> {
+  const fairy = store.getCharacter(worldId, fairyId);
+  const voiceId = fairy?.voiceId ?? '';
+  const say = (text: string) => pushLineTts(socket, adapters, store, text, voiceId, session.clientTts);
+  const BUSY_LINE = '我们正在玩一个游戏呢，玩完这个再玩别的好不好？';
+  if (!hub || !stages) return; // 编程错误（3 条 voice 路径都传了 hub/stages）；prod 不会到这
+  if (!store.getWorld(worldId)) { await say('咦，这个世界好像不见啦，我们待会儿再玩好不好？'); return; }
+
+  // 先判「能不能开」再应下——别先说「好呀我们来玩」又紧跟「其实正在玩呢」自相矛盾。
+  // 已在演出 / 全局并发上限：只说兜底句，不发那句应答。
+  if (stages.activeIn(worldId)) { await say(BUSY_LINE); return; }
+  if (stages.atCapacity()) { await say('现在好多小朋友都在玩游戏，稍等一会儿再来玩好不好？'); return; }
+
+  // 能开了才应下：孩子立刻听到「好呀，我们来玩！」，别在强模型 codegen 的几秒里干等。
+  await say(leadIn || '好呀，我们来玩！');
+
+  const sceneId = session.currentScene;
+  const villagerNames = store.listCharacters(worldId, sceneId).filter((c) => !c.isFairy).map((c) => c.name);
+  const hasPlayer = !!session.playerId && hub.membersIn(worldId).some((m) => m.playerId === session.playerId);
+
+  let draft;
+  try {
+    draft = await adapters.llm.generateScreenplay({ gameDesc, villagerNames, hasPlayer });
+  } catch (err) {
+    console.warn(`[play_game] 生成剧本异常：${String(err)}`);
+    await say('这个游戏我还没学会呢，我们先玩点别的好不好？');
+    return;
+  }
+  if (!draft) { await say('这个游戏有点难，我还没学会呢，我们先玩点别的好不好？'); return; }
+
+  const built = buildStageOptsFromDraft(draft, store, hub, worldId, session.playerId, sceneId);
+  if (!built.ok) { await say(`${built.reason}，我们下次再玩这个好不好？`); return; }
+
+  // 生成期间（几秒）可能有别人先开了一场（activeIn 之后、startStage 之前的窗口）：startStage 返回 null，
+  // 此时才「先应下又落空」，但这是真「刚好被别人抢先」，说 BUSY_LINE 合理。
+  const run = stages.startStage(worldId, built.opts);
+  if (!run) { await say(BUSY_LINE); return; }
+  // 不 await 终局：演出要演几分钟，stage_begin 已广播给全场，这里只管把它跑起来。
+  void run.catch(() => {});
+  // 真开演了才算「发现了能一起玩游戏」——前面每个 return 都是没开成，不能算。
+  await fulfillAbility(socket, adapters, store, worldId, session.playerId, 'play_game', session.clientTts, session.currentScene);
 }
 
 async function pushLineTts(
@@ -1339,6 +1890,8 @@ export async function createPropAsync(
   store: WorldStore,
   clientTts = false,
   creatorId = '', // 造物的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
+  sceneId = DEFAULT_SCENE, // 造完要按玩家所在场景重发漏话（心愿池随 discovered/钱包变）
+  recipient?: RecipientRef, // A2：这件东西是给谁做的（落进 ItemDef.recipient + 交付话术走对方音色）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
@@ -1361,6 +1914,8 @@ export async function createPropAsync(
       return;
     }
     const def = creationItemDef(worldId, randomUUID(), validated.spec);
+    if (recipient) def.recipient = recipient; // A2：给谁做的落库（供 A1 试用/B3 起名/交付话术读取）
+    def.creatorPlayerId = playerId; // B3 起名所有权：造物一落地被客户端自动摆放出背包后，靠这个认「自己造的」
     store.upsertItem(def);
     store.bagAdd(worldId, playerId, def.id);
     created = true;
@@ -1375,11 +1930,156 @@ export async function createPropAsync(
       wallet: store.getWallet(worldId, playerId),
       bag: store.getBag(worldId, playerId),
     }));
+    // 造物成功 = 发现了「能造东西」这个玩法；若有村民正盼着它 → 开「试用」（A1：造出来带体型，
+    // 村民试用差一点，小朋友调对再盖章）。体型取自造物 spec.scale 反推的档。
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_prop', clientTts, sceneId,
+      { itemRef: def.id, size: scaleToSize(validated.spec.scale) }, recipient);
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
   } finally {
     if (!created) store.refundFlower(worldId, playerId); // 造失败/被审核挡：退还，别让孩子白花一朵
   }
+}
+
+/** create_sticker 异步落地（fairy-stickers）：与 createPropAsync 平行，但产物是扁平 die-cut 贴纸。
+ *  扣花 → sticker_pending → 审核描述 → designSticker(名字+英文生图 prompt) → generateIconAsset 管线
+ *  （生图→抠图→加白边→存资产哈希）→ creationStickerDef(mount:'edge', renderRef `sticker:@<hash>`) →
+ *  upsertItem + bagAdd → item_created 推送（复用造物落地路径：进背包，摆放走放置模式）。
+ *  0 花拦截推 prop_denied（复用造物拒绝 UX）；任何失败都退还那朵花并推 prop_failed。 */
+export async function createStickerAsync(
+  socket: { send: (data: string) => void },
+  worldId: string,
+  playerId: string,
+  description: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  clientTts = false,
+  creatorId = '', // 造贴纸的角色（小仙子）：给了就在造完后记一条 creation 记忆
+  sceneId = DEFAULT_SCENE, // 造完要按玩家所在场景重发漏话
+  recipient?: RecipientRef, // A2：这张贴纸是给谁做的（落进 ItemDef.recipient + 交付话术走对方音色）
+): Promise<void> {
+  if (!store.spendFlower(worldId, playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'sticker', clientTts);
+    return;
+  }
+  // 开造即报：客户端据此退出对话、就地立起占位符（复用造物的 prop_pending 熔炉动静）。
+  socket.send(JSON.stringify({ type: 'sticker_pending', worldId, wallet: store.getWallet(worldId, playerId) }));
+  let created = false;
+  try {
+    const check = await adapters.moderation.moderateText(description);
+    if (!check.allowed) {
+      socket.send(JSON.stringify({ type: 'sticker_failed', reason: 'moderation blocked' }));
+      return;
+    }
+    const { name, prompt } = await adapters.llm.designSticker(description);
+    // 复用图标专用管线：扁平生图 → 绿幕抠图 → 程序加白 die-cut 贴纸边 → 存资产哈希。
+    const assetHash = await generateIconAsset(adapters, prompt, store);
+    const def = creationStickerDef(worldId, randomUUID(), name, assetHash);
+    if (recipient) def.recipient = recipient; // A2：给谁做的落库
+    def.creatorPlayerId = playerId; // B3 起名所有权（贴纸留背包，但摆到边缘/角色后同样认造物者）
+    store.upsertItem(def);
+    store.bagAdd(worldId, playerId, def.id);
+    created = true;
+    if (creatorId) {
+      store.addMemory(creatorId, { text: `帮小朋友做过「${def.name}」贴纸（${description.slice(0, 60)}）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
+    }
+    socket.send(JSON.stringify({
+      type: 'item_created',
+      worldId,
+      item: def,
+      wallet: store.getWallet(worldId, playerId),
+      bag: store.getBag(worldId, playerId),
+    }));
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_sticker', clientTts, sceneId, undefined, recipient);
+  } catch (err) {
+    socket.send(JSON.stringify({ type: 'sticker_failed', reason: String(err) }));
+  } finally {
+    if (!created) store.refundFlower(worldId, playerId); // 造失败/被审核挡：退还
+  }
+}
+
+/** 积木式造物落成（B1，docs/kids-thinking-build-from-parts.md §3.1/§4.3）：与 createStickerAsync 平行，
+ *  但产物是组合物零件树（renderRef='composed:'）而非生成图——零件全来自预置库，无需生图/审核。
+ *  扣花 → prop_pending（复用造物占位 UX）→ 按 blueprintId + 已填槽拼出 ComposedSpec → creationBuildDef
+ *  → upsertItem + bagAdd → item_created（进背包，摆放走放置模式）。0 花拦截推 prop_denied，任何失败退还那朵花。
+ *  落成扣费时机与「确认要造的那一刻」一致（拼装期零件免费，预置库无限量）。 */
+export async function createBuildAsync(
+  socket: { send: (data: string) => void },
+  worldId: string,
+  playerId: string,
+  blueprintId: string,
+  filled: Record<string, string>, // slotId → partId（会话累积的已填槽）
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  clientTts = false,
+  creatorId = '', // 拼装引导的角色（小仙子）：给了就在落成后记一条 creation 记忆
+  sceneId = DEFAULT_SCENE, // 造完要按玩家所在场景重发漏话
+): Promise<void> {
+  if (!store.spendFlower(worldId, playerId)) {
+    await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
+    return;
+  }
+  // 开造即报：复用造物 prop_pending，客户端据此退对话、就地立占位符。
+  socket.send(JSON.stringify({ type: 'prop_pending', worldId, wallet: store.getWallet(worldId, playerId) }));
+  let created = false;
+  try {
+    const bp = findBlueprint(blueprintId);
+    if (!bp) {
+      socket.send(JSON.stringify({ type: 'prop_failed', reason: 'unknown blueprint' }));
+      return;
+    }
+    // 按蓝图槽序收拢已填零件（跳过没填的选填槽/丢失的零件），冗余 partRenderRef 供客户端直接画子 quad。
+    const parts: ComposedPart[] = [];
+    for (const slot of bp.slots) {
+      const partId = filled[slot.slotId];
+      if (!partId) continue;
+      const part = findPart(partId);
+      if (!part) continue;
+      // fit 校验（权威，两条路径共用）：零件必须能挂进该槽（fitSlots 含槽 accept），否则丢弃。
+      // 引导会话路径的零件本就来自 partsForSlot 兼容表、天然通过；这里主要防复用改装（create_build）
+      // 传来对不上的槽零件——服务端绝不落一个歪拼的组合物。
+      if (!part.fitSlots.includes(slot.accept)) continue;
+      parts.push({ slotId: slot.slotId, partId, partRenderRef: part.renderRef });
+    }
+    if (parts.length === 0) {
+      socket.send(JSON.stringify({ type: 'prop_failed', reason: 'empty build' }));
+      return;
+    }
+    const spec: ComposedSpec = { blueprintId, parts };
+    const def = creationBuildDef(worldId, randomUUID(), bp.name, spec);
+    def.creatorPlayerId = playerId; // B3 起名所有权：积木造物落地后被自动摆放出背包，靠这个认「自己造的」
+    store.upsertItem(def);
+    store.bagAdd(worldId, playerId, def.id);
+    created = true;
+    if (creatorId) {
+      store.addMemory(creatorId, { text: `帮小朋友拼出「${def.name}」（${parts.length}个零件）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
+    }
+    socket.send(JSON.stringify({
+      type: 'item_created',
+      worldId,
+      item: def,
+      wallet: store.getWallet(worldId, playerId),
+      bag: store.getBag(worldId, playerId),
+    }));
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_prop', clientTts, sceneId);
+  } catch (err) {
+    socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
+  } finally {
+    if (!created) store.refundFlower(worldId, playerId); // 落成失败：退还，别让孩子白花一朵
+  }
+}
+
+/** 复用改装（B1，docs/kids-thinking-build-from-parts.md §3.1）：某副蓝图每个槽的兼容零件表
+ *  （slotId → [{id,label,renderRef}]）。客户端进改装时一次性取回，之后本地即时建零件盘换槽——
+ *  零件库保持服务端权威，客户端不必再造一份镜像。未知蓝图返回空表。 */
+export function buildSlotOptions(blueprintId: string): Record<string, Array<{ id: string; label: string; renderRef: string }>> {
+  const bp = findBlueprint(blueprintId);
+  if (!bp) return {};
+  const out: Record<string, Array<{ id: string; label: string; renderRef: string }>> = {};
+  for (const slot of bp.slots) {
+    out[slot.slotId] = partsForSlot(slot.accept).map((p) => ({ id: p.id, label: p.name, renderRef: p.renderRef }));
+  }
+  return out;
 }
 
 /** create_character 异步落地：造角色管线（spec→审核→生图→抠图→持久化），gen_progress 逐阶段推、
@@ -1396,6 +2096,7 @@ export async function createCharacterAsync(
   clientTts = false,
   creatorId = '', // 造角色的角色（小仙子）：给了就在造完后记一条 creation 记忆（「帮我造刚才的」指代用）
   spawn?: SpawnCtx, // 降生上下文：落在发起者所在场景/身边 + 向同场景其他人广播 character_spawned
+  recipient?: RecipientRef, // A2：这个新伙伴是给谁造的（落进 appearance.recipient + 交付话术走对方音色）
 ): Promise<void> {
   if (!store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'character', clientTts);
@@ -1409,7 +2110,7 @@ export async function createCharacterAsync(
     const sceneId = spawn?.sceneId;
     const position = sceneId ? store.getPlayerTile(worldId, sceneId, playerId) : undefined;
     const character = await createCharacter(
-      { worldId, intentText: description, byFairy: true, sceneId, position },
+      { worldId, intentText: description, byFairy: true, sceneId, position, recipient },
       adapters,
       store,
       (stage) => socket.send(JSON.stringify({ type: 'gen_progress', requestId, stage })),
@@ -1430,8 +2131,11 @@ export async function createCharacterAsync(
     }
     // 静态立绘先给客户端，idle 动画后台异步补（客户端凭 spriteAsset 轮询 /sprite-anim/:hash）
     if (character.appearance.spriteAsset) {
-      triggerIdleAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
+      triggerCharacterAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
     }
+    // A1 试用：造出来的新伙伴带体型 → 开「试用」（村民试用差一点，小朋友调对再盖章）。
+    await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_character', clientTts, sceneId ?? DEFAULT_SCENE,
+      { itemRef: character.id, size: character.appearance.size ?? scaleToSize(character.appearance.scale) }, recipient);
   } catch (err) {
     const reason = err instanceof ModerationError ? err.message : String(err);
     socket.send(JSON.stringify({ type: 'gen_failed', requestId, reason }));
@@ -1443,8 +2147,9 @@ export async function createCharacterAsync(
 /**
  * 引导式创造图标批量生成：遍历图标库每个选项，走图标专用管线 generateIconAsset
  * （图标画风生图→抠图→程序加白 die-cut 边→putAsset）出一张图，存「option id→asset hash」映射。
- * 覆盖造角色全库 + 造物专属的 kind/motion（prop_ 前缀）；造物的 color/size 复用造角色同 id，
- * 不重复生成（同 id 幂等跳过）。幂等：已生成的跳过，除非 force。opts.only 限定只生成指定 id。
+ * 覆盖造角色全库 + 造物专属 kind/motion（prop_ 前缀）+ 造贴纸专属 kind 图案（stk_ 前缀）；
+ * 造物/贴纸的 color/size 复用造角色同 id，不重复生成（同 id 幂等跳过）。
+ * 幂等：已生成的跳过，除非 force。opts.only 限定只生成指定 id。
  * 返回生成/跳过/失败清单。绝不抛（单项失败不影响其它）。
  */
 export async function generateCreationIcons(
@@ -1461,6 +2166,12 @@ export async function generateCreationIcons(
   const jobs: { id: string; prompt: string }[] = [
     ...CREATION_OPTIONS.map((o) => ({ id: o.id, prompt: iconPrompt(o.id) })),
     ...PROP_CREATION_OPTIONS.filter((o) => o.id.startsWith('prop_')).map((o) => ({ id: o.id, prompt: propIconPrompt(o.id) })),
+    // 造贴纸专属图案(stk_ 前缀)：color 复用造角色同 id、不重复生成，与造物同理。
+    ...STICKER_CREATION_OPTIONS.filter((o) => o.id.startsWith('stk_')).map((o) => ({ id: o.id, prompt: stickerIconPrompt(o.id) })),
+    // onboarding 形象选项图标(av_ 前缀，docs/onboarding-avatar-redesign-design.md §3.4)：
+    // 只生成图标类别（AVATAR_ICON_CATEGORIES）；color 类客户端渲染色块，不生图。
+    ...AVATAR_OPTIONS.filter((o) => (AVATAR_ICON_CATEGORIES as readonly string[]).includes(o.category))
+      .map((o) => ({ id: o.id, prompt: avatarIconPrompt(o.id) })),
   ];
   for (const job of jobs) {
     if (onlySet && !onlySet.has(job.id)) continue;
@@ -1511,13 +2222,17 @@ export async function advanceCreation(
   const state = session.creation;
   if (!state) return;
   const isProp = state.goal === 'prop';
-  // 会话目标决定汇总描述用哪套：造物 composePropDesc，造角色 describeCreationAttrs。
-  const summarize = () => isProp ? composePropDesc(state.attrs) : describeCreationAttrs(state);
-  // done 时按目标分派到对应的异步造：造物 createPropAsync，造角色 createCharacterAsync。
-  // 造物进的是背包（私有，不广播；摆到地上时 terrain_patch 自带实体定义），只有造角色要降生广播。
-  const finishCreate = (desc: string) => isProp
-    ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId)
-    : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId, spawn);
+  const isSticker = state.goal === 'sticker';
+  // 会话目标决定汇总描述用哪套：造贴纸 composeStickerDesc，造物 composePropDesc，造角色 describeCreationAttrs。
+  const summarize = () => isSticker ? composeStickerDesc(state.attrs) : isProp ? composePropDesc(state.attrs) : describeCreationAttrs(state);
+  // done 时按目标分派到对应的异步造：造贴纸 createStickerAsync，造物 createPropAsync，造角色 createCharacterAsync。
+  // 造贴纸/造物都进背包（私有，不广播；摆放走放置模式 terrain_patch 自带实体定义），只有造角色要降生广播。
+  const recipient = state.attrs.recipient; // A2：会话最前问出的「给谁做的」→ 传给产物落库 + 交付话术走对方音色
+  const finishCreate = (desc: string) => isSticker
+    ? createStickerAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId, session.currentScene, recipient)
+    : isProp
+      ? createPropAsync(socket, worldId, session.playerId, desc, adapters, store, session.clientTts, fairyId, session.currentScene, recipient)
+      : createCharacterAsync(socket, worldId, session.playerId, desc, adapters, store, undefined, session.clientTts, fairyId, spawn, recipient);
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
   // 超轮兜底（适配器无关）：已追问满上限还没 done，就用现有属性直接造——绝不无限追问。
   // 此前只有 mock 在 turnCount>=5 时强制 done，线上 LLM 属性解析不进去就会原地循环。
@@ -1529,7 +2244,7 @@ export async function advanceCreation(
   }
   let r;
   try {
-    r = isProp ? await adapters.llm.guideProp(state, childInput) : await adapters.llm.guideCreation(state, childInput);
+    r = isSticker ? await adapters.llm.guideSticker(state, childInput) : isProp ? await adapters.llm.guideProp(state, childInput) : await adapters.llm.guideCreation(state, childInput);
   } catch (err) {
     // guide 挂了：用现有属性兜底造，不让幼儿卡住
     console.warn(`guide(${state.goal}) 失败，用现有属性兜底造：${String(err)}`);
@@ -1583,7 +2298,7 @@ export async function advanceCreation(
     return;
   }
   // 追问：合成仙子问句 TTS（失败不阻塞；clientTts 时客户端自己合成）+ 下发图标选项卡
-  const lookup = isProp ? findPropOption : findOption;
+  const lookup = isSticker ? findStickerOption : isProp ? findPropOption : findOption;
   const options = (r.optionIds ?? [])
     .map((id) => lookup(id))
     .filter((o): o is NonNullable<typeof o> => !!o)
@@ -1611,6 +2326,114 @@ export async function advanceCreation(
   }));
 }
 
+/**
+ * 引导式积木拼装推进（B1，docs/kids-thinking-build-from-parts.md §3.4）：与 advanceCreation 平行，
+ * 但走 guideBuild（按未填必填槽的功能提问）→ 累积「哪个槽填了哪个零件」→ done→createBuildAsync 落成。
+ * 结果类型（GuideBuildResult：filled/slotId）与 GuideCreationResult（updatedAttrs/category）不同，故独立成函数。
+ * 兜底同 advanceCreation：guide 挂了/超轮就用已填零件直接落成，绝不把孩子卡在半开会话里。
+ * childInput = 孩子这轮输入（点的零件 name 或语音功能词）；leadIn 只入口那轮传（升级造物→拼装那句应答）。
+ */
+export async function advanceBuild(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  fairyId: string,
+  childInput: string,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  leadIn = '',
+): Promise<void> {
+  const state = session.creation;
+  if (!state || !state.build) return;
+  const build = state.build;
+  const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
+  const finish = () => createBuildAsync(
+    socket, worldId, session.playerId, build.blueprintId, build.filled,
+    adapters, store, session.clientTts, fairyId, session.currentScene,
+  );
+  const bp = findBlueprint(build.blueprintId);
+  // 蓝图丢失（不该发生）：用已填零件兜底落成
+  if (!bp) {
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finish();
+    return;
+  }
+  // 超轮兜底：追问满上限还没 done，就用现有零件直接落成——绝不无限追问。
+  if (state.turnCount >= CREATION_MAX_TURNS) {
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finish();
+    return;
+  }
+  let r;
+  try {
+    r = await adapters.llm.guideBuild(state, childInput);
+  } catch (err) {
+    console.warn(`guideBuild 失败，用现有零件兜底落成：${String(err)}`);
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finish();
+    return;
+  }
+  // 小朋友反悔（「算了/不拼了」）：清会话 + 通知客户端收占位符，绝不落成、不扣花。
+  if (r.cancelled) {
+    session.creation = null;
+    let ttsAsset = '';
+    if (!session.clientTts) {
+      try {
+        ttsAsset = store.putAsset(await adapters.tts.synthesize(r.replyText, fairyVoice));
+      } catch (err) {
+        console.warn(`取消安抚语 TTS 失败（不阻塞，客户端仍会收视图）：${String(err)}`);
+      }
+    }
+    socket.send(JSON.stringify({
+      type: 'creation_cancelled',
+      goal: 'build',
+      replyText: r.replyText,
+      ttsAsset,
+      voiceId: fairyVoice,
+    }));
+    return;
+  }
+  // 累积本轮增量：填槽（点选路径可能已在 WS 层直填，这里对已填是幂等覆写）+ 记问过的槽。
+  if (r.filled) build.filled[r.filled.slotId] = r.filled.partId;
+  if (r.slotId) build.askedSlots.push(r.slotId);
+  state.dialog.push({ role: 'child', text: childInput, ts: 0 });
+  if (!r.done) state.dialog.push({ role: 'npc', text: r.question ?? r.replyText, ts: 0 });
+  state.turnCount += 1;
+  if (r.done) {
+    session.creation = null;
+    if (leadIn) await pushLineTts(socket, adapters, store, leadIn, fairyVoice, session.clientTts);
+    await finish();
+    return;
+  }
+  // 追问：合成点点功能问句 TTS（失败不阻塞）+ 下发 build_prompt（当前槽 + 兼容零件盘，客户端点亮该槽发光）。
+  const options = (r.optionIds ?? [])
+    .map((id) => findPart(id))
+    .filter((p): p is NonNullable<typeof p> => !!p)
+    .map((p) => ({ id: p.id, label: p.name, renderRef: p.renderRef }));
+  const spoken = leadIn ? `${leadIn}${r.replyText}` : r.replyText;
+  let ttsAsset = '';
+  if (!session.clientTts) {
+    try {
+      ttsAsset = store.putAsset(await adapters.tts.synthesize(spoken, fairyVoice));
+    } catch (err) {
+      console.warn(`拼装追问 TTS 失败（不阻塞，客户端可显示文字）：${String(err)}`);
+    }
+  }
+  socket.send(JSON.stringify({
+    type: 'build_prompt',
+    blueprintId: build.blueprintId,
+    replyText: spoken,
+    question: r.question ?? r.replyText, // 纯功能问句：客户端拿它做选项卡标题，不带前置话语
+    slotId: r.slotId,                    // 当前要填的槽：客户端点亮它发光
+    options,
+    ttsAsset,
+    voiceId: fairyVoice,
+  }));
+}
+
 /** 把累积属性汇成一句中文描述（兜底造角色用；与 mock 的 composeCreationDesc 同形）。 */
 function describeCreationAttrs(state: CreationState): string {
   const a = state.attrs;
@@ -1620,6 +2443,8 @@ function describeCreationAttrs(state: CreationState): string {
   if (a.traits.length > 0) parts.push(a.traits.join('、'));
   if (a.personality) parts.push(`性格${a.personality}`);
   if (a.name) parts.push(`叫${a.name}`);
+  const rp = recipientPhrase(a.recipient); // A2：带上「给X用的」，让 designCharacter 也能从语义再判一次体型
+  if (rp) parts.push(rp);
   return parts.join('，');
 }
 
@@ -1673,6 +2498,55 @@ export function sanitizeAnchors(v: unknown): CharacterAnchors | undefined {
   const handR = pt(o.handR);
   if (!headTop || !handL || !handR) return undefined;
   return { headTop, handL, handR, source: o.source === 'vision' ? 'vision' : 'fallback' };
+}
+
+// ── onboarding 形象引导的不可信输入夹紧（与 sanitizeAnchors 同哲学：设备端自报，全部当脏数据）──
+
+function cleanStr(v: unknown, max: number): string {
+  return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+
+function cleanStrArr(v: unknown, maxItems: number, maxLen: number): string[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    .map((s) => s.trim().slice(0, maxLen))
+    .slice(0, maxItems);
+}
+
+const AVATAR_CATEGORY_SET = new Set(['gender', 'hairstyle', 'outfit', 'color', 'motif', 'accessory']);
+
+/**
+ * 从 /onboarding/avatar-chat（及 /onboarding/profile 的 attrs 部分）请求体重建 AvatarGuideState。
+ * 无状态多轮的服务端半段：客户端带回什么都不信，逐字段夹紧（长度/条数/类别白名单/轮数上限）。
+ */
+export function sanitizeAvatarState(raw: unknown): AvatarGuideState {
+  const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const a = (b.attrs && typeof b.attrs === 'object' ? b.attrs : {}) as Record<string, unknown>;
+  const attrs: AvatarAttrs = { motifs: cleanStrArr(a.motifs, 6, 60), extras: cleanStrArr(a.extras, 6, 60) };
+  const gender = cleanStr(a.gender, 20);
+  if (gender) attrs.gender = gender;
+  const hairstyle = cleanStr(a.hairstyle, 60);
+  if (hairstyle) attrs.hairstyle = hairstyle;
+  const outfit = cleanStr(a.outfit, 60);
+  if (outfit) attrs.outfit = outfit;
+  const color = cleanStr(a.color, 30);
+  if (color) attrs.color = color;
+  const accessory = cleanStr(a.accessory, 60);
+  if (accessory) attrs.accessory = accessory;
+  const askedCategories = cleanStrArr(b.askedCategories, 12, 12).filter((c) => AVATAR_CATEGORY_SET.has(c));
+  const turnRaw = typeof b.turnCount === 'number' && Number.isFinite(b.turnCount) ? Math.floor(b.turnCount) : 0;
+  const dialog: ChatTurn[] = Array.isArray(b.dialog)
+    ? b.dialog
+        .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
+        .map((t) => ({ role: t.role === 'npc' ? ('npc' as const) : ('child' as const), text: cleanStr(t.text, 300), ts: 0 }))
+        .filter((t) => t.text.length > 0)
+        .slice(-24)
+    : [];
+  const state: AvatarGuideState = { attrs, askedCategories, turnCount: Math.max(0, Math.min(10, turnRaw)), dialog };
+  const childName = cleanStr(b.childName, 20);
+  if (childName) state.childName = childName;
+  return state;
 }
 
 export function presenceOf(store: WorldStore, worldId: string, sceneId: string, playerId: string): ActorPresence {
@@ -1761,6 +2635,146 @@ function tileEdgeItemIdAt(store: WorldStore, worldId: string, sceneId: string, x
   }
 }
 
+/** 反查：某实体 id 当前挂在场景哪个 tile（体型调整要按 tile 重发编辑触发重渲染）。找不到回 null。 */
+function findItemTile(store: WorldStore, worldId: string, sceneId: string, itemId: string): { x: number; y: number; yawDeg: number } | null {
+  const rec = store.getSceneTerrain(worldId, sceneId);
+  if (!rec) return null;
+  try {
+    const t = decodeTerrain(rec.bytes);
+    const ref = t.palette.indexOf(itemId) + 1;
+    if (ref === 0) return null;
+    for (let i = 0; i < t.itemRef.length; i++) {
+      if (t.itemRef[i] === ref) {
+        return { x: i % t.gridW, y: Math.floor(i / t.gridW), yawDeg: (t.itemArg[i]! * 360) / 256 };
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md §4.2）：把小朋友调的那一下体型【应用】到世界并广播重渲染。
+ * 老板拍板方案=服务端改尺寸+广播（不是客户端自改）。两条路径，按 refineItemRef 指向什么分发：
+ *  - 造物（SDF item）：改 def.spec.scale=sizeToScale(newSize) → re-upsert → 定位它所在 tile → 复用
+ *    editSceneTerrain（version+1 + terrain_patch 广播 + forceInclude 该 def）让客户端覆写目录后按新 scale 重绘。
+ *    还在背包没落地（找不到 tile）就只改 def——下次摆出来自然是新尺寸。
+ *  - 角色：改 appearance.size/scale → 落库 → character_resized 定向广播 → 客户端重算 pixel_size。
+ * 只改倍率、不重新生图、不动资产哈希（size 是纯标量轴，§3.1）。
+ */
+function applyRefineResize(
+  store: WorldStore,
+  hub: WorldHub | undefined,
+  worldId: string,
+  currentScene: string,
+  itemRef: string,
+  newSize: CreatureSize,
+): void {
+  const scale = sizeToScale(newSize);
+  const def = store.getItemDef(worldId, itemRef);
+  if (def) {
+    // 造物：spec.scale 是体型倍率（sdf_prop.ts），改它零成本、瞬时可见、不换资产。
+    const spec = def.spec as { scale?: number } | undefined;
+    if (spec && typeof spec === 'object') spec.scale = scale;
+    store.upsertItem(def);
+    const loc = findItemTile(store, worldId, currentScene, itemRef);
+    if (loc) {
+      // 复用 tile 编辑路径：重发同一 tile 的同一引用（矩阵无实质变化）只为 version+1 触发重铺，
+      // forceInclude 把改过 scale 的 def 塞进 patch.items，客户端覆写目录 → rebuild_tiles 按新 scale 重绘。
+      try {
+        editSceneTerrain(store, hub, worldId, currentScene, [{ x: loc.x, y: loc.y, item: { id: itemRef, yawDeg: loc.yawDeg } }], [itemRef]);
+      } catch {
+        // 校验意外失败：def 已更新，下次全量对齐或重摆时会按新 scale 渲染，不阻断试用判定。
+      }
+    }
+    return;
+  }
+  const char = store.getCharacter(worldId, itemRef);
+  if (char) {
+    char.appearance.size = newSize;
+    char.appearance.scale = scale;
+    store.saveCharacter(char);
+    hub?.broadcastScene(worldId, char.sceneId ?? DEFAULT_SCENE, {
+      type: 'character_resized', worldId, sceneId: char.sceneId ?? DEFAULT_SCENE, characterId: itemRef, size: newSize, scale,
+    });
+  }
+}
+
+/**
+ * 处理位置上报(JSON positions_report 与二进制帧共用)。空间权威在客户端,服务端记最后 tile 供读回,
+ * 并把携 x,y 的条目按【同世界同场景】转发插值 + 喂 near 求值。下行 positions_relay 双格式编码一次:
+ * 二进制成员发 bin、其余发 JSON(序列化各一次)。sceneId 空串 = 不覆盖,沿用 session.currentScene(高频流不带)。
+ */
+export function applyPositionsReport(
+  input: { worldId: string; sceneId: string; t?: number; chars: unknown[]; player?: unknown; balls?: unknown[] },
+  socket: { send: (data: string) => void },
+  store: WorldStore,
+  session: VoiceSession,
+  connKey: string,
+  hub?: WorldHub,
+  stages?: StageDirector,
+): void {
+  const worldId = input.worldId;
+  // 明示 sceneId(非空)时以它为准并自愈 session/hub;高频流不带 sceneId → 沿用 session.currentScene。
+  if (input.sceneId && input.sceneId !== session.currentScene) {
+    session.currentScene = input.sceneId;
+    hub?.setScene(connKey, input.sceneId);
+  }
+  const sceneId = session.currentScene;
+  const entries = input.chars;
+  let applied = 0;
+  const relayChars: { id: string; x: number; y: number }[] = [];
+  for (const raw of entries) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const e = raw as { id?: unknown; tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
+    if (typeof e.id !== 'string' || !e.id) continue;
+    const tile: TilePos = { tileX: Number(e.tileX), tileY: Number(e.tileY) };
+    if (isValidTile(tile) && store.setCharacterTile(worldId, e.id, tile, sceneId)) applied++;
+    if (typeof e.x === 'number' && typeof e.y === 'number') relayChars.push({ id: e.id, x: e.x, y: e.y });
+  }
+  let relayPlayer: { id: string; x: number; y: number } | undefined;
+  if (typeof input.player === 'object' && input.player !== null && session.playerId) {
+    const p = input.player as { tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
+    const tile: TilePos = { tileX: Number(p.tileX), tileY: Number(p.tileY) };
+    if (isValidTile(tile)) store.setPlayerTile(worldId, sceneId, session.playerId, tile);
+    if (typeof p.x === 'number' && typeof p.y === 'number') relayPlayer = { id: session.playerId, x: p.x, y: p.y };
+  }
+  // C 档球（realtime-game-primitives §5）：球位置也进复制流（供他端插值/外推 + 服务端 enter 判定）。
+  // 球【不】持久化为角色（无 setCharacterTile）——它是演出道具，收场即散。
+  const relayBalls: { id: string; x: number; y: number; vx: number; vy: number }[] = [];
+  for (const raw of input.balls ?? []) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const e = raw as { id?: unknown; x?: unknown; y?: unknown; vx?: unknown; vy?: unknown };
+    if (typeof e.id !== 'string' || !e.id) continue;
+    if (typeof e.x !== 'number' || typeof e.y !== 'number') continue;
+    relayBalls.push({ id: e.id, x: e.x, y: e.y, vx: Number(e.vx) || 0, vy: Number(e.vy) || 0 });
+  }
+  if (relayChars.length > 0 || relayPlayer || relayBalls.length > 0) {
+    const t = typeof input.t === 'number' ? input.t : 0;
+    if (relayBalls.length > 0) {
+      // 带球的这一拍走 JSON 广播（二进制 relay 帧 encodeRelay 不含球）；posBin 客户端也解析 JSON
+      // positions_relay（_poll_ws 收字符串包走 JSON 分发），故球能到达全端。球只在踢球演出期间出现。
+      hub?.broadcastScene(
+        worldId, sceneId,
+        { type: 'positions_relay', sceneId, t, chars: relayChars, player: relayPlayer, balls: relayBalls },
+        connKey,
+      );
+    } else {
+      // 常态高频流：双格式编码各一次（JSON 给老客户端、二进制给 posBin 客户端），别逐接收者重复编。
+      const text = JSON.stringify({ type: 'positions_relay', sceneId, t, chars: relayChars, player: relayPlayer });
+      const bin = encodeRelay({ t, sceneId, chars: relayChars, player: relayPlayer });
+      hub?.broadcastSceneDual(worldId, sceneId, text, bin, connKey);
+    }
+    const all = relayPlayer ? [...relayChars, relayPlayer] : [...relayChars];
+    for (const b of relayBalls) all.push({ id: b.id, x: b.x, y: b.y });
+    stages?.updatePositions(worldId, all);
+  }
+  if (entries.length > 0 && applied === 0) {
+    socket.send(JSON.stringify({ type: 'error', error: 'no character position applied' }));
+  }
+}
+
 export async function handleWsMessage(
   socket: { send: (data: string) => void },
   raw: string,
@@ -1781,9 +2795,7 @@ export async function handleWsMessage(
     byFairy?: boolean;
     characterId?: string;
     slot?: string; // character_attach：贴纸槽位（headTop/handL/handR）
-    audio?: string; // base64
-    format?: string;
-    transcript?: string; // voice_transcript：端侧 ASR 已识别的文本
+    transcript?: string; // voice_transcript：端侧 ASR 已识别的文本（唯一语音入口）
     text?: string; // tts_request：客户端 edge-tts 失败时求服务端合成的文本
     voiceId?: string; // tts_request：合成音色
     locations?: unknown; // world_info：世界地点名清单
@@ -1799,6 +2811,13 @@ export async function handleWsMessage(
     // positions_report：客户端批量上报 tile（chars 只含本轮变化过的角色，player 可缺省）
     chars?: unknown;
     player?: unknown;
+    balls?: unknown; // C 档球位置流：[{id,x,y,vx,vy}]，转发给同场景他端 + 喂 enter 判定（不持久化）
+    // C 档球所有权广播（ball_kick / ball_settle，见 realtime-game-primitives §5）
+    ballId?: string;
+    x?: number;
+    y?: number;
+    vx?: number;
+    vy?: number;
     /** 玩家当前所在场景（缺省 village；老客户端不带）。 */
     sceneId?: string;
     // positions_report 流式版（演出/多人）：条目带世界坐标 x,y + 服务端钟时戳 t，供转发插值与 near 求值
@@ -1806,6 +2825,12 @@ export async function handleWsMessage(
     // 引导式造角色：creation_reply 幼儿点的图标 id / 说的话
     optionId?: string;
     spokenText?: string;
+    // 积木式造物 B1 复用改装（build_options 取兼容零件 / create_build 直接落成编辑后的零件树）
+    blueprintId?: string; // 改哪副蓝图的组合物（客户端读组合物 spec.blueprintId 带上）
+    filled?: unknown;     // create_build：编辑后的槽→零件 map（{slotId: partId}），服务端 fit 校验后落成
+    // 试用·还差一点（A1）：wish_refine 上报小朋友把造出来那件东西的体型调成了哪档
+    itemRef?: string;     // 调的是哪件东西（item id / character id，与 ActiveTask.refineItemRef 对应）
+    newSize?: string;     // 调成的体型档（small/medium/big）
     // time_sync：客户端发送时刻(客户端毫秒钟)，原样回带供其算偏移
     t0?: number;
     // stage_event：舞台协议上行(kind 复用上面的字段: ack/abort/near/tap/timer)
@@ -1818,6 +2843,9 @@ export async function handleWsMessage(
     targetPlayerId?: string;
     action?: string; // player_emote：动作名（EMOTE_ACTIONS 白名单）
     lang?: string; // player_speech：文本语言（跨语言翻译钩子，缺省 zh）
+    // 语音起名（B3 reuse-name）：name_creation 带孩子那句录音（base64 WAV）或已存 assetHash + ASR 文本
+    audio?: string;
+    assetHash?: string;
     // 玩家身份：每条消息可带 playerId（设备端稳定 UUID）；world_info 另带 profile 供首见建档。
     playerId?: string;
     profile?: {
@@ -1840,6 +2868,15 @@ export async function handleWsMessage(
 
   // 玩家身份：记进会话，供后续记忆/Visit 按玩家归属（P3/P4 消费）。
   if (typeof msg.playerId === 'string' && msg.playerId) session.playerId = msg.playerId;
+
+  // 心跳：任意消息刷新活跃时刻（空闲扫描据此判半开连接）；
+  // ping 回 pong 并标记本连接会发 ping——只有这类连接才做「超时即断」（见连接层扫描）。
+  session.lastSeenMs = Date.now();
+  if (msg.type === 'ping') {
+    session.pingCapable = true;
+    socket.send(JSON.stringify({ type: 'pong' }));
+    return;
+  }
 
   // 时间偏移握手：回带 t0 + 服务端毫秒钟。倒计时 HUD 双端读数一致、位置插值时间戳都靠它。
   if (msg.type === 'time_sync') {
@@ -1899,6 +2936,10 @@ export async function handleWsMessage(
         playerId: session.playerId,
         sceneId: session.currentScene,
         send: (m) => socket.send(JSON.stringify(m)),
+        sendText: (s) => socket.send(s),
+        posBin: session.posBin,
+        // socket 在本函数按 {send:(string)} 窄化(复用于测试 mock);真实 ws socket 收 Uint8Array 二进制帧,故此处收窄转发。
+        sendBin: (b) => (socket.send as (d: string | Uint8Array) => void)(b),
       });
       joined.departed?.newHost?.send({ type: 'world_host', isHost: true });
       socket.send(JSON.stringify({ type: 'world_host', isHost: joined.isHost }));
@@ -1907,6 +2948,8 @@ export async function handleWsMessage(
     }
     socket.send(JSON.stringify({
       type: 'world_state',
+      // 二进制位置流回执：客户端 ?posbin=1 且服务端支持时为 true，客户端据此才切二进制上行(防老服务端)。
+      posBin: session.posBin,
       wallet: store.getWallet(worldId, session.playerId),
       // 自己的稳定音色（playerId 哈希）：客户端喊话复述用——复述音=对端听到的音，孩子两端听感一致
       voiceId: session.playerId ? voiceForPlayer(session.playerId, store.getPlayer(session.playerId)?.gender) : '',
@@ -1914,11 +2957,14 @@ export async function handleWsMessage(
       activeTask: store.getActiveTask(worldId, session.playerId),
       // 自己身上的贴纸（服务端权威）：重连/重启后客户端据此把「我」的贴纸补回来（placement-interaction §3.3 A）
       attachments: session.playerId ? (store.getPlayer(session.playerId)?.attachments ?? []) : [],
-      // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按小神仙旁降生）
+      // 上次离开时玩家所在 tile（首次进世界 / 老档案无此字段 → 缺省，客户端按点点旁降生）
       playerPos: session.playerId ? store.getPlayerTile(worldId, msg.sceneId ?? DEFAULT_SCENE, session.playerId) : undefined,
     }));
     // 中途加入：世界正在演出时补发 stage_begin，让新连接锁交互并接住后续舞台命令/位置流。
     stages?.snapshotFor(worldId, (m) => socket.send(JSON.stringify(m)));
+    // 村民的漏话候选（按这个玩家的 discovered 算）——客户端据此自己调度、按距离衰减地播
+    // 带 session：进世界这一刻是「有需求语境」，顺带算复用提示（背包旧物 × 村民心愿命中才挂）。
+    pushWishes(socket, store, worldId, session.playerId, session.currentScene, session);
     return;
   }
 
@@ -1979,8 +3025,29 @@ export async function handleWsMessage(
     try {
       // 点选 → 用该选项的中文 label 当输入；否则用语音转写文本。
       const optId = typeof msg.optionId === 'string' ? msg.optionId : '';
-      // 点选 → 该选项中文 label 当输入；造物会话查物品图标库，造角色查角色图标库。
-      const lookup = session.creation.goal === 'prop' ? findPropOption : findOption;
+      // A2 recipient 预问步的答复（pendingRequest 非空即表示在等它）：解析 recipient → 继续正常追问。
+      // 必须先于 build/属性分支——recipient 步的 optId 是 self/everyone/skip/角色id，不在任何图标库里。
+      if (session.creation.pendingRequest !== undefined) {
+        await handleRecipientReply(socket, session, msg.worldId ?? '', msg.characterId ?? '', optId, String(msg.spokenText ?? ''), adapters, store, spawnCtx());
+        return;
+      }
+      // 积木拼装（build）：点选传的是零件 partId → 直接坐进正在问的槽（服务端权威填槽，不靠 LLM 解析），
+      // 再把零件中文名当输入喂 advanceBuild 推进对话（guideBuild 见槽已填即跳到下一个）。
+      if (session.creation.goal === 'build') {
+        const build = session.creation.build;
+        const part = optId ? findPart(optId) : undefined;
+        const askedSlot = build?.askedSlots.at(-1);
+        if (build && part && askedSlot && !build.filled[askedSlot]) build.filled[askedSlot] = part.id;
+        const childInput = (optId ? (part?.name ?? optId) : (msg.spokenText ?? '')).trim();
+        if (!childInput) {
+          socket.send(JSON.stringify({ type: 'voice_failed', reason: '拼装答复为空' }));
+          return;
+        }
+        await advanceBuild(socket, session, msg.worldId ?? '', msg.characterId ?? '', childInput, adapters, store, '');
+        return;
+      }
+      // 点选 → 该选项中文 label 当输入；造贴纸查贴纸图标库，造物查物品图标库，造角色查角色图标库。
+      const lookup = session.creation.goal === 'sticker' ? findStickerOption : session.creation.goal === 'prop' ? findPropOption : findOption;
       const picked = optId ? lookup(optId) : undefined;
       // 点选路径确定性入账：option 自带 category，服务端直接写 attrs，不依赖 LLM 把 label 解析进
       // updatedAttrs——此前解析失败属性不进账，guide 看到的状态不变，就会重复问同一个问题。
@@ -2013,42 +3080,74 @@ export async function handleWsMessage(
     return;
   }
 
-  if (msg.type === 'voice_input') {
+  // 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md §4.1/§4.2）：小朋友把造出来那件东西的体型调了一次。
+  // ①【应用体型 + 广播重渲染】（老板拍板：服务端改尺寸）——不管这一下调对没调对，孩子按下的这一下都要看得见。
+  // ② 判定试用是否满意：方向对/达上限 → 盖章 + 村民用自己音色道谢；方向反且未达上限 → 仙子再问一句更具体的问句。
+  if (msg.type === 'wish_refine') {
+    const worldId = msg.worldId ?? '';
+    const itemRef = String(msg.itemRef ?? '');
+    const newSize = (String(msg.newSize ?? 'medium')) as CreatureSize;
+    // 先按当前场景把体型落到世界（造物走 terrain_patch 重铺、角色走 character_resized）。
+    applyRefineResize(store, hub, worldId, session.currentScene, itemRef, newSize);
+    const r = completeWishRefine(worldId, session.playerId, itemRef, newSize, store);
+    if (!r) return; // 没有对应试用（不该发生）：静默
+    if (r.satisfied) {
+      socket.send(JSON.stringify({
+        type: 'task_complete', task: r.task, stampStyle: r.task.stampStyle,
+        flowerGained: r.flowerGained, wallet: r.wallet,
+      }));
+      await pushPraiseTts(socket, adapters, store, worldId, r.task, r, session.clientTts);
+    } else {
+      // 调反了、还没到上限：仙子升一级再问一句（仍是问句，客户端播预制 refine_hint_2）。
+      socket.send(JSON.stringify({
+        type: 'wish_retry', worldId, npcId: r.task.npcId, itemRef,
+        refineDir: r.task.refineDir, tries: r.tries, fairyHint: REFINE_HINT_2,
+      }));
+    }
+    return;
+  }
+
+  // 复用改装（B1，§3.1）：客户端进「拆开改改」时取回本蓝图每槽的兼容零件表，本地即时建换槽零件盘。
+  // 只读、无会话、不扣花（改装的扣费在 create_build 落成那一刻）。
+  if (msg.type === 'build_options') {
+    const worldId = msg.worldId ?? '';
+    const blueprintId = String(msg.blueprintId ?? '');
+    socket.send(JSON.stringify({ type: 'build_options', worldId, blueprintId, options: buildSlotOptions(blueprintId) }));
+    return;
+  }
+
+  // 复用改装落成（B1，§3.1「无需新机制」）：客户端把编辑后的零件树（blueprintId + filled）直接送来，
+  // 服务端 fit 校验后走 createBuildAsync 造一行**新** ItemDef（旧的保留在背包，可拆可复用），无 LLM 会话。
+  // 扣花/退还与引导拼装同价（createBuildAsync 内处理）；无仙子引导故 creatorId=''（不记 creation 记忆）。
+  if (msg.type === 'create_build') {
+    const worldId = msg.worldId ?? '';
     const gate = limiter.tryAcquire(connKey, Date.now());
     if (!gate.ok) {
       socket.send(JSON.stringify({ type: 'voice_failed', reason: gate.reason }));
       return;
     }
     try {
-      const audioBytes = Uint8Array.from(Buffer.from(msg.audio ?? '', 'base64'));
-      const transcript = (await adapters.asr.transcribe({ bytes: audioBytes, mime: msg.format ?? 'audio/wav' })).trim();
-      // 造角色引导会话进行中：这句话当造角色答复，不走 routeIntent。
-      if (session.creation?.active) {
-        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', spawnCtx());
-        return;
+      const blueprintId = String(msg.blueprintId ?? '');
+      const raw = (msg.filled && typeof msg.filled === 'object') ? msg.filled as Record<string, unknown> : {};
+      const filled: Record<string, string> = {};
+      for (const k of Object.keys(raw)) {
+        const v = raw[k];
+        if (typeof v === 'string' && v) filled[k] = v;
       }
-      const response = await respondToTranscript(msg.worldId ?? '', msg.characterId ?? '', session.playerId, transcript, adapters, store, undefined, session.clientTts, session.currentScene, visitContext(session, msg.characterId ?? ''));
-      // 造角色/造物入口：开引导会话，不发普通回应（问句 TTS + 图标卡由会话驱动）。
-      if (response.characterRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText, 'character', spawnCtx());
-        return;
-      }
-      if (response.propRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
-        return;
-      }
-      socket.send(JSON.stringify({ type: 'character_response', ...response }));
-      // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
-      recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
+      await createBuildAsync(
+        socket, worldId, session.playerId, blueprintId, filled,
+        adapters, store, session.clientTts, '', session.currentScene,
+      );
     } catch (err) {
-      socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
+      socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
     } finally {
       gate.release();
     }
     return;
   }
 
-  // ── 端侧 ASR：客户端（Android 插件）本地识别完成，直送转写文本，跳过服务端 ASR ──
+  // ── 端侧 ASR：客户端（Android 插件 / macOS GDExtension）本地识别完成，直送转写文本。
+  // 这是唯一的语音入口——服务端 ASR（voice_input 整段、voice_start/chunk/end 流式）已整条退役。──
   if (msg.type === 'voice_transcript') {
     const gate = limiter.tryAcquire(connKey, Date.now());
     if (!gate.ok) {
@@ -2061,9 +3160,18 @@ export async function handleWsMessage(
         socket.send(JSON.stringify({ type: 'voice_failed', reason: '转写文本为空' }));
         return;
       }
-      // 造角色引导会话进行中：这句话当造角色答复，不走 routeIntent。
+      // 造角色/物/贴纸/拼装引导会话进行中：这句话当会话答复，不走 routeIntent。积木拼装走 advanceBuild。
       if (session.creation?.active) {
-        await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', spawnCtx());
+        // A2：正在等 recipient 答复（孩子用语音说「给小兔子」）→ 当 recipient 解析，不当属性追问。
+        if (session.creation.pendingRequest !== undefined) {
+          await handleRecipientReply(socket, session, msg.worldId ?? '', msg.characterId ?? '', '', transcript, adapters, store, spawnCtx());
+          return;
+        }
+        if (session.creation.goal === 'build') {
+          await advanceBuild(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '');
+        } else {
+          await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', spawnCtx());
+        }
         return;
       }
     // 流式 TTS 钩子：character_response 先行（文字/行为脚本提前到达），音频分片随合成推送。
@@ -2086,13 +3194,32 @@ export async function handleWsMessage(
       );
       // 造角色/造物入口：respondToTranscript 识别到意图但没出声，这里开引导会话，不发普通回应。
       if (response.characterRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText, 'character', spawnCtx());
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.characterRequest, adapters, store, response.replyText, 'character');
         return;
       }
       if (response.propRequest) {
-        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
+        // 造物入口升级：孩子要的东西有蓝图（小车/房子/火车/雪人）→ 从「许愿造一个」升级成「亲手拼一个」（积木式造物 B1）。
+        // 无蓝图则回落现有整体造物（优雅降级）。docs/kids-thinking-build-from-parts.md §4.1。
+        const bp = matchBlueprint(response.propRequest);
+        if (bp) {
+          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'build', bp.id);
+        } else {
+          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop');
+        }
         return;
       }
+      if (response.stickerRequest) {
+        await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.stickerRequest, adapters, store, response.replyText, 'sticker');
+        return;
+      }
+      // 玩游戏入口：生成剧本→过 typecheck→开演（stage_begin 广播全场），不发普通回应。
+      if (response.gameRequest) {
+        await startGameAsync(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.gameRequest, response.replyText, adapters, store, hub, stages);
+        return;
+      }
+      // 仙子答应带路 = 发现了「引路」玩法（宽松口径：应下就算，不等走到——
+      // 中途反悔的 3 岁小朋友不该被剥夺盖章）。若有村民正盼着去哪儿 → 心愿达成。
+      if (response.guide) await fulfillAbility(socket, adapters, store, msg.worldId ?? '', session.playerId, 'guide_to', session.clientTts, session.currentScene);
       if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
       // 对话增量记进当前 Visit；会话结束（leave_world/close）批量抽记忆，省去每轮一次 LLM。
       recordVisitTurn(session, msg.worldId ?? '', session.playerId, msg.characterId ?? '', response.transcript, response.replyText, adapters, store);
@@ -2155,77 +3282,6 @@ export async function handleWsMessage(
       socket.send(JSON.stringify({ type: 'tts_failed', reason: String(err) }));
     } finally {
       gate.release();
-    }
-    return;
-  }
-
-  // ── 边说边识别：分片随到随发识别器，voice_end 时识别已基本完成（见 asr-live-stream 计划）──
-  if (msg.type === 'voice_start') {
-    if (session.gate) { session.gate.release(); session.gate = null; } // 上一会话没正常收尾，先释放
-    const gate = limiter.tryAcquire(connKey, Date.now());
-    if (!gate.ok) {
-      socket.send(JSON.stringify({ type: 'voice_failed', reason: gate.reason }));
-      return;
-    }
-    session.active = true;
-    session.worldId = msg.worldId ?? '';
-    session.characterId = msg.characterId ?? '';
-    session.asr = adapters.asr.openStream(); // 立即开识别流，分片随到随发
-    session.gate = gate;
-    return;
-  }
-
-  if (msg.type === 'voice_chunk') {
-    if (session.active && session.asr && msg.audio) session.asr.feed(Buffer.from(msg.audio, 'base64'));
-    return; // 分片实时喂识别器，不回包
-  }
-
-  // 误触/中途放弃（按住说话 <0.4s 松手）：丢弃识别流（finish 让 sherpa 识别流释放，
-  // 转写弃用），释放 gate，不回任何包——客户端取消后不该看到任何反馈。
-  if (msg.type === 'voice_cancel') {
-    if (session.asr) void session.asr.finish().catch(() => {});
-    session.active = false;
-    session.asr = null;
-    if (session.gate) { session.gate.release(); session.gate = null; }
-    return;
-  }
-
-  if (msg.type === 'voice_end') {
-    if (!session.active || !session.asr) {
-      socket.send(JSON.stringify({ type: 'voice_failed', reason: '没有进行中的录音会话' }));
-      return;
-    }
-    const { worldId, characterId, playerId, asr } = session;
-    session.active = false;
-    session.asr = null;
-    try {
-      const transcript = await asr.finish(); // 识别尾巴：流式期间已基本识完
-      // 造角色引导会话进行中：这句话当造角色答复，不走 routeIntent。
-      if (session.creation?.active) {
-        await advanceCreation(socket, session, worldId, characterId, transcript, adapters, store, '', spawnCtx());
-        return;
-      }
-      const ttsHooks = {
-        onResponse: (r: VoiceResponse) => socket.send(JSON.stringify({ type: 'character_response', ...r })),
-        onChunk: (pcm: Uint8Array) => socket.send(JSON.stringify({ type: 'tts_chunk', audio: Buffer.from(pcm).toString('base64') })),
-        onEnd: (assetHash: string) => socket.send(JSON.stringify({ type: 'tts_end', ttsAsset: assetHash })),
-      };
-      const response = await respondToTranscript(worldId, characterId, playerId, transcript, adapters, store, ttsHooks, session.clientTts, session.currentScene, visitContext(session, characterId));
-      // 造角色/造物入口：开引导会话，不发普通回应。
-      if (response.characterRequest) {
-        await openCreationSession(socket, session, worldId, characterId, response.characterRequest, adapters, store, response.replyText, 'character', spawnCtx());
-        return;
-      }
-      if (response.propRequest) {
-        await openCreationSession(socket, session, worldId, characterId, response.propRequest, adapters, store, response.replyText, 'prop', spawnCtx());
-        return;
-      }
-      if (!response.ttsStreaming) socket.send(JSON.stringify({ type: 'character_response', ...response }));
-      recordVisitTurn(session, worldId, playerId, characterId, response.transcript, response.replyText, adapters, store);
-    } catch (err) {
-      socket.send(JSON.stringify({ type: 'voice_failed', reason: String(err) }));
-    } finally {
-      if (session.gate) { session.gate.release(); session.gate = null; }
     }
     return;
   }
@@ -2297,6 +3353,46 @@ export async function handleWsMessage(
     }
     store.bagAdd(worldId, session.playerId, itemId);
     socket.send(JSON.stringify({ type: 'bag_update', worldId, bag: store.getBag(worldId, session.playerId) }));
+    return;
+  }
+
+  // 语音起名（B3 reuse-name，docs/kids-thinking-reuse-name.md §4.1）：孩子给自己造的东西起了个名字。
+  //   name_creation { worldId, itemId, audio(base64 WAV) | assetHash, text }
+  // 校验 itemId 在【该 player 的背包】里（防越权改别人的东西）→ putAsset(录音) → upsertItem 回填
+  // nameVoiceAsset/nameText → 回 item_updated。复用现成 putAsset + upsertItem，零新管线、零 LLM。
+  if (msg.type === 'name_creation') {
+    const worldId = msg.worldId ?? '';
+    const itemId = String(msg.itemId ?? '');
+    const def = itemId ? store.getItemDef(worldId, itemId) : undefined;
+    if (!def || def.worldId === null) {
+      // 造物才有名字可起（内置物 worldId===null）——理论上背包里的内置贴纸也可能命中，一并拒。
+      socket.send(JSON.stringify({ type: 'error', error: 'item not nameable' }));
+      return;
+    }
+    // 所有权：给自己的造物起名——「在背包里」，或造物一落地就被客户端自动摆放出背包（真机路径，
+    // bagTake），此时靠造物者判本人。别人造的、又不在自己背包 → 越权拒。
+    const inBag = (store.getBag(worldId, session.playerId)[itemId] ?? 0) >= 1;
+    const isCreator = def.creatorPlayerId != null && def.creatorPlayerId === session.playerId;
+    if (!inBag && !isCreator) {
+      socket.send(JSON.stringify({ type: 'error', error: 'item not yours' }));
+      return;
+    }
+    // 录音：优先 base64 音频（客户端 confirm_mode 打包好的 WAV），否则收已存在的 assetHash（复播/幂等）。
+    let assetHash = String(msg.assetHash ?? '');
+    const b64 = typeof msg.audio === 'string' ? msg.audio : '';
+    if (b64) {
+      try {
+        assetHash = store.putAsset({ bytes: Uint8Array.from(Buffer.from(b64, 'base64')), mime: 'audio/wav' });
+      } catch (err) {
+        socket.send(JSON.stringify({ type: 'error', error: `bad audio: ${String(err)}` }));
+        return;
+      }
+    }
+    if (assetHash) def.nameVoiceAsset = assetHash;
+    const text = typeof msg.text === 'string' ? msg.text.trim() : '';
+    if (text) def.nameText = text; // ASR 文本：内部用（不展示给孩子）
+    store.upsertItem(def);
+    socket.send(JSON.stringify({ type: 'item_updated', worldId, item: def }));
     return;
   }
 
@@ -2459,59 +3555,18 @@ export async function handleWsMessage(
       items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
       playerPos: session.playerId ? store.getPlayerTile(worldId, sceneId, session.playerId) : undefined,
     }));
+    // 换场景 = 换了一批村民；带 session 顺带算复用提示（同 world_info，有需求语境才挂）。
+    pushWishes(socket, store, worldId, session.playerId, sceneId, session);
     return;
   }
 
   // 角色/玩家坐标回报：空间权威在客户端，服务端只记最后位置供下次进世界读回。
   // 静止时客户端不发；每拍只带 tile 变化过的角色。越界 tile 静默丢弃（单个坏条目不连坐整批）。
   if (msg.type === 'positions_report') {
-    const worldId = msg.worldId ?? '';
-    // 场景单一真相 = session.currentScene（world_info/enter_scene 维护，与 hub 成员同源）。
-    // 高频流（send_positions_stream）不带 sceneId，若按 msg.sceneId?? 缺省会把森林里的位置
-    // 落回 village、并把位置流发错场景。客户端明示 sceneId 时以它为准并自愈 session/hub。
-    if (typeof msg.sceneId === 'string' && msg.sceneId && msg.sceneId !== session.currentScene) {
-      session.currentScene = msg.sceneId;
-      hub?.setScene(connKey, msg.sceneId);
-    }
-    const sceneId = session.currentScene;
-    const entries = Array.isArray(msg.chars) ? msg.chars : [];
-    let applied = 0;
-    // 世界坐标流条目（携 x,y 时）：转发给同世界其他连接插值渲染 + 喂服务端 near 求值。tile 仍照常持久化。
-    const relayChars: { id: string; x: number; y: number }[] = [];
-    for (const raw of entries) {
-      if (typeof raw !== 'object' || raw === null) continue;
-      const e = raw as { id?: unknown; tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
-      if (typeof e.id !== 'string' || !e.id) continue;
-      const tile: TilePos = { tileX: Number(e.tileX), tileY: Number(e.tileY) };
-      // tile 越界只是不持久化；世界坐标该转发还得转发（演出期间位置流不能因一个坏 tile 断掉）。
-      if (isValidTile(tile) && store.setCharacterTile(worldId, e.id, tile, sceneId)) applied++;
-      if (typeof e.x === 'number' && typeof e.y === 'number') relayChars.push({ id: e.id, x: e.x, y: e.y });
-    }
-    // 玩家自己的位置（Player 表；档案未建时静默跳过——首次进世界还没上报 profile）。
-    let relayPlayer: { id: string; x: number; y: number } | undefined;
-    if (typeof msg.player === 'object' && msg.player !== null && session.playerId) {
-      const p = msg.player as { tileX?: unknown; tileY?: unknown; x?: unknown; y?: unknown };
-      const tile: TilePos = { tileX: Number(p.tileX), tileY: Number(p.tileY) };
-      if (isValidTile(tile)) store.setPlayerTile(worldId, sceneId, session.playerId, tile);
-      // 玩家复制位置以 playerId 为 actor 键（剧本 cast 里玩家演员 id 约定即 playerId）。
-      if (typeof p.x === 'number' && typeof p.y === 'number') relayPlayer = { id: session.playerId, x: p.x, y: p.y };
-    }
-    // 复制位置分发：广播给同世界【同场景】其他成员（排除自己）+ 喂 near 求值（无演出则 no-op）。
-    // 场景定向：隔壁场景的人看不见你，收到位置流只会渲染出一个脚下走过的幽灵。
-    if (relayChars.length > 0 || relayPlayer) {
-      hub?.broadcastScene(
-        worldId,
-        sceneId,
-        { type: 'positions_relay', sceneId, t: msg.t, chars: relayChars, player: relayPlayer },
-        connKey,
-      );
-      const all = relayPlayer ? [...relayChars, relayPlayer] : relayChars;
-      stages?.updatePositions(worldId, all);
-    }
-    // 成功无回包（与 prop_place 一致）；整批一个角色都没落地才回 error，便于客户端察觉世界/角色 id 错配。
-    if (entries.length > 0 && applied === 0) {
-      socket.send(JSON.stringify({ type: 'error', error: 'no character position applied' }));
-    }
+    applyPositionsReport(
+      { worldId: msg.worldId ?? '', sceneId: typeof msg.sceneId === 'string' ? msg.sceneId : '', t: msg.t, chars: Array.isArray(msg.chars) ? msg.chars : [], player: msg.player, balls: Array.isArray(msg.balls) ? msg.balls : [] },
+      socket, store, session, connKey, hub, stages,
+    );
     return;
   }
 
@@ -2562,6 +3617,35 @@ export async function handleWsMessage(
     }, connKey);
     return;
   }
+
+  // C 档球所有权广播（realtime-game-primitives §5）：无状态、按【同世界同场景】定向转发（排除自己），不落库。
+  // ball_kick=踢者转所有权给自己 + 携速度供他端外推；ball_settle=滚停交回 host 中立。
+  if (msg.type === 'ball_kick' || msg.type === 'ball_settle') {
+    if (!hub || !session.playerId) return; // 无多人基座/无身份：没有可送达的对象
+    const ballId = typeof msg.ballId === 'string' ? msg.ballId : '';
+    if (!ballId) return;
+    const relay: Record<string, unknown> = {
+      type: msg.type,
+      sceneId: session.currentScene,
+      ballId,
+      x: Number(msg.x) || 0,
+      y: Number(msg.y) || 0,
+      t: msg.t,
+    };
+    if (msg.type === 'ball_kick') {
+      relay.playerId = session.playerId; // 服务端盖章踢者身份（各端据此转所有权）
+      relay.vx = Number(msg.vx) || 0;
+      relay.vy = Number(msg.vy) || 0;
+    }
+    hub.broadcastScene(msg.worldId ?? '', session.currentScene, relay, connKey);
+    return;
+  }
+
+  // 退役协议（服务端 ASR，2026-07-13）：老客户端可能仍发音频会话消息。静默忽略而不是落到下面的
+  // unknown type——voice_chunk 是 150ms 一片的高频消息，逐片回 error 等于给老客户端刷一场 error 风暴。
+  // 注意：老客户端发完 voice_end 会一直等不到 character_response（服务端不再识别音频），
+  // 由它自己的思考超时解卡。真机一律走端侧 ASR（voice_transcript），不受影响。
+  if (RETIRED_VOICE_TYPES.has(msg.type ?? '')) return;
 
   socket.send(JSON.stringify({ type: 'error', error: `unknown type: ${msg.type}` }));
 }

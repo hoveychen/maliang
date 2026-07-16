@@ -1,0 +1,246 @@
+{
+  "name": "build_parts",
+  "license": "AIGC 生成（gen_ui_assets sticker 模式；prompt 源 server/src/part_library.ts partIconPrompt，可复现）。积木式造物 B1 零件真图（P3）。",
+  "entries": {
+    "body_box": {
+      "category": "part",
+      "path": "res://assets/build_parts/body_box.png"
+    },
+    "body_round": {
+      "category": "part",
+      "path": "res://assets/build_parts/body_round.png"
+    },
+    "body_truck": {
+      "category": "part",
+      "path": "res://assets/build_parts/body_truck.png"
+    },
+    "car_closed": {
+      "category": "part",
+      "path": "res://assets/build_parts/car_closed.png"
+    },
+    "car_open": {
+      "category": "part",
+      "path": "res://assets/build_parts/car_open.png"
+    },
+    "chimney_brick": {
+      "category": "part",
+      "path": "res://assets/build_parts/chimney_brick.png"
+    },
+    "chimney_pipe": {
+      "category": "part",
+      "path": "res://assets/build_parts/chimney_pipe.png"
+    },
+    "door_arch": {
+      "category": "part",
+      "path": "res://assets/build_parts/door_arch.png"
+    },
+    "door_square": {
+      "category": "part",
+      "path": "res://assets/build_parts/door_square.png"
+    },
+    "engine_bullet": {
+      "category": "part",
+      "path": "res://assets/build_parts/engine_bullet.png"
+    },
+    "engine_classic": {
+      "category": "part",
+      "path": "res://assets/build_parts/engine_classic.png"
+    },
+    "handle_curve": {
+      "category": "part",
+      "path": "res://assets/build_parts/handle_curve.png"
+    },
+    "handle_straight": {
+      "category": "part",
+      "path": "res://assets/build_parts/handle_straight.png"
+    },
+    "hat_bucket": {
+      "category": "part",
+      "path": "res://assets/build_parts/hat_bucket.png"
+    },
+    "hat_top": {
+      "category": "part",
+      "path": "res://assets/build_parts/hat_top.png"
+    },
+    "nose_button": {
+      "category": "part",
+      "path": "res://assets/build_parts/nose_button.png"
+    },
+    "nose_carrot": {
+      "category": "part",
+      "path": "res://assets/build_parts/nose_carrot.png"
+    },
+    "roof_dome": {
+      "category": "part",
+      "path": "res://assets/build_parts/roof_dome.png"
+    },
+    "roof_flat": {
+      "category": "part",
+      "path": "res://assets/build_parts/roof_flat.png"
+    },
+    "roof_tri": {
+      "category": "part",
+      "path": "res://assets/build_parts/roof_tri.png"
+    },
+    "snowball_big": {
+      "category": "part",
+      "path": "res://assets/build_parts/snowball_big.png"
+    },
+    "snowball_big_sparkle": {
+      "category": "part",
+      "path": "res://assets/build_parts/snowball_big_sparkle.png"
+    },
+    "snowball_small": {
+      "category": "part",
+      "path": "res://assets/build_parts/snowball_small.png"
+    },
+    "snowball_small_sparkle": {
+      "category": "part",
+      "path": "res://assets/build_parts/snowball_small_sparkle.png"
+    },
+    "wall_brick": {
+      "category": "part",
+      "path": "res://assets/build_parts/wall_brick.png"
+    },
+    "wall_stone": {
+      "category": "part",
+      "path": "res://assets/build_parts/wall_stone.png"
+    },
+    "wall_wood": {
+      "category": "part",
+      "path": "res://assets/build_parts/wall_wood.png"
+    },
+    "wheel_flower": {
+      "category": "part",
+      "path": "res://assets/build_parts/wheel_flower.png"
+    },
+    "wheel_round": {
+      "category": "part",
+      "path": "res://assets/build_parts/wheel_round.png"
+    },
+    "wheel_star": {
+      "category": "part",
+      "path": "res://assets/build_parts/wheel_star.png"
+    },
+    "window_round": {
+      "category": "part",
+      "path": "res://assets/build_parts/window_round.png"
+    },
+    "window_square": {
+      "category": "part",
+      "path": "res://assets/build_parts/window_square.png"
+    },
+    "base_round": {
+      "category": "part",
+      "path": "res://assets/build_parts/base_round.png"
+    },
+    "base_square": {
+      "category": "part",
+      "path": "res://assets/build_parts/base_square.png"
+    },
+    "base_heart": {
+      "category": "part",
+      "path": "res://assets/build_parts/base_heart.png"
+    },
+    "cream_white": {
+      "category": "part",
+      "path": "res://assets/build_parts/cream_white.png"
+    },
+    "cream_pink": {
+      "category": "part",
+      "path": "res://assets/build_parts/cream_pink.png"
+    },
+    "cream_choco": {
+      "category": "part",
+      "path": "res://assets/build_parts/cream_choco.png"
+    },
+    "top_strawberry": {
+      "category": "part",
+      "path": "res://assets/build_parts/top_strawberry.png"
+    },
+    "top_cherry": {
+      "category": "part",
+      "path": "res://assets/build_parts/top_cherry.png"
+    },
+    "top_star": {
+      "category": "part",
+      "path": "res://assets/build_parts/top_star.png"
+    },
+    "candle_one": {
+      "category": "part",
+      "path": "res://assets/build_parts/candle_one.png"
+    },
+    "candle_number": {
+      "category": "part",
+      "path": "res://assets/build_parts/candle_number.png"
+    },
+    "center_yellow": {
+      "category": "part",
+      "path": "res://assets/build_parts/center_yellow.png"
+    },
+    "center_orange": {
+      "category": "part",
+      "path": "res://assets/build_parts/center_orange.png"
+    },
+    "center_dot": {
+      "category": "part",
+      "path": "res://assets/build_parts/center_dot.png"
+    },
+    "petals_round": {
+      "category": "part",
+      "path": "res://assets/build_parts/petals_round.png"
+    },
+    "petals_pointy": {
+      "category": "part",
+      "path": "res://assets/build_parts/petals_pointy.png"
+    },
+    "petals_heart": {
+      "category": "part",
+      "path": "res://assets/build_parts/petals_heart.png"
+    },
+    "stem_straight": {
+      "category": "part",
+      "path": "res://assets/build_parts/stem_straight.png"
+    },
+    "stem_curve": {
+      "category": "part",
+      "path": "res://assets/build_parts/stem_curve.png"
+    },
+    "leaf_single": {
+      "category": "part",
+      "path": "res://assets/build_parts/leaf_single.png"
+    },
+    "leaf_pair": {
+      "category": "part",
+      "path": "res://assets/build_parts/leaf_pair.png"
+    },
+    "cone_waffle": {
+      "category": "part",
+      "path": "res://assets/build_parts/cone_waffle.png"
+    },
+    "cone_cup": {
+      "category": "part",
+      "path": "res://assets/build_parts/cone_cup.png"
+    },
+    "scoop_strawberry": {
+      "category": "part",
+      "path": "res://assets/build_parts/scoop_strawberry.png"
+    },
+    "scoop_choco": {
+      "category": "part",
+      "path": "res://assets/build_parts/scoop_choco.png"
+    },
+    "scoop_vanilla": {
+      "category": "part",
+      "path": "res://assets/build_parts/scoop_vanilla.png"
+    },
+    "ice_cherry": {
+      "category": "part",
+      "path": "res://assets/build_parts/ice_cherry.png"
+    },
+    "ice_star": {
+      "category": "part",
+      "path": "res://assets/build_parts/ice_star.png"
+    }
+  }
+}

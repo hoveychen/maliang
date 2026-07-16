@@ -12,7 +12,12 @@ extends RefCounted
 ## 必须与 server/src/device_profile.ts 的 BENCH_VERSION 一致（跨语言，只能靠这行注释互相看住）。
 ## v2（P5）：压测负载从染色 critter 换成 seed 村民图集（真立绘纹理+idle 动画）、采样期冻结世界动态，
 ##          渲染成本口径变了 → 旧 v1 众包样本作废。
-const BENCH_VERSION := 2
+## v3（benchmark-story-ramp）：采样期不再冻结村民——负载角色注册占用 + ambient wander，村民 wander
+##          （A* 寻路 + 走动 CPU）全程计入 p95。旧 v2 冻结口径系统性偏轻、测出全最高，样本作废。
+## v4（bench-determinism）：负载从【随机 wander】换成【确定性固定巡逻 + 每 trial 复位到同一状态】——
+##          仍是动态负载（A* + 走动 CPU 计入 p95，不冻结），但每次跑的负载序列可复现（真机 PoC 实测：
+##          随机 wander 目标点每 trial 不同，是 ±60ms trial 噪声的大头）。负载路径变了、成本口径变，v3 作废。
+const BENCH_VERSION := 4
 
 const DEVICE_ID_KEY := "device_id"
 

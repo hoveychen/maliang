@@ -1,12 +1,19 @@
 import type {
+  AvatarAttrs,
+  AvatarGuideState,
+  ChatTurn,
   CharacterSpec,
   CreationState,
   ExtractedMemory,
+  GuideAvatarResult,
+  GuideBuildResult,
   GuideCreationResult,
   IntentContext,
   IntentResult,
   MemoryExtractionContext,
   ModerationResult,
+  ScreenplayDraft,
+  ScreenplayGenContext,
   SessionCompactionContext,
 } from '../types.ts';
 import type { SdfPropSpec } from '../sdf_prop.ts';
@@ -27,6 +34,12 @@ export interface VideoBlob {
   mime: string;
 }
 
+/**
+ * 角色动画段名。每段一条独立生成的绿幕视频，三段共用一张图集（见 sprite_sheet.ts）。
+ * 客户端按角色状态选段，优先级 talking > moving > idle（见 world.gd）。
+ */
+export type ClipName = 'idle' | 'moving' | 'talking';
+
 /** LLM：造角色 spec / 意图路由 / 角色对话。真实实现接 OpenRouter。 */
 export interface LLMAdapter {
   designCharacter(intentText: string, byFairy: boolean): Promise<CharacterSpec>;
@@ -37,12 +50,43 @@ export interface LLMAdapter {
   guideCreation(state: CreationState, childInput: string): Promise<GuideCreationResult>;
   /** 引导式造物品一轮：与 guideCreation 平行，问的是 kind/color/size/motion，产物描述喂 designSdfProp。 */
   guideProp(state: CreationState, childInput: string): Promise<GuideCreationResult>;
+  /** 引导式造贴纸一轮：与 guideProp 平行，问的是 kind(图案)/color，产物描述喂 designSticker。 */
+  guideSticker(state: CreationState, childInput: string): Promise<GuideCreationResult>;
+  /**
+   * 引导式积木拼装一轮（B1，docs/kids-thinking-build-from-parts.md §3.4）：与 guideProp 平行，但
+   * 问的是「未填必填槽的功能线索」、答的是「兼容零件」，产物是往骨架填零件（filled 增量）而非属性描述。
+   * 铁律：只问功能不给答案，问句绝不出现零件名。读 state.build（blueprintId + 已填槽）。
+   */
+  guideBuild(state: CreationState, childInput: string): Promise<GuideBuildResult>;
+  /** 按贴纸的中文描述给出贴纸中文名 + 英文扁平贴纸生图 prompt（喂 generateIconAsset 管线）。 */
+  designSticker(intentText: string): Promise<{ name: string; prompt: string }>;
+  /**
+   * 剧本生成（realtime-primitives P5）：把「我们来踢球吧」这类口语生成一段【真 TS】剧本。
+   * 硬 codegen 任务——真实实现用【强模型】+ 对着 stage_sdk.d.ts 过 typecheck，失败带错回喂重生成 1-2 次；
+   * 全部尝试都过不了 typecheck 返回 null（调用方走口头兜底，不开演）。防腐纪律见 docs/realtime-game-primitives-design §3。
+   */
+  generateScreenplay(ctx: ScreenplayGenContext): Promise<ScreenplayDraft | null>;
   /** 对话后让角色「自己挑出值得长期记住的要点」（0~3 条，各带分类 kind；去重、归属玩家由 voice 落地）。 */
   extractMemory(ctx: MemoryExtractionContext): Promise<ExtractedMemory[]>;
   /** session 超长压缩：把较旧轮次（并入上次摘要）压成一段中文摘要，session 内继续对话时注入。 */
   compactSession(ctx: SessionCompactionContext): Promise<string>;
   /** onboarding 自我介绍：从小朋友的转写里提取名字与称呼（提取不到均返回空串）。 */
   extractProfile(transcript: string): Promise<{ name: string; nickname: string }>;
+  /**
+   * onboarding 形象引导一轮（docs/onboarding-avatar-redesign-design.md §2.2）：与 guideCreation 平行，
+   * 问玩家自己的外观（性别/发型/衣服/主色/图案/配饰）。无 cancelled——小朋友不耐烦就 done 用已知属性画。
+   */
+  guideAvatar(state: AvatarGuideState, childInput: string): Promise<GuideAvatarResult>;
+  /**
+   * onboarding 形象描述合成（§2.3）：把属性+对话汇成纯外观中文描述，硬规则——双手空着绝不持物、
+   * 喜好一律转译为穿戴元素（恐龙→恐龙连帽衫，不是抱恐龙玩偶）、只有这一个孩子无背景无道具。
+   */
+  describeAvatar(attrs: AvatarAttrs, dialog: ChatTurn[]): Promise<string>;
+  /**
+   * 照镜子·改一改（§2.4）：把小朋友点名的修改合并进外观描述，未点名的部分保持原意不变；
+   * 产物仍受 describeAvatar 同一套硬规则约束。
+   */
+  refineAvatar(description: string, childRequest: string): Promise<string>;
   /** 存量角色体型回填：从英文 visualDescription 判定体型（small/medium/big），供 /admin/calibrate-size。 */
   classifyCreatureSize(visualDescription: string): Promise<CreatureSize>;
   respond(prompt: string): Promise<string>;
@@ -66,7 +110,8 @@ export interface CutoutAdapter {
  * 慢（60~90s），只在造角色后异步补，不进对话闭环。
  */
 export interface VideoAdapter {
-  generateIdleAnimation(sprite: ImageBlob): Promise<VideoBlob>;
+  /** 立绘 → 某一段的绿幕循环 mp4（首尾闭合）。每段一次调用、一次计费。 */
+  generateClip(sprite: ImageBlob, clip: ClipName): Promise<VideoBlob>;
 }
 
 /**
@@ -97,18 +142,8 @@ export interface AnchorAdapter {
   detectAnchors(image: ImageBlob): Promise<RawAnchorPoints | null>;
 }
 
-/** 语音识别：音频 → 中文文字。真实实现走 sherpa-onnx（LocalASRAdapter）。 */
-/** 流式识别会话：录音中持续 feed 分片（实时喂本地 sherpa 识别器），finish 收尾并返回最终转写。 */
-export interface ASRStream {
-  feed(chunk: Uint8Array): void;
-  finish(): Promise<string>;
-}
-
-export interface ASRAdapter {
-  transcribe(audio: AudioBlob): Promise<string>;
-  /** 边说边识别：voice_start 时开流，分片随到随发，voice_end 调 finish 拿转写。 */
-  openStream(): ASRStream;
-}
+// 语音识别没有服务端适配器：识别一律在客户端端侧完成（Android 插件 / macOS GDExtension 的
+// sherpa-onnx），服务端只收 voice_transcript 的成品文本。服务端 ASR 于 2026-07-13 整条退役。
 
 /** 流式合成回调：onStart 在首个分片前带 mime（客户端要先知道采样率），onChunk 按序推 PCM16 分片。 */
 export interface TTSStreamCallbacks {
@@ -139,7 +174,6 @@ export interface ServiceAdapters {
   video: VideoAdapter;
   orientation: OrientationAdapter;
   anchors: AnchorAdapter;
-  asr: ASRAdapter;
   tts: TTSAdapter;
   moderation: ModerationAdapter;
 }

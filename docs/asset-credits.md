@@ -53,6 +53,48 @@ CC BY 3.0 许可全文：https://creativecommons.org/licenses/by/3.0/
 - **Sci-Fi Robots** — 未来机器人主题的机器人/机甲。`assets/scifi/robots`。
 - **Animated Fish** — 海底主题的海洋生物。`assets/underwater`。
 
+### Poly Haven — 主题地形纹理源（themed-terrain，全 CC0 1.0）
+主题地形 tile 贴图由以下 CC0 光扫纹理经 `tools/watercolorize.py` 程序化水彩风格化而来
+（源纹理不入库，仅记录出处；风格化产物入 `assets/textures/terrain/`）。
+
+| 用途 | Poly Haven slug | 链接 |
+|---|---|---|
+| 沙 sand | `coast_sand_02` | https://polyhaven.com/a/coast_sand_02 |
+| 雪 snow | `snow_03` | https://polyhaven.com/a/snow_03 |
+| 珊瑚/礁岩 coral/reef | `coral_ground_02` | https://polyhaven.com/a/coral_ground_02 |
+| 白瓷砖 tile | `long_white_tiles` | https://polyhaven.com/a/long_white_tiles |
+| 粗沙 coarse_sand（海底 P2）| `coral_gravel` | https://polyhaven.com/a/coral_gravel |
+| 珊瑚砂 coral_sand（海底 P2）| `coral_mud_01` | https://polyhaven.com/a/coral_mud_01 |
+| 海草地 seagrass（海底 P2）| `aerial_grass_rock` | https://polyhaven.com/a/aerial_grass_rock |
+| 深水床 deep_bed（海底 P2）| `brown_mud_leaves_01` | https://polyhaven.com/a/brown_mud_leaves_01 |
+| 压实雪 packed_snow（冰雪 P3）| `snow_03` | https://polyhaven.com/a/snow_03 |
+| 冰面 ice（冰雪 P3）| `snow_02` | https://polyhaven.com/a/snow_02 |
+| 雪泥 slush（冰雪 P3）| `snow_03` | https://polyhaven.com/a/snow_03 |
+| 裸岩积雪 rock_snow（冰雪 P3）| `rocks_ground_04` | https://polyhaven.com/a/rocks_ground_04 |
+| 干裂土 cracked_earth（侏罗 P3）| `brown_mud_dry` | https://polyhaven.com/a/brown_mud_dry |
+| 火山岩 volcanic（侏罗 P3）| `burned_ground_01` | https://polyhaven.com/a/burned_ground_01 |
+| 泥沼 mud_bog（侏罗 P3）| `brown_mud_02` | https://polyhaven.com/a/brown_mud_02 |
+| 蕨类草地 fern（侏罗 P3）| `forrest_ground_03` | https://polyhaven.com/a/forrest_ground_03 |
+| 碎石 rubble（侏罗/罗马 P3）| `bicolour_gravel` | https://polyhaven.com/a/bicolour_gravel |
+| 鹅卵石 cobble（中世纪/中国 P3）| `cobblestone_05` | https://polyhaven.com/a/cobblestone_05 |
+| 石板 stone_slab（中世纪/罗马/中国 P3）| `cobblestone_floor_04` | https://polyhaven.com/a/cobblestone_floor_04 |
+| 农田垄 farm_furrow（中世纪 P3）| `brown_mud_dry` | https://polyhaven.com/a/brown_mud_dry |
+| 大理石 marble（罗马 P3）| `marble_01` | https://polyhaven.com/a/marble_01 |
+| 马赛克 mosaic（罗马 P3）| `marble_mosaic_tiles` | https://polyhaven.com/a/marble_mosaic_tiles |
+| 木地板 wood_floor（中国/玩具/厨房 P3）| `wood_floor` | https://polyhaven.com/a/wood_floor |
+| 沥青 asphalt（现代 P3）| `asphalt_02` | https://polyhaven.com/a/asphalt_02 |
+| 人行道砖 paver_brick（现代 P3）| `brick_pavement_02` | https://polyhaven.com/a/brick_pavement_02 |
+| 水泥 concrete（现代/未来/医院 P3）| `concrete_floor_01` | https://polyhaven.com/a/concrete_floor_01 |
+| 草坪格 lawn_grid（现代 P3）| `grass_concrete_pavement` | https://polyhaven.com/a/grass_concrete_pavement |
+| 防滑垫 antislip（厨房/医院 P3）| `anti_slip_concrete` | https://polyhaven.com/a/anti_slip_concrete |
+| 金属板 metal_plate（未来 P3）| `metal_plate` | https://polyhaven.com/a/metal_plate |
+| 格栅 grating（未来 P3）| `metal_grate_rusty` | https://polyhaven.com/a/metal_grate_rusty |
+
+> 斑马线/地毯/拼图垫/棋盘格/医用地胶/发光格/警戒条纹等无 CC0 干净图案的 tile，由
+> `tools/gen_pattern_tex.py` 程序化平色图案生成（非 CC0 素材，纯几何，无需署名）。
+>
+> P1-P3 逐主题铺开时，新增的每个 Poly Haven / ambientCG 源都追加到本表。
+
 ---
 
 ## 弃用的资产（许可不兼容公开仓库，留档备查）

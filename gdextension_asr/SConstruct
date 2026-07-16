@@ -17,9 +17,19 @@ if os.path.exists(api_file):
 env = SConscript("godot-cpp/SConstruct")
 
 env.Append(CPPPATH=["src/", "sherpa-onnx/include/"])
-env.Append(LIBPATH=["sherpa-onnx/lib/"])
-env.Append(LIBS=["sherpa-onnx-c-api", "onnxruntime"])
 sources = Glob("src/*.cpp")
+
+# iOS 专属：麦克风权限桥（platform_ios.mm，Objective-C++，调 AVAudioSession）。
+# 其它平台不编 .mm（maliang_asr.cpp 里对该符号的引用也只在 TARGET_OS_IOS 下存在）。
+# AVFoundation 由 Godot 的 iOS 模板链接（音频驱动本就用它），静态库这里只产目标文件。
+if env["platform"] == "ios":
+    sources += Glob("src/*.mm")
+
+# iOS 是静态链接：本扩展编成 .a，sherpa/onnxruntime 由 Xcode 工程链（见 build 脚本）。
+# 其余平台动态链接，这里就要 sherpa 的动态库。
+if env["platform"] != "ios":
+    env.Append(LIBPATH=["sherpa-onnx/lib/"])
+    env.Append(LIBS=["sherpa-onnx-c-api", "onnxruntime"])
 
 if env["platform"] == "macos":
     # RPATH：@loader_path = .framework/ 目录；运行期 dylib 与 framework 同放
@@ -30,6 +40,17 @@ if env["platform"] == "macos":
         "../addons/maliang_asr_native/bin/libmaliang_asr.{}.{}.framework/libmaliang_asr.{}.{}".format(
             env["platform"], env["target"], env["platform"], env["target"]
         ),
+        source=sources,
+    )
+elif env["platform"] == "ios":
+    # iOS 不允许应用自带的 GDExtension 走 dylib：Godot 的 iOS 导出把扩展**静态链**进
+    # Xcode 工程，并生成 extension loader 调 entry_symbol。所以这里产出 .a 而非 .dylib。
+    # 注意落在 bin_ios/（暂存），**不是** addons/.../bin/：这个 .a 只含本扩展的目标文件，
+    # godot-cpp 的符号由 build 脚本用 libtool 合并后才写进 addons/.../bin/（否则 Xcode
+    # 链接期一堆 godot::* 未定义符号）。两级分开放才幂等——直接原地合并的话，重跑脚本会
+    # 把 godot-cpp 二次并进已合并的库（实测 45M→89M）。
+    library = env.StaticLibrary(
+        "bin_ios/libmaliang_asr{}{}".format(env["suffix"], env["LIBSUFFIX"]),
         source=sources,
     )
 else:

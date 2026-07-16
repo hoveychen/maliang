@@ -25,11 +25,16 @@ uniform float pleat_amp = 0.0;   // 风琴折深度（米），沿高度 zigzag
 uniform float pleat_freq = 4.0;  // 风琴折折数（整张高度内的周期数）
 uniform float crumple_amp = 0.0; // 揉皱幅度（米）：位置哈希噪声位移
 
-// idle 动画 sprite-sheet：sheet_frames>0 时把 albedo_tex 当作 cols×rows 图集，
+// 动画 sprite-sheet：sheet_frames>0 时把 albedo_tex 当作 cols×rows 图集，
 // 按 TIME*fps 推进当前格并把 UV 映射到该格；=0 时按整张静态贴图采样（原行为不变）。
+//
+// 多段（idle/moving/talking）：三段的帧在同一张图集里按行主序连续排布，
+// sheet_start = 当前段首帧的全局下标、sheet_frames = 当前段的帧数。切段只改这两个
+// uniform（三段共用裁剪盒 → cell 尺寸相同 → 几何不用重算）。单段图集 sheet_start=0。
 uniform int sheet_cols = 1;
 uniform int sheet_rows = 1;
-uniform int sheet_frames = 0;
+uniform int sheet_start = 0;   // 当前段首帧下标
+uniform int sheet_frames = 0;  // 当前段帧数（不是整张图集的帧数）
 uniform float sheet_fps = 8.0;
 uniform float sheet_phase = 0.0; // 每角色相位偏移（秒），避免同款立绘齐步走
 
@@ -79,7 +84,7 @@ void vertex() {
 void fragment() {
 	vec2 uv = UV;
 	if (sheet_frames > 0) {
-		int f = int(mod(floor((TIME + sheet_phase) * sheet_fps), float(sheet_frames)));
+		int f = sheet_start + int(mod(floor((TIME + sheet_phase) * sheet_fps), float(sheet_frames)));
 		int col = f % sheet_cols;
 		int row = f / sheet_cols;
 		// UV(0..1) 映射进第 (col,row) 格；内缩半个纹素防线性采样越格串帧

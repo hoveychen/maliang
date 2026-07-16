@@ -1,7 +1,7 @@
 {
-  "_comment": "医院主题资产包（world-themes P5 半覆盖主题）。全 node 类。全 CC0：Kenney Furniture Kit 策展子集拼装（无现成 CC0 医疗包，老板拍板用家具拼；Atomic Realm 医院包因自定义许可禁再分发、与本仓库 PUBLIC 冲突而弃用）。来源见 assets/hospital/SOURCES.txt。地面走 T_TILE(瓷砖，中性灰 tint)——tile 地基 P1 已就位。key 为语义命名（与其他包 Kenney 原名键不撞，尤其 bedSingle 已被 toyroom 占用）。scale=3.5 统一倍数（同 Kenney Furniture Kit 约定，实测 AABB×3.5：病床≈3.9m、护士站≈2.5m、床头柜≈1.9m），真机手感微调留后续。",
+  "_comment": "医院主题资产包（world-themes P5 半覆盖主题）。全 node 类。多数为 CC0 Kenney Furniture Kit 策展子集拼装（无现成 CC0 医疗包，老板拍板用家具拼；Atomic Realm 医院包因自定义许可禁再分发、与本仓库 PUBLIC 冲突而弃用）；2026-07-12 去重复：wardBed 原先复用 furniture 单人床（bedSingle.glb，与玩具房单人床字节相同），现换成 Sketchfab 上真正的医疗床（loxfear《Hospital Bed》，含 5 张内嵌纹理，CC-BY 4.0，已在 assets/hospital/SOURCES.txt 署名），scale 0.0117 按真实 AABB 测得（床长≈2.2m）。其余 Kenney 件仍 CC0、scale=3.5。来源见 assets/hospital/SOURCES.txt。地面走 T_TILE。key 为语义命名（与其他包 Kenney 原名键不撞，尤其 bedSingle 已被 toyroom 占用）。真机手感微调留后续。",
   "entries": {
-    "wardBed":       { "category": "node", "path": "res://assets/hospital/bedSingle.glb",          "scale": 3.5 },
+    "wardBed":       { "category": "node", "path": "res://assets/hospital/wardBed.glb",            "scale": 0.0117 },
     "wardBedWide":   { "category": "node", "path": "res://assets/hospital/bedDouble.glb",          "scale": 3.5 },
     "bedside":       { "category": "node", "path": "res://assets/hospital/sideTableDrawers.glb",   "scale": 3.5 },
     "visitorChair":  { "category": "node", "path": "res://assets/hospital/chairModernCushion.glb", "scale": 3.5 },

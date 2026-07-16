@@ -29,6 +29,26 @@ static func set_outline_enabled(on: bool, tree: SceneTree) -> void:
 			continue
 		p._mats[0].next_pass = p._mats[1] if on else null
 
+## 纸艺风（画质页样式键）：主壳材质的纸艺参数档。与 BendMat.PAPER_PROPS 语法同源；
+## 本 shader 固有三段 toon 光，无 bands 项。记忆态由 world 接线时传 BendMat.papercraft_on()
+## 的解析结果（调试强制位语义只在 BendMat 一处）。
+const PAPER_SDF := {"paper_facet": 1.0, "paper_edge": 0.55, "paper_grain": 0.5, "paper_tone": 0.4}
+static var _papercraft := BendMat.papercraft_on()
+
+## 纸艺风开关：作用于已存在（perf_props 组）与后续创建的所有物件（照 set_snap_iters 先例）。
+static func set_papercraft(on: bool, tree: SceneTree) -> void:
+	_papercraft = on
+	for n in tree.get_nodes_in_group("perf_props"):
+		var p := n as SdfProp
+		if p == null or p._mats.is_empty():
+			continue
+		p._apply_paper()
+
+## 把当前纸艺档写到主壳材质（描边 pass 无纸艺项）。创建与切换两处共用。
+func _apply_paper() -> void:
+	for k: String in PAPER_SDF:
+		_mats[0].set_shader_parameter(k, PAPER_SDF[k] if _papercraft else 0.0)
+
 ## 换档入口（画质旋钮 prop_detail）：作用于已存在（perf_props 组）与后续创建的所有物件。
 static func set_snap_iters(main_iters: int, outline_iters: int, tree: SceneTree) -> void:
 	_snap_iters_main = main_iters
@@ -107,6 +127,8 @@ func _setup(cfg: Dictionary) -> void:
 		m.set_shader_parameter("prim_count", prims.size())
 		m.set_shader_parameter("blend_k", cfg.blend)
 		m.set_shader_parameter("curvature", BendMat.CURVATURE)
+	if _papercraft:
+		_apply_paper()
 	material_override = main
 
 	var colors := PackedVector4Array()
@@ -139,20 +161,24 @@ func push_uniforms() -> void:
 	var pos := PackedVector4Array()
 	var rot := PackedVector4Array()
 	var par := PackedVector4Array()
+	var cur := PackedVector4Array()  # bezier 弯管控制点 B.xy/C.xy（其余基本体为 0）
 	for pr: SdfMath.Prim in prims:
 		var o := pr.xform.origin
 		pos.append(Vector4(o.x, o.y, o.z, float(pr.shape)))
 		var q := pr.xform.basis.get_rotation_quaternion()
 		rot.append(Vector4(q.x, q.y, q.z, q.w))
 		par.append(Vector4(pr.params.x, pr.params.y, pr.params.z, pr.blend))
+		cur.append(pr.curve)
 	_mats[0].set_shader_parameter("prim_pos", pos)
 	_mats[0].set_shader_parameter("prim_rot", rot)
 	_mats[0].set_shader_parameter("prim_params", par)
+	_mats[0].set_shader_parameter("prim_curve", cur)
 	# 描边被摘除时不给游离 pass 上传（省一半 uniform 流量）；重挂后下帧自然补上
 	if _mats.size() > 1 and _mats[0].next_pass != null:
 		_mats[1].set_shader_parameter("prim_pos", pos)
 		_mats[1].set_shader_parameter("prim_rot", rot)
 		_mats[1].set_shader_parameter("prim_params", par)
+		_mats[1].set_shader_parameter("prim_curve", cur)
 
 ## 启用锚点游走：以当前局部位置为圆心、radius 为半径漫游（父空间为区块局部系，
 ## 跟随世界环面重定位）。seed 用于确定性行为（同一 tile 的物件每次表现一致）。

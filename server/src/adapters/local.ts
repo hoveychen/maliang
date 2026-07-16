@@ -1,25 +1,21 @@
 // 本地语音适配器：sherpa-onnx 进程内推理，无外部服务、无密钥。
 // - TTS：Kokoro v1.1-zh（82M，103 音色，输出 24kHz PCM16）—— 与 talk-cli 同款模型
-// - ASR：流式 Zipformer 中文（int8，14k 小时中文数据，真流式，配合 openStream 边说边识别）
-// 模型文件 ~1GB 不入库，由 server/scripts/fetch-voice-models.sh 拉取到 VOICE_MODELS_DIR。
+// 服务端只做 TTS：语音识别已整条退役，一律在客户端端侧完成（Android 插件 / macOS GDExtension）。
+// 模型文件不入库，由 server/scripts/fetch-voice-models.sh 拉取到 VOICE_MODELS_DIR。
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
-import type { ASRAdapter, ASRStream, TTSAdapter, AudioBlob } from './types.ts';
+import type { TTSAdapter, AudioBlob } from './types.ts';
 
 // sherpa-onnx-node 是 CJS native addon（加载 ~30MB 动态库），按需 require，
 // 避免 mock 模式下白白载入。
 const require = createRequire(import.meta.url);
 
-export const ASR_MODEL_DIR = 'sherpa-onnx-streaming-zipformer-multi-zh-hans-2023-12-12';
 export const TTS_MODEL_DIR = 'kokoro-multi-lang-v1_1';
 
-/** 两套模型目录都在才算就绪（factory 的 auto 路由据此选 local）。 */
+/** Kokoro TTS 模型目录在即算就绪（factory 的 auto 路由据此选 local）。 */
 export function hasLocalVoiceModels(modelsDir: string): boolean {
-  return (
-    fs.existsSync(path.join(modelsDir, ASR_MODEL_DIR)) &&
-    fs.existsSync(path.join(modelsDir, TTS_MODEL_DIR))
-  );
+  return fs.existsSync(path.join(modelsDir, TTS_MODEL_DIR));
 }
 
 // Kokoro v1.1-zh 的 sid ↔ 音色名映射（来源：sherpa-onnx 官方文档 kokoro-multi-lang-v1_1 说话人表）。
@@ -65,15 +61,6 @@ export function floatToPcm16(samples: Float32Array): Uint8Array {
     out[i] = Math.round(s * 32767);
   }
   return new Uint8Array(out.buffer);
-}
-
-/** PCM16LE 字节 → Float32 [-1,1]（奇数尾字节截断保护）。 */
-export function pcm16ToFloat(bytes: Uint8Array): Float32Array {
-  const n = Math.floor(bytes.byteLength / 2);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, n * 2);
-  const out = new Float32Array(n);
-  for (let i = 0; i < n; i++) out[i] = view.getInt16(i * 2, true) / 32768;
-  return out;
 }
 
 export interface LocalVoiceOptions {
@@ -145,55 +132,3 @@ export class LocalTTSAdapter implements TTSAdapter {
   }
 }
 
-/** 流式 Zipformer 中文识别：16kHz PCM16 分片随到随解码，finish 收尾返回转写。 */
-export class LocalASRAdapter implements ASRAdapter {
-  readonly #recognizer: any;
-
-  constructor(opts: LocalVoiceOptions) {
-    const sherpa = require('sherpa-onnx-node');
-    const dir = path.join(opts.modelsDir, ASR_MODEL_DIR);
-    this.#recognizer = new sherpa.OnlineRecognizer({
-      featConfig: { sampleRate: 16000, featureDim: 80 },
-      modelConfig: {
-        transducer: {
-          // encoder/joiner 用 int8（速度），decoder 用 fp32（量化伤精度且它本来就小）
-          encoder: path.join(dir, 'encoder-epoch-20-avg-1-chunk-16-left-128.int8.onnx'),
-          decoder: path.join(dir, 'decoder-epoch-20-avg-1-chunk-16-left-128.onnx'),
-          joiner: path.join(dir, 'joiner-epoch-20-avg-1-chunk-16-left-128.int8.onnx'),
-        },
-        tokens: path.join(dir, 'tokens.txt'),
-        numThreads: opts.numThreads ?? 2,
-        provider: 'cpu',
-        debug: 0,
-      },
-      decodingMethod: 'greedy_search',
-    });
-  }
-
-  openStream(): ASRStream {
-    const rec = this.#recognizer;
-    const stream = rec.createStream();
-    const drain = (): void => {
-      while (rec.isReady(stream)) rec.decode(stream);
-    };
-    return {
-      feed(chunk: Uint8Array): void {
-        stream.acceptWaveform({ sampleRate: 16000, samples: pcm16ToFloat(chunk) });
-        drain(); // 随到随解码，finish 时只剩尾巴要算
-      },
-      async finish(): Promise<string> {
-        // 尾部补 0.6s 静音把 chunk 窗口内的最后几个字吐出来（官方示例做法）
-        stream.acceptWaveform({ sampleRate: 16000, samples: new Float32Array(9600) });
-        drain();
-        const text: string = rec.getResult(stream).text ?? '';
-        return text.trim();
-      },
-    };
-  }
-
-  transcribe(audio: AudioBlob): Promise<string> {
-    const s = this.openStream();
-    s.feed(audio.bytes);
-    return s.finish();
-  }
-}

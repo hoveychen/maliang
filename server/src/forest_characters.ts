@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ServiceAdapters } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import { generateSprite } from './orchestrator.ts';
-import { triggerIdleAnimation, type ToSpriteSheet } from './idle_animation.ts';
+import { triggerCharacterAnimation, type ToSpriteSheet } from './idle_animation.ts';
 import { BASE_ABILITIES, type Character, type TilePos } from './types.ts';
 import type { GreetingStyle } from './greetings.ts';
 
@@ -117,7 +117,7 @@ export async function seedForestCharacters(
         relationships: {},
       };
       store.addCharacter(character);
-      triggerIdleAnimation(adapters, store, assetHash, opts.toSpriteSheet);
+      triggerCharacterAnimation(adapters, store, assetHash, opts.toSpriteSheet);
       result.created.push({ id: character.id, name: seed.name, spriteAsset: assetHash });
     } catch (err) {
       console.warn(`森林村民种入失败（${seed.name}，跳过）：${String(err)}`);

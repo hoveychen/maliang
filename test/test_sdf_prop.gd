@@ -27,7 +27,7 @@ func _init() -> void:
 	fails += _check("bundled specs present", spec_count >= 5, true)
 
 	# ---- 校验拒收：坏形状 / 坏颜色索引 / 超上限 / 坏腿数 ----
-	var bad1 := SdfSpec.parse({"palette": ["#fff"], "parts": [{"shape": "torus"}]})
+	var bad1 := SdfSpec.parse({"palette": ["#fff"], "parts": [{"shape": "pyramid"}]})
 	fails += _check("reject unknown shape", bad1.ok, false)
 	var bad2 := SdfSpec.parse({"palette": ["#fff"], "parts": [{"shape": "sphere", "color": 3}]})
 	fails += _check("reject color index", bad2.ok, false)
@@ -44,6 +44,39 @@ func _init() -> void:
 	fails += _check("reject too many prims", bad4.ok, false)
 	var bad5 := SdfSpec.parse({"palette": ["notacolor"], "parts": [{"shape": "sphere"}]})
 	fails += _check("reject bad palette", bad5.ok, false)
+
+	# ---- 新形状 torus / bezier 解析 ----
+	var tspec := {
+		"palette": ["#e8b04b", "#f4ead4"],
+		"parts": [
+			{"shape": "torus", "pos": [0, 0.5, 0], "R": 0.4, "r": 0.1, "arc": 90, "color": 0},
+			{"shape": "bezier", "pos": [0, 1, 0], "b": [0.3, 0.4], "c": [0.6, 0.0], "r0": 0.12, "r1": 0.05, "color": 1},
+		],
+	}
+	var tcfg := SdfSpec.parse(tspec)
+	fails += _check("torus/bezier spec parses", tcfg.ok, true)
+	if tcfg.ok:
+		fails += _check("torus shape", tcfg.parts[0].shape, SdfMath.SHAPE_TORUS)
+		fails += _check("torus params R", is_equal_approx(tcfg.parts[0].params.x, 0.4), true)
+		fails += _check("torus arc clamp", is_equal_approx(tcfg.parts[0].params.z, 90.0), true)
+		fails += _check("bezier shape", tcfg.parts[1].shape, SdfMath.SHAPE_BEZIER)
+		fails += _check("bezier r0", is_equal_approx(tcfg.parts[1].params.x, 0.12), true)
+		# curve 存 B.xy / C.xy
+		fails += _check("bezier curve B", is_equal_approx(tcfg.parts[1].curve.x, 0.3) and is_equal_approx(tcfg.parts[1].curve.y, 0.4), true)
+		fails += _check("bezier curve C", is_equal_approx(tcfg.parts[1].curve.z, 0.6), true)
+		# build_rig 把 curve 传进 Prim
+		var trig := SdfSpec.build_rig(tcfg)
+		fails += _check("prim carries curve", is_equal_approx((trig.prims[1] as SdfMath.Prim).curve.x, 0.3), true)
+		# arc>180 被 clamp 到 180（满环）
+		var full := SdfSpec.parse({"palette": ["#fff"], "parts": [{"shape": "torus", "arc": 999}]})
+		fails += _check("torus arc clamp 180", is_equal_approx(full.parts[0].params.z, 180.0), true)
+	# scale：torus 缩 R/r 不缩 arc；bezier 缩 curve
+	var tscaled := tspec.duplicate(true)
+	tscaled["scale"] = 1.5
+	var tsc := SdfSpec.parse(tscaled)
+	fails += _check("torus R ×scale", is_equal_approx(tsc.parts[0].params.x, 0.6), true)
+	fails += _check("torus arc 不缩", is_equal_approx(tsc.parts[0].params.z, 90.0), true)
+	fails += _check("bezier curve ×scale", is_equal_approx(tsc.parts[1].curve.x, 0.45), true)
 
 	# ---- 骨架细节：4 腿 walker ----
 	var hut_cfg := SdfSpec.parse(JSON.parse_string(
@@ -118,6 +151,41 @@ func _init() -> void:
 	var aabb1 := SdfMath.rest_aabb(SdfSpec.build_rig(c1).prims)
 	var aabb14 := SdfMath.rest_aabb(SdfSpec.build_rig(c1_4).prims)
 	fails += _check("AABB 随 scale 变大", aabb14.size.y > aabb1.size.y + 0.1, true)
+
+	# ---- is_static 判据（真静止才可烘焙）：四类动画源各一反例 + 纯静物正例 ----
+	var st_pure := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "box", "pos": [0, 0.5, 0], "size": [1, 1, 1], "color": 0}],
+	})
+	fails += _check("纯静物 → static", SdfSpec.is_static(st_pure), true)
+	var st_walker := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "sphere", "pos": [0, 1, 0], "color": 0}],
+		"locomotion": {"type": "walker", "legs": 4},
+	})
+	fails += _check("走兽 → 非static", SdfSpec.is_static(st_walker), false)
+	var st_hopper := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "sphere", "pos": [0, 1, 0], "color": 0}],
+		"locomotion": {"type": "hopper", "hop_h": 0.5},
+	})
+	fails += _check("蹦跳 → 非static", SdfSpec.is_static(st_hopper), false)
+	var st_spin := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "box", "pos": [0, 1, 0], "size": [0.6, 0.1, 0.1], "color": 0, "spin": 1.5}],
+	})
+	fails += _check("风车(spin) → 非static", SdfSpec.is_static(st_spin), false)
+	var st_head := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "sphere", "pos": [0, 1, 0], "color": 0, "group": "head"}],
+	})
+	fails += _check("花头(head) → 非static", SdfSpec.is_static(st_head), false)
+	var st_rope := SdfSpec.parse({
+		"palette": ["#e8b04b"],
+		"parts": [{"shape": "box", "pos": [0, 1, 0], "size": [1, 1, 1], "color": 0}],
+		"ropes": [{"anchor": [0, 1, 0], "segments": 3, "seg_len": 0.2, "r": 0.05, "color": 0}],
+	})
+	fails += _check("飘带(rope) → 非static", SdfSpec.is_static(st_rope), false)
 
 	if fails == 0:
 		print("sdf_prop tests PASS")

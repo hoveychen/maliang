@@ -352,6 +352,39 @@ test('POST /admin/item-icon/:id：客户端上传缩略图 → 入库 + 绑定 +
   }
 });
 
+test('GET /item-icons：公开只读映射（无 token 放行），admin GET 仍门禁', async () => {
+  const prev = process.env.MALIANG_ADMIN_TOKEN;
+  process.env.MALIANG_ADMIN_TOKEN = 'sesame'; // 门禁 token 在 buildServer 时捕获，必须先设
+  const store = new WorldStore();
+  seed(store);
+  const app = await buildServer({ adapters: createMockAdapters(), store });
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const pngBase64 = Buffer.from(png).toString('base64');
+  try {
+    // 先经 admin 通道上传一张（需 token）
+    const up = await app.inject({
+      method: 'POST', url: '/admin/item-icon/tree_puff_a',
+      headers: { 'x-admin-token': 'sesame' }, payload: { pngBase64 },
+    });
+    assert.equal(up.statusCode, 200);
+    const { iconAsset } = up.json() as { iconAsset: string };
+
+    // 公开 GET /item-icons：无 token 也放行，映射含刚上传的 id→hash
+    const pub = await app.inject({ method: 'GET', url: '/item-icons' });
+    assert.equal(pub.statusCode, 200, '公开读半边无 token 放行');
+    const icons = (pub.json() as { icons: Record<string, string> }).icons;
+    assert.equal(icons['tree_puff_a'], iconAsset, '映射回刚上传的资产 hash');
+
+    // 对照：admin GET /admin/item-icons 无 token 仍拒绝（写入通道保持门禁）
+    const adminDenied = await app.inject({ method: 'GET', url: '/admin/item-icons' });
+    assert.equal(adminDenied.statusCode, 403, 'admin 映射端点仍门禁');
+  } finally {
+    if (prev === undefined) delete process.env.MALIANG_ADMIN_TOKEN;
+    else process.env.MALIANG_ADMIN_TOKEN = prev;
+    await app.close();
+  }
+});
+
 test('POST /admin/item-icon/:id：配置 token 后无 token 拒绝、带 token 放行', async () => {
   const prev = process.env.MALIANG_ADMIN_TOKEN;
   process.env.MALIANG_ADMIN_TOKEN = 'sesame';

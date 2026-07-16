@@ -2,7 +2,7 @@ class_name IntroNarrator
 extends Node
 ## intro 建造演出的顺序旁白播放器（P4）。与 FairyVoice 的区别：FairyVoice 是「触发器随机池 +
 ## 冷却」用于运行期环境语音；本类是「按 id 顺序播、可 await 时长」用于一段被编排好的开场演出。
-## 数据源 assets/voice/intro/lines.json（同 gen_voice_lines.mjs 管线，仙子音色 zh-CN-XiaoyiNeural）。
+## 数据源 assets/voice/intro/lines.json（同 gen_voice_lines.mjs 管线，点点音色 zh-CN-YunxiaNeural）。
 ## 运行期零 TTS 调用——音频全是构建期预制 WAV，离线可用、无 API 成本。
 ##
 ## 用法：IntroDirector 建一个挂到自己身上，play(id) 返回时长秒，调用方 await 该时长推进下一段。

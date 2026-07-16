@@ -1,8 +1,7 @@
-import type { ServiceAdapters, ASRAdapter, TTSAdapter } from './types.ts';
+import type { ServiceAdapters, TTSAdapter } from './types.ts';
 import {
   type Config,
   type TTSProvider,
-  type VoiceProvider,
   hasMinimax,
   hasOpenRouter,
 } from '../config.ts';
@@ -14,16 +13,9 @@ import { OpenRouterVideoAdapter } from './openrouter_video.ts';
 import { ChromaKeyCutoutAdapter } from './chroma_cutout.ts';
 import { OpenRouterOrientationAdapter } from './openrouter_orientation.ts';
 import { OpenRouterAnchorAdapter } from './openrouter_anchors.ts';
-import { LocalASRAdapter, LocalTTSAdapter, hasLocalVoiceModels } from './local.ts';
+import { LocalTTSAdapter, hasLocalVoiceModels } from './local.ts';
 import { FallbackTTSAdapter, MinimaxTTSAdapter } from './minimax.ts';
 import { OpenRouterModerationAdapter } from './openrouter_moderation.ts';
-
-/** VOICE_ASR_PROVIDER=auto 的落点：有本地模型 local → mock。 */
-export function resolveAsrProvider(config: Config): Exclude<VoiceProvider, 'auto'> {
-  if (config.voiceAsrProvider !== 'auto') return config.voiceAsrProvider;
-  if (hasLocalVoiceModels(config.voiceModelsDir)) return 'local';
-  return 'mock';
-}
 
 /** VOICE_TTS_PROVIDER=auto 的落点：有 MiniMax key minimax → 本地模型 local → mock。 */
 export function resolveTtsProvider(config: Config): Exclude<TTSProvider, 'auto'> {
@@ -36,7 +28,7 @@ export function resolveTtsProvider(config: Config): Exclude<TTSProvider, 'auto'>
 /**
  * 按配置选择适配器（各服务独立）：
  * - 有 OpenRouter key → 真实 LLM/生图/抠图 + 内容审核（文字 LLM、图片视觉）；否则 mock。
- * - ASR 由 VOICE_ASR_PROVIDER 路由（local=sherpa-onnx 进程内 / mock）。
+ * - 语音识别不在服务端：一律客户端端侧（Android 插件 / macOS GDExtension），服务端只收成品转写。
  * - TTS 由 VOICE_TTS_PROVIDER 路由（minimax 云端 / local Kokoro / mock）；
  *   minimax + 本地模型同时在场时自动带 Kokoro 回落，网络故障不哑巴。
  */
@@ -48,13 +40,6 @@ export function createAdapters(config: Config): ServiceAdapters {
       throw new Error(`${who}=local 但模型缺失：请先运行 scripts/fetch-voice-models.sh ${config.voiceModelsDir}`);
     }
   };
-
-  let asr: ASRAdapter = mock.asr;
-  const asrProvider = resolveAsrProvider(config);
-  if (asrProvider === 'local') {
-    requireLocalModels('VOICE_ASR_PROVIDER');
-    asr = new LocalASRAdapter({ modelsDir: config.voiceModelsDir });
-  }
 
   let tts: TTSAdapter = mock.tts;
   let ttsNote = '';
@@ -80,10 +65,10 @@ export function createAdapters(config: Config): ServiceAdapters {
     tts = new LocalTTSAdapter({ modelsDir: config.voiceModelsDir, defaultVoice: config.voiceTtsVoice ?? 'zf_001' });
   }
 
-  console.log(`语音：ASR=${asrProvider} TTS=${ttsProvider}${ttsNote}`);
+  console.log(`语音：TTS=${ttsProvider}${ttsNote}（识别在客户端端侧）`);
 
   if (!hasOpenRouter(config)) {
-    return { ...mock, asr, tts };
+    return { ...mock, tts };
   }
   const client = new OpenRouterClient(config.openrouterApiKey as string);
   // 生图单独用长超时客户端：实测 gemini 生图常态 60~75s，共享 25s 客户端必超时；
@@ -92,14 +77,13 @@ export function createAdapters(config: Config): ServiceAdapters {
   // 朝向检测带图上传（base64 后 1-2MB），25s 客户端偶发不够，给 60s。
   const visionClient = new OpenRouterClient(config.openrouterApiKey as string, 60000);
   return {
-    llm: new OpenRouterLLMAdapter(client, config.llmModel),
+    llm: new OpenRouterLLMAdapter(client, config.llmModel, config.screenplayModel),
     image: new OpenRouterImageAdapter(imageClient, config.imageModel),
     cutout: new ChromaKeyCutoutAdapter(),
     // idle 动画：异步补，慢（60~90s），自带长超时轮询，不共享上面的 client。
     video: new OpenRouterVideoAdapter(config.openrouterApiKey as string, { model: config.videoModel }),
     orientation: new OpenRouterOrientationAdapter(visionClient, config.visionModel),
     anchors: new OpenRouterAnchorAdapter(visionClient, config.visionModel),
-    asr,
     tts,
     moderation: new OpenRouterModerationAdapter(client, config.moderationTextModel),
   };

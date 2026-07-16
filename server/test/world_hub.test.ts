@@ -8,7 +8,13 @@ import { handleWsMessage, newVoiceSession } from '../src/server.ts';
 import { DEFAULT_SCENE } from '../src/types.ts';
 
 function member(clientId: string, inbox: Record<string, unknown>[], sceneId = DEFAULT_SCENE): HubMember {
-  return { clientId, playerId: `p-${clientId}`, sceneId, send: (m) => inbox.push(m) };
+  // 广播走 sendText(预序列化的字符串)；helper 解析回对象让断言照旧比对内容。
+  return {
+    clientId, playerId: `p-${clientId}`, sceneId,
+    send: (m) => inbox.push(m),
+    sendText: (s) => inbox.push(JSON.parse(s)),
+    posBin: false, sendBin: () => {},
+  };
 }
 
 test('双连接同世界互见: 首位是 host, 广播可排除发送者', () => {
@@ -75,11 +81,34 @@ test('重复 join 同世界: 保序不换 host, 只更新成员信息', () => {
 test('死连接不拖累广播: send 抛错跳过继续发', () => {
   const hub = new WorldHub();
   const inbox: Record<string, unknown>[] = [];
-  hub.join('w1', { clientId: 'dead', playerId: 'p', sceneId: DEFAULT_SCENE, send: () => { throw new Error('closed'); } });
+  hub.join('w1', {
+    clientId: 'dead', playerId: 'p', sceneId: DEFAULT_SCENE,
+    send: () => { throw new Error('closed'); },
+    sendText: () => { throw new Error('closed'); },
+    posBin: false, sendBin: () => { throw new Error('closed'); },
+  });
   hub.join('w1', member('cB', inbox));
   const n = hub.broadcast('w1', { type: 'ping' });
   assert.equal(n, 1);
   assert.deepEqual(inbox, [{ type: 'ping' }]);
+});
+
+test('序列化一次: 广播只 stringify 一次, 同一份字符串发给全场', () => {
+  const hub = new WorldHub();
+  const raw: string[] = [];
+  const spy = (clientId: string): HubMember => ({
+    clientId, playerId: `p-${clientId}`, sceneId: DEFAULT_SCENE,
+    send: () => {}, sendText: (s) => raw.push(s),
+    posBin: false, sendBin: () => {},
+  });
+  hub.join('w1', spy('cA'));
+  hub.join('w1', spy('cB'));
+  hub.join('w1', spy('cC'));
+  const n = hub.broadcast('w1', { type: 'positions_relay', t: 1, chars: [{ id: 'x', x: 1, y: 2 }] });
+  assert.equal(n, 3);
+  assert.equal(raw.length, 3, '三个成员各收一次');
+  assert.equal(raw[0], raw[1], '内容一致');
+  assert.ok(raw[0] === raw[1] && raw[1] === raw[2], '是同一份字符串引用(证明只序列化一次)');
 });
 
 // ---- handleWsMessage 接线 ----

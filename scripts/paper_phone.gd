@@ -23,9 +23,21 @@ const PANEL_H := 1.0              ## 面板高（本地基准，勿改：fit 按
 const PANEL_W := PANEL_H / PANEL_ASPECT
 const PANEL_T := 0.032            ## 卡纸厚度（厚切边=硬卡纸手工感，侧面纸芯白最卖"纸做的"）
 const FACE_EPS := 0.002           ## 贴面浮出板面的间隙（防 z-fighting）
+const CORNER_R := PANEL_W * (27.0 / 480.0)  ## 芯板圆角半径=壳贴图 alpha 镂空的圆角（die-cut 剪影）
+const SLAB_INSET := PANEL_W * (3.0 / 480.0) ## 芯板四周比贴面略缩（藏进贴图镂空边缘内，正视零穿帮）
+const CORNER_SEGS := 6            ## 每个圆角的弧分段
+const EDGE_COLOR := Color(0.965, 0.945, 0.905) ## 纸芯切边暖白（比印刷面亮——"剪出来的卡纸"信号）
+## 手机独立渲染层（全仓库唯一用 .layers 处）：世界太阳 cull 掉该层、attach_light_rig 的
+## 自带灯只照该层——shaded 纸面在相机环绕时亮度才稳定（P1 derisk：yaw 扫描波动 0.3%）。
+const RENDER_LAYER := 1 << 10
 const FLIP_DUR := 0.45            ## 翻转+展开动画时长
 const MOVE_DUR := 0.40            ## 停靠位↔持机位搬移动画时长
 const DOCK_ROT := Vector3(0.10, 0.44, -0.05) ## 停靠侧摆角(rad):脸朝屏幕中心(用户方向)侧身~25°,一眼立体手机
+# 盖章后座（kick）：砸下那一瞬机身一沉 + 轻微侧抖，~0.35s 弹回
+const KICK_DECAY := 3.0            ## 后座衰减速率（1.0 → 0 约 0.33s）
+const KICK_PITCH := 0.10           ## 俯冲角(rad)
+const KICK_ROLL := 0.05            ## 侧抖角(rad)
+const KICK_DROP := 0.012           ## 下沉距离(m)
 
 ## 贴面 id（射线拾取返回、set_face_texture 寻址）
 const FACE_FRONT := "front"        ## A 外面：手机正面壳
@@ -55,6 +67,9 @@ var _dock_scale := 0.2
 var _dock_fitted := false          ## 停靠位是否已按真实布局贴合过（首帧 Control 布局后才有）
 var _base_rot := DOCK_ROT          ## 基础姿态角（停靠=DOCK_ROT 侧摆、持机=0；微摆叠加其上；初始即停靠）
 var _sway_t := 0.0                 ## 持机微摆相位
+var _drop_shadow: MeshInstance3D   ## 悬浮软影（机身后下方，宽度跟随折叠进度）
+var _kick := 0.0                   ## 盖章后座余量 1→0（见 kick）
+var _rest_pos := Vector3.ZERO      ## 后座前的静止位（衰减完精确复位）
 
 # 在 _init 建几何而非 _ready：headless 测试在 SceneTree._initialize 阶段节点尚未进树、
 # _ready 会延迟到首帧，_init 保证 new() 出来即可用（show_front/pick 不依赖树状态）。
@@ -65,11 +80,28 @@ func _init() -> void:
 
 ## 持机微摆：纸片"活着"的感觉（Origami King 的 paper-in-motion 极简版）。
 ## 只动整机根节点的 x/z 微旋（pivot 的 y 旋留给翻转姿态），收起时不跑。
+## 叠加一记「后座」：集邮册上狠狠盖章的那一下，整台机身被砸得一沉（见 kick）。
 func _process(delta: float) -> void:
 	if not visible:
 		return
 	_sway_t += delta
-	rotation = _base_rot + Vector3(sin(_sway_t * 0.9 + 1.7) * 0.008, 0.0, sin(_sway_t * 1.4) * 0.012)
+	var sway := Vector3(sin(_sway_t * 0.9 + 1.7) * 0.008, 0.0, sin(_sway_t * 1.4) * 0.012)
+	if _kick <= 0.0001:
+		rotation = _base_rot + sway
+		return
+	# 后座期间才碰 position——平时不写，免得跟 _animate_move 的位移 tween 打架
+	_kick = maxf(0.0, _kick - delta * KICK_DECAY)
+	var k := _kick * _kick   # 平方衰减：砸下那一瞬最狠，回弹快
+	rotation = _base_rot + sway + Vector3(k * KICK_PITCH, 0.0, sin(_kick * 34.0) * k * KICK_ROLL)
+	position = _rest_pos + Vector3(0.0, -k * KICK_DROP, 0.0)
+	if _kick <= 0.0001:
+		position = _rest_pos   # 收干净，别留一丝位移残差
+
+## 盖章砸下去的一记后座：机身俯冲一沉 + 轻微侧抖，指数衰减。手机是挂在相机下的实体，
+## 抖机身比抖屏幕里的 UI 真实得多——「狠狠」主要就是这一下卖出来的。
+func kick(strength := 1.0) -> void:
+	_kick = clampf(strength, 0.0, 1.0)
+	_rest_pos = position   # 记住当下的静止位（掏出/翻转动画中途也能挨这一下）
 
 ## ── 几何 ────────────────────────────────────────────────────────────────────
 
@@ -97,18 +129,113 @@ func _build() -> void:
 	_panel_b.add_child(_make_slab())
 	_add_face(FACE_BACK, _panel_b, Vector3(0.0, 0.0, PANEL_T * 0.5 + FACE_EPS), false)
 	_add_face(FACE_SPREAD_R, _panel_b, Vector3(0.0, 0.0, -PANEL_T * 0.5 - FACE_EPS), true)
+	_build_drop_shadow()
+
+## 悬浮软影：持机物没有落地面，"离你很近的一张实体卡"的存在感靠机身后下方
+## 一片软影承担（纸艺观感第二支柱的持机版）。贴图复用 PaperBook 的超椭圆烘法
+## （剪影内实心+轮廓外平滑衰减——纯径向渐变会把浓度全藏在机身正后方看不见）。
+## 挂 root：跟机身一起搬移/缩放/侧摆；spread 视觉中心始终在 root 原点
+## （_apply_pose 的 pivot 平移保证），软影只需随折叠加宽（见 _apply_pose）。
+const SHADOW_CORE := 0.78         ## 影贴图实心核半径占比（衰减带只占外圈 22%——窄圈贴剪影）
+func _build_drop_shadow() -> void:
+	var q := QuadMesh.new()
+	# 实心核对齐机身剪影：quad 取机身/CORE，窄衰减圈正好箍在剪影外一小圈。
+	# 书影贴图（0.62 核+宽衰减）是桌面接触影的糊法，用在持机物上会糊成环境渐变（实测）。
+	q.size = Vector2(PANEL_W / SHADOW_CORE, PANEL_H / SHADOW_CORE)
+	_drop_shadow = MeshInstance3D.new()
+	_drop_shadow.name = "DropShadow"
+	_drop_shadow.mesh = q
+	# 后下方偏移：光从左上前方来（attach_light_rig），影子落右下后方。
+	# 深度别拉远：透视会把软影缩小+拖向灭点，整片藏到机身正后面看不见（实测 -0.5 全灭）。
+	# x 偏移里有 ~0.045 是在抵消灭点漂移（持机位在画面右侧，靠后的影会向画面中心滑）
+	_drop_shadow.position = Vector3(0.085, -0.055, -0.10)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_texture = _make_drop_shadow_texture()
+	m.albedo_color = Color(0.13, 0.12, 0.10, 0.42) # 中性软影（草地/任意场景上都是"影"）
+	_drop_shadow.material_override = m
+	_drop_shadow.layers = RENDER_LAYER
+	_drop_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_drop_shadow)
+
+## 悬浮影贴图：超椭圆（≈圆角矩形）剪影内实心 + 轮廓外窄带平滑衰减。
+## 与 PaperBook._make_shadow_texture 同族，核更大衰减更窄（悬浮 drop shadow
+## 要"贴着边缘的一圈"，不是桌面接触影那种大范围糊散）。
+static func _make_drop_shadow_texture() -> ImageTexture:
+	var img := Image.create(128, 128, false, Image.FORMAT_RGBA8)
+	for y in 128:
+		for x in 128:
+			var p := Vector2(absf(x - 63.5) / 63.5, absf(y - 63.5) / 63.5)
+			var d := pow(pow(p.x, 4.0) + pow(p.y, 4.0), 0.25) # 超椭圆≈圆角矩形
+			var t := clampf((d - SHADOW_CORE) / (1.0 - SHADOW_CORE), 0.0, 1.0)
+			var a := 1.0 - t * t * (3.0 - 2.0 * t)
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
+	return ImageTexture.create_from_image(img)
 
 ## 纸板芯：面板的厚度体（侧面即纸边）。贴面用独立 quad 盖在两大面上。
+## 圆角矩形棱柱（非 BoxMesh）：直角盒芯会从壳贴图的圆角镂空后面露出灰角，
+## 圆角芯+镂空贴图=真 die-cut 卡纸剪影。侧壁法线沿轮廓外向（弧段平滑），
+## 吃光后一圈切边自带明暗渐变——翻转/展开时最抢眼的"纸做的"信号。
 func _make_slab() -> MeshInstance3D:
-	var box := BoxMesh.new()
-	box.size = Vector3(PANEL_W, PANEL_H, PANEL_T)
+	var hw := PANEL_W * 0.5 - SLAB_INSET
+	var hh := PANEL_H * 0.5 - SLAB_INSET
+	var prof := _rounded_profile(hw, hh, CORNER_R, CORNER_SEGS)
+	var ht := PANEL_T * 0.5
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := prof.size()
+	for i in n:
+		var a: Dictionary = prof[i]
+		var b: Dictionary = prof[(i + 1) % n]
+		var pa := a["p"] as Vector2
+		var pb := b["p"] as Vector2
+		var na := a["n"] as Vector2
+		var nb := b["n"] as Vector2
+		# 侧壁条：+z 沿 → -z 沿（法线=轮廓外向，弧段相邻共享方向 → 平滑着色）
+		for spec: Array in [
+				[Vector3(pa.x, pa.y, ht), na], [Vector3(pb.x, pb.y, ht), nb], [Vector3(pb.x, pb.y, -ht), nb],
+				[Vector3(pa.x, pa.y, ht), na], [Vector3(pb.x, pb.y, -ht), nb], [Vector3(pa.x, pa.y, -ht), na]]:
+			var nv := spec[1] as Vector2
+			st.set_normal(Vector3(nv.x, nv.y, 0.0))
+			st.add_vertex(spec[0] as Vector3)
+		# 前后盖板（扇形三角到中心；贴面 quad 盖在外面，盖板只在斜视/镂空角外露）
+		st.set_normal(Vector3(0.0, 0.0, 1.0))
+		st.add_vertex(Vector3(0.0, 0.0, ht))
+		st.set_normal(Vector3(0.0, 0.0, 1.0))
+		st.add_vertex(Vector3(pa.x, pa.y, ht))
+		st.set_normal(Vector3(0.0, 0.0, 1.0))
+		st.add_vertex(Vector3(pb.x, pb.y, ht))
+		st.set_normal(Vector3(0.0, 0.0, -1.0))
+		st.add_vertex(Vector3(0.0, 0.0, -ht))
+		st.set_normal(Vector3(0.0, 0.0, -1.0))
+		st.add_vertex(Vector3(pb.x, pb.y, -ht))
+		st.set_normal(Vector3(0.0, 0.0, -1.0))
+		st.add_vertex(Vector3(pa.x, pa.y, -ht))
 	var mi := MeshInstance3D.new()
 	mi.name = "Slab"
-	mi.mesh = box
-	# 侧面=手机边框：钛灰哑光（老板点名要像 iPhone；纸感由正背面卡纸+切边厚度承担）
-	mi.material_override = _paper_mat(Color(0.84, 0.82, 0.79)) # 钛灰侧框（iPhone 边框感，仍是哑光卡纸）
+	mi.mesh = st.commit()
+	mi.material_override = _paper_mat(EDGE_COLOR)
+	mi.layers = RENDER_LAYER
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi
+
+## 圆角矩形轮廓（CCW 闭合）：每点带外向法线。四个角圆弧相接，弧端点法线与
+## 直边法线一致 → 直边平直、圆角平滑，无接缝跳变。返回 [{p:Vector2, n:Vector2}]。
+static func _rounded_profile(hw: float, hh: float, r: float, segs: int) -> Array:
+	var out: Array = []
+	var corners := [
+		[Vector2(hw - r, hh - r), 0.0],
+		[Vector2(-(hw - r), hh - r), 90.0],
+		[Vector2(-(hw - r), -(hh - r)), 180.0],
+		[Vector2(hw - r, -(hh - r)), 270.0],
+	]
+	for c: Array in corners:
+		for i in segs + 1:
+			var ang := deg_to_rad(float(c[1]) + 90.0 * float(i) / float(segs))
+			var nv := Vector2(cos(ang), sin(ang))
+			out.append({ "p": (c[0] as Vector2) + nv * r, "n": nv })
+	return out
 
 ## 贴面 quad：flip=true 时绕 Y 转 180°（面朝 -Z 且从该侧看贴图左右不镜像）。
 func _add_face(id: String, parent: Node3D, pos: Vector3, flip: bool,
@@ -122,16 +249,38 @@ func _add_face(id: String, parent: Node3D, pos: Vector3, flip: bool,
 	if flip:
 		mi.rotation.y = PI
 	mi.material_override = _paper_mat(Color(0.98, 0.96, 0.90)) # 白卡纸占位
+	mi.layers = RENDER_LAYER
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(mi)
 	_faces[id] = { "mesh": mi, "size": size }
 
-## 纸面材质：unshaded 保证纸面亮度稳定（不吃场景光/world-bend），有贴图时走贴图。
+## 纸面材质：吃光的哑光卡纸（纸艺观感第一支柱——素色材质+真实光照，PaperBook 同款）。
+## 亮度稳定性不靠 unshaded，靠渲染层隔离：世界太阳不照手机、自带灯挂相机随视角走
+## （见 attach_light_rig）。粗糙度拉满零高光；双面渲染省绕序心智负担。
 static func _paper_mat(albedo: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.albedo_color = albedo
+	m.roughness = 1.0
+	m.metallic_specular = 0.0
 	return m
+
+## 自带灯 rig：挂到父节点（相机）——只照 RENDER_LAYER 的左上前方暖平行光
+## （onboarding 故事书同参）。跟相机走 → 手机相对光向恒定，环绕世界不忽明忽暗；
+## 环境光(AMBIENT_SOURCE_COLOR)无方向性天然稳定，保留补底。世界侧还需把太阳
+## light_cull_mask 去掉 RENDER_LAYER（见 world._setup_environment）。
+func attach_light_rig() -> void:
+	var parent := get_parent() as Node3D
+	if parent == null or parent.get_node_or_null("PhoneRigLight") != null:
+		return
+	var rig := DirectionalLight3D.new()
+	rig.name = "PhoneRigLight"
+	rig.light_cull_mask = RENDER_LAYER
+	rig.rotation = Vector3(-0.95, -0.35, 0.0)
+	rig.light_color = Color(1.0, 0.965, 0.90)
+	rig.light_energy = 1.05
+	rig.shadow_enabled = false
+	parent.add_child(rig)
 
 ## 给某个贴面换贴图（AIGC 纸壳 / SubViewport 屏幕都走这里）。
 ## alpha=true 时开透明（正/背面壳贴图带圆角镂空）。
@@ -150,26 +299,30 @@ func set_face_texture(id: String, tex: Texture2D, alpha := false) -> void:
 ## 建两块屏幕内容视口并贴上贴面：正面主屏(front_px) + 背面跨页(spread_px，左右页各采样一半)。
 ## Control 树由业务层(phone_ui)塞进 front_viewport()/spread_viewport()。
 func create_screens(front_px: Vector2i, spread_px: Vector2i) -> void:
-	_front_vp = _make_screen_vp(front_px)
-	_spread_vp = _make_screen_vp(spread_px)
+	_front_vp = _make_screen_vp(front_px, false)
+	# 跨页视口透明底：底图（phone3d_spread_bg）外侧角带圆角 alpha 镂空，
+	# 摊开的双页剪影才跟芯板一样圆角（die-cut），不是四角戳出的方贴图。
+	_spread_vp = _make_screen_vp(spread_px, true)
 	# 正面屏幕区：内嵌于正面壳的 quad（浮出 2ε，拾取时先于 front 命中）
 	_add_face(FACE_SCREEN, _panel_a, Vector3(0.0, 0.0, PANEL_T * 0.5 + FACE_EPS * 2.0), false,
 		Vector2(PANEL_W, PANEL_H) * SCREEN_FRAC)
-	_bind_vp_texture(FACE_SCREEN, _front_vp, Vector3.ONE, Vector3.ZERO)
+	_bind_vp_texture(FACE_SCREEN, _front_vp, Vector3.ONE, Vector3.ZERO, false)
 	# 跨页左右页：同一块 spread 视口的左半/右半（uv1 scale/offset 切）
-	_bind_vp_texture(FACE_SPREAD_L, _spread_vp, Vector3(0.5, 1.0, 1.0), Vector3.ZERO)
-	_bind_vp_texture(FACE_SPREAD_R, _spread_vp, Vector3(0.5, 1.0, 1.0), Vector3(0.5, 0.0, 0.0))
+	_bind_vp_texture(FACE_SPREAD_L, _spread_vp, Vector3(0.5, 1.0, 1.0), Vector3.ZERO, true)
+	_bind_vp_texture(FACE_SPREAD_R, _spread_vp, Vector3(0.5, 1.0, 1.0), Vector3(0.5, 0.0, 0.0), true)
 	_update_screen_activity()
 
-func _make_screen_vp(px: Vector2i) -> SubViewport:
+func _make_screen_vp(px: Vector2i, transparent: bool) -> SubViewport:
 	var vp := SubViewport.new()
 	vp.size = px
 	vp.disable_3d = true
+	vp.transparent_bg = transparent
 	vp.render_target_update_mode = SubViewport.UPDATE_DISABLED # 收起时不烧 GPU
 	add_child(vp)
 	return vp
 
-func _bind_vp_texture(face: String, vp: SubViewport, uv_scale: Vector3, uv_offset: Vector3) -> void:
+func _bind_vp_texture(face: String, vp: SubViewport, uv_scale: Vector3, uv_offset: Vector3,
+		alpha: bool) -> void:
 	var f: Dictionary = _faces.get(face, {})
 	if f.is_empty():
 		return
@@ -178,6 +331,8 @@ func _bind_vp_texture(face: String, vp: SubViewport, uv_scale: Vector3, uv_offse
 	mat.albedo_texture = vp.get_texture()
 	mat.uv1_scale = uv_scale
 	mat.uv1_offset = uv_offset
+	if alpha:
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 
 func front_viewport() -> SubViewport:
 	return _front_vp
@@ -324,6 +479,8 @@ func _apply_pose(fold_deg: float, yaw_deg: float) -> void:
 	_pivot.rotation.y = deg_to_rad(yaw_deg)
 	var spread_frac := 1.0 - fold_deg / 180.0 # 0=合拢 → 1=摊平
 	_pivot.position.x = -PANEL_W * 0.5 * spread_frac
+	if _drop_shadow != null:
+		_drop_shadow.scale.x = 1.0 + spread_frac # 摊平双倍宽，软影跟着加宽
 
 func _animate_flip(fold_to: float, yaw_to: float) -> void:
 	_kill_tween()

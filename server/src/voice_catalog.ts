@@ -33,8 +33,13 @@ export const VOICE_CATALOG: VoiceInfo[] = [
   { id: 'zh-TW-YunJheNeural', gender: '男', desc: '斯文温和的台湾腔男声，书卷气', tags: ['书生', '文静角色', '慢性子'] },
 ];
 
-/** 仙子固定音色（与预制台词 lines.json、客户端 legacy 映射一致，不参与随机分配）。 */
-export const FAIRY_VOICE = 'zh-CN-XiaoyiNeural';
+/**
+ * 点点固定音色（与预制台词 lines.json、客户端 legacy 映射一致，不参与随机分配）。
+ * 选奶声奶气小男孩音（老板 2026-07-14 拍板，见 docs/fairy-persona-design.md §2.4）：
+ * 她第三人称自称「点点」已经很幼态，音色再往尖了叠会聒噪（英文版派蒙的翻车配方）；
+ * 笔灵是器物精灵、无性别，男孩音反而强化非人感，且幼崽感触发孩子的照顾欲（怕水锚点要的）。
+ */
+export const FAIRY_VOICE = 'zh-CN-YunxiaNeural';
 
 const IDS = new Set(VOICE_CATALOG.map((v) => v.id));
 const MAIN_POOL = VOICE_CATALOG.filter((v) => v.main).map((v) => v.id);

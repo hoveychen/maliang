@@ -1,0 +1,12 @@
+{
+  "name": "vocab_demo",
+  "palette": ["#e07a9c", "#7bc47f", "#f2c14e"],
+  "blend": 0.1,
+  "outline": 0.04,
+  "parts": [
+    {"shape": "torus", "pos": [-0.7, 0.7, 0], "R": 0.5, "r": 0.16, "arc": 180, "color": 0},
+    {"shape": "torus", "pos": [0.7, 0.7, 0], "R": 0.45, "r": 0.13, "arc": 90, "color": 1}
+  ],
+  "locomotion": {"type": "none"},
+  "ropes": []
+}

@@ -293,5 +293,261 @@
         }
       }
     ]
+  },
+  "soccer": {
+    "actors": [
+      {
+        "id": "p1",
+        "name": "宝宝",
+        "isPlayer": true
+      }
+    ],
+    "cmds": [
+      {
+        "cmdId": 1,
+        "op": "spawn_ball",
+        "args": {
+          "id": "ball1",
+          "at": {
+            "x": 75,
+            "y": 75
+          }
+        }
+      },
+      {
+        "cmdId": 2,
+        "op": "hud_score",
+        "args": {
+          "id": "hud1",
+          "label": "红队"
+        }
+      },
+      {
+        "cmdId": 3,
+        "op": "hud_score",
+        "args": {
+          "id": "hud2",
+          "label": "蓝队"
+        }
+      },
+      {
+        "cmdId": 4,
+        "op": "narrate",
+        "args": {
+          "text": "踢球开始啦！把球踢进对方的球门就得分，靠近球就能踢哦！"
+        }
+      },
+      {
+        "cmdId": 5,
+        "op": "hud_countdown",
+        "args": {
+          "id": "hud3",
+          "sec": 120
+        }
+      },
+      {
+        "cmdId": -1,
+        "op": "watch",
+        "args": {
+          "subId": "s1",
+          "ev": "timer",
+          "params": {
+            "id": "hud3"
+          }
+        }
+      },
+      {
+        "cmdId": 6,
+        "op": "hud_score_add",
+        "args": {
+          "id": "hud1",
+          "n": 1
+        }
+      },
+      {
+        "cmdId": 7,
+        "op": "hud_toast",
+        "args": {
+          "text": "红队进球！1 : 0"
+        }
+      },
+      {
+        "cmdId": 8,
+        "op": "ball_reset",
+        "args": {
+          "id": "ball1",
+          "at": {
+            "x": 75,
+            "y": 75
+          }
+        }
+      },
+      {
+        "cmdId": 9,
+        "op": "hud_score_add",
+        "args": {
+          "id": "hud1",
+          "n": 1
+        }
+      },
+      {
+        "cmdId": 10,
+        "op": "hud_toast",
+        "args": {
+          "text": "红队进球！2 : 0"
+        }
+      },
+      {
+        "cmdId": 11,
+        "op": "hud_cancel",
+        "args": {
+          "id": "hud3"
+        }
+      }
+    ]
+  },
+  "eagle_and_chicks": {
+    "actors": [
+      {
+        "id": "a1",
+        "name": "老鹰",
+        "isPlayer": false,
+        "voiceId": "zh-CN-YunxiaNeural"
+      },
+      {
+        "id": "a2",
+        "name": "母鸡",
+        "isPlayer": false,
+        "voiceId": "zh-CN-XiaoxiaoNeural"
+      },
+      {
+        "id": "a3",
+        "name": "小鸡甲",
+        "isPlayer": false,
+        "voiceId": "zh-CN-XiaoyiNeural"
+      },
+      {
+        "id": "a4",
+        "name": "小鸡乙",
+        "isPlayer": false,
+        "voiceId": "zh-CN-XiaoyiNeural"
+      },
+      {
+        "id": "p1",
+        "name": "宝宝",
+        "isPlayer": true
+      }
+    ],
+    "cmds": [
+      {
+        "cmdId": 1,
+        "op": "hud_score",
+        "args": {
+          "id": "hud1",
+          "label": "抓到"
+        }
+      },
+      {
+        "cmdId": 2,
+        "op": "narrate",
+        "args": {
+          "text": "老鹰抓小鸡开始啦！母鸡带着小鸡快跑，别被老鹰抓到！"
+        }
+      },
+      {
+        "cmdId": 3,
+        "actorId": "a2",
+        "op": "follow",
+        "args": {
+          "target": "p1"
+        }
+      },
+      {
+        "cmdId": 4,
+        "actorId": "a3",
+        "op": "follow",
+        "args": {
+          "target": "a2"
+        }
+      },
+      {
+        "cmdId": 5,
+        "actorId": "a4",
+        "op": "follow",
+        "args": {
+          "target": "a3"
+        }
+      },
+      {
+        "cmdId": 6,
+        "actorId": "a1",
+        "op": "follow",
+        "args": {
+          "target": "a4"
+        }
+      },
+      {
+        "cmdId": 7,
+        "actorId": "a1",
+        "op": "stop",
+        "args": {}
+      },
+      {
+        "cmdId": 8,
+        "actorId": "a4",
+        "op": "stop",
+        "args": {}
+      },
+      {
+        "cmdId": 9,
+        "op": "hud_score_add",
+        "args": {
+          "id": "hud1",
+          "n": 1
+        }
+      },
+      {
+        "cmdId": 10,
+        "op": "hud_toast",
+        "args": {
+          "text": "小鸡乙被抓住啦！"
+        }
+      },
+      {
+        "cmdId": 11,
+        "actorId": "a1",
+        "op": "follow",
+        "args": {
+          "target": "a3"
+        }
+      },
+      {
+        "cmdId": 12,
+        "actorId": "a1",
+        "op": "stop",
+        "args": {}
+      },
+      {
+        "cmdId": 13,
+        "actorId": "a3",
+        "op": "stop",
+        "args": {}
+      },
+      {
+        "cmdId": 14,
+        "op": "hud_score_add",
+        "args": {
+          "id": "hud1",
+          "n": 1
+        }
+      },
+      {
+        "cmdId": 15,
+        "op": "hud_toast",
+        "args": {
+          "text": "小鸡甲被抓住啦！"
+        }
+      }
+    ]
   }
 }

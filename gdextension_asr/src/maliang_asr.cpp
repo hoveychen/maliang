@@ -11,6 +11,15 @@
 #include <string>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(__APPLE__) && TARGET_OS_IOS
+// platform_ios.mm 里的实现（AVAudioSession.recordPermission）；只在 iOS 编 .mm。
+extern "C" int maliang_ios_mic_permission_status();
+#endif
+
 using namespace godot;
 
 // 与 Android 插件、服务端 local.ts 完全同一套权重（int8 encoder/joiner + fp32 decoder）。
@@ -27,6 +36,9 @@ void MaliangAsr::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("feedPcm", "chunk"), &MaliangAsr::feed_pcm);
 	ClassDB::bind_method(D_METHOD("stop_session"), &MaliangAsr::stop_session);
 	ClassDB::bind_method(D_METHOD("stopSession"), &MaliangAsr::stop_session);
+	// iOS 麦克风权限查询（0=未定/1=拒/2=授；非 iOS 恒 2）。Godot GDScript 读不到 iOS 麦权限，
+	// 靠这个原生方法给 MicPermission 门禁判定；client 缺单例时按 granted 处理不拦（见 MicPermission）。
+	ClassDB::bind_method(D_METHOD("ios_mic_permission"), &MaliangAsr::ios_mic_permission);
 
 	// 与 Android 插件对齐的信号（world.gd 连接 final_result/asr_error/asr_ready）。
 	ADD_SIGNAL(MethodInfo("asr_ready"));
@@ -162,6 +174,14 @@ void MaliangAsr::initialize() {
 
 bool MaliangAsr::is_ready() const {
 	return _ready.load();
+}
+
+int MaliangAsr::ios_mic_permission() const {
+#if defined(__APPLE__) && TARGET_OS_IOS
+	return maliang_ios_mic_permission_status();
+#else
+	return 2; // 非 iOS（Android/桌面/headless）：麦权限不归本插件管，恒「已授予」不拦截。
+#endif
 }
 
 void MaliangAsr::start_session() {

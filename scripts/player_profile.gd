@@ -1,12 +1,17 @@
 class_name PlayerProfile
 extends RefCounted
 ## 玩家档案（user://profile.json）。onboarding 写入，菜单/世界读取。
-## 字段：name(名字) nickname(称呼) gender(boy/girl) color(喜欢的颜色名)
-##       likes(喜欢的东西) interest(兴趣) intro(自我介绍原文)
+## 字段：name(名字) nickname(称呼) gender(boy/girl,音色映射/presence 旧口径) color(主色)
+##       intro(自我介绍原文) avatar_attrs(形象对话结构化属性,服务端 AvatarAttrs 同键)
+##       visual_description(LLM 合成的外观描述,refine 后为最新版)
 ##       sprite_asset(服务端形象资产 hash) created_at(ISO 时间)
-## 档案是设备本地的：形象资产内容寻址存服务端，名字等只进本机——不建服务端玩家实体。
+##       likes/interest 是旧版 4 题的遗留字段（老档案还有,新档案不再写）。
+## 本地档案是主档（离线可玩的根基）；onboarding 完成时另全量上报服务端副本
+## （POST /onboarding/profile，见 docs/onboarding-avatar-redesign-design.md §2.5）。
 
 const PATH := "user://profile.json"
+const BAK_PATH := "user://profile.json.bak"  ## 上一版（save 时轮转，load 损坏兜底）
+const TMP_PATH := "user://profile.json.tmp"  ## 原子写中转（写满再 rename 顶替主档）
 
 static func exists() -> bool:
 	return FileAccess.file_exists(PATH)
@@ -19,32 +24,64 @@ static func has_character() -> bool:
 	var p := load_profile()
 	return not String(p.get("name", "")).is_empty() or not String(p.get("sprite_asset", "")).is_empty()
 
-## 读档案；缺失/损坏返回空字典。
+## 读档案；缺失返回空字典。主档【存在但坏】（撕裂写/写一半崩溃/并发读改写撞上半截 JSON）
+## 时退上一版备份——绝不能把 {} 流出去：所有 save_* 都是 read-modify-write，{} 一旦被
+## 当作基底再落盘，name/sprite_asset 就整档冲掉（开发机档案被抹三次的根因，见 test）。
 static func load_profile() -> Dictionary:
-	var f := FileAccess.open(PATH, FileAccess.READ)
+	var d: Variant = _read_json(PATH)
+	if d != null:
+		return d
+	if FileAccess.file_exists(PATH):
+		var bak: Variant = _read_json(BAK_PATH)
+		if bak != null:
+			return bak
+	return {}
+
+## 读 JSON 字典；null=读不到/解析失败（与「合法的空字典 {}」区分——把 {} 当损坏会
+## 让 load 错误回退 .bak，clear 掉的 graphics 就还魂了，test_graphics_settings 抓过）。
+static func _read_json(path: String) -> Variant:
+	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
-		return {}
+		return null
 	var data: Variant = JSON.parse_string(f.get_as_text())
 	if typeof(data) != TYPE_DICTIONARY:
-		return {}
+		return null
 	return data
 
+## 原子落盘：写满 tmp 再 rename 顶替（同目录 rename 原子）——读者永远只见完整 JSON，
+## 不再有「截断式 WRITE 写一半」的窗口。顶替前把上一版挪去 .bak 供 load 的损坏兜底。
 static func save_profile(p: Dictionary) -> void:
-	var f := FileAccess.open(PATH, FileAccess.WRITE)
+	var f := FileAccess.open(TMP_PATH, FileAccess.WRITE)
 	if f == null:
-		push_warning("玩家档案写入失败: %s" % PATH)
+		push_warning("玩家档案写入失败: %s" % TMP_PATH)
 		return
 	f.store_string(JSON.stringify(p, "  "))
+	f.close()
+	if FileAccess.file_exists(PATH):
+		DirAccess.rename_absolute(ProjectSettings.globalize_path(PATH),
+			ProjectSettings.globalize_path(BAK_PATH))
+	var err := DirAccess.rename_absolute(ProjectSettings.globalize_path(TMP_PATH),
+		ProjectSettings.globalize_path(PATH))
+	if err != OK:
+		push_warning("玩家档案落盘失败(rename=%d): %s" % [err, PATH])
 
+## 删档连 .bak/.tmp 一起：否则删完 load 从备份还魂。
 static func clear() -> void:
-	if exists():
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(PATH))
+	for path in [PATH, BAK_PATH, TMP_PATH]:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
-## 档案答案 → 形象描述（onboarding 生成与设置页「换形象」共用，防两处文案漂移；
-## 风格/朝向后缀由服务端生图管线统一拼接）。字段缺失时用兜底词，旧档案也能拼。
+## 档案 → 形象描述（设置页「换形象」与 onboarding 兜底共用，防两处文案漂移；
+## 风格/朝向后缀由服务端生图管线统一拼接）。
+## 首选形象对话产出的 visual_description（LLM 合成、含 refine 累积）；老档案没有它时
+## 退旧字段模板——模板已按新硬规则重写：双手空着、喜好转为衣服图案，绝不再「抱着玩偶」
+## （旧模板的「抱着一只%s玩偶」正是生成形象手上拿东西的根源，见 onboarding 重做设计 §1.3）。
 static func avatar_description(p: Dictionary) -> String:
+	var vd := String(p.get("visual_description", ""))
+	if not vd.is_empty():
+		return vd
 	var who := "小男孩" if String(p.get("gender", "")) == "boy" else "小女孩"
-	return "一个可爱的%s形象，穿着%s的衣服，抱着一只%s玩偶，一看就很喜欢%s" % [
+	return "一个可爱的%s，穿着%s的衣服，衣服上印着%s图案，一看就很喜欢%s，双手空空的自然垂在身边，没有拿任何东西" % [
 		who, String(p.get("color", "彩色")),
 		String(p.get("likes", "小兔子")), String(p.get("interest", "玩耍"))]
 
@@ -77,6 +114,16 @@ static func intro_seen() -> bool:
 static func mark_intro_seen() -> void:
 	var p := load_profile()
 	p["intro_seen"] = true
+	save_profile(p)
+
+## 语音确认模式（小龄玩家）：说完先回放一遍自己的话，点「就是这样」才发出去。
+## 家长/老师在手机设置里开；缺省关（大孩子说完就发，不打断节奏）。见 VoiceCapture.confirm_mode。
+static func confirm_voice() -> bool:
+	return bool(load_profile().get("confirm_voice", false))
+
+static func set_confirm_voice(on: bool) -> void:
+	var p := load_profile()
+	p["confirm_voice"] = on
 	save_profile(p)
 
 ## 确保档案里有稳定玩家 id：设备端「开始新游戏」时生成的 UUID（面向未来 MMO / QR 换机迁移）。

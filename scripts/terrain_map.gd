@@ -27,13 +27,82 @@ const T_PATH := 1
 const T_WATER := 2
 ## 扩展可行走地表（world-themes P1）：3/4 是 TerrainAtlas 崖唇/崖壁 B 码，不作 tile 类型，故从 5 起。
 ## 与 server terrain.ts T_SAND/SNOW/TILE 及 shader body-type ty 5/6/7 一一对应。
-const T_SAND := 5   ## 沙地
+const T_SAND := 5   ## 沙地（海底：细沙）
 const T_SNOW := 6   ## 雪地
 const T_TILE := 7   ## 瓷砖地板
+## 海底主题地表（themed-terrain P2）：与 server terrain.ts 及 TerrainTextures 层映射一一对应。
+const T_COARSE_SAND := 8  ## 粗沙
+const T_CORAL_SAND := 9   ## 珊瑚砂
+const T_REEF := 10        ## 礁岩（可抬高，礁岩侧壁）
+const T_SEAGRASS := 11    ## 海草地
+const T_DEEP_BED := 12    ## 深水床（暗）
+## 冰雪世界主题地表（themed-terrain P3）：与 server terrain.ts 及 TerrainTextures 层映射一一对应。
+const T_PACKED_SNOW := 13 ## 压实雪
+const T_ICE := 14         ## 冰面（结冰水共用此面）
+const T_SLUSH := 15       ## 雪泥/融雪
+const T_ROCK_SNOW := 16   ## 裸岩积雪（可抬高，岩壁）
+## 侏罗纪主题地表（themed-terrain P3）：与 server terrain.ts 及 TerrainTextures 层映射一一对应。
+const T_CRACKED_EARTH := 17 ## 干裂土（中国夯土/罗马斗兽场沙土共用）
+const T_VOLCANIC := 18      ## 火山岩（可抬高）
+const T_MUD_BOG := 19       ## 泥沼
+const T_FERN := 20          ## 蕨类草地
+const T_RUBBLE := 21        ## 碎石（罗马碎石共用）
+## 中世纪主题地表（themed-terrain P3）：与 server terrain.ts 及 TerrainTextures 层映射一一对应。
+const T_COBBLE := 22        ## 鹅卵石（中国卵石庭共用）
+const T_STONE_SLAB := 23    ## 石板（中国青石板/罗马石板共用，可抬高）
+const T_FARM_FURROW := 24   ## 农田垄
+## 罗马主题地表（themed-terrain P3）：罗马石板复用 T_STONE_SLAB、碎石复用 T_RUBBLE、斗兽场沙土复用 T_CRACKED_EARTH。
+const T_MARBLE := 25        ## 大理石（可抬高）
+const T_MOSAIC := 26        ## 马赛克地
+## 中国古代主题地表（themed-terrain P3）：青石板复用 T_STONE_SLAB、夯土复用 T_CRACKED_EARTH、卵石庭复用 T_COBBLE。
+const T_WOOD_FLOOR := 27    ## 木地板（廊；玩具/厨房共用，可抬高）
+## 现代城市主题地表（themed-terrain P3）：与 server terrain.ts 及 TerrainTextures 层映射一一对应。
+const T_ASPHALT := 28       ## 沥青
+const T_PAVER_BRICK := 29   ## 人行道砖（可抬高）
+const T_CROSSWALK := 30     ## 斑马线
+const T_CONCRETE := 31      ## 水泥（未来混凝土/医院手术室共用，可抬高）
+const T_LAWN_GRID := 32     ## 草坪格
+## 玩具房间主题地表（themed-terrain P3）：木地板/瓷砖复用现有类型。
+const T_CARPET_RED := 33    ## 地毯红
+const T_CARPET_BLUE := 34   ## 地毯蓝
+const T_PUZZLE_MAT := 35    ## 拼图垫
+## 厨房主题地表（themed-terrain P3）：白瓷砖/木地板复用现有类型。
+const T_CHECKER_TILE := 36  ## 格纹地砖
+const T_ANTISLIP := 37      ## 防滑垫（医院防滑走廊共用）
+## 医院主题地表（themed-terrain P3）：白瓷砖复用 T_TILE、手术室地复用 T_CONCRETE、防滑走廊复用 T_ANTISLIP。
+const T_MED_VINYL_GREEN := 38 ## 医用地胶浅绿
+const T_MED_VINYL_BLUE := 39  ## 医用地胶浅蓝
+## 未来机器人主题地表（themed-terrain P3）：混凝土复用 T_CONCRETE。
+const T_METAL_PLATE := 40   ## 金属板（可抬高）
+const T_GRATING := 41       ## 格栅
+const T_GLOW_TILE := 42     ## 发光地砖
+const T_HAZARD := 43        ## 警戒条纹地
+const T_TOY_WALL := 44      ## 玩具房间墙面（室内房间围墙，抬高成四壁）
+const T_KITCHEN_WALL := 45  ## 厨房墙面（室内房间围墙，抬高成四壁）
+const T_HOSPITAL_WALL := 46 ## 医院墙面（室内房间围墙，抬高成四壁）
+const T_FUTURE_WALL := 47   ## 未来舱壁墙面（室内房间围墙，抬高成四壁）
 ## 合法存储 tile 类型（校验/autotile 分组用）。
-const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE]
+const VALID_TYPES := [T_GRASS, T_PATH, T_WATER, T_SAND, T_SNOW, T_TILE,
+	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
+	T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW,
+	T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE,
+	T_COBBLE, T_STONE_SLAB, T_FARM_FURROW, T_MARBLE, T_MOSAIC, T_WOOD_FLOOR,
+	T_ASPHALT, T_PAVER_BRICK, T_CROSSWALK, T_CONCRETE, T_LAWN_GRID,
+	T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT,
+	T_CHECKER_TILE, T_ANTISLIP, T_MED_VINYL_GREEN, T_MED_VINYL_BLUE,
+	T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD, T_TOY_WALL,
+	T_KITCHEN_WALL, T_HOSPITAL_WALL, T_FUTURE_WALL]
 ## 「画在草底上的 body」类型（autotile 与邻居同类过渡）：路 + 新增地表；水另走整格湖床。
-const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE]
+const BODY_TYPES := [T_PATH, T_SAND, T_SNOW, T_TILE,
+	T_COARSE_SAND, T_CORAL_SAND, T_REEF, T_SEAGRASS, T_DEEP_BED,
+	T_PACKED_SNOW, T_ICE, T_SLUSH, T_ROCK_SNOW,
+	T_CRACKED_EARTH, T_VOLCANIC, T_MUD_BOG, T_FERN, T_RUBBLE,
+	T_COBBLE, T_STONE_SLAB, T_FARM_FURROW, T_MARBLE, T_MOSAIC, T_WOOD_FLOOR,
+	T_ASPHALT, T_PAVER_BRICK, T_CROSSWALK, T_CONCRETE, T_LAWN_GRID,
+	T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT,
+	T_CHECKER_TILE, T_ANTISLIP, T_MED_VINYL_GREEN, T_MED_VINYL_BLUE,
+	T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD, T_TOY_WALL,
+	T_KITCHEN_WALL, T_HOSPITAL_WALL, T_FUTURE_WALL]
 const MAX_HEIGHT := 255   ## 数据上限（存储为 byte）；默认地形主峰只到 8 级
 const STEP_HEIGHT := 2.0  ## 每级台阶的世界高度（米）= 1 格（tile 边长）；相邻 tile 跳变可超 1 级（陡崖）
 const MAX_DEPTH := 2      ## 默认地形的最大水深级数（1=浅水 2=深水；湖床 = 高度 - 深度）

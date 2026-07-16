@@ -70,23 +70,57 @@ func _load_image_buf(buf: PackedByteArray) -> Image:
 	return null if e != OK else img
 
 ## 同步解码（测试/小图用）。
-func _decode_image(buf: PackedByteArray) -> Texture2D:
+func _decode_image(buf: PackedByteArray, gpu_compress := false) -> Texture2D:
 	var img := _load_image_buf(buf)
-	return null if img == null else ImageTexture.create_from_image(img)
+	if img == null:
+		return null
+	if gpu_compress:
+		_compress_for_gpu(img)
+	return ImageTexture.create_from_image(img)
 
 ## 异步解码：PNG/WebP 解码搬 WorkerThreadPool——大图集解码几十 ms 级，主线程做
-## 会在下载完成/缓存命中瞬间卡帧。线程里只做 Image 解码（线程安全），
+## 会在下载完成/缓存命中瞬间卡帧。线程里只做 Image 解码 + 块压缩（都是纯 CPU、线程安全），
 ## ImageTexture.create_from_image 回主线程（涉及 RenderingServer 上传）。
-func _decode_image_async(buf: PackedByteArray) -> Texture2D:
+func _decode_image_async(buf: PackedByteArray, gpu_compress := false) -> Texture2D:
 	var out: Array = [null]
-	var task := WorkerThreadPool.add_task(func() -> void: out[0] = _load_image_buf(buf))
+	var task := WorkerThreadPool.add_task(func() -> void:
+		var im := _load_image_buf(buf)
+		if im != null and gpu_compress:
+			_compress_for_gpu(im)
+		out[0] = im)
 	while not WorkerThreadPool.is_task_completed(task):
 		await get_tree().process_frame
 	WorkerThreadPool.wait_for_task_completion(task)  # 完成后仍需 wait 回收任务句柄
 	var img: Image = out[0]
 	return null if img == null else ImageTexture.create_from_image(img)
 
-## 新建世界（后端会种入小神仙）。失败返回空字典。
+## 动画图集的显存块压缩。
+##
+## 为什么必须压：一张三段图集是 93 帧 × ~200×256，未压缩 RGBA8 上传 ≈ 17MB 显存/角色。
+## 一个场景八九个村民就是 150MB——老 Mali 平板扛不住。块压缩到 1 字节/像素（4×），
+## 三套动画反而比压缩前的一套（~6MB）还省。实测 996×1536 的图集压一次只要 4ms。
+##
+## cell 宽高在服务端已对齐到 4 的倍数（sprite_sheet.ts）：块压缩以 4×4 为块，不对齐的话
+## 一个块会横跨相邻两格的边界，压完帧与帧串色。
+##
+## 格式按平台选：移动端 GLES3/Vulkan 一律有 ETC2；桌面 GPU 一律有 S3TC/BC。反过来都不保证
+## （桌面对 ETC2 的支持很参差）。都没有就不压——退回未压缩，只是费显存，不会坏。
+func _compress_for_gpu(img: Image) -> void:
+	if img.is_compressed():
+		return
+	var mode := -1
+	if OS.has_feature("mobile") or OS.has_feature("android") or OS.has_feature("ios"):
+		if OS.has_feature("etc2"):
+			mode = Image.COMPRESS_ETC2
+	elif OS.has_feature("s3tc"):
+		mode = Image.COMPRESS_S3TC
+	if mode < 0:
+		return
+	# 失败（尺寸不合法/格式不支持）只是没压成，img 保持未压缩可用——不让它把整张贴图弄丢。
+	if img.compress(mode as Image.CompressMode, Image.COMPRESS_SOURCE_SRGB) != OK:
+		push_warning("图集显存压缩失败（回退未压缩）：%dx%d" % [img.get_width(), img.get_height()])
+
+## 新建世界（后端会种入点点）。失败返回空字典。
 func create_world() -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)
@@ -117,6 +151,13 @@ func get_json(path: String) -> Dictionary:
 	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
 	return data if typeof(data) == TYPE_DICTIONARY else {}
 
+## 物品缩略图映射（item_id → 资产 hash）：公开只读端点，背包物品页混合来源的「服务端已烧图」半边
+## （docs/backpack-page-redesign-design.md §2）。失败/无图返回空字典，调用方回退客户端现场渲染。
+func fetch_item_icons() -> Dictionary:
+	var data := await get_json("/item-icons")
+	var icons: Variant = data.get("icons", {})
+	return icons if typeof(icons) == TYPE_DICTIONARY else {}
+
 ## 拉取指定世界状态（含角色）。失败返回空字典。
 func get_world(id: String) -> Dictionary:
 	var http := HTTPRequest.new()
@@ -134,10 +175,11 @@ func get_world(id: String) -> Dictionary:
 	return data if typeof(data) == TYPE_DICTIONARY else {}
 
 ## POST JSON → JSON。失败/非 200 返回空字典。
-func post_json(path: String, body: Dictionary) -> Dictionary:
+## timeout_sec 可按调用方收紧（如 onboarding 对话一轮 15s 就该降级，不值得陪满 40s）。
+func post_json(path: String, body: Dictionary, timeout_sec := REQUEST_TIMEOUT_SEC) -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)
-	http.timeout = REQUEST_TIMEOUT_SEC # 服务端 hang 时不让界面永久转圈（见常量注释）
+	http.timeout = timeout_sec # 服务端 hang 时不让界面永久转圈（见常量注释）
 	var err := http.request(base + path, PackedStringArray(["Content-Type: application/json"]),
 		HTTPClient.METHOD_POST, JSON.stringify(body))
 	if err != OK:
@@ -206,7 +248,11 @@ func fetch_terrain(world_id: String, scene_id: String, version := 0) -> Dictiona
 
 ## 拉取资源 hash → Texture2D（PNG/WebP/JPG）。失败返回 null。
 ## 三级取源：内存已解码缓存 → 磁盘缓存（免网络）→ 下载后落盘+进内存。资产内容寻址故缓存永不失效。
-func fetch_texture(asset_hash: String) -> Texture2D:
+##
+## gpu_compress：解码后做显存块压缩（见 _compress_for_gpu）。动画图集走 true——它是显存大头
+## （三段 93 帧，未压缩 ~17MB/角色）。静态立绘/图标走 false：它们小，且会被放大了给孩子看，
+## 块压缩的色块瑕疵在大尺寸上更容易被看出来。
+func fetch_texture(asset_hash: String, gpu_compress := false) -> Texture2D:
 	if asset_hash.is_empty():
 		return null
 	if _tex_mem.has(asset_hash):
@@ -214,7 +260,7 @@ func fetch_texture(asset_hash: String) -> Texture2D:
 	# 磁盘缓存命中：解码后进内存，直接返回，不发网络请求
 	var cached := _cache_read(asset_hash)
 	if not cached.is_empty():
-		var ctex := await _decode_image_async(cached)
+		var ctex := await _decode_image_async(cached, gpu_compress)
 		if ctex != null:
 			_tex_mem[asset_hash] = ctex
 			return ctex
@@ -230,7 +276,7 @@ func fetch_texture(asset_hash: String) -> Texture2D:
 	if int(res[1]) != 200:
 		return null
 	var buf := res[3] as PackedByteArray
-	var tex := await _decode_image_async(buf)
+	var tex := await _decode_image_async(buf, gpu_compress)
 	if tex == null:
 		return null
 	_cache_write(asset_hash, buf) # 落盘供下次免下载（内容寻址，永久有效）

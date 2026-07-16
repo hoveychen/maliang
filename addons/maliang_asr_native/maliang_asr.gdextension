@@ -8,3 +8,20 @@ reloadable = true
 macos.editor = "res://addons/maliang_asr_native/bin/libmaliang_asr.macos.editor.framework"
 macos.debug = "res://addons/maliang_asr_native/bin/libmaliang_asr.macos.template_debug.framework"
 macos.release = "res://addons/maliang_asr_native/bin/libmaliang_asr.macos.template_release.framework"
+; iOS 只有真机 arm64，且必须是**静态库**——Godot 导出时静态链进 Xcode 工程并生成
+; extension loader 调 entry_symbol（.a 里已用 libtool 合并了 godot-cpp 的符号）。
+ios.debug = "res://addons/maliang_asr_native/bin/libmaliang_asr.ios.template_debug.arm64.a"
+ios.release = "res://addons/maliang_asr_native/bin/libmaliang_asr.ios.template_release.arm64.a"
+
+[dependencies]
+; sherpa/onnxruntime 在 iOS 上也是静态的，交给 Xcode 工程链接。
+ios.debug = {
+"res://addons/maliang_asr_native/bin/sherpa-onnx.xcframework": "",
+"res://addons/maliang_asr_native/bin/onnxruntime.xcframework": "",
+"res://addons/maliang_asr_native/bin/asr-models": ""
+}
+ios.release = {
+"res://addons/maliang_asr_native/bin/sherpa-onnx.xcframework": "",
+"res://addons/maliang_asr_native/bin/onnxruntime.xcframework": "",
+"res://addons/maliang_asr_native/bin/asr-models": ""
+}

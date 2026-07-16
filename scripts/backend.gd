@@ -3,6 +3,8 @@ extends Node
 ## 后端 WS 客户端：连接 maliang-server，发造角色/语音请求，收进度/回应。
 
 signal connected
+## 连接断开（曾 open 后转 closed）：供手机状态栏改信号格、也标记进入重连退避
+signal disconnected
 signal character_response(data: Dictionary)
 signal tts_chunk(pcm: PackedByteArray)
 signal tts_end
@@ -11,12 +13,20 @@ signal gen_complete(data: Dictionary)      ## 含 character + 最新 wallet
 signal gen_denied(data: Dictionary)        ## 小红花不足，未进造角色（reason=no_flowers + 引导语 + wallet）
 ## 引导式造角色：小仙子追问一轮（含图标选项 + 仙子问句 TTS 资源 + goal 决定占位符）
 signal creation_prompt(data: Dictionary)
+## 积木式造物追问一轮（build，docs/kids-thinking-build-from-parts.md）：与 creation_prompt 平行，
+## 多带 blueprintId + slotId（当前要填的槽，客户端点亮发光）+ options（该槽兼容零件盘）。
+signal build_prompt(data: Dictionary)
+## 复用改装（B1，§3.1）：进「拆开改改」时取回本蓝图每槽的兼容零件表 {blueprintId, options:{slotId:[{id,label,renderRef}]}}
+signal build_options(data: Dictionary)
 ## 引导会话被取消（小朋友说「算了/不要了」，服务端 guide 判的）：收创造视图 + 收占位符 + 念安抚语
 signal creation_cancelled(data: Dictionary)
 signal prop_pending(data: Dictionary)      ## 造物开工（已扣花）：客户端立起魔法熔炉，含最新 wallet
 signal item_created(data: Dictionary)      ## 造物落成：{ item(实体行), wallet, bag }（万物皆物品）
+signal item_updated(data: Dictionary)      ## 造物就地更新（B3 起名回填 nameVoiceAsset/nameText）：{ worldId, item }
 signal prop_denied(data: Dictionary)       ## 小红花不足，未造物（reason=no_flowers + 引导语 + wallet）
 signal prop_failed(reason: String)
+signal sticker_pending(data: Dictionary)   ## 造贴纸开工（已扣花）：客户端立起魔法画板占位符，含最新 wallet
+signal sticker_failed(reason: String)      ## 造贴纸失败（审核/异常）：退花已由服务端处理，客户端出 oops 提示
 signal bag_update(data: Dictionary)        ## 背包变化（摆放/拾起后）：{ worldId, bag }
 signal sticker_bought(data: Dictionary)    ## 贴纸小铺购入：{ worldId, itemId, bag, wallet }
 signal sticker_denied(data: Dictionary)    ## 小红花不足未买成：{ worldId, reason, wallet }
@@ -28,7 +38,13 @@ signal failed(reason: String)
 # 奖赏系统：world_info 后的状态同步 / 委托完成盖章升花
 signal world_state(data: Dictionary)
 signal task_complete(data: Dictionary)
+## 村民的心愿漏话候选 + 玩家已发现的玩法（服务端持久口径，进世界/换场景/发现新玩法后重发）。
+signal npc_wishes(wishes: Array, discovered: Array, reuse_hint: Variant)  ## reuse_hint: {itemId,itemName} 或 null（B3 复用提示）
 signal praise_tts(data: Dictionary)
+## 试用·还差一点（A1）：造物类心愿造成功后开「试用」——村民抱怨差一点，出变大/变小箭头调体型。
+signal wish_trial(data: Dictionary)      ## {npcId, itemRef, refineDir, fromSize, complaint, voiceId, fairyHint}
+signal wish_retry(data: Dictionary)      ## 调反(未达上限)：仙子升级问句 {npcId, itemRef, refineDir, tries, fairyHint}
+signal character_resized(data: Dictionary) ## 角色体型改了(服务端重渲染广播){characterId, size, scale}
 ## tts_request 降级流（客户端 edge-tts 失败求服务端合成）：tts_start 带 mime，随后 tts_chunk/tts_end 同一通道
 signal tts_start(mime: String)
 signal tts_failed
@@ -39,7 +55,9 @@ signal stage_end(data: Dictionary)     ## 正常收场：{stageId, result?}
 signal stage_abort(data: Dictionary)   ## 异常终止：{stageId, reason}
 signal world_host(is_host: bool)       ## 多人所有权：本连接是否为 host（首位进入者，负责 NPC 模拟）
 signal time_sync(data: Dictionary)     ## 时间握手回执：{t0, serverMs}（倒计时/插值时间戳用）
-signal positions_relay(data: Dictionary) ## 其他端复制位置：{t, chars:[{id,x,y}], player?:{id,x,y}}（远端演员插值渲染）
+signal positions_relay(data: Dictionary) ## 其他端复制位置：{t, chars:[{id,x,y}], player?:{id,x,y}, balls?:[{id,x,y,vx,vy}]}（远端演员/球插值渲染）
+signal ball_kick(data: Dictionary)     ## 他端踢球（C 档）：{ballId, playerId, x, y, vx, vy, t}——转所有权给踢者 + 播种复制缓冲
+signal ball_settle(data: Dictionary)   ## 他端球滚停（C 档）：{ballId, x, y, t}——所有权交回 host 中立
 signal actor_leave(player_id: String)  ## 某玩家离场：即时清掉其远端副本（不等插值缓冲陈旧）
 ## 在场玩家名单（进世界/换场景时一次性下发）：{ sceneId, actors:[{playerId,name,spriteAsset,tile?}] }。
 ## 位置流只在人动起来时才发，光靠它静止的玩家在本端根本不存在——presence 让进场即可见。
@@ -73,39 +91,74 @@ var _open := false
 ## 当前玩家 id（设备端稳定 UUID）：由 world.gd bootstrap 时从档案设入，_send 统一注入每条消息。
 var player_id := ""
 
+## 自动重连（弱网/半开连接兜底）：connect_to_server 起意后，断线即指数退避重拨，
+## 重连成功走 _open false→true 复用 connected 信号自动重握手（world.gd 已连好 _send_world_info+time_sync）。
+const RECONNECT_BASE_S := 1.0   ## 首次退避
+const RECONNECT_MAX_S := 15.0   ## 退避封顶
+var _should_reconnect := false  ## 是否要维持连接（connect 起、disconnect_from_server 止）
+var _reconnect_backoff := RECONNECT_BASE_S ## 当前退避时长（连上即重置为 base）
+var _reconnect_wait := 0.0      ## 距下次重拨的倒计时
+
+## 心跳（app 层 JSON ping/pong）：客户端定时发 ping，服务端回 pong。
+## 任意回包都算「链路活着」；超时无任何回包即判半开连接，强制关连触发上面的自动重连。
+const PING_INTERVAL_S := 10.0    ## 发 ping 间隔
+const HEARTBEAT_TIMEOUT_S := 30.0 ## 无任何回包多久判死（三个 ping 周期）
+var _ping_accum := 0.0          ## 距下次发 ping 的累计
+var _since_rx := 0.0            ## 距上次收到任意回包的累计
+
 ## WS 是否已连上（供手机状态栏信号格显示网络是否通畅）。
 func is_online() -> bool:
 	return _open
 
 func connect_to_server() -> void:
+	_should_reconnect = true
+	_reconnect_backoff = RECONNECT_BASE_S
+	_reconnect_wait = 0.0
+	_open_socket()
+
+## 主动断开（离开世界/退出）：停掉自动重连，避免后台不停重拨。
+func disconnect_from_server() -> void:
+	_should_reconnect = false
+	_ws.close()
+	_open = false
+
+func _open_socket() -> void:
+	# CLOSED 的 WebSocketPeer 不复用（残留状态），每次重拨换新 peer。
+	_ws = WebSocketPeer.new()
 	# 默认入站缓冲 64KB：慢帧场景（录屏/低端机）下一帧间隔内的 TTS 分片突发
 	# 会撑爆缓冲直接断连，后续推送（如 item_created）全部丢失——调大到 2MB。
 	_ws.inbound_buffer_size = 2 * 1024 * 1024
+	# 默认出站缓冲也是 64KB：起名录音 name_creation 带 base64 WAV（~150KB+）会撑爆它，
+	# send_text 直接 ERR_OUT_OF_MEMORY 把消息丢在客户端、服务端根本收不到——孩子的名字静默丢失
+	# （真机 voice-e2e 抓到：客户端显示「起好名字啦」但服务端 nameVoiceAsset 永远为空）。调大到 2MB。
+	_ws.outbound_buffer_size = 2 * 1024 * 1024
 	_ws.connect_to_url(full_url())
 
-## 连接 URL 带 clientTts=1 能力声明：服务端全程跳过 TTS 合成只发文本+voiceId，
-## 客户端 edge-tts 本地合成；edge 不通时逐句 send_tts_request 降级（服务端仍保留全套 TTS）。
+## 退避序列：翻倍封顶。抽成纯函数供单测。
+func _next_backoff(cur: float) -> float:
+	return minf(cur * 2.0, RECONNECT_MAX_S)
+
+## 心跳步进（抽出供单测）：到点发 ping；有回包则复位活跃时钟，否则累计。
+## 返回是否已超时（无任何回包超过 HEARTBEAT_TIMEOUT_S）——调用方据此强制关连。
+func _step_heartbeat(delta: float, got_rx: bool) -> bool:
+	_since_rx = 0.0 if got_rx else _since_rx + delta
+	_ping_accum += delta
+	if _ping_accum >= PING_INTERVAL_S:
+		_ping_accum = 0.0
+		_send({ "type": "ping" })
+	return _since_rx > HEARTBEAT_TIMEOUT_S
+
+## 连接 URL 带能力声明：clientTts=1 服务端跳过 TTS 合成只发文本+voiceId（edge-tts 本地合成，
+## 不通时 send_tts_request 降级）；posbin=1 声明支持位置流二进制帧（服务端回执 world_state.posBin
+## 确认后才切二进制上行，防老服务端；下行 posBin 成员直接收二进制）。
 func full_url() -> String:
-	return url + ("&" if url.contains("?") else "?") + "clientTts=1"
+	return url + ("&" if url.contains("?") else "?") + "clientTts=1&posbin=1"
 
-func send_voice(world_id: String, character_id: String, audio_b64: String, fmt := "audio/wav") -> void:
-	_send({ "type": "voice_input", "worldId": world_id, "characterId": character_id, "audio": audio_b64, "format": fmt })
+## 服务端是否确认二进制位置流(world_state.posBin 回执)。确认前上行仍走 JSON——防打到不懂二进制的老服务端。
+var _posbin_ok := false
 
-## 边录边传：录音开始即开会话，录音中持续发分片，松手发 voice_end 收尾。
-func send_voice_start(world_id: String, character_id: String) -> void:
-	_send({ "type": "voice_start", "worldId": world_id, "characterId": character_id })
-
-func send_voice_chunk(audio_b64: String) -> void:
-	_send({ "type": "voice_chunk", "audio": audio_b64 })
-
-func send_voice_end() -> void:
-	_send({ "type": "voice_end" })
-
-## 误触取消（按住说话太短就松手）：服务端丢弃本次会话，不回任何包。
-func send_voice_cancel() -> void:
-	_send({ "type": "voice_cancel" })
-
-## 端侧 ASR：平板本地已识别，只上传文本（跳过服务端 ASR）。
+## 语音上行只有这一个口：端侧 ASR（Android 插件 / macOS GDExtension）识别好文本再送，
+## 音频永不上传。服务端 ASR（voice_input 整段 / voice_start+chunk+end 流式）已整条退役。
 func send_voice_transcript(world_id: String, character_id: String, transcript: String) -> void:
 	_send({ "type": "voice_transcript", "worldId": world_id, "characterId": character_id, "transcript": transcript })
 
@@ -131,9 +184,23 @@ func send_create_character(world_id: String, intent_text: String) -> void:
 func send_creation_reply(world_id: String, character_id: String, option_id: String) -> void:
 	_send({ "type": "creation_reply", "worldId": world_id, "characterId": character_id, "optionId": option_id })
 
+## 复用改装（B1，§3.1）：取回本蓝图每槽的兼容零件表（进「拆开改改」时调，回执走 build_options 信号）。
+func send_build_options(world_id: String, blueprint_id: String) -> void:
+	_send({ "type": "build_options", "worldId": world_id, "blueprintId": blueprint_id })
+
+## 复用改装落成（B1，§3.1）：把编辑后的零件树直接送去落成一行**新** ItemDef（旧的保留），无会话。
+## filled = {slotId: partId}（服务端 fit 校验后按蓝图槽序收拢）。回执走 prop_pending → item_created。
+func send_create_build(world_id: String, blueprint_id: String, filled: Dictionary) -> void:
+	_send({ "type": "create_build", "worldId": world_id, "blueprintId": blueprint_id, "filled": filled })
+
 ## 取消引导式造角色（退出与小仙子的交互）：服务端清掉会话，后续语音不再当造角色答复。
 func send_creation_cancel() -> void:
 	_send({ "type": "creation_cancel" })
+
+## B3 起名（reuse-name）：给自己造物起个语音名。audio_b64 = 孩子那句录音的原始 PCM16(16k 单声道)
+## base64；text = 端侧 ASR 文本（内部用）。服务端 putAsset → 回填 nameVoiceAsset/nameText → item_updated。
+func send_name_creation(world_id: String, item_id: String, audio_b64: String, text: String) -> void:
+	_send({ "type": "name_creation", "worldId": world_id, "itemId": item_id, "audio": audio_b64, "text": text })
 
 ## 离开世界（玩家正常退出）：显式通知服务端收尾会话（Visit），触发批量抽记忆。
 ## 世界卸载后紧接着场景切换/节点释放，socket 可能来不及发——poll 一次尽量把帧推出；
@@ -203,11 +270,29 @@ func send_positions(world_id: String, chars: Array, player_tile := Vector2i(-1, 
 ## chars 形如 [{id, x, y, tileX, tileY}]；player 形如 {x, y, tileX, tileY} 或空。
 ## t 为服务端钟毫秒（本地钟 + 时间偏移），接收端据此对齐插值时间戳。
 ## 服务端把带 x,y 的条目转发给同世界其他连接，并喂 near 规则求值。
-func send_position_stream(world_id: String, chars: Array, player: Dictionary, t: int) -> void:
+## balls 形如 [{id, x, y, vx, vy}]（C 档球位置流，服务端转发给同场景他端 + 喂 enter 判定，不持久化）。
+func send_position_stream(world_id: String, chars: Array, player: Dictionary, t: int, balls := []) -> void:
+	# 二进制上行(服务端已确认):高频流不带 sceneId(服务端用 session.currentScene),playerId 也由服务端会话取。
+	# 球流(balls)走 JSON：PosCodec 二进制帧不含球，有球的这一拍整条发 JSON 保球不丢
+	# （球只在踢球演出期间出现，不影响常态高频流的二进制优化）。
+	if _posbin_ok and _open and balls.is_empty():
+		_ws.send(PosCodec.encode_report("", t, chars, player))
+		return
 	var msg := { "type": "positions_report", "worldId": world_id, "chars": chars, "t": t }
 	if not player.is_empty():
 		msg["player"] = player
+	if not balls.is_empty():
+		msg["balls"] = balls
 	_send(msg)
+
+## 踢球广播（C 档）：转所有权给踢者 + 让同场景他端从此刻起接收该球位置流。服务端按场景定向转发。
+func send_ball_kick(world_id: String, ball_id: String, player_id: String, pos: Vector2, vel: Vector2, t: int) -> void:
+	_send({ "type": "ball_kick", "worldId": world_id, "ballId": ball_id, "playerId": player_id,
+		"x": pos.x, "y": pos.y, "vx": vel.x, "vy": vel.y, "t": t })
+
+## 球滚停广播（C 档）：所有权交回 host 中立，最终静止位置随附供他端收敛。
+func send_ball_settle(world_id: String, ball_id: String, pos: Vector2, t: int) -> void:
+	_send({ "type": "ball_settle", "worldId": world_id, "ballId": ball_id, "x": pos.x, "y": pos.y, "t": t })
 
 ## 摆放：背包一份实体摆到指定 tile。服务端校验（占地/背包）→ tile 编辑 → terrain_patch 广播
 ## + bag_update 回包；失败回 error 不动账。渲染统一等广播回来落地（万物皆物品）。
@@ -237,38 +322,84 @@ func send_character_attach(world_id: String, character_id: String, slot: String,
 func send_player_attach(world_id: String, slot: String, item_id: String) -> void:
 	_send({ "type": "player_attach", "worldId": world_id, "slot": slot, "itemId": item_id })
 
+## 试用·还差一点（A1）：小朋友把造出来那件东西的体型调成 new_size（small/medium/big）。
+## 服务端应用体型+广播重渲染，并判定试用是否满意（对/达上限盖章，反且未达上限仙子再问一句）。
+func send_wish_refine(world_id: String, item_ref: String, new_size: String) -> void:
+	_send({ "type": "wish_refine", "worldId": world_id, "itemRef": item_ref, "newSize": new_size })
+
 func _send(obj: Dictionary) -> void:
 	# 统一注入玩家身份：每条出站消息带 playerId（设备端 UUID），服务端按玩家归属记忆/Visit。
 	if not player_id.is_empty() and not obj.has("playerId"):
 		obj["playerId"] = player_id
 	sent.emit(obj)
 	if _open:
-		_ws.send_text(JSON.stringify(obj))
+		# send_text 返回值必须查：出站缓冲不够（大消息如 name_creation 录音）时它会 ERR_OUT_OF_MEMORY
+		# 静默丢弃——不查返回就会误以为发出去了。失败如实告警，别再当无事发生（voice-e2e 实锤）。
+		var err := _ws.send_text(JSON.stringify(obj))
+		if err != OK:
+			push_warning("[ws] send FAILED (err=%d): %s（出站缓冲不够？消息未送达服务端）" % [err, String(obj.get("type", ""))])
+	elif OS.is_debug_build():
+		# WS 未连时 _send 会静默丢弃——把丢弃如实打出来，别再当无事发生。
+		push_warning("[ws] send DROPPED (ws closed): %s" % String(obj.get("type", "")))
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var t0 := Time.get_ticks_usec()
-	_poll_ws()
+	_poll_ws(delta)
 	ProcProf.add("ws", Time.get_ticks_usec() - t0)
 
-func _poll_ws() -> void:
+func _poll_ws(delta: float) -> void:
 	_ws.poll()
 	var st := _ws.get_ready_state()
 	if st == WebSocketPeer.STATE_OPEN:
 		if not _open:
 			_open = true
+			_reconnect_backoff = RECONNECT_BASE_S # 连上即重置退避，下次断线从 base 起
+			_ping_accum = 0.0
+			_since_rx = 0.0                       # 心跳时钟随新连接归零
 			connected.emit()
+		var got_rx := false
 		while _ws.get_available_packet_count() > 0:
-			var raw := _ws.get_packet().get_string_from_utf8()
-			var data: Variant = JSON.parse_string(raw)
-			if typeof(data) == TYPE_DICTIONARY:
-				_dispatch(data)
+			got_rx = true
+			var pkt := _ws.get_packet()
+			if _ws.was_string_packet():
+				var data: Variant = JSON.parse_string(pkt.get_string_from_utf8())
+				if typeof(data) == TYPE_DICTIONARY:
+					_dispatch(data)
+			else:
+				# 二进制帧 = 位置流(唯一二进制下行);解码失败(tag 不符)返回空,静默丢弃。
+				var relay := PosCodec.decode_relay(pkt)
+				if not relay.is_empty():
+					positions_relay.emit(relay)
+		if _step_heartbeat(delta, got_rx):
+			# 超时无回包：半开连接，强制关连；下一帧回落 CLOSED 触发自动重连。
+			_ws.close()
 	elif st == WebSocketPeer.STATE_CLOSED:
-		_open = false
+		if _open:
+			_open = false
+			_reconnect_wait = _reconnect_backoff # 从当前退避起算（刚断=base）
+			disconnected.emit()
+		_tick_reconnect(delta)
+
+## 断线后的重拨节拍：倒计时到点换新 peer 重拨，并把退避翻倍备下次。
+## CONNECTING 期间状态既非 OPEN 也非 CLOSED，本函数不被调用；只有回落 CLOSED 才继续倒计时。
+func _tick_reconnect(delta: float) -> void:
+	if not _should_reconnect:
+		return
+	_reconnect_wait -= delta
+	if _reconnect_wait > 0.0:
+		return
+	_open_socket()
+	_reconnect_backoff = _next_backoff(_reconnect_backoff)
+	_reconnect_wait = _reconnect_backoff       # 本次若失败，下次按翻倍后的间隔再拨
 
 func _dispatch(data: Dictionary) -> void:
 	if OS.get_environment("MALIANG_WS_DEBUG") != "":
 		print("[ws] ", String(data.get("type", "")))
 	match String(data.get("type", "")):
+		"pong":
+			pass # 心跳回执：活跃时钟已在 _poll_ws 靠「收到任意回包」复位，无需额外处理
+		"ping":
+			_send({ "type": "pong" }) # 服务端反向探活时回执（当前服务端不发，留作对称兜底）
 		"character_response":
 			character_response.emit(data)
 		"tts_chunk":
@@ -283,14 +414,27 @@ func _dispatch(data: Dictionary) -> void:
 			gen_denied.emit(data)
 		"creation_prompt":
 			creation_prompt.emit(data)
+		"build_prompt":
+			build_prompt.emit(data)
+		"build_options":
+			build_options.emit(data)
 		"creation_cancelled":
 			creation_cancelled.emit(data)
 		"world_state":
+			_posbin_ok = bool(data.get("posBin", false)) # 服务端确认二进制位置流,上行开始走二进制
 			world_state.emit(data)
 		"task_complete":
 			task_complete.emit(data)
+		"npc_wishes":
+			npc_wishes.emit(data.get("wishes", []), data.get("discovered", []), data.get("reuseHint", null))
 		"praise_tts":
 			praise_tts.emit(data)
+		"wish_trial":
+			wish_trial.emit(data)
+		"wish_retry":
+			wish_retry.emit(data)
+		"character_resized":
+			character_resized.emit(data)
 		"tts_start":
 			tts_start.emit(String(data.get("ttsMime", "")))
 		"tts_failed":
@@ -303,10 +447,16 @@ func _dispatch(data: Dictionary) -> void:
 			prop_pending.emit(data)
 		"item_created":
 			item_created.emit(data)
+		"item_updated":
+			item_updated.emit(data)
 		"prop_denied":
 			prop_denied.emit(data)
 		"prop_failed":
 			prop_failed.emit(String(data.get("reason", "")))
+		"sticker_pending":
+			sticker_pending.emit(data)
+		"sticker_failed":
+			sticker_failed.emit(String(data.get("reason", "")))
 		"bag_update":
 			bag_update.emit(data)
 		"sticker_bought":
@@ -331,6 +481,10 @@ func _dispatch(data: Dictionary) -> void:
 			time_sync.emit(data)
 		"positions_relay":
 			positions_relay.emit(data)
+		"ball_kick":
+			ball_kick.emit(data)
+		"ball_settle":
+			ball_settle.emit(data)
 		"actor_leave":
 			actor_leave.emit(String(data.get("playerId", "")))
 		"actors_snapshot":

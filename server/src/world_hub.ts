@@ -9,7 +9,14 @@ export interface HubMember {
   playerId: string;
   /** 所在场景(模型 B: world 含多 scene)。world_info 置初值,enter_scene 走 portal 时经 setScene 更新。 */
   sceneId: string;
+  /** 单接收者便捷发送(自行 stringify)：用于 host 变更/hearts 这类低频定向消息。 */
   send(msg: Record<string, unknown>): void;
+  /** 发预序列化好的文本帧：广播「序列化一次、同串发全场」的快路径(见 #send)。 */
+  sendText(text: string): void;
+  /** 本连接是否支持位置流二进制帧(客户端 ?posbin=1 声明)。 */
+  posBin: boolean;
+  /** 发预编码好的二进制帧(位置流)。 */
+  sendBin(data: Uint8Array): void;
 }
 
 export interface HubLeaveResult {
@@ -105,12 +112,40 @@ export class WorldHub {
     return this.#send(this.membersInScene(worldId, sceneId), msg, exceptClientId);
   }
 
+  /**
+   * 场景定向双格式广播(位置流专用):同一份消息,text 帧与 bin 帧各预编码一次,
+   * 按成员能力(posBin)分发。Hub 只挑帧、不懂编码——编码在 server.ts 完成后传入。
+   */
+  broadcastSceneDual(
+    worldId: string,
+    sceneId: string,
+    text: string,
+    bin: Uint8Array,
+    exceptClientId?: string,
+  ): number {
+    let n = 0;
+    for (const m of this.membersInScene(worldId, sceneId)) {
+      if (m.clientId === exceptClientId) continue;
+      try {
+        if (m.posBin) m.sendBin(bin);
+        else m.sendText(text);
+        n++;
+      } catch {
+        // 发送失败的连接留给它自己的 close 事件清理
+      }
+    }
+    return n;
+  }
+
   #send(members: HubMember[], msg: Record<string, unknown>, exceptClientId?: string): number {
+    // 序列化一次:同一份 payload 广播给全场,别逐接收者 JSON.stringify(高频位置流 fanout 的 CPU 大头)。
+    let text: string | null = null;
     let n = 0;
     for (const m of members) {
       if (m.clientId === exceptClientId) continue;
       try {
-        m.send(msg);
+        if (text === null) text = JSON.stringify(msg);
+        m.sendText(text);
         n++;
       } catch {
         // 发送失败的连接留给它自己的 close 事件清理

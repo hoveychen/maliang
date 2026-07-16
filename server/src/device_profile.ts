@@ -13,8 +13,12 @@
 
 /** benchmark 口径版本：渲染管线/负载场景/旋钮集合变了就 +1，旧样本自动隔离作废。
  *  必须与 scripts/device_profile.gd 的 BENCH_VERSION 一致。
- *  v2（P5）：压测负载换 seed 村民图集 + 采样期冻结世界，渲染成本口径变了 → 旧 v1 样本作废。 */
-export const BENCH_VERSION = 2;
+ *  v2（P5）：压测负载换 seed 村民图集 + 采样期冻结世界，渲染成本口径变了 → 旧 v1 样本作废。
+ *  v3（benchmark-story-ramp）：采样期不再冻结——负载角色注册占用 + ambient wander，村民 wander 的
+ *  A* 寻路+走动 CPU 全程计入 p95。旧 v2 冻结口径系统性偏轻，样本作废。
+ *  v4（bench-determinism）：负载从随机 wander 换成确定性固定巡逻 + 每 trial 复位到同一状态（仍动态、
+ *  A* 计入 p95，但可复现）。负载路径/成本口径变，v3 作废。 */
+export const BENCH_VERSION = 4;
 
 export type Levels = Record<string, number>;
 

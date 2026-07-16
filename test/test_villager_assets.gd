@@ -3,7 +3,7 @@ extends SceneTree
 ## 而不是染色 critter 静态占位（此前 _setup_npcs 用 critter_tex + 小蓝/小绿/小黄 三种颜色）。
 ## 断言两件事：
 ##   ① VillagerAssets.SEED 图集完整——能加载，且尺寸 = cols*cellW × rows*cellH（meta 与图对齐）。
-##   ② 离线实例化 main.tscn 后，demo_ 前缀的非仙子 NPC 都置了 _sheet（=已 play_idle 动画）
+##   ② 离线实例化 main.tscn 后，demo_ 前缀的非仙子 NPC 都置了 _sheet（=已 play_anim 动画）
 ##      且贴图正是某个 seed 村民图集。
 ## 运行: MALIANG_API_BASE=http://127.0.0.1:1 godot --headless --fixed-fps 10 \
 ##       --quit-after 40 --script res://test/test_villager_assets.gd
@@ -59,7 +59,7 @@ func _check_demo_villagers() -> void:
 		var node: PaperCharacter = n["node"]
 		var sheet: Dictionary = node.get("_sheet")
 		if sheet.is_empty():
-			printerr("  FAIL demo %s 未置 _sheet（仍是静态占位，没 play_idle）" % n["id"]); fails += 1
+			printerr("  FAIL demo %s 未置 _sheet（仍是静态占位，没 play_anim）" % n["id"]); fails += 1
 		elif not seed_atlases.has(node.texture):
 			printerr("  FAIL demo %s 贴图不是 seed 村民图集" % n["id"]); fails += 1
 		else:

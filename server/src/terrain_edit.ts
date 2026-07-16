@@ -156,6 +156,12 @@ export function editSceneTerrain(
   worldId: string,
   sceneId: string,
   edits: TileEditInput[],
+  /**
+   * 强制随 patch 带上的实体 id（即便其 palette 引用早已存在、非新增）。
+   * 用于「实体定义本身变了而 tile 引用没变」的场景——当前是造物体型调整（A1 试用·还差一点，
+   * def.spec.scale 改了但 palette ref 不变），客户端据此覆写目录里的旧 def 后按新 scale 重渲染。
+   */
+  forceIncludeDefs: string[] = [],
 ): { version: number; applied: AppliedEdit[]; paletteAppend: { index: number; itemId: string }[]; items: ItemDef[] } {
   const rec = store.getSceneTerrain(worldId, sceneId);
   if (!rec) throw new TerrainEditError(`scene ${worldId}/${sceneId} 无地形矩阵`);
@@ -168,6 +174,12 @@ export function editSceneTerrain(
 
   // 新引用实体的定义随 patch 带上（客户端可能没见过该造物）
   const items = paletteAppend.map((p) => resolve(p.itemId)!).filter(Boolean);
+  // 强制携带的实体（定义变了但引用没变，如体型调整后的造物）：去重后追加。
+  for (const id of forceIncludeDefs) {
+    if (items.some((d) => d.id === id)) continue;
+    const d = resolve(id);
+    if (d) items.push(d);
+  }
   hub?.broadcast(worldId, {
     type: 'terrain_patch', worldId, sceneId, version, paletteAppend, items, edits: applied,
   });

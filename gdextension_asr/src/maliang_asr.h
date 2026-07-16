@@ -36,6 +36,9 @@ public:
 	void initialize();
 	// 模型已就绪则可走端侧；GDScript 据此决定端侧/服务端路由。
 	bool is_ready() const;
+	// iOS 麦克风权限（0=未定/1=拒/2=授；非 iOS 恒 2）。Godot GDScript 读不到 iOS 麦权限，
+	// 靠这个原生方法给 MicPermission 门禁（denied 时全屏引导去设置）。
+	int ios_mic_permission() const;
 	// 开一段新的识别会话（丢弃上一段）。
 	void start_session();
 	// 16kHz 单声道 PCM16LE 分片（与服务端 voice_chunk 同一采集源）。

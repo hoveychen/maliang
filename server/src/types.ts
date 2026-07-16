@@ -18,12 +18,73 @@ export interface BehaviorScript {
   loop: boolean;
 }
 
+/**
+ * 引导精灵的名字（见 docs/fairy-persona-design.md）。
+ *
+ * 她是神笔的笔灵：画什么什么就活过来，一笔落下就是一个点——所以叫「点点」。
+ * 此前三个称呼并存且全是物种不是名字：数据里 name='小神仙'、台词里自称「小仙子」、注释里写「仙女」。
+ * 单一来源在此，别再往代码里写字面量。
+ */
+export const FAIRY_NAME = '点点';
+
+/**
+ * 点点的人设。会注入 routeIntent 的 system prompt（作为 ctx.personality）。
+ *
+ * 只写「她是谁、她想要什么」——**禁止清单（不吐槽/不反讽/不替孩子做决定）刻意不写在这里**，
+ * 那是给 LLM 的行为约束，归 system prompt 的静态前缀管（openrouter_llm.ts 的 staticSystem）。
+ * 约束混进人设，LLM 会把它当性格念出来。
+ */
+export const FAIRY_PERSONALITY =
+  `神笔的笔灵${FAIRY_NAME}。她说话用第三人称自称「${FAIRY_NAME}」。她不会走路，只会飞——笔没有腿。` +
+  '她画什么什么就活过来，最爱显摆手艺，画完一定要问「好看吗」；画歪了就笑自己手笨笨的。' +
+  '她怕水，沾了水身上的墨会化开，过水边会紧张地飞高一点。' +
+  '她对小朋友做的任何事都夸张地惊叹。她只提议，从不替小朋友做决定。';
+
 /** 所有村民共有的基础交互能力（与 scripts/behavior_executor.gd 的指令集对齐）。
  * 存量角色 abilities 里可能只有旧的两项，意图 prompt 按「基础集 ∪ 角色自带」取并集，免数据迁移。 */
 export const BASE_ABILITIES = ['move_to', 'follow', 'stop_follow', 'do_action', 'chat_with', 'deliver_message'];
 
 /** 要「走过去」才能兑现的能力（stop_follow 只有在能 follow 时才有意义，一并算入）。 */
 export const LOCOMOTION_ABILITIES = ['move_to', 'follow', 'stop_follow', 'chat_with', 'deliver_message'];
+
+/**
+ * 引路（guide_to/guide_stop）—— 小仙子专属，见 docs/fairy-guide-design.md。
+ *
+ * 刻意**不**放进 LOCOMOTION_ABILITIES：那一组是「她走不了、给了也兑现不了」的能力，会被 effectiveAbilities
+ * 从她的 prompt 里剔掉。引路恰恰相反——它是她唯一能兑现的位移，因为走路的是**小朋友**：她只在前面飞、
+ * 回头等（客户端 _fairy_guide 状态机），不碰 BehaviorExecutor，故不受那三层封锁的影响。
+ */
+export const GUIDE_ABILITIES = ['guide_to', 'guide_stop'];
+
+/** 跨场景引路的跳数上限（老板 2026-07-13 拍板）：3-5 岁小朋友扛不住 3-4 跳 portal 的长途跋涉。 */
+export const MAX_GUIDE_LEGS = 2;
+
+/** 引路的一跳：在 sceneId 里把小朋友带到 portalTile，他自己走进去即到 toScene（既有 _step_portal 触发）。 */
+export interface GuideLeg {
+  sceneId: string;
+  portalTile: TilePos;
+  toScene: string;
+}
+
+/** 引路计划：服务端算好「去哪、怎么走」，客户端的引路状态机照着领路。 */
+export interface GuidePlan {
+  /** 找人还是找地方——决定到达时的收尾（找人：让他打招呼；找地方：仙子说「到啦」）。 */
+  targetKind: 'character' | 'location';
+  targetName: string;
+  targetScene: string;
+  /** character 的坐标只是**下发时的快照**：村民会自己走动，客户端到场后按名字重解析（不钉住他）。 */
+  targetTile: TilePos;
+  /** 逐跳 portal；同场景为空数组。长度受 MAX_GUIDE_LEGS 约束。 */
+  legs: GuideLeg[];
+}
+
+/** 引路候选（喂意图 LLM）：让它知道「小明」是森林里的一个真实角色，而不是编一个出来。 */
+export interface GuideTarget {
+  name: string;
+  kind: 'character' | 'location';
+  sceneId: string;
+  sceneName: string;
+}
 
 /**
  * 喂给意图 LLM 的能力集：基础集 ∪ 角色自带，小仙子再减去所有需要走动的能力。
@@ -74,7 +135,7 @@ export interface Wallet {
 export const STAMP_STYLES: readonly string[] = ['star', 'smile', 'paw', 'medal', 'heart'];
 
 /** 委托类型：完成判定全部是客户端确定性事件（送达回调/相邻/到点），不靠 LLM 猜。 */
-export type TaskType = 'deliver' | 'bring' | 'visit';
+export type TaskType = 'deliver' | 'bring' | 'visit' | 'wish';
 
 /** 进行中的委托。同一时刻至多一个（幼儿单任务心智，完成判定也无歧义）。完成 = 盖 1 章。 */
 export interface ActiveTask {
@@ -86,6 +147,22 @@ export interface ActiveTask {
   locationName?: string; // visit：地点名（客户端 POI 判定）
   message?: string; // deliver：要带的话
   stampStyle: string; // 完成时盖的章款式 id（STAMP_STYLES 之一，纯演出）
+  /**
+   * wish：这个心愿勾的玩法（wishes.ts 的 ability 名，如 create_prop）。
+   * 完成判定不走客户端上报——服务端在造物/造角色/玩游戏【成功】的那个代码点自己知道
+   * （见 completeWishOnAbility）。村民不会魔法，真正兑现心愿的是小仙子。
+   */
+  wishAbility?: string;
+  /**
+   * 试用·还差一点（A1，docs/kids-thinking-tryout-refine.md）：造物类心愿的两段完成。
+   * 造出来那一刻不再当场盖章——先让村民走过去用、发现「还差一点」，小朋友调对体型再盖章。
+   * 缺省（无这些字段）= 一段完成（老逻辑 / play_game / guide_to 等无体型可调的能力）。
+   */
+  wishStage?: 'pending' | 'tried'; // pending（缺省）=还没造出来；tried=造出来了、村民试用中差一点
+  refineItemRef?: string;          // 造出来那件东西的引用（item id / character id），调整按它匹配
+  refineDir?: 'smaller' | 'bigger';// 该往哪调（按造出来的档反推，保证目标档一定够得到）
+  refineFromSize?: CreatureSize;   // 造出来时的体型档（判方向调对没的基准）
+  refineTries?: number;            // 已调几次；到 REFINE_MAX_TRIES 无条件盖章，绝不无止境挑刺
 }
 
 /** LLM 从玩家意图产出的角色设定（落地前）。 */
@@ -105,7 +182,7 @@ export interface CharacterSpec {
  */
 export const GRID_TILES = 75;
 
-/** 世界正中心 tile：新角色/小神仙的降生点（客户端首次上报前的占位值）。 */
+/** 世界正中心 tile：新角色/点点的降生点（客户端首次上报前的占位值）。 */
 export const WORLD_CENTER_TILE: TilePos = { tileX: Math.floor(GRID_TILES / 2), tileY: Math.floor(GRID_TILES / 2) };
 
 export interface TilePos {
@@ -176,8 +253,12 @@ export interface ItemDef {
    *   'sticker:<name>' 贴纸图（assets/stickers/<name>.webp，边缘竖片，docs/sticker-items-design.md）
    */
   renderRef: string;
-  /** sdf_inline 时的 SDF spec（结构见 sdf_prop.ts）。 */
-  spec?: import('./sdf_prop.ts').SdfPropSpec;
+  /**
+   * spec 按 renderRef 分发：
+   *   'sdf_inline' → SDF spec（结构见 sdf_prop.ts，语音造物）
+   *   'composed:'  → 组合物零件树（结构见 build_blueprints.ts，积木式造物 B1）
+   */
+  spec?: import('./sdf_prop.ts').SdfPropSpec | import('./build_blueprints.ts').ComposedSpec;
   /** 占地（tile），锚点居中展开（奇数边）；1×1 / 3×3。 */
   footprintW: number;
   footprintH: number;
@@ -198,6 +279,22 @@ export interface ItemDef {
    * 'edge' 只能挂 tile 四条边缘平面（贴纸类薄片），不进占用位图。
    */
   mount?: 'tile' | 'edge';
+  /** A2「给谁做的」：这件造物是给谁用的（docs/kids-thinking-made-for-whom.md），供 A1 试用/B3 起名/交付话术读取。 */
+  recipient?: RecipientRef;
+  /**
+   * 造物者（哪个 player 语音造出来的）。B3 起名的所有权判据：造物一落地就被客户端自动摆放到世界、
+   * 移出背包（bagTake），此时 name_creation 若只认「在背包」就会把刚造好的东西拒之门外（真机实证）。
+   * 记下造物者后，name_creation 放行「在背包 OR 造物者是本人」。缺省 = 无（内置物/存量造物）。
+   */
+  creatorPlayerId?: string;
+  /**
+   * B3 起名（reuse-name，docs/kids-thinking-reuse-name.md）：孩子给这件造物起的名字。
+   *  nameVoiceAsset = 孩子那句录音的 assetHash（WAV），背包点小喇叭回放他【自己的声音】；
+   *  nameText = 端侧 ASR 文本，仅供大人/日志/搜索，不展示给不识字的孩子。
+   * 现有 name（LLM 文本名）保留作回落——起名可选，不起就沿用它。
+   */
+  nameVoiceAsset?: string;
+  nameText?: string;
 }
 
 /** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */
@@ -233,7 +330,7 @@ export interface Character {
   voiceId: string;
   /** 进对话时的招呼风格（warm|shy|playful|gentle）；缺省按 id 稳定哈希落到一种，见 greetings.ts。 */
   greetingStyle?: string;
-  appearance: { visualDescription: string; spriteAsset: string; scale: number; size?: CreatureSize; anchors?: CharacterAnchors };
+  appearance: { visualDescription: string; spriteAsset: string; scale: number; size?: CreatureSize; anchors?: CharacterAnchors; recipient?: RecipientRef };
   memory: string[];
   chatHistory: ChatTurn[];
   state: string;
@@ -267,6 +364,8 @@ export interface CreateCharacterInput {
   position?: TilePos;
   /** 新伙伴降生的场景；缺省=DEFAULT_SCENE（单场景时代/未指定时落 village）。 */
   sceneId?: string;
+  /** A2：这个新伙伴是给谁造的（落进 appearance.recipient，供 A1 试用/交付话术读取）。 */
+  recipient?: RecipientRef;
 }
 
 export interface ModerationResult {
@@ -284,6 +383,8 @@ export interface IntentResult {
   performerName?: string;
   /** LLM 在这句回应里发起了上下文给的委托候选（taskCandidate）→ 服务端把它设为进行中。 */
   offerTask?: boolean;
+  /** 小朋友说「不想做了/算了/不帮他了」→ 放弃进行中的委托（仅在 ctx.activeTask 存在时认）。 */
+  abandonTask?: boolean;
 }
 
 /** 意图路由的上下文（喂给 LLM）。 */
@@ -296,16 +397,29 @@ export interface IntentContext {
   sessionSummary?: string;
   /** 角色对当前玩家的长期记忆（带分类，注入时按 kind 分组）。 */
   memory?: { text: string; kind: MemoryKind }[];
-  /** 世界里的其他角色花名册（不含自己/小神仙）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
+  /** 世界里的其他角色花名册（不含自己/点点）：让 LLM 能把「小蓝跟我来」「去找小绿聊天」对上真实角色名。 */
   worldCharacters?: { id: string; name: string }[];
   /** 世界地点名清单（客户端 world_info 上报的 POI 名）：move_to 的 location_name 优先归一到这些名字。 */
   locations?: string[];
+  /** 可以带小朋友去的人和地方（仅小仙子有 guide_to 时注入）：让 LLM 把「找小明」对上真实角色，别凭空编。 */
+  guideTargets?: GuideTarget[];
   /** 进行中的委托（若有）：让角色记得催/答疑，且不再发起新委托。 */
   activeTask?: ActiveTask;
   /** 可发起的委托候选（无进行中委托时服务端生成）：LLM 觉得时机合适就用自己口吻发起并置 offerTask。 */
   taskCandidate?: ActiveTask;
+  /**
+   * 这个角色当下的心愿背景（wishes.ts 的 WishDef.context）：它刚才可能在旁边自言自语漏过这件事，
+   * 小朋友凑上来问的就是它。注入后角色被搭话时能自然接上自己的念想——而不是一脸茫然。
+   */
+  wishContext?: string;
   /** 稳定的会话缓存键（`world:character:player`）：作 OpenRouter session_id 做 sticky routing，命中 prompt cache。 */
   cacheKey?: string;
+  /**
+   * 玩家 onboarding 档案摘要（喜好接线，docs/onboarding-avatar-redesign-design.md §2.5）：
+   * 称呼/喜欢的图案/主色/形象创作原话——注入后点点/村民能自然提起（「你不是最喜欢小恐龙嘛」）。
+   * 由 onboardingProfileNote(store.getOnboardingProfile(playerId)) 生成，无档案则 undefined。
+   */
+  childProfile?: string;
 }
 
 /** session 超长压缩（compactSession）的上下文：把较旧轮次压成一段中文摘要，session 内继续对话时注入。 */
@@ -329,7 +443,7 @@ export interface MemoryExtractionContext {
   cacheKey?: string;
 }
 
-/** voice_input 编排的返回（推给客户端 character_response）。 */
+/** 语音编排的返回（推给客户端 character_response）。 */
 export interface VoiceResponse {
   characterId: string;
   transcript: string;
@@ -347,12 +461,49 @@ export interface VoiceResponse {
   performerId?: string;
   /** 这句回应里新发起的委托（LLM offerTask 且服务端已设为进行中）→ 客户端显示任务提示。 */
   task?: ActiveTask;
+  /** 小朋友说「不想做了」→ 服务端已清掉进行中委托，客户端据此撤掉任务提示 chip。 */
+  taskCleared?: boolean;
   /** create_prop 意图的物件描述：不下发客户端，由 WS 层摘走并异步造物（prop_created 推送）。 */
   propRequest?: string;
   /** create_character 意图的新伙伴描述：不下发客户端，由 WS 层摘走并异步造角色（gen_progress/gen_complete 推送）。仅小仙子有此能力。 */
   characterRequest?: string;
+  /** create_sticker 意图的贴纸描述：不下发客户端，由 WS 层摘走并异步造贴纸（sticker_pending/item_created 推送）。仅小仙子有此能力。 */
+  stickerRequest?: string;
+  /** guide_to 意图算出的引路计划：客户端引路状态机据此领路。带不了（目标不存在/太远）时不下发，只留口头回应。仅小仙子。 */
+  guide?: GuidePlan;
+  /** guide_stop 意图：小朋友说「不去了」→ 取消进行中的引路（客户端另有「停止」气泡入口，双保险）。仅小仙子。 */
+  guideStop?: boolean;
+  /** play_game 意图的游戏口语描述（「踢球」「老鹰抓小鸡」）：不下发客户端，由 WS 层摘走→LLM 生成剧本→过 typecheck→开演（stage_begin 广播）。仅小仙子有此能力。 */
+  gameRequest?: string;
   /** 主动招呼（进对话对方先开口）：transcript 为空且非玩家发起，客户端据此跳过「没听清」提示。 */
   greeting?: boolean;
+}
+
+// ── 剧本生成层（realtime-primitives P5 / docs/realtime-game-primitives-design §9）──
+// 口语「我们来踢球吧」→ routeIntent 识别 play_game → LLM 照 stage_sdk.d.ts 生成【真 TS】剧本
+// → checkScreenplay 过 typecheck（失败带错回喂重生成 1-2 次）→ stripTypeScriptTypes → vm 沙箱开演。
+
+/** 喂给剧本生成 LLM 的上下文：孩子想玩的游戏 + 当前可选的演员（防腐纪律：规则进脚本、原语已在客户端）。 */
+export interface ScreenplayGenContext {
+  /** 孩子的口语游戏描述，尽量保留原话（「踢球」「老鹰抓小鸡」「捉迷藏」）。 */
+  gameDesc: string;
+  /** 当前场景里可当演员的村民名字（不含小仙子/玩家）；LLM 的 cast 角色数不得超过这个数量。 */
+  villagerNames: string[];
+  /** 场上是否有小朋友在玩（有则剧本可用 stage.player）。 */
+  hasPlayer: boolean;
+}
+
+/**
+ * 生成的剧本草案：过了 typecheck 才返回。
+ * cast 是【有序角色名】，与 stage_debut 的 PLAY_ROLES 同套路——运行时把它按序映射到真实村民，
+ * 并把演员的 name 设成这些角色名，脚本里的 cast('老鹰') 才能对上（坐标/玩法名不写死在脚本）。
+ * soccer 这类无需命名演员的玩法 cast 为空数组（只用 stage.player + 球 + region）。
+ */
+export interface ScreenplayDraft {
+  /** 真 TS 剧本源码（异步函数体，全局只有 stage/cast/console，未剥类型）。 */
+  code: string;
+  /** 有序角色名，映射到真实村民；空数组=不需要命名演员。 */
+  cast: string[];
 }
 
 /** 世界里由语音生成的 SDF 物件（spec 结构见 sdf_prop.ts；tile 为客户端落位后回报）。 */
@@ -452,6 +603,20 @@ export interface ExtractedMemory {
 
 // ── 引导式造角色（多轮会话，见 docs/guided-creation-design.md）──────────────
 
+/**
+ * A2「给谁做的」（fit-to-user，见 docs/kids-thinking-made-for-whom.md）：造物会话最前问一句
+ * 「这是给谁用的呀？」，答案是一个【人】而不是一个属性词。
+ *   'self'     给自己（玩家档案体型，缺则 medium）
+ *   'everyone' 给大家（medium，谁都能用）
+ *   'character' 给某个村民/已造角色（characterId 指向 Character；读其 appearance.size 当 size 默认）
+ * label 是给下游描述/交付话术用的显示名（村民名字/「自己」/「大家」）。
+ */
+export interface RecipientRef {
+  kind: 'self' | 'everyone' | 'character';
+  characterId?: string;
+  label?: string;
+}
+
 /** 引导式创造累积的属性（幼儿逐轮填；traits 可多个）。造角色/造物共用此结构，各取所需字段。 */
 export interface CreationAttrs {
   kind?: string;        // 类型：造角色=猫/狗/龙…；造物=花/风车/小房子…
@@ -461,10 +626,14 @@ export interface CreationAttrs {
   personality?: string; // 性格（造角色用）
   name?: string;        // 名字（造角色用；语音说，无图标）
   motion?: string;      // 会不会动：安静/会转/会飘/会跳（造物用，映射 SDF locomotion/spin）
+  recipient?: RecipientRef; // A2：给谁用的（会话最前问一步，character 时预填 size 默认）
 }
 
-/** 引导式创造的目标：造新角色 or 造新物件。会话状态机据此分派 guide 与生成接口。 */
-export type CreationGoal = 'character' | 'prop';
+/**
+ * 引导式创造的目标：造新角色 / 造新物件 / 造贴纸 / 积木式拼装（B1）。会话状态机据此分派 guide 与生成接口。
+ * 'build' 与 'prop' 共用会话骨架（同一条 session.creation，goal 区分），但走 guideBuild/createBuildAsync。
+ */
+export type CreationGoal = 'character' | 'prop' | 'sticker' | 'build';
 
 /** 引导式创造会话状态：连接级（一个孩子一条连接），挂在 VoiceSession 上。 */
 export interface CreationState {
@@ -479,10 +648,43 @@ export interface CreationState {
   // 仙子最近帮这个小朋友造过的东西（kind='creation' 记忆，开会话时填入）：
   // 注入 guide prompt，支持「帮我造刚才的小动物，但是会飞的」这类指代。
   recentCreations?: string[];
+  // goal==='build' 时的积木拼装状态（拼哪副蓝图 + 各槽填了什么）。turnCount/dialog 复用本对象（同一条会话）。
+  build?: BuildState;
+  // A2 recipient 预问步（docs/kids-thinking-made-for-whom.md）：入口先问「给谁用」，此值非 undefined 表示
+  // 正在等 recipient 答复——收到后用它当 childInput 喂 advanceCreation，继续正常属性追问。build 不走此步。
+  pendingRequest?: string;
 }
 
-/** 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。 */
-export type CreationCategory = 'kind' | 'color' | 'size' | 'trait' | 'personality' | 'name' | 'motion';
+/**
+ * 积木式造物（B1，docs/kids-thinking-build-from-parts.md）会话的拼装状态：附在 CreationState 上（goal==='build' 时非空）。
+ * 与 CreationState.attrs 并列——造角色/造物累积「属性」，积木拼装累积「哪个槽坐了哪个零件」。
+ */
+export interface BuildState {
+  blueprintId: string;               // 在拼哪副整体蓝图（WholeBlueprint.id）
+  filled: Record<string, string>;    // 已填的槽：slotId → partId（坐进骨架的零件）
+  askedSlots: string[];              // 已按功能问过的槽（mock 确定性推进；LLM 靠 dialog 自带上下文）
+}
+
+/**
+ * guideBuild 一轮的产物：要么继续按功能追问某个槽（question+slotId+兼容零件 optionIds），
+ * 要么必填槽全满去落成（done），要么小朋友反悔（cancelled）。与 GuideCreationResult 平行。
+ */
+export interface GuideBuildResult {
+  replyText: string;                 // 点点这轮说的话（TTS 念出）
+  done: boolean;
+  cancelled?: boolean;               // 小朋友说不拼了（「算了/不拼了」）：清会话、绝不落成、不扣花
+  question?: string;                 // done=false：按 functionHint 生成的功能问句（铁律：绝不含零件名）
+  slotId?: string;                   // done=false：本轮问的是哪个槽（客户端据此点亮发光）
+  optionIds?: string[];              // done=false：该槽兼容零件 partId（partsForSlot）
+  filled?: { slotId: string; partId: string }; // 从本轮输入解析出的「填了哪个槽哪个零件」增量
+}
+
+/**
+ * 引导式创造的属性类别（图标库按此组织；name 无图标走语音，motion 是造物专属）。
+ * 'recipient'（A2）是唯一走【动态在场角色选项】的类别——候选由 advanceCreation 组装（场景村民
+ * +自己+大家），不进静态图标库；见 docs/kids-thinking-made-for-whom.md §4.1。
+ */
+export type CreationCategory = 'kind' | 'color' | 'size' | 'trait' | 'personality' | 'name' | 'motion' | 'recipient';
 
 /** 图标库里的一个候选项。iconAsset 由 P3 图标生成填入（/assets/:hash），未生成为空串。 */
 export interface CreationOption {
@@ -504,7 +706,87 @@ export interface GuideCreationResult {
   updatedAttrs?: Partial<CreationAttrs>; // 从本轮输入解析出的属性更新（含 traits 增量）
 }
 
-/** 引导式创造会话的初始空状态（缺省造角色，兼容存量调用点）。 */
-export function newCreationState(goal: CreationGoal = 'character'): CreationState {
-  return { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0, dialog: [] };
+/** 引导式创造会话的初始空状态（缺省造角色，兼容存量调用点）。goal==='build' 时须带 blueprintId 初始化拼装状态。 */
+export function newCreationState(goal: CreationGoal = 'character', blueprintId?: string): CreationState {
+  const state: CreationState = { active: true, goal, attrs: { traits: [] }, askedCategories: [], turnCount: 0, dialog: [] };
+  if (goal === 'build' && blueprintId) state.build = { blueprintId, filled: {}, askedSlots: [] };
+  return state;
+}
+
+// ── 玩家形象 onboarding：点点引导式创作（见 docs/onboarding-avatar-redesign-design.md）──────
+// 与引导式造角色（CreationState 一族）平行，但走无状态 HTTP 多轮（onboarding 在进世界前，无 WS），
+// 状态由客户端每轮全量带回。类别是玩家外观专属（发型/衣服/图案/配饰），与 CreationCategory 刻意分开。
+
+/** onboarding 形象对话可问的类别。color 客户端渲染色块，其余类别有图标（P3 生成）。 */
+export type AvatarCategory = 'gender' | 'hairstyle' | 'outfit' | 'color' | 'motif' | 'accessory';
+
+/** 形象选项库里的一个候选项（形状同 CreationOption，类别域不同）。 */
+export interface AvatarOption {
+  id: string;
+  category: AvatarCategory;
+  label: string;
+  iconAsset: string;
+}
+
+/**
+ * onboarding 形象对话累积的属性。开放语音优先：小朋友说「我要会发光的头发」时
+ * hairstyle 存原话，不归一成库里的词——个性化的来源之一。落不进类别的外观点进 extras。
+ */
+export interface AvatarAttrs {
+  gender?: string;      // 男生/女生（生图必需，第一问）
+  hairstyle?: string;   // 发型
+  outfit?: string;      // 衣服风格
+  color?: string;       // 主色
+  motifs: string[];     // 喜欢的图案元素（可多个；一律转译为穿戴元素，绝不手持）
+  accessory?: string;   // 小配饰
+  extras: string[];     // 其他外观点（开放语音聊出的）
+}
+
+/** onboarding 形象对话状态：无状态 HTTP 多轮，客户端每轮全量带回，服务端不落会话。 */
+export interface AvatarGuideState {
+  attrs: AvatarAttrs;
+  askedCategories: string[]; // 已问过的类别（mock 确定性解析用；LLM 路径靠 dialog 自带上下文）
+  turnCount: number;         // 兜底：超上限强制 done
+  dialog: ChatTurn[];        // child=小朋友、npc=点点，整段回放给 guide LLM
+  childName?: string;        // 名字页前移后已知，点点喊着名字引导
+}
+
+/** onboarding 形象对话的初始空状态。 */
+export function newAvatarGuideState(childName?: string): AvatarGuideState {
+  const state: AvatarGuideState = { attrs: { motifs: [], extras: [] }, askedCategories: [], turnCount: 0, dialog: [] };
+  if (childName) state.childName = childName;
+  return state;
+}
+
+/**
+ * guideAvatar 一轮的产物：要么继续追问（question+options），要么攒够去画（done）。
+ * 刻意没有 cancelled——onboarding 必须产出形象，小朋友不耐烦时 LLM 直接 done 用已知属性画（零挫败）。
+ * done 后的外观描述由 describeAvatar 单独合成（硬规则 prompt），不在此结果里。
+ */
+export interface GuideAvatarResult {
+  replyText: string;                    // 点点这轮说的话（TTS 念出，含问题与选项口播）
+  done: boolean;
+  question?: string;                    // done=false：追问的问题
+  category?: AvatarCategory;            // done=false：本轮问的类别
+  optionIds?: string[];                 // done=false：候选项 id（2–4）
+  updatedAttrs?: Partial<AvatarAttrs>;  // 从本轮输入解析出的属性更新（motifs/extras 为增量后全量）
+}
+
+/**
+ * 玩家 onboarding 档案（§2.5，老板拍板当期接线）：onboarding 完成时客户端全量上报落库。
+ * 键 = playerId（设备端稳定 UUID，同 players 表）。独立表、不并进 Player——world_info 的
+ * Player upsert 是整行覆盖（server.ts world_info handler），并进去会被抹掉。
+ * 隐私边界：只存结构化属性+文本，不存录音（音频本就不上行）。
+ * 本地 user://profile.json 照旧是主档（离线可玩的根基），这里是服务端副本：
+ * 管理台可见 + 世界里点点/村民 LLM prompt 注入喜好（P5）+ 换设备恢复的地基。
+ */
+export interface PlayerOnboardingProfile {
+  playerId: string;
+  name: string;
+  nickname: string;
+  attrs: AvatarAttrs;          // 结构化答案（含开放语音原话）
+  visualDescription: string;   // LLM 合成的最终外观描述
+  refineNotes: string[];       // 照镜子环孩子提的修改原话（个性化金矿：「头发要长一点」）
+  spriteAsset: string;         // 最终采纳的形象资产 hash
+  createdAt: string;           // ISO 时间；客户端带上，服务端不取墙上时钟
 }

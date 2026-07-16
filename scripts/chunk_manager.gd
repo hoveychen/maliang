@@ -36,15 +36,10 @@ const SHADOW_LIFT := 0.2         ## 抬离地面（同 BlobShadow，给深度测
 ## assets/packs/<pack>/pack.json，由 PackRegistry 启动扫描、运行时 load() 建注册表。
 ## 「加主题包 = 丢个 pack 目录 + index.json 加一行」，本文件零改动。见 scripts/pack_registry.gd。
 
-## 水彩地面贴图（CC0，assets/textures/watercolor）：世界 UV 平铺，控制图选域/调色。
-const GRASS_TEX: Texture2D = preload("res://assets/textures/watercolor/grass.png")
-const DIRT_TEX: Texture2D = preload("res://assets/textures/watercolor/dirt.png")
-const STONE_TEX: Texture2D = preload("res://assets/textures/watercolor/stone.png")
+## 地面贴图（themed-terrain P1）：顶面/侧壁走 TerrainTextures 的 Texture2DArray 按层采样，
+## 「哪种地形」由 mesh 顶点 COLOR 层索引承载。水面仍是单张水彩贴图（水 tile 覆盖层，独立 shader）。
 const WATER_TEX: Texture2D = preload("res://assets/textures/watercolor/water.png")
-## 各贴图全图均值（magick -resize 1x1 实测，sRGB）；shader 用 tex/mean 归一出细节层
-const GRASS_MEAN := Color(72.0 / 255.0, 92.0 / 255.0, 39.0 / 255.0)
-const DIRT_MEAN := Color(77.0 / 255.0, 48.0 / 255.0, 36.0 / 255.0)
-const STONE_MEAN := Color(91.0 / 255.0, 91.0 / 255.0, 97.0 / 255.0)
+## 水贴图全图均值（magick -resize 1x1 实测，sRGB）；shader 用 tex/mean 归一出波纹细节。
 const WATER_MEAN := Color(72.0 / 255.0, 122.0 / 255.0, 132.0 / 255.0)
 const WATER_DIP := 0.35   ## 水面低于岸沿的落差（米）：露出一小截岸壁 = 可读的水位线
 
@@ -79,12 +74,61 @@ var _claims: Dictionary = {}
 ## 且 benchmark 会反复换档——必须记住，否则这一档写空/被重建的材质打回默认。
 var _terrain_low_detail := false
 
+## 万物基底层（themed-terrain P2）：body tile autotile 过渡子掩码采的底色层。默认草地（0）；
+## rebuild() 按当前 TerrainMap 的模态地表刷新——海底场景 → 细沙层，避免边缘露草绿。
+## 与 low_detail 同款懒建记忆态：材质可能晚于本值建成，须记住并在建材质时补上。
+var _base_layer := TerrainTextures.LAYER_GRASS
+
 func set_terrain_low_detail(on: bool) -> void:
 	_terrain_low_detail = on
 	if _ground_mat != null:
 		_ground_mat.set_shader_parameter("low_detail", on)
 	if _water_mat != null:
 		_water_mat.set_shader_parameter("low_detail", on)
+
+## 纸艺风（画质页样式键）在地形/水面上的参数档。物品档见 BendMat.PAPER_PROPS。
+## 地形无折面化（平面 quad）；水面的 bands 量化深度分层而非光照（见 water_surface.gdshader）。
+const PAPER_GROUND := {"paper_bands": 3.0, "paper_edge": 0.7, "paper_grain": 0.6, "paper_tone": 0.4}
+const PAPER_WATER := {"paper_bands": 4.0, "paper_grain": 0.4, "paper_tone": 0.3}
+
+## 与 low_detail 同款懒建记忆态；初值认 BendMat 的调试强制位（MALIANG_PAPERCRAFT=1）。
+var _papercraft := BendMat.papercraft_on()
+
+## 画质：纸艺风开/关（地形+水面）。调用方（world._apply_graphics_key）先切 BendMat
+## 再把 BendMat.papercraft_on() 的解析结果传进来——调试强制位的语义只在 BendMat 一处。
+func set_papercraft(on: bool) -> void:
+	_papercraft = on
+	for pair in [[_ground_mat, PAPER_GROUND], [_water_mat, PAPER_WATER]]:
+		var m: ShaderMaterial = pair[0]
+		if m == null:
+			continue
+		for k: String in pair[1]:
+			m.set_shader_parameter(k, pair[1][k] if _papercraft else 0.0)
+
+## 设万物基底层并（若材质已建）即时下发。数据源见 _refresh_base_layer()。
+func set_base_layer(layer: int) -> void:
+	_base_layer = layer
+	if _ground_mat != null:
+		_ground_mat.set_shader_parameter("base_layer", layer)
+
+## 按当前 TerrainMap 的模态地表（出现最多的非水 tile 类型）定基底层：草地世界→草，
+## 海底/雪原等单一主题场景→该主题主地表。混合主题公园（P4）取占比最大者（近似，非逐 tile）。
+func _refresh_base_layer() -> void:
+	var n := WorldGrid.GRID_TILES
+	var counts := {}
+	for z in range(n):
+		for x in range(n):
+			var tt := TerrainMap.tile_type(Vector2i(x, z))
+			if tt == TerrainMap.T_WATER:
+				continue  # 水走湖床/水面 shader，不作基底候选
+			counts[tt] = int(counts.get(tt, 0)) + 1
+	var best_type := TerrainMap.T_GRASS
+	var best_n := -1
+	for tt: int in counts:
+		if counts[tt] > best_n:
+			best_n = counts[tt]
+			best_type = tt
+	set_base_layer(TerrainTextures.top_layer(best_type))
 
 ## 画质开关记忆态：chunk 是 3×3 流送、越界重铺会重建 deco 子节点，新建的贴片影 /
 ## SDF 物件必须沿用当前开关态，否则重铺一次就打回默认。setter 同时切现有节点。
@@ -149,6 +193,8 @@ func _make_slot() -> Dictionary:
 		_ground_mat = _make_ground_mat()
 		_water_mat = _make_water_mat()
 		set_terrain_low_detail(_terrain_low_detail)  # 懒建材质沿用当前档（见 setter 注释）
+		set_base_layer(_base_layer)                  # 同上：懒建材质补上当前基底层
+		set_papercraft(_papercraft)                  # 同上：懒建材质补上纸艺风
 	var root := Node3D.new()
 	add_child(root)
 	var tile := MeshInstance3D.new()
@@ -168,28 +214,37 @@ func _make_slot() -> Dictionary:
 	root.add_child(deco)
 	return { "root": root, "tile": tile, "water": water, "deco": deco, "wrapped": Vector2i(-999, -999) }
 
-## 地形专用材质：控制图 atlas（域/描边/类型/明暗）+ 世界 UV 平铺水彩贴图，
-## 调色板 tint 全部取自 TerrainAtlas 常量（shaders/terrain_ground.gdshader）。
+## 贴图平色化/拼布抖动基线档（Pokopia 化 P2，调参对象）：flatten 把照片纹理往逐层
+## 平均色收敛（远看干净色块），tile_jitter 给相邻 tile/墙格轻微色差（拼布感）。
+const FLATTEN := 0.65
+const TILE_JITTER := 0.5
+const WALL_STRATA := 0.55  ## 崖壁逐级地层行带强度（Pokopia 化 P3）
+const CAP_TRIM := 0.9      ## 崖顶波浪盖帽强度（Pokopia 化 P4，第一识别特征）
+const CORNER_AO := 0.7     ## 墙脚接触暗缝强度（Pokopia 化 P5，内凹角柔和 AO）
+## 草地草簇/大头花散布（Pokopia 化 P6）的密度/姿态旋钮在 terrain_deco.gd 顶部常量区。
+
+## 地形专用材质（themed-terrain P1）：控制图 atlas（域/描边/角色/明暗）+ 顶面/侧壁
+## Texture2DArray（世界 UV 平铺，per-tile 层索引选贴图）。逐层 tint/mean 与描边色取自
+## TerrainTextures / TerrainAtlas 常量（shaders/terrain_ground.gdshader）。
 static func _make_ground_mat() -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = load("res://shaders/terrain_ground.gdshader")
 	m.set_shader_parameter("control_tex", TerrainAtlas.texture())
-	m.set_shader_parameter("grass_tex", GRASS_TEX)
-	m.set_shader_parameter("dirt_tex", DIRT_TEX)
-	m.set_shader_parameter("stone_tex", STONE_TEX)
-	m.set_shader_parameter("grass_mean", GRASS_MEAN)
-	m.set_shader_parameter("dirt_mean", DIRT_MEAN)
-	m.set_shader_parameter("stone_mean", STONE_MEAN)
-	m.set_shader_parameter("grass_tint", TerrainAtlas.GRASS_TINT)
-	m.set_shader_parameter("path_tint", TerrainAtlas.PATH_TINT)
-	m.set_shader_parameter("bed_tint", TerrainAtlas.BED_TINT)
-	m.set_shader_parameter("lip_tint", TerrainAtlas.CLIFF_LIP_TINT)
-	m.set_shader_parameter("wall_tint", TerrainAtlas.WALL_TINT)
+	m.set_shader_parameter("top_array", TerrainTextures.build_texture_array())
+	# gl_compatibility（iOS）对 sampler2DArray 不做 source_color 的 sRGB 解码 → 手动补（见 shader 注释）。
+	m.set_shader_parameter("srgb_array_manual", RenderingServer.get_current_rendering_method() == "gl_compatibility")
+	m.set_shader_parameter("layer_tint", TerrainTextures.layer_tints_linear())
+	m.set_shader_parameter("layer_mean", TerrainTextures.layer_means_linear())
+	m.set_shader_parameter("layer_flat", TerrainTextures.layer_flats_linear())
+	m.set_shader_parameter("flatten", FLATTEN)
+	m.set_shader_parameter("tile_jitter", TILE_JITTER)
+	m.set_shader_parameter("wall_strata", WALL_STRATA)
+	m.set_shader_parameter("cap_trim", CAP_TRIM)
+	m.set_shader_parameter("layer_cap", TerrainTextures.layer_cap_trims())
+	m.set_shader_parameter("corner_ao", CORNER_AO)
+	m.set_shader_parameter("wall_relief", TerrainTextures.layer_wall_reliefs())
 	m.set_shader_parameter("path_rim", TerrainAtlas.PATH_RIM)
 	m.set_shader_parameter("cliff_rim", TerrainAtlas.CLIFF_RIM_GRASS)
-	m.set_shader_parameter("sand_tint", TerrainAtlas.SAND_TINT)
-	m.set_shader_parameter("snow_tint", TerrainAtlas.SNOW_TINT)
-	m.set_shader_parameter("tile_tint", TerrainAtlas.TILE_TINT)
 	m.set_shader_parameter("curvature", BendMat.CURVATURE)
 	return m
 
@@ -214,6 +269,7 @@ static func _make_water_mat() -> ShaderMaterial:
 ## docs/multi-scene-design.md 步骤⑤边界1；玩家/角色/动态物件的卸载由换场景流程另管。
 ## 复位期间槽位仍显示旧网格，直到被 update() 逐帧重铺（换场景走过场遮挡，见步骤⑤）。
 func rebuild() -> void:
+	_refresh_base_layer()  # 换场景可能换主题 → 按新地形定万物基底层（themed-terrain P2）
 	_chunk_meshes.clear()
 	_water_meshes.clear()
 	for slot in _slots:
@@ -348,10 +404,26 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 					building_shadows.append([inst.position, ext.x, ext.y])
 			elif rref == "sdf_inline" or rref.begins_with("sdf_res:"):
 				_spawn_static_sdf(deco, def, rref, pos, yaw, hk)
+			elif rref.begins_with("composed:"):
+				_spawn_composed(deco, def, pos)
 			elif rref.is_empty():
 				push_warning("[items] 未知物品实体 %s（catalog 未载入?），跳过渲染" % id)
 			else:
 				push_warning("[items] renderRef %s 的键未在 PackRegistry 注册，跳过渲染" % rref)
+	# 草地装饰散布（Pokopia 化 P6）：厚叶草簇/大头花密植——落点决策与 mesh 见 TerrainDeco
+	# （纯函数确定性，重刷不闪），合批走同一个 batches。占地过滤在此层做：房/树/动态物件
+	# 脚下不长（占地是世界状态，纯函数管不着）；角色站位不算占地（暂态，与散布重摆同理）。
+	for j in range(CHUNK_TILES):
+		for i in range(CHUNK_TILES):
+			var ti := Vector2i(i, j)
+			var gt := wrapped * CHUNK_TILES + ti
+			var d := TerrainDeco.pick(gt)
+			if d.is_empty():
+				continue
+			if not OccupancyMap.is_free_rect(OccupancyMap.tile_to_cell(gt), 2, 2):
+				continue
+			var off: Vector2 = d["off"]
+			_batch(batches, d["key"], _tile_local(ti, wrapped) + Vector3(off.x, 0.0, off.y), d["scale"], d["yaw"])
 	# 边缘贴纸层：逐 tile 扫四条边（绝大多数为 0，纯 PackedByteArray 读，开销可忽略）。
 	for j in range(CHUNK_TILES):
 		for i in range(CHUNK_TILES):
@@ -362,7 +434,8 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 				if sid.is_empty():
 					continue
 				var skey := String(ItemCatalog.get_def(sid).get("renderRef", "")).get_slice(":", 1)
-				if PackRegistry.category(skey) != "sticker":
+				# skey 以 '@' 打头 = 造贴纸的网络资产哈希(sticker:@<hash>),合法;否则须是打包贴纸。
+				if not skey.begins_with("@") and PackRegistry.category(skey) != "sticker":
 					continue # 未注册/未来的墙篱笆类边缘物走独立分支
 				var off: Vector2 = EDGE_OFFSETS[side] * WorldGrid.TILE_SIZE
 				var out_n := off.normalized() * STICKER_OUT
@@ -390,6 +463,25 @@ func _spawn_static_sdf(parent: Node3D, def: Dictionary, rref: String, pos: Vecto
 	prop.visible = _props_shown  # 沿用画质开关态（chunk 重铺不打回默认）
 	parent.add_child(prop)
 	prop.enable_wander(float(def.get("wander", 0.0)), seed_v)
+	# 真静止造物（loco.none∧无spin∧无head∧无ropes）：异步烘焙成零成本静态 mesh 换掉 live，
+	# 省掉每帧逐顶点吸附（成本主轴）。会动的造物 bake_and_swap 内部判非静止即原样保留 live。
+	# 烘出的静态 mesh 是普通实例、不进 perf_props → 不再被「会动的物件」开关波及（如烘焙树，恒显）。
+	# 走绝对节点路径取 autoload 单例（其全局名在 headless --script 编译期不可用，见 sdf_bake_swap.gd）；
+	# 取不到（如离屏缩略图渲染无此单例）则不烘焙、prop 保持 live，属安全降级。
+	var bake_swap := get_node_or_null(^"/root/SdfBakeSwap")
+	if bake_swap != null:
+		bake_swap.bake_and_swap(prop)
+
+## 组合物（积木式造物，renderRef 'composed:'）：读 spec 的零件树，画骨架 + 每零件一片子 quad。
+## 纸片扁平、正对相机——不套 yaw（纸艺四支柱：正对俯角、禁 yaw 侧摆），底边落在地面。
+func _spawn_composed(parent: Node3D, def: Dictionary, pos: Vector3) -> void:
+	var spec: Variant = def.get("spec", null)
+	if typeof(spec) != TYPE_DICTIONARY:
+		return
+	var cp := ComposedProp.from_spec(spec)
+	cp.position = pos + Vector3(0.0, ComposedProp.HEIGHT * 0.5, 0.0) # 居中骨架抬半高，底边贴地
+	cp.visible = _props_shown
+	parent.add_child(cp)
 
 ## 散布缩放抖动（迁自旧散布逻辑，逐 tile hash 确定性；朝向抖动已烘进矩阵 arg）。
 static func _jitter_scale(key: String, hk: int) -> float:
@@ -412,6 +504,7 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 	var norms := PackedVector3Array()
 	var uvs := PackedVector2Array()
 	var uv2s := PackedVector2Array()  # 逻辑世界米坐标：贴图平铺锚在环面上，玩家居中重摆不游动
+	var cols := PackedColorArray()    # 顶点 COLOR.r = 本 quad 贴图层索引/255（顶面层 / 崖壁侧壁层）
 	var idx := PackedInt32Array()
 	var base_tile := wrapped * CHUNK_TILES
 	var half := CHUNK_WORLD * 0.5
@@ -424,35 +517,42 @@ func _chunk_mesh(wrapped: Vector2i) -> ArrayMesh:
 			var fl := TerrainMap.tile_floor_level(t)
 			var y := float(fl) * TerrainMap.STEP_HEIGHT  # 地面 = 有效级：水 tile 湖床下沉
 			var parity := posmod(t.x + t.y, 2)
-			# 角变体与取图类型：路走同类过渡；水是整格湖床（岸线由草侧崖缘+岸壁表达）；
-			# 草地在「有效级更低」的邻居（矮台地或水域湖床）旁换悬崖边草皮
-			var uv_type := ttype
+			# cell 种类 = autotile 几何行组；layer = 顶面贴图层索引（写进顶点 COLOR.r）。
+			# 路走带描边过渡；沙/雪/瓷砖走无描边 body（几何共享，差异全在 layer）；
+			# 水是整格湖床；草地在有效级更低的邻居旁换悬崖边草皮（body 部分 = 崖唇层）。
+			var cell_kind := TerrainAtlas.CELL_GRASS
+			var layer := TerrainTextures.top_layer(ttype)
 			var corners := PackedInt32Array([0, 0, 0, 0])  # 平草地/湖床不看变体
-			if ttype in TerrainMap.BODY_TYPES:
-				# 路 + 新增地表（沙/雪/瓷砖）皆「画在草底上的 body」：与同类邻居 autotile 过渡
+			if ttype == TerrainMap.T_PATH:
+				cell_kind = TerrainAtlas.CELL_PATH
 				var same := func(q: Vector2i) -> bool: return TerrainMap.tile_type(q) == ttype
 				corners = Autotile.corners_from_mask(Autotile.mask_of(t, same))
+			elif ttype in TerrainMap.BODY_TYPES:  # 沙/雪/瓷砖：无描边 body，与同类邻居过渡
+				cell_kind = TerrainAtlas.CELL_BODY
+				var same := func(q: Vector2i) -> bool: return TerrainMap.tile_type(q) == ttype
+				corners = Autotile.corners_from_mask(Autotile.mask_of(t, same))
+			elif ttype == TerrainMap.T_WATER:
+				cell_kind = TerrainAtlas.CELL_WATER  # V_FULL 湖床（岸线由草侧崖缘+岸壁表达）
 			elif ttype == TerrainMap.T_GRASS:
 				var not_lower := func(q: Vector2i) -> bool: return TerrainMap.tile_floor_level(q) >= fl
 				var mask := Autotile.mask_of(t, not_lower)
 				if mask != 255:
-					uv_type = TerrainAtlas.CLIFF_RIM
+					cell_kind = TerrainAtlas.CELL_CLIFF_RIM
+					layer = TerrainTextures.LAYER_CLIFF_LIP  # body 部分 = 崖唇土色
 					corners = Autotile.corners_from_mask(mask)
 			var x0 := -half + float(i) * WorldGrid.TILE_SIZE
 			var z0 := -half + float(j) * WorldGrid.TILE_SIZE
-			for c in range(4):
-				var cx := x0 + (half_tile if (c == Autotile.C_NE or c == Autotile.C_SE) else 0.0)
-				var cz := z0 + (half_tile if (c == Autotile.C_SW or c == Autotile.C_SE) else 0.0)
-				var r := TerrainAtlas.uv_rect(uv_type, c, corners[c], parity)
-				_emit_quad(verts, norms, uvs, uv2s, idx, cx, cz, y, half_tile, r, loff)
-			# L3 侧壁：邻居有效级更低的边（矮台地或湖床落差），逐级发墙 quad
-			_emit_walls(verts, norms, uvs, uv2s, idx, t, fl, x0, z0, loff)
+			# 顶面 4 角 quad（beveled tile 的临崖外缘内缩 + 发 chamfer 斜面倒角）
+			_emit_top_face(verts, norms, uvs, uv2s, cols, idx, t, ttype, fl, cell_kind, corners, layer, parity, x0, z0, y, loff)
+			# L3 侧壁：邻居有效级更低的边逐级发墙 quad；侧壁贴图层按被抬高 tile（本 tile）类型取
+			_emit_walls(verts, norms, uvs, uv2s, cols, idx, t, ttype, fl, x0, z0, loff)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_NORMAL] = norms
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
+	arrays[Mesh.ARRAY_COLOR] = cols  # 顶点 COLOR.r = 贴图层索引/255（themed-terrain P1）
 	arrays[Mesh.ARRAY_INDEX] = idx
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -557,13 +657,157 @@ func _emit_quad(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Packe
 	uv2s.append(lu + Vector2(0.0, size))
 	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
 
+## 通用 4 顶点 facet（顶面倒角/斜面用）：p0..p3 世界顶点（正面绕序 p0→p1→p2→p3），
+## 单一法线 nrm，贴图层 layer（写 COLOR.r），atlas 控制 uv 矩形 r，UV2 = 逻辑世界 xz（loff+xz）。
+## 与 _emit_quad 同绕序/同 UV 角点顺序，故可直接替代顶面平铺 quad（beveled tile 用）。
+func _emit_facet(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, nrm: Vector3, layer: int, r: Rect2, loff: Vector2) -> void:
+	var b := verts.size()
+	verts.append(p0); verts.append(p1); verts.append(p2); verts.append(p3)
+	var lcol := Color(float(layer) / 255.0, 0.0, 0.0, 1.0)
+	for k in range(4):
+		norms.append(nrm)
+		cols.append(lcol)
+	uvs.append(r.position)
+	uvs.append(Vector2(r.end.x, r.position.y))
+	uvs.append(r.end)
+	uvs.append(Vector2(r.position.x, r.end.y))
+	uv2s.append(loff + Vector2(p0.x, p0.z))
+	uv2s.append(loff + Vector2(p1.x, p1.z))
+	uv2s.append(loff + Vector2(p2.x, p2.z))
+	uv2s.append(loff + Vector2(p3.x, p3.z))
+	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
+
+## 同 _emit_facet 但逐顶点法线（倒角圆润用）：顶缘顶点法线=向上、底缘=墙面水平，
+## 插值后光照从顶面平滑扫到墙面 = 圆润棱观感（非单一平法线的「切一刀」硬斜面）；
+## 且顶缘与顶面(UP)、底缘与墙面(水平)法线一致 → 顶面→倒角→墙面无光照接缝。
+func _emit_facet4n(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, n0: Vector3, n1: Vector3, n2: Vector3, n3: Vector3, layer: int, r: Rect2, loff: Vector2) -> void:
+	var b := verts.size()
+	verts.append(p0); verts.append(p1); verts.append(p2); verts.append(p3)
+	norms.append(n0); norms.append(n1); norms.append(n2); norms.append(n3)
+	var lcol := Color(float(layer) / 255.0, 0.0, 0.0, 1.0)
+	for k in range(4):
+		cols.append(lcol)
+	uvs.append(r.position)
+	uvs.append(Vector2(r.end.x, r.position.y))
+	uvs.append(r.end)
+	uvs.append(Vector2(r.position.x, r.end.y))
+	uv2s.append(loff + Vector2(p0.x, p0.z))
+	uv2s.append(loff + Vector2(p1.x, p1.z))
+	uv2s.append(loff + Vector2(p2.x, p2.z))
+	uv2s.append(loff + Vector2(p3.x, p3.z))
+	idx.append_array(PackedInt32Array([b, b + 1, b + 2, b, b + 2, b + 3]))
+
+## 崖顶圆润倒角（fillet）：沿一条临崖边发 BEVEL_SEGS 段弧面，从顶面(法线 UP)绕 90° 圆弧
+## 平滑过渡到墙面(法线 h 水平)——顶点法线取弧的径向，位置沿 1/4 圆弧外凸（非单一平斜面「切一刀」）。
+## Ca/Cb = 弧心在边两端的世界点（= 内缩顶缘正下方 bevel 处）；up=Vector3.UP；h=向外水平单位向量。
+const BEVEL_SEGS := 3
+func _emit_fillet(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, ca: Vector3, cb: Vector3, up: Vector3, h: Vector3, bevel: float, layer: int, r: Rect2, loff: Vector2) -> void:
+	var prev_a := ca + up * bevel
+	var prev_b := cb + up * bevel
+	var prev_n := up
+	for s in range(1, BEVEL_SEGS + 1):
+		var ang := (float(s) / float(BEVEL_SEGS)) * (PI * 0.5)
+		var dir := (up * cos(ang) + h * sin(ang)).normalized()
+		var cur_a := ca + dir * bevel
+		var cur_b := cb + dir * bevel
+		_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
+			prev_a, prev_b, cur_b, cur_a, prev_n, prev_n, dir, dir, layer, r, loff)
+		prev_a = cur_a
+		prev_b = cur_b
+		prev_n = dir
+
+## 顶面 4 角 quad。非 beveled tile 走原 _emit_quad 平铺（零回归）。
+## beveled tile（TerrainTextures.tile_bevel>0 且有临崖边）：把每个角 quad 临崖的外缘内缩 bevel，
+## 并沿临崖边发一道 45° chamfer 斜面（内缩顶缘 y → 崖壁顶 boundary,y-bevel），外凸角补 miter，
+## 把「白方糖」的硬直角切成圆润雪盖棱。chamfer 用顶面雪贴图（雪盖滚过棱）+ body 控制 cell（无描边/无墙浮雕）。
+## 崖壁顶缘对应下降 bevel 由 _emit_walls 处理（两者在 boundary,y-bevel 处对齐）。
+func _emit_top_face(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, t: Vector2i, ttype: int, fl: int, cell_kind: int, corners: PackedInt32Array, layer: int, parity: int, x0: float, z0: float, y: float, loff: Vector2) -> void:
+	var half_tile := WorldGrid.TILE_SIZE * 0.5
+	var bevel := TerrainTextures.tile_bevel(ttype)
+	var cl_nx := TerrainMap.tile_floor_level(t + Vector2i(-1, 0)) < fl
+	var cl_px := TerrainMap.tile_floor_level(t + Vector2i(1, 0)) < fl
+	var cl_nz := TerrainMap.tile_floor_level(t + Vector2i(0, -1)) < fl
+	var cl_pz := TerrainMap.tile_floor_level(t + Vector2i(0, 1)) < fl
+	var beveled := bevel > 0.0 and (cl_nx or cl_px or cl_nz or cl_pz)
+	var top_lyr := TerrainTextures.top_layer(ttype)  # chamfer 用顶面贴图（雪盖）
+	var body_r := TerrainAtlas.uv_rect(TerrainAtlas.CELL_BODY, Autotile.C_NW, Autotile.V_FULL, parity)
+	var lcol := Color(float(layer) / 255.0, 0.0, 0.0, 1.0)
+	var yb := y - bevel
+	for c in range(4):
+		var right := c == Autotile.C_NE or c == Autotile.C_SE
+		var down := c == Autotile.C_SW or c == Autotile.C_SE
+		var cx := x0 + (half_tile if right else 0.0)
+		var cz := z0 + (half_tile if down else 0.0)
+		var r := TerrainAtlas.uv_rect(cell_kind, c, corners[c], parity)
+		if not beveled:
+			_emit_quad(verts, norms, uvs, uv2s, idx, cx, cz, y, half_tile, r, loff)
+			for _k in range(4):
+				cols.append(lcol)
+			continue
+		# 本角 quad 的两条外缘（-x/+x 取决 right，-z/+z 取决 down）临崖则内缩
+		var ins_nx := (not right) and cl_nx
+		var ins_px := right and cl_px
+		var ins_nz := (not down) and cl_nz
+		var ins_pz := down and cl_pz
+		var qx0 := cx + (bevel if ins_nx else 0.0)
+		var qx1 := cx + half_tile - (bevel if ins_px else 0.0)
+		var qz0 := cz + (bevel if ins_nz else 0.0)
+		var qz1 := cz + half_tile - (bevel if ins_pz else 0.0)
+		_emit_facet(verts, norms, uvs, uv2s, cols, idx,
+			Vector3(qx0, y, qz0), Vector3(qx1, y, qz0), Vector3(qx1, y, qz1), Vector3(qx0, y, qz1),
+			Vector3.UP, layer, r, loff)
+		var NX := Vector3(-1, 0, 0)
+		var PX := Vector3(1, 0, 0)
+		var NZ := Vector3(0, 0, -1)
+		var PZ := Vector3(0, 0, 1)
+		# 圆润倒角 fillet（1/4 圆弧外凸 + 径向平滑法线），四边各一道
+		if ins_nx:
+			_emit_fillet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, yb, qz0), Vector3(qx0, yb, qz1), Vector3.UP, NX, bevel, top_lyr, body_r, loff)
+		if ins_px:
+			_emit_fillet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, yb, qz1), Vector3(qx1, yb, qz0), Vector3.UP, PX, bevel, top_lyr, body_r, loff)
+		if ins_nz:
+			_emit_fillet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, yb, qz0), Vector3(qx0, yb, qz0), Vector3.UP, NZ, bevel, top_lyr, body_r, loff)
+		if ins_pz:
+			_emit_fillet(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, yb, qz1), Vector3(qx1, yb, qz1), Vector3.UP, PZ, bevel, top_lyr, body_r, loff)
+		# 外凸角 miter：两邻边都临崖 → 补角圆润斜面（顶=UP、底=两墙法线对角），否则外角留缺口
+		if ins_nx and ins_nz:
+			_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, y, qz0), Vector3(cx, yb, qz0), Vector3(cx, yb, cz), Vector3(qx0, yb, cz),
+				Vector3.UP, NX, (NX + NZ).normalized(), NZ, top_lyr, body_r, loff)
+		if ins_px and ins_nz:
+			_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, y, qz0), Vector3(qx1, yb, cz), Vector3(cx + half_tile, yb, cz), Vector3(cx + half_tile, yb, qz0),
+				Vector3.UP, NZ, (PX + NZ).normalized(), PX, top_lyr, body_r, loff)
+		if ins_nx and ins_pz:
+			_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx0, y, qz1), Vector3(qx0, yb, cz + half_tile), Vector3(cx, yb, cz + half_tile), Vector3(cx, yb, qz1),
+				Vector3.UP, PZ, (NX + PZ).normalized(), NX, top_lyr, body_r, loff)
+		if ins_px and ins_pz:
+			_emit_facet4n(verts, norms, uvs, uv2s, cols, idx,
+				Vector3(qx1, y, qz1), Vector3(cx + half_tile, yb, qz1), Vector3(cx + half_tile, yb, cz + half_tile), Vector3(qx1, yb, cz + half_tile),
+				Vector3.UP, PX, (PX + PZ).normalized(), PZ, top_lyr, body_r, loff)
+
 ## tile 四边中「邻居有效级更低」的边发竖直崖壁/水下岸壁。每级 = 一个 2m×2m 墙格，
 ## 墙格对同一墙面的 8 邻墙格（沿墙走向左右 × 层级上下 × 对角）做 corner autotile：
 ## 有邻墙 = 相连，无邻墙侧出凹缝暗边 + 亮棱线。墙格再切 4 个 1m 角 quad 按变体取 UV。
 ## tile 局部范围 [x0, x0+2]×[z0, z0+2]，本 tile 有效级 fl（湖床可为负）。
 ## UV2 = (沿墙逻辑坐标, 世界 y)——竖直面按墙走向平铺贴图。
-func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, idx: PackedInt32Array, t: Vector2i, fl: int, x0: float, z0: float, loff: Vector2) -> void:
+func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array, cols: PackedColorArray, idx: PackedInt32Array, t: Vector2i, ttype: int, fl: int, x0: float, z0: float, loff: Vector2) -> void:
 	var ts := WorldGrid.TILE_SIZE
+	# 侧壁贴图层 = 被抬高 tile（本 tile）类型对应的侧壁层（修 CLIFF_WALL 写死的偷懒）
+	var side_layer := float(TerrainTextures.side_layer(ttype)) / 255.0
+	# 盖帽涂装（Pokopia 化 P4）用两个空闲顶点色通道：
+	# g = 顶面层索引（盖帽取顶面平色，生态身份跟着顶面走）；
+	# b = 距崖顶深度 below/2m（clamp 到 [0,1]；shader 只关心 <0.6m 的帽区，8bit 精度 ~8mm 足够；
+	#     跨 clamp 的 quad 在 0..2m 内逐段线性，帽区判定不受插值失真影响）。
+	var cap_lyr := float(TerrainTextures.top_layer(ttype)) / 255.0
+	# beveled tile：最顶一级墙面顶缘下降 bevel，给顶面 chamfer 斜面让位（在 boundary,y-bevel 处对齐）
+	var bevel := TerrainTextures.tile_bevel(ttype)
+	var wall_top := float(fl) * TerrainMap.STEP_HEIGHT - bevel
 	var x1 := x0 + ts
 	var z1 := z0 + ts
 	# 每边：邻居偏移 n / 墙面法线 / 上边两端点 a→b（从法线侧看去 a 在屏幕左）/
@@ -578,12 +822,17 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 		var n_off: Vector2i = s["n"]
 		var tang: Vector2i = s["tang"]
 		var nfl := TerrainMap.tile_floor_level(t + n_off)
+		# 墙脚 AO（Pokopia 化 P5）：COLOR.a 编码「离墙基高度/2m」（墙基=邻居有效地面=
+		# 内凹角所在），shader 对 <0.45m 的墙脚压暗——内凹角的柔和接触暗缝。
+		var wall_base := float(nfl) * TerrainMap.STEP_HEIGHT
 		for lvl in range(nfl, fl):
 			# (q.x, q.y) = (沿墙偏移, 视觉上下偏移)；atlas 的 N(-1) = 上一级
 			var pred := func(q: Vector2i) -> bool:
 				return _wall_exists(t + tang * q.x, n_off, lvl - q.y)
 			var corners := Autotile.corners_from_mask(Autotile.mask_of(Vector2i.ZERO, pred))
 			var y_top := float(lvl + 1) * TerrainMap.STEP_HEIGHT
+			if lvl == fl - 1:
+				y_top -= bevel  # 顶级让位给 chamfer（非 beveled tile bevel=0，无变化）
 			var y_mid := (float(lvl) + 0.5) * TerrainMap.STEP_HEIGHT
 			var y_bot := float(lvl) * TerrainMap.STEP_HEIGHT
 			var a: Vector3 = s["a"]
@@ -602,8 +851,14 @@ func _emit_walls(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pack
 				verts.append(Vector3(h1.x, yt, h1.z))
 				verts.append(Vector3(h1.x, yb, h1.z))
 				verts.append(Vector3(h0.x, yb, h0.z))
+				var col_t := Color(side_layer, cap_lyr, clampf((wall_top - yt) * 0.5, 0.0, 1.0), clampf((yt - wall_base) * 0.5, 0.0, 1.0))
+				var col_b := Color(side_layer, cap_lyr, clampf((wall_top - yb) * 0.5, 0.0, 1.0), clampf((yb - wall_base) * 0.5, 0.0, 1.0))
 				for k in range(4):
 					norms.append(s["normal"])
+				cols.append(col_t)
+				cols.append(col_t)
+				cols.append(col_b)
+				cols.append(col_b)
 				uvs.append(r.position)
 				uvs.append(Vector2(r.end.x, r.position.y))
 				uvs.append(r.end)
@@ -640,6 +895,7 @@ func _flush_batches(parent: Node3D, batches: Dictionary) -> void:
 			mm.set_instance_transform(i, arr[i])
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
+		mmi.set_meta("scatter_key", key)  # 散布种类 key（矩阵散布 / TerrainDeco 装饰 / sticker: 三源同池，元数据留痕供测试与调试区分）
 		mmi.material_override = info["mat"]
 		mmi.extra_cull_margin = CULL_MARGIN
 		# 散布物一律不投影：真机（Mali-G76）瓶颈是顶点吞吐，shadow pass 重画全部散布
@@ -741,14 +997,49 @@ func _flush_building_shadows(parent: Node3D, centers: Array) -> void:
 ## mesh 和 bend 包裹后的材质（_wrap_material 有缓存，同调色板 atlas 只建一份）。
 static var _scatter_kinds: Dictionary = {}
 
+## 造贴纸的网络资产贴图缓存（hash→Texture2D）：world 侧按 renderRef 'sticker:@<hash>' 预热
+## （api.fetch_texture），本类 _scatter_kind 同步读。缓存后 world 触发 rebuild() 用真图重建。
+static var _sticker_asset_tex: Dictionary = {}
+static var _sticker_placeholder_tex: Texture2D = null
+
+## 1×1 透明占位（资产贴图未到时用，绝不崩；到货后 rebuild 换真图）。
+static func _sticker_placeholder() -> Texture2D:
+	if _sticker_placeholder_tex == null:
+		var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+		img.set_pixel(0, 0, Color(1, 1, 1, 0))
+		_sticker_placeholder_tex = ImageTexture.create_from_image(img)
+	return _sticker_placeholder_tex
+
+## world 预热完成后灌入资产贴图：存缓存 + 失效该键的散布种类（下次 rebuild 用真图+真宽高比重建）。
+static func cache_sticker_asset(hash: String, tex: Texture2D) -> void:
+	if tex == null:
+		return
+	_sticker_asset_tex[hash] = tex
+	_scatter_kinds.erase("sticker:@" + hash) # 丢掉占位版本，逼 _scatter_kind 用真图重建
+
+## world 预热前查重：已缓存就不重复拉网络。
+static func has_sticker_asset(hash: String) -> bool:
+	return _sticker_asset_tex.has(hash)
+
+## 同步取已缓存的造贴纸资产贴图（角色锚点贴纸盘用）；未预热到 → null。
+static func get_sticker_asset(hash: String) -> Texture2D:
+	return _sticker_asset_tex.get(hash) as Texture2D
+
 func _scatter_kind(key: String) -> Dictionary:
 	if _scatter_kinds.has(key):
 		return _scatter_kinds[key]
 	var info := {}
 	if key.begins_with("sticker:"):
 		# 贴纸竖片：QuadMesh 底边对齐原点（center_offset 上移半高），宽按贴图比例；
-		# 贴图经 PackRegistry（category "sticker"）运行时 load。
-		var tex := PackRegistry.load_resource(key.get_slice(":", 1)) as Texture2D
+		# 打包贴纸经 PackRegistry 运行时 load；造贴纸(skey '@<hash>')从资产缓存取，未到用透明占位。
+		var skey := key.get_slice(":", 1)
+		var tex: Texture2D
+		if skey.begins_with("@"):
+			tex = _sticker_asset_tex.get(skey.substr(1)) as Texture2D
+			if tex == null:
+				tex = _sticker_placeholder()
+		else:
+			tex = PackRegistry.load_resource(skey) as Texture2D
 		var q := QuadMesh.new()
 		var w := STICKER_H * (float(tex.get_width()) / float(tex.get_height()) if tex != null else 1.0)
 		q.size = Vector2(w, STICKER_H)
@@ -758,6 +1049,9 @@ func _scatter_kind(key: String) -> Dictionary:
 		m.set_shader_parameter("albedo_tex", tex)
 		m.set_shader_parameter("curvature", BendMat.CURVATURE)
 		info = { "mesh": q, "mat": m }
+	elif key.begins_with("deco_"):
+		# 草地装饰散布（Pokopia 化 P6）：程序化低模 mesh + 烘焙布景共享顶点色材质
+		info = { "mesh": TerrainDeco.mesh(key), "mat": SdfStaticBaker.material() }
 	elif PackRegistry.category(key) == "baked":
 		info = { "mesh": PackRegistry.load_resource(key), "mat": SdfStaticBaker.material() }
 	else:  # scatter：KayKit 场景剥出 mesh + bend 包裹材质

@@ -1,19 +1,24 @@
 class_name AsrGuard
 extends RefCounted
-## 端侧 ASR 门禁：Android 上端侧模型（MaliangAsr 插件 + sherpa AAR）是硬依赖。
-## 缺失/初始化失败绝不能静默回落服务端识别——否则「导出漏带 AAR」的坏包会悄悄
-## 降级、一路流到小朋友手里都发现不了（老板 2026-07-09 明确要求：没模型直接启动报错）。
-## 桌面/编辑器天然没有该单例，走服务端识别是合法的，不受此门禁约束。
+## 端侧 ASR 门禁：Android/导出 macOS 上端侧模型（MaliangAsr 插件 + sherpa）是硬依赖。
+## 服务端 ASR 已整条退役（2026-07-13），端侧是唯一的识别路径——所以「导出漏带模型」的坏包
+## 一旦放行就是个哑巴 App，必须在启动时硬报错拦住（老板 2026-07-09 明确要求：没模型直接报错）。
+## editor/headless 从源码跑时模型不随包（除非 MALIANG_ASR_MODEL_DIR 指路），此时本机没有识别
+## 能力：麦照开、VAD 照跑、转写恒空。这是开发环境的既定状态，不受此门禁约束——否则没建过
+## GDExtension / 没拉过模型的干净 checkout 会被全屏挡在游戏外，整套 headless 回测也跑不了。
 
 ## 本平台是否「本应有端侧 ASR」。
 ## - Android：恒为真（AAR 打进 APK，缺失即坏包）。
+## - iOS：恒为真。iOS 没有 editor 形态——跑起来的 iOS 进程必然是导出包，而导出包里
+##   GDExtension 静态库 + 模型是随包的（scripts/export-ios.sh 会当场数、缺了 exit 1）。
+##   所以缺失只可能是坏包，硬报错拒进游戏。
 ## - macOS：仅**导出构建**（is_template=OS.has_feature("template")）为真——导出的 .app 把
-##   GDExtension + 模型随包带走，缺失即坏包，硬报错拒进游戏。editor/headless 从源码跑时
-##   GDExtension 虽也加载，但模型未随包，走服务端识别合法，不受门禁约束（否则整套 headless
-##   回测会因缺模型被 block）。真实端侧识别路径由 macos_asr_recognize.gd 专测覆盖。
+##   GDExtension + 模型随包带走（play-mac.sh / package-mac-app.sh 注入 Contents/Resources/
+##   asr-models），缺失即坏包，硬报错拒进游戏。editor/headless 从源码跑不受门禁约束（模型
+##   不随包，见文件头）。真实端侧识别路径由 macos_asr_recognize.gd 专测覆盖。
 ## - 其它平台：为假。
 static func asr_required(os_name: String, is_template: bool = false) -> bool:
-	if os_name == "Android":
+	if os_name == "Android" or os_name == "iOS":
 		return true
 	if os_name == "macOS":
 		return is_template
@@ -28,9 +33,9 @@ static func is_fatal(os_name: String, available: bool, is_template: bool = false
 	return asr_required(os_name, is_template) and not available
 
 ## utterance 阶段：是否必须等端侧就绪再开麦。
-## Android/导出 macOS 上端侧 ASR 是硬依赖，未就绪时绝不回落服务端上传 PCM（宁可不开麦、等
-## asr_ready 信号；加载失败会走 asr_error 硬报错，不会卡在这里）。editor/headless（is_template
-## 为假）从源码跑走服务端识别合法，永远不等待。
+## Android/导出 macOS 上端侧 ASR 是硬依赖，未就绪时宁可不开麦、等 asr_ready 信号（没有服务端
+## 可回落；加载失败会走 asr_error 硬报错，不会卡在这里）。editor/headless（is_template 为假）
+## 永远不等待——那里本就没有识别能力，等也等不来。
 static func must_wait_for_ready(os_name: String, is_ready: bool, is_template: bool = false) -> bool:
 	return asr_required(os_name, is_template) and not is_ready
 

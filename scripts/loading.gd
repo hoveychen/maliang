@@ -20,15 +20,15 @@ const FADE_TIME := 0.45   ## 揭开淡出时长
 const MIN_SHOW_MS := 600  ## 最短显示：避免过场一闪而过（世界瞬间就绪时也留个照面）
 const DOT_COUNT := 3
 
-const FAIRY_W := 260.0    ## 仙子精灵框宽/高（横飞时按框定位）
-const FAIRY_H := 178.0
+const FAIRY_W := 296.0    ## 点点精灵框宽/高（横飞时按框定位；比例贴合图集 cell 296×256）
+const FAIRY_H := 256.0
 const FLY_MARGIN := 44.0  ## 飞行航道左右留白
-# 仙子 idle 动画图集（服务端生成、WebP 打包本地供离线用；6×6 网格 31 帧 8fps，cell 216×160）
+# 点点 idle 动画图集（服务端 Seedance 生成、WebP 打包本地供离线用；6×6 网格 31 帧 8fps，cell 296×256）
 const FAIRY_SHEET_COLS := 6
 const FAIRY_SHEET_FRAMES := 31
 const FAIRY_SHEET_FPS := 8.0
-const FAIRY_CELL_W := 216
-const FAIRY_CELL_H := 160
+const FAIRY_CELL_W := 296
+const FAIRY_CELL_H := 256
 const PROG_FOLLOW := 2.5  ## 显示进度追真进度的速度（每秒）：真里程碑落地时仙子快速前冲
 const PROG_CREEP := 0.035 ## 真进度停滞时的慢爬（每秒），朝 0.9 渐近但永不到顶——到顶只由 world_ready 触发
 const CREEP_CEIL := 0.9   ## 慢爬封顶：网络久等时仙子最多爬到 90%，留最后一截给「真就绪」
@@ -42,7 +42,14 @@ const REACT_DUR := 0.7     ## 点击屏幕后小仙子纸片翻转反应时长
 var _fade_root: Control    ## 淡出目标（背景+三点挂它下面，改 modulate:a 剥离）
 var _portal: TextureRect   ## 航道终点的传送门（挂 CanvasLayer 上、盖过 _fade_root，单独转场）
 var _fairy: TextureRect
-var _fairy_atlas: AtlasTexture ## 仙子动画图集的取帧窗口（每帧移 region 播 idle 动画）
+var _fairy_atlas: AtlasTexture ## 点点动画图集的取帧窗口（每帧移 region 播 idle 动画）
+var _trail: InkStroke          ## 点点飞过留下的墨迹（＝进度条：她画到哪儿，就是加载到哪儿）
+var _trail_base_y := 0.0       ## 墨迹基线 Y（不随点点上下起伏抖动，是稳的一道笔画）
+var _fairy_cx := 0.0           ## 点点框心 X（_layout_fairy 每帧写，墨迹终点取它）
+var _trail_max_x := 0.0        ## 墨迹已画到的最靠右 X（只增不减：画上去的墨不会退，笔尖左右摆也不缩尾）
+var _ink_drop: TextureRect     ## 笔尖将滴未滴的墨珠（慢网停滞时浮现：墨快用完了在续墨）
+var _stall_t := 0.0            ## 真进度停滞累计秒（慢爬而非跟进）：越久越"墨快用完"
+var _stalled := false          ## 本帧是否停滞（笔尖蹭飞白 + 墨珠据此显隐）
 var _status_label: Label   ## 调试浮层：当前加载阶段文案+进度百分比（仅 debug 构建，release 不建，见 _build_overlay）
 var _dots: Array[ColorRect] = []
 var _t := 0.0
@@ -80,6 +87,26 @@ func _build_overlay() -> void:
 	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_fade_root.add_child(bg)
+
+	# 点点飞过留下的墨迹＝进度条：一道水墨笔画，从航道起点画到她当前位置。
+	# 自绘（InkStroke，非 Line2D+平铺纹理——那会周期性对齐成"马路中线"，像小路不像墨）：
+	# 一束笔毛叠出浓淡+羽化软边，非周期噪声断墨=真飞白。在 bg 之后、点点之前入树→画在她身后。
+	_trail = InkStroke.new()
+	_trail.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_trail.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade_root.add_child(_trail)
+
+	# 笔尖将滴未滴的墨珠：慢网停滞时浮现（墨快用完，笔尖攒着一滴不落）。平时透明。
+	_ink_drop = TextureRect.new()
+	_ink_drop.texture = _make_drop_texture(40)
+	_ink_drop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_ink_drop.stretch_mode = TextureRect.STRETCH_SCALE
+	_ink_drop.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_ink_drop.custom_minimum_size = Vector2(34.0, 46.0)
+	_ink_drop.pivot_offset = Vector2(17.0, 4.0) # 绕顶端(连着笔尖处)缩放，像从笔尖垂下来
+	_ink_drop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ink_drop.modulate.a = 0.0
+	_fade_root.add_child(_ink_drop)
 
 	# 横飞的小仙子（bob + 呼吸 + 随就绪进度从左飞到右，见 _process）——把等待可视化成
 	# 「小仙子布置世界，飞到尽头就绪」，让慢网也有进度感、且揭幕严格等仙子飞到头。
@@ -131,6 +158,7 @@ func _build_overlay() -> void:
 	_portal.custom_minimum_size = Vector2(PORTAL_W, PORTAL_H)
 	_portal.pivot_offset = Vector2(PORTAL_W * 0.5, PORTAL_H * 0.5) # 自转/缩放绕门心
 	_portal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_portal.modulate.a = 0.0 # loading 期间隐藏——门不是一开始就杵在那儿，是收锋墨点绽出来的（见 _on_world_ready）
 	layer.add_child(_portal)
 
 	# 调试状态浮层（仅 debug 构建，与世界里的 FPS/坐标调试信息同门控 OS.is_debug_build()）：
@@ -187,6 +215,8 @@ func _process(delta: float) -> void:
 	_advance_progress(delta)
 	if not _transitioning: # 转场后仙子交给吸入 tween，别再被逐帧布局覆盖 scale/位置
 		_layout_fairy()
+		_layout_trail()
+		_layout_ink_drop()
 	_layout_portal()
 	# 三点顺序脉动（相位错开），alpha 在 0.35~1.0 之间呼吸
 	for i in range(_dots.size()):
@@ -212,8 +242,12 @@ func _advance_progress(delta: float) -> void:
 		real = _world.ready_progress()
 	if real > _prog:
 		_prog = move_toward(_prog, real, PROG_FOLLOW * delta)
+		_stall_t = 0.0            # 真进度在推进：不算停滞，墨够用
 	else:
 		_prog = move_toward(_prog, CREEP_CEIL, PROG_CREEP * delta)
+		_stall_t += delta         # 真进度停滞、只在慢爬：越久越像"墨快用完"
+	# 停滞 >0.5s 才算（避开里程碑之间的正常小间隙）；落地/转场期不停滞
+	_stalled = _stall_t > 0.5 and not _landing and not _transitioning
 
 ## 刷新调试状态浮层（仅 debug 构建存在）：显示世界当前引导阶段文案 + 显示进度百分比。
 func _update_status_label() -> void:
@@ -254,6 +288,91 @@ func _layout_fairy() -> void:
 	_fairy.offset_bottom = base_y + FAIRY_H + bob
 	_fairy.rotation = tilt
 	_fairy.scale = Vector2(s * flip, s) # x 方向翻转做纸片翻面
+	_fairy_cx = x + FAIRY_W * 0.5           # 墨迹画到她身下的笔尖处（框心 x）
+	_trail_base_y = base_y + FAIRY_H * 0.58 # 稳的一道基线：取她身体中下部，不随 bob 抖
+
+## 墨迹进度条：从航道起点画到点点当前位置的一道水墨笔画。采中心点喂给 InkStroke 自绘。
+## 基线只留很淡的起伏——书法笔画大体是直的，之前低频大波让它看着像蜿蜒的小路。
+func _layout_trail() -> void:
+	if _trail == null or _fade_root == null:
+		return
+	var start_x := FLY_MARGIN + 12.0
+	# 只增不减：笔尖 flit 左右摆时墨迹不缩尾（画上去的墨不会退）。落地冲刺(_prog→1)也一路只涨。
+	_trail_max_x = maxf(_trail_max_x, _fairy_cx - FAIRY_W * 0.18)
+	var end_x := maxf(_trail_max_x, start_x)
+	# 停滞时笔尖原地小幅高频抖动＝蹭飞白（墨快用完，在纸上蹭着找墨；只在尾巴抖，不改已画部分）
+	if _stalled:
+		end_x += sin(_t * 22.0) * 4.0
+	var pts := PackedVector2Array()
+	var seg := 14.0   # 采样更密：逐小段连续画，段间才衔接得上（老板反馈"一段一段没衔接"）
+	var x := start_x
+	while x < end_x:
+		pts.append(Vector2(x, _trail_base_y + _trail_wob(x)))
+		x += seg
+	pts.append(Vector2(end_x, _trail_base_y + _trail_wob(end_x)))
+	_trail.set_stroke(pts)
+
+## 笔画基线的轻微起伏（书法运笔的手抖，不是小路的蜿蜒）：幅度压到 ±3px 上下。
+func _trail_wob(x: float) -> float:
+	return sin(x * 0.018) * 3.0 + sin(x * 0.07) * 1.2
+
+## 笔尖墨珠：慢网停滞时在笔尖挂一滴将滴未滴的墨（墨快用完了在续墨），轻微膨胀+下坠但从不落下。
+## 挂在墨迹当前终点(笔尖)下方；停滞时淡入+呼吸，恢复推进立刻淡出。
+func _layout_ink_drop() -> void:
+	if _ink_drop == null:
+		return
+	var target_a := 1.0 if _stalled else 0.0
+	_ink_drop.modulate.a = move_toward(_ink_drop.modulate.a, target_a, 4.0 * get_process_delta_time())
+	if _ink_drop.modulate.a <= 0.001:
+		return
+	# 挂在笔尖(墨迹终点)正下方；停滞越久墨珠越沉一点(将滴未滴)，配一层轻呼吸
+	var tip_x := maxf(_fairy_cx - FAIRY_W * 0.18, FLY_MARGIN + 12.0)
+	var swell := 0.9 + 0.12 * sin(_t * 3.2)                    # 呼吸
+	var sag := clampf(_stall_t - 0.5, 0.0, 2.0) / 2.0 * 8.0    # 越久坠得越低(封顶 8px)
+	var w := _ink_drop.custom_minimum_size.x
+	_ink_drop.offset_left = tip_x - w * 0.5
+	_ink_drop.offset_right = tip_x + w * 0.5
+	_ink_drop.offset_top = _trail_base_y + 6.0 + sag
+	_ink_drop.offset_bottom = _ink_drop.offset_top + _ink_drop.custom_minimum_size.y
+	_ink_drop.scale = Vector2(swell, swell)
+
+## 收锋墨点纹理：一坨圆墨点（径向实心+软边，边缘略洇不规则）。墨点绽成传送门的起点。
+func _make_blot_texture(size: int) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var ink := Color(0.13, 0.11, 0.10)
+	var c := float(size) * 0.5
+	for y in size:
+		for x in size:
+			var dx := float(x) - c
+			var dy := float(y) - c
+			var r := sqrt(dx * dx + dy * dy) / c            # 0 心→1 边
+			# 边缘略不规则（墨洇）：按角度轻微起伏半径阈值
+			var wob := 0.06 * sin(atan2(dy, dx) * 5.0)
+			var a := smoothstep(0.92 + wob, 0.62 + wob, r) * 0.96
+			img.set_pixel(x, y, Color(ink.r, ink.g, ink.b, a))
+	return ImageTexture.create_from_image(img)
+
+## 墨珠纹理：一颗上尖下圆的墨滴（顶端连笔尖、底端聚一点高光）。墨色偏暖黑，无外部素材。
+func _make_drop_texture(size: int) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var ink := Color(0.14, 0.12, 0.11)
+	var cx := float(size) * 0.5
+	for y in size:
+		var v := float(y) / float(size - 1)          # 0 顶 → 1 底
+		# 上尖下圆：半宽随 v 从很窄张到最宽(v≈0.7)再收
+		var halfw := (0.10 + 0.42 * sin(clampf(v, 0.0, 1.0) * PI * 0.9)) * float(size)
+		for x in size:
+			var d := absf(float(x) - cx)
+			var a := 0.0
+			if d < halfw:
+				a = smoothstep(halfw, halfw - 3.0, d)  # 软边
+			if a <= 0.0:
+				continue
+			# 左上一点高光(湿墨反光)
+			var hl := clampf(1.0 - Vector2(float(x) - cx * 0.7, float(y) - size * 0.55).length() / (size * 0.22), 0.0, 1.0)
+			var col := ink.lerp(Color(0.55, 0.52, 0.5), hl * 0.5)
+			img.set_pixel(x, y, Color(col.r, col.g, col.b, a * 0.95))
+	return ImageTexture.create_from_image(img)
 
 ## 播 idle 动画：按 _t 与 fps 取当前帧，移动 AtlasTexture 的 region 到对应网格格子。
 func _update_fairy_frame() -> void:
@@ -351,8 +470,46 @@ func _on_world_ready() -> void:
 	land.tween_property(self, "_prog", 1.0, LAND_TIME).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	await land.finished
 
-	# ② 仙子被吸入门：缩到门心并淡出。_transitioning 接管门（位置/缩放交给 tween）。
+	# ①.5 收锋墨点绽成传送门：点点一笔画到头，收锋在笔画末端顿出一个黑墨点，墨点再"活过来"
+	# 绽成传送门（画什么什么活过来，兑现点点笔灵人设）。_transitioning 接管门/仙子的逐帧布局。
 	_transitioning = true
+	var vp0 := _fade_root.size
+	var base_y := vp0.y * 0.40
+	var tip := Vector2((vp0.x - FLY_MARGIN - FAIRY_W * 0.5) - FAIRY_W * 0.18, base_y + FAIRY_H * 0.58)
+	# 收锋墨点：笔画末端顿出来（BACK 过冲＝按下去的顿笔）
+	var blot := TextureRect.new()
+	blot.texture = _make_blot_texture(96)
+	blot.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	blot.stretch_mode = TextureRect.STRETCH_SCALE
+	blot.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	blot.custom_minimum_size = Vector2(72.0, 72.0)
+	blot.pivot_offset = Vector2(36.0, 36.0)
+	blot.offset_left = tip.x - 36.0
+	blot.offset_top = tip.y - 36.0
+	blot.offset_right = tip.x + 36.0
+	blot.offset_bottom = tip.y + 36.0
+	blot.scale = Vector2.ZERO
+	blot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade_root.add_child(blot)
+	_ink_drop.modulate.a = 0.0 # 停滞墨珠若在，收起让位给收锋
+	var pop := create_tween()
+	pop.tween_property(blot, "scale", Vector2(1.15, 1.15), 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	await pop.finished
+	# 门摆到墨点处，从墨点长出来（scale 0.35→1 + 淡入），墨点同时晕开淡出（墨"化"成门）
+	_portal.offset_left = tip.x - PORTAL_W * 0.5
+	_portal.offset_top = tip.y - PORTAL_H * 0.5
+	_portal.offset_right = tip.x + PORTAL_W * 0.5
+	_portal.offset_bottom = tip.y + PORTAL_H * 0.5
+	_portal.scale = Vector2(0.35, 0.35)
+	var bloom := create_tween().set_parallel(true)
+	bloom.tween_property(_portal, "modulate:a", 1.0, 0.30)
+	bloom.tween_property(_portal, "scale", Vector2(1.0, 1.0), 0.38).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	bloom.tween_property(blot, "scale", Vector2(1.7, 1.7), 0.32)
+	bloom.tween_property(blot, "modulate:a", 0.0, 0.32)
+	await bloom.finished
+	blot.queue_free()
+
+	# ② 仙子被吸入门：缩到门心并淡出。（门此刻在墨点处，下一步 recenter 会把它移到屏幕中央）
 	var suck := create_tween().set_parallel(true)
 	suck.tween_property(_fairy, "scale", Vector2(0.05, 0.05), 0.26).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 	suck.tween_property(_fairy, "modulate:a", 0.0, 0.26)
@@ -381,3 +538,66 @@ func _on_world_ready() -> void:
 	out.tween_property(_portal, "modulate:a", 0.0, 0.3)
 	await out.finished
 	queue_free() # 过场移除，世界成为唯一场景
+
+## 自绘水墨笔画：把一条中心折线渲成毛笔笔触。**不用 Line2D+平铺纹理**——那会把飞白/笔毛缝
+## 周期性对齐成"马路中线"，看着像蜿蜒小路不像墨（老板实测打回）。
+##
+## 做法照真毛笔＝一束笔毛：跨笔画方向铺 HAIRS 根平行细线，中间密两侧疏（叠加出浓淡+羽化软边）；
+## 每根笔毛沿笔画方向按**非周期哈希**断墨（飞白不再对齐成规则虚线，快扫处墨不满纸露出纸白）；
+## 起笔尖、行笔粗、收笔留湿头。断墨位置只由 (笔毛号, x) 决定→画好的墨"干"在那儿不随帧闪。
+class InkStroke extends Control:
+	var _pts := PackedVector2Array()
+	const HAIRS := 15            ## 笔毛根数
+	const HALF_W := 12.0         ## 笔画半宽（中心到边缘）
+	const INK := Color(0.13, 0.11, 0.10)  ## 墨色（微暖黑）
+
+	func set_stroke(pts: PackedVector2Array) -> void:
+		_pts = pts
+		queue_redraw()
+
+	## 平滑"墨量"密度：低频，随位置缓变（别高频抖成碎块）。0=干 1=湿。每根笔毛相位错开。
+	func _density(hair: int, s: float) -> float:
+		var n := 0.5 + 0.5 * (sin(s * 0.018 + hair * 1.3) * 0.6 + sin(s * 0.006 - hair * 0.7) * 0.4)
+		return clampf(n, 0.0, 1.0)
+
+	func _draw() -> void:
+		if _pts.size() < 2:
+			return
+		# 沿笔画累计弧长 s + 每点法线（近水平，法线≈竖直）
+		var n := _pts.size()
+		var slen := PackedFloat32Array(); slen.resize(n)
+		slen[0] = 0.0
+		for i in range(1, n):
+			slen[i] = slen[i - 1] + _pts[i].distance_to(_pts[i - 1])
+		var total := maxf(slen[n - 1], 1.0)
+		var normals := PackedVector2Array(); normals.resize(n)
+		for i in n:
+			var a := _pts[maxi(i - 1, 0)]
+			var b := _pts[mini(i + 1, n - 1)]
+			var tang := (b - a).normalized()
+			if tang == Vector2.ZERO:
+				tang = Vector2.RIGHT
+			normals[i] = Vector2(-tang.y, tang.x)
+		# 逐笔毛：每根用 draw_polyline_colors **一次画成一条连续线**（单图元，顶点不双绘→无"竹节"
+		# 堆叠节点；之前逐小段半透明画，相邻段在共享点叠加成一串深节＝竹节蛇）。逐顶点给平滑 alpha：
+		# 干处变淡、湿处变浓，但从不断开。中心笔毛 alpha 下限＝始终连着的墨脊。浓度靠 15 根叠印。
+		for h in HAIRS:
+			var hv := (float(h) / float(HAIRS - 1)) * 2.0 - 1.0   # -1..1 跨笔画位置
+			var edge := 1.0 - absf(hv)                             # 中心1 边缘0
+			var base_a := 0.16 + 0.5 * edge                        # 加深治"太淡"：中心浓、边缘淡→羽化
+			var hp := PackedVector2Array(); hp.resize(n)
+			var hc := PackedColorArray(); hc.resize(n)
+			for i in n:
+				var s := slen[i]
+				var sn := s / total
+				# 压力：起笔尖→迅速铺开→收笔略收
+				var pressure := smoothstep(0.0, 0.05, sn) * (1.0 - 0.22 * smoothstep(0.84, 1.0, sn))
+				var off := hv * HALF_W * pressure
+				# 存在度：中心(edge→1)给 0.6 下限＝墨脊不断；边缘(edge→0)可淡到近无＝飞白只在边缘
+				var pres := lerpf(_density(h, s), 1.0, edge * 0.6) * pressure
+				hp[i] = _pts[i] + normals[i] * off
+				hc[i] = Color(INK.r, INK.g, INK.b, minf(base_a * pres, 0.9))
+			draw_polyline_colors(hp, hc, 2.8, true)
+		# 收笔湿头：末端一小坨浓墨（毛笔抬起前的驻墨）
+		var tip := _pts[n - 1]
+		draw_circle(tip, HALF_W * 0.55, Color(INK.r, INK.g, INK.b, 0.92))

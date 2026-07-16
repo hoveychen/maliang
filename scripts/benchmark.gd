@@ -2,36 +2,29 @@ class_name Benchmark
 extends Node
 ## 新机器画质定档：在受控负载下测出「这台机器能跑稳 30fps 的最高画质档」。
 ##
-## 为什么复用 world 而不是另搭一个场景：要测的就是孩子真正会看到的那条渲染路径——地形、
-## 水面、散布植被、SDF 物件（描边 + 顶点吸附）、纸片角色（立绘 + 实时阴影 + X 光剪影）、
-## 天空、雾。另起炉灶必然要复制一份太阳灯/环境参数，两处定义早晚漂移，测出来的档也就不作数。
-## world.benchmark_mode 只短路掉「跟渲染无关」的部分：后端、麦克风、引导。
+## 只有一条路径——嵌在首启「建造小世界」的注魔幕里跑（IntroDirector 在无画质档时 make + add_child）。
+## 不另搭 benchmark 场景、不切场景、不建遮罩：测的就是孩子真正会看到的那条渲染路径——地形、水面、
+## 散布植被、SDF 物件（描边 + 顶点吸附）、纸片角色（立绘 + 实时阴影 + X 光剪影）、天空、雾。另起炉灶
+## 必然要复制一份太阳灯/环境参数，两处定义早晚漂移，测出来的档也就不作数。world.set_bench_freeze 只
+## 短路掉「跟渲染无关」的部分：锁玩家输入（相机/主角不动，防拖动干扰）+ 仙子定格（旁白干净）。
 ##
-## 负载可复现（换档前后的帧时必须可比，否则贪心是在比噪声）：
-##   - 额外塞 EXTRA_CHARS 个角色，环绕玩家站定，全在相机视野里
-##   - 这些角色不 wander、不参与占用图；玩家不动 → 相机不动 → 每帧画面一模一样
+## 负载 = 活的热闹世界（不冻结——冻结静态场景系统性偏轻、测出全最高）：
+##   - IntroDirector 在热闹幕铺好 EXTRA_CHARS 个会 wander 的「小伙伴」（真图集 + idle 动画 + 注册占用），
+##     benchmark 只在这活的峰值上测；退场也由 IntroDirector 在转正前统一做（它是负载 owner）。
+##   - 采样期它们照常 wander：A* 寻路 + 走动 CPU 计入 p95，才是弱机真实卡顿的来源
+##   - 换档前后仍可比：人口/物件数稳定 + 2.4s 窗口 p95 + MIN_GAIN_MS 门槛吸收 wander 抖动
 ##
 ## 测量：每档 warmup 后采 p95 帧时（见 FrameSampler）。达标线 = GraphicsSettings.TARGET_FRAME_MS。
-## 贪心求解在 _advance()（见该函数注释）。
+## 贪心求解在 _advance()（见该函数注释）。设计 docs/benchmark-story-ramp-design.md。
 
 signal finished(levels: Dictionary, p95_ms: float)
-signal progress(done: int, total: int)  ## 供调优页进度条（total 是上限，多数机器提前达标）
-
-## 「下次进 world 要定档」：world._ready 见到它就挂 Benchmark 并短路掉后端/麦克风/引导。
-## 由新机器首启、或设置页「重新检测画质」置位；Benchmark 一 _ready 就消费掉它。
-static var pending := false
-
-## 定档跑完是否自动切进正常世界（测试里关掉，免得测试脚本被切走场景）。
-var enter_world_when_done := true
-
-## 嵌入 intro 前置阶段跑（见设计 D5）：不建奶油底遮罩（intro 的建造演出提供视觉）、不 change_scene
-## （就地应用 levels）、采样期冻结 world 动态保证可复现帧、复用 intro world 的 api 上报。默认 false =
-## 独立 benchmark 场景（设置页「重新检测画质」/ 新机器首启走这条），行为保持原样。
-var embedded := false
 
 const EXTRA_CHARS := 12   ## 环绕玩家的额外角色数：压满角色渲染这条最贵的路径
 const MIN_GAIN_MS := 1.5  ## 「关了真的有明显提升」的门槛：收益低于它就不值得掉这档画质
 const MAX_MEASURES := 30  ## 测量次数硬上限（~30×3.6s ≈ 108s）：最弱的机器也不能无限测下去
+const HYSTERESIS_MS := 2.0 ## 近并列滞回：后选旋钮收益要超过当前最佳 HYSTERESIS_MS 才顶替，否则按 KEYS
+                           ## 固定顺序留在先试的那个——杀掉「两旋钮收益差在测量噪声内、两次跑各选各的、
+                           ## 采纳档不可复现」（PoC 实测：actor_shadows 与 hi_res 差 ~1-2ms，一次开一次关）。
 
 var _world: Node3D
 var _levels: Dictionary          ## 当前采纳的档
@@ -46,118 +39,33 @@ var _best_ms := 0.0
 var _measures := 0
 var _done := false
 var _api: Api
-var _title: Label
-var _bar: ProgressBar
 
+## 由 IntroDirector 在无画质档时 add_child 调用（注魔幕）。不切场景、不建遮罩、就地应用 levels。
 static func make(world: Node3D) -> Benchmark:
 	var b := Benchmark.new()
 	b.name = "Benchmark"
 	b._world = world
 	return b
 
-## 嵌入式（intro 前置阶段）定档：由 IntroDirector 在无画质档时 add_child 调用。不切场景、不建遮罩、
-## 采样期冻结世界（见 embedded 注释与设计 D5）。
-static func make_embedded(world: Node3D) -> Benchmark:
-	var b := Benchmark.new()
-	b.name = "Benchmark"
-	b._world = world
-	b.embedded = true
-	b.enter_world_when_done = false  # 就地应用 levels，不 change_scene 回 loading（D1）
-	return b
-
 func is_done() -> bool:
 	return _done
 
 func _ready() -> void:
-	pending = false  # 消费掉标志：定档跑一次就够，别让下次进世界又跑
 	Engine.max_fps = 0  # 测真实帧时：menu 的 30fps cap 会把帧时钳在 33ms，测不出余量
-	if embedded:
-		_api = _world.get("api")  # intro 模式 world 已建 api，复用它上报（不另建 BenchApi）
-	else:
-		_api = Api.new()  # 独立 benchmark 场景 world 没建 api（_ready 提前 return 了），自己建一个
-		_api.name = "BenchApi"
-		add_child(_api)
-		_build_overlay()  # 独立场景才需奶油底遮罩盖住闪烁的画质切换；embedded 由 intro 建造演出提供视觉
-	_spawn_load()
-	if embedded:
-		# 采样期冻结世界动态（仙子定格/村民停走/吞玩家移动输入）保证可复现帧——见 _spawn_load 头注释。
-		# 独立场景由不透明遮罩盖住、行为保持原样（其可复现性特征不在本次改动范围）。
-		_world.call("set_bench_freeze", true)
+	_api = _world.get("api")  # intro 模式 world 已建 api，复用它上报（不另建 BenchApi）
+	# 负载（会 wander 的「小伙伴」）已由 IntroDirector 在热闹幕分幕生好、也由它退场——benchmark 只管
+	# 在活的峰值上测。benchmark 期锁玩家输入（相机/主角不动，防拖动干扰）+ 仙子定格（旁白干净）；
+	# 村民【不】冻结：采样期照常 wander，A* + 走动 CPU 计入 p95 才测得准。
+	_world.call("set_bench_freeze", true)
 	_levels = GraphicsSettings.all_max()  # 从全最高档起步，能不降就不降
 	_start_measure(_levels)
 
-## 调优页：不透明全屏盖住底下的世界——画质在反复切换，让孩子看着会闪。3D 视口照常渲染，
-## 负载不受影响（canvas 层成本恒定）。孩子看到的是一句人话 + 一根进度条。
-func _build_overlay() -> void:
-	var layer := CanvasLayer.new()
-	layer.layer = 100  # 盖在 world 的 HUD 之上
-	add_child(layer)
-	var bg := ColorRect.new()
-	bg.color = Color(0.99, 0.96, 0.90)  # 与 loading 同一张奶油底
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	layer.add_child(bg)
-	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	box.grow_vertical = Control.GROW_DIRECTION_BOTH
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 18)
-	layer.add_child(box)
-	_title = Label.new()
-	_title.text = "正在为你的平板调整画面…"
-	_title.add_theme_font_size_override("font_size", 34)
-	_title.add_theme_color_override("font_color", Color(0.35, 0.28, 0.22))
-	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(_title)
-	var hint := Label.new()
-	hint.text = "第一次玩要花一小会儿，以后就不用啦"
-	hint.add_theme_font_size_override("font_size", 20)
-	hint.add_theme_color_override("font_color", Color(0.55, 0.48, 0.42))
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(hint)
-	_bar = ProgressBar.new()
-	_bar.custom_minimum_size = Vector2(420.0, 26.0)
-	_bar.max_value = float(MAX_MEASURES)
-	_bar.show_percentage = false
-	box.add_child(_bar)
+## 压测负载的 spawn/despawn 在 world（bench_spawn_one / bench_despawn_load）：负载角色注册占用 +
+## 挂 ambient wander，同时压渲染与寻路 CPU（静态负载测不出寻路那笔），退场时对称注销 + 取消执行器。
+## ⚠️ 换负载改了成本 → 改 p95 → 必须同步 bump DeviceProfile.BENCH_VERSION。
 
-## 环绕玩家站一圈角色。不注册占用图、不给行为脚本——它们只是渲染负载，不该参与游戏逻辑。
-## 负载 = 打包 seed 村民图集（VillagerAssets，播 idle 动画）而非染色 critter：更贴近运行期真实村民
-## 的渲染成本（真立绘纹理 + 动画），测出的 p95 才作数；在 intro 里也是「村民雏形/精灵光点」的演出身份。
-## ⚠️ 换负载改了渲染成本 → 改 p95 → 影响众包分桶，必须同步 bump DeviceProfile.BENCH_VERSION。
-func _spawn_load() -> void:
-	var focus: Vector2 = _world.get("focus_logical")
-	var tex: Texture2D = _world.get("critter_tex")
-	var npcs: Array = _world.get("npcs")
-	var seed: Array = VillagerAssets.SEED
-	for i in EXTRA_CHARS:
-		var ang := TAU * float(i) / float(EXTRA_CHARS)
-		var radius := 4.0 + 2.0 * float(i % 3)  # 三圈同心，拉开深度，别互相完全遮挡
-		var lg := WorldGrid.wrap_pos(focus + Vector2(cos(ang), sin(ang)) * radius)
-		var v: Dictionary = seed[i % seed.size()]
-		var npc := PaperCharacter.new()
-		_world.add_child(npc)
-		npc.setup(tex, Color.WHITE, "bench_%d" % i)  # 先用 critter 跑通 setup（归一尺寸+暗斑），再切图集动画
-		var atlas := load(String(v["atlas"])) as Texture2D
-		if atlas != null:
-			var phase := float(i) / float(EXTRA_CHARS) * 3.9  # 错开相位，避免整齐同帧的机械感
-			npc.play_idle(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
-		npcs.append({ "node": npc, "logical": lg, "id": "bench_%d" % i })
-
-## 压测负载退场（embedded：不 change_scene，得就地清掉 bench_ 角色，把干净场景交给转正）。
-## bench_ 角色没登记占用图（见 _spawn_load），故只 queue_free + 出 npcs 数组，无需 unregister。
-func _despawn_load() -> void:
-	var npcs: Array = _world.get("npcs")
-	for i in range(npcs.size() - 1, -1, -1):
-		var n: Dictionary = npcs[i]
-		if String(n.get("id", "")).begins_with("bench_"):
-			var node: Variant = n.get("node")
-			if node is Node and is_instance_valid(node):
-				(node as Node).queue_free()
-			npcs.remove_at(i)
-
-## intro 被家长跳过时中止定档：复位到当前采纳档画面、解冻、清负载，不写档不上报
-## （留待下次 Benchmark.pending 快速定档，见 IntroDirector._run_benchmark）。
+## intro 被家长跳过时中止定档：复位到当前采纳档画面、解冻，不写档不上报
+## （留待下次 should_run 重跑首启故事定档，见 IntroDirector._run_benchmark）。
 func abort() -> void:
 	if _done:
 		return
@@ -167,28 +75,24 @@ func abort() -> void:
 	for key: String in GraphicsSettings.KEYS:  # 可能停在没被采纳的试降档上 → 复位到当前采纳档
 		_world.call("_apply_graphics_key", key, int(_levels[key]))
 	Engine.max_fps = GraphicsSettings.FPS_CAP if OS.has_feature("mobile") else 0
-	if embedded:
-		_world.call("set_bench_freeze", false)
-		_despawn_load()
+	_world.call("set_bench_freeze", false)  # 负载退场由 IntroDirector 在转正前统一做（它是负载 owner）
 
 ## 应用一组档并开始采样。
 func _start_measure(levels: Dictionary) -> void:
+	# 确定化：每次测量前把压测负载复位到同一状态（村民回各自 home + 重启固定巡逻），让每个 trial 的
+	# 采样窗都跑【同一段】动态负载序列，而非各测各的随机 wander（±60ms 噪声的大头，见 PoC）。
+	_world.call("bench_reset_load")
 	for key: String in GraphicsSettings.KEYS:
 		_world.call("_apply_graphics_key", key, int(levels[key]))
 	_sampler = FrameSampler.new()
 	_measures += 1
-	progress.emit(_measures, MAX_MEASURES)
-	if _bar != null:
-		_bar.value = float(_measures)
 
 func _process(delta: float) -> void:
 	if _done or _sampler == null:
 		return
 	_sampler.feed(delta)
-	if embedded:
-		# 采样窗(window)内冻结村民保证可复现帧；warmup 段（帧被丢弃、不计 p95）放行，让画质档切换与村民
-		# 微动在采样窗【间隙】可见地"世界成形"（设计 D5）。计入统计的 window 段始终静止，不污染 p95。
-		_world.call("set_bench_still", not _sampler.is_warming())
+	# 采样期【不】冻结村民：villager wander（A* + 走动）全程活着，帧时反映真实负载。
+	# 活场景的帧时抖动由 2.4s 窗口 + p95 + MIN_GAIN_MS 门槛吸收（见 _advance）。
 	if _sampler.is_done():
 		_advance(_sampler.p95_ms())
 
@@ -218,7 +122,7 @@ func _advance(p95: float) -> void:
 	var gain := _cur_ms - p95
 	print("BENCH trial %-14s lv%d p95=%.1fms gain=%+.1fms" % [
 		_trial_key, int(_levels[_trial_key]) - 1, p95, gain])
-	if gain > _best_gain:
+	if gain > _best_gain + HYSTERESIS_MS:  # 滞回：后选旋钮要明显更优才顶替，近并列按 KEYS 顺序留先试的
 		_best_gain = gain
 		_best_key = _trial_key
 		_best_ms = p95
@@ -287,18 +191,14 @@ func _finish() -> void:
 		"gpu": DeviceProfile.gpu(), "bench_version": DeviceProfile.BENCH_VERSION,
 		"p95_ms": snappedf(_cur_ms, 0.1), "hit": hit,
 	})
-	if embedded:
-		# 就地收尾（不 change_scene）：解冻世界、压测负载退场，把清爽场景交回 intro 转正。
-		_world.call("set_bench_freeze", false)
-		_despawn_load()
+	# 就地收尾（不 change_scene）：解锁输入/仙子。压测负载（小伙伴）退场由 IntroDirector 在转正前统一做。
+	_world.call("set_bench_freeze", false)
 	finished.emit(_levels, _cur_ms)
-	_upload_and_enter(hit)
+	_upload(hit)
 
-## 上报这台机器的结果（后来的同 GPU 机器就不用再当小白鼠了），然后进正常世界。
-## 上传失败不影响孩子玩——本机档已经存好了，下次启动直接用。
-func _upload_and_enter(hit: bool) -> void:
-	if _title != null:
-		_title.text = "调好啦！"
+## 上报这台机器的结果（后来的同 GPU 机器就不用再当小白鼠了）。上传失败不影响孩子玩——
+## 本机档已经存好了，下次启动直接用。就地收尾不切场景（intro 继续走它的转正）。
+func _upload(hit: bool) -> void:
 	# 没有 GPU 名就不上传：众包按 GPU 分桶，没 key 的样本服务端只会 400（本机档已存好，不影响玩）
 	if _api != null and not DeviceProfile.gpu().is_empty():
 		await _api.post_json("/device-profile", {
@@ -309,9 +209,3 @@ func _upload_and_enter(hit: bool) -> void:
 			"p95Ms": snappedf(_cur_ms, 0.1),
 			"hit": hit,
 		})
-	# 不入树 = 单测在直接喂 _advance()，没有场景树可切（也不该切）
-	if not enter_world_when_done or not is_inside_tree():
-		return
-	# benchmark 模式的 world 是残缺的（没后端/没麦克风/没引导）——重新进一个正常世界
-	Loading.next_scene = "res://main.tscn"
-	get_tree().change_scene_to_file("res://loading.tscn")

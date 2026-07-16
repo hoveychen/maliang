@@ -64,7 +64,6 @@ func _run_once() -> void:
 		ob._vc._feed(_pcm(30, 0.3))
 	fails += _check("说话触发录音", ob._vc.is_recording(), true)
 	fails += _check("开口开端侧会话", fake.started, true)
-	fails += _check("端侧路径不攒服务端 PCM", ob._intro_pcm.is_empty(), true)
 
 	for i in 40: # 静音 1200ms → 断句
 		ob._vc._feed(_pcm(30, 0.0))
@@ -75,7 +74,8 @@ func _run_once() -> void:
 	fails += _check("端侧路径喂了 PCM", fake.fed > 0, true)
 	ob.free()
 
-	# ── 服务端路径（无端侧单例）：开口后往 _intro_pcm 攒整段 ──
+	# ── 无可用端侧 ASR（editor/headless 缺模型）：服务端 ASR 已退役，没有回落路径。
+	# 录音照跑，但音频不外传（PCM 只可能进插件，插件不在就丢弃）——绝不上传。──
 	var ob2 := _new_ob()
 	ob2._vc._asr = null
 	ob2._process(0.016)
@@ -83,8 +83,8 @@ func _run_once() -> void:
 		ob2._vc._feed(_pcm(30, 0.0))
 	for i in 20:
 		ob2._vc._feed(_pcm(30, 0.3))
-	fails += _check("服务端路径: 进入录音", ob2._vc.is_recording(), true)
-	fails += _check("服务端路径: 攒整段 PCM", ob2._intro_pcm.size() > 0, true)
+	fails += _check("无 ASR: 仍进入录音（VAD 不依赖 ASR）", ob2._vc.is_recording(), true)
+	fails += _check("无 ASR: 不开端侧会话", ob2._vc.is_ready(), false)
 	ob2.free()
 
 	if fails == 0:

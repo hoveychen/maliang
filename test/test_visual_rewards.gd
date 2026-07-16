@@ -41,6 +41,10 @@ func _tick() -> void:
 			match (n["node"] as PaperCharacter).char_name:
 				"舞舞兔": blue = n
 				"灵狐小围巾": green = n
+		# chip 去文字改头像（幼儿园孩子不识字）：给俩 NPC 各设一张独特纹理，
+		# 好断言 chip 里的委托人/目标头像取的正是对应角色的立绘（demo 默认都用同一张 critter，分不开）。
+		(blue["node"] as PaperCharacter).texture = _solid(Color(0.2, 0.4, 1.0))
+		(green["node"] as PaperCharacter).texture = _solid(Color(0.2, 1.0, 0.4))
 		(scene.get("backend") as Backend).sent.connect(func(m: Dictionary) -> void: sent.append(m))
 		scene.set("online", true) # 离线世界里启用任务判定钩子（send 由 sent 信号观测）
 		return
@@ -51,15 +55,11 @@ func _tick() -> void:
 				"activeTask": _task("deliver", { "targetName": "舞舞兔", "message": "hi" }) })
 			var chip := scene.get("task_chip") as HBoxContainer
 			_check("task chip visible", chip.visible, true)
-			var chip_text := ""
-			var chip_icons := 0
-			for c in chip.get_children():
-				if c is Label:
-					chip_text += (c as Label).text
-				elif c is TextureRect:
-					chip_icons += 1
-			_check("task chip shows goal", chip_text.contains("舞舞兔"), true)
-			_check("task chip shows target+stamp icons", chip_icons >= 2, true)
+			# 去文字改头像：委托人(灵狐小围巾)领头 + 目标(舞舞兔)头像，chip 不再有可读姓名。
+			_check("task chip 显示委托人头像", _chip_has_tex(chip, (green["node"] as PaperCharacter).texture), true)
+			_check("task chip 显示目标头像(舞舞兔)", _chip_has_tex(chip, (blue["node"] as PaperCharacter).texture), true)
+			_check("task chip 去掉了姓名文字", _chip_text(chip).contains("舞舞兔") or _chip_text(chip).contains("灵狐"), false)
+			_check("task chip 头像+图标齐(委托人+类型+目标+盖章)", _chip_icon_count(chip) >= 4, true)
 			_check("wallet flowers synced", scene.call("_red_flower_count"), 2)
 			scene.call("_toggle_album")
 			_check("phone opens", (scene.get("paper_phone") as PaperPhone).state != PaperPhone.State.DOCKED, true)
@@ -101,13 +101,29 @@ func _tick() -> void:
 			_check("visit_done sent near location", String(ev.get("kind", "")), "visit_done")
 			scene.call("_set_active_task", null)
 		68:
-			# task_complete（升花）：集满盖章换到 1 朵小红花 → 计数+1、横幅报喜
+			# task_complete（服务端已升花）：钱包计数照样跟着涨（服务端权威），但世界里的横幅
+			# **不再报喜说小红花到手**——花是小朋友回手机把第三个章盖上才种出来的，
+			# 提前在世界里宣布「换到一朵小红花啦」就把仪式的高潮剧透了。
+			# 见 docs/stamp-flower-ux-design.md §4.2。
 			scene.call("_on_task_complete", { "task": _task("visit", { "locationName": "池塘" }),
 				"stampStyle": "medal", "flowerGained": true,
 				"wallet": { "flowers": 3, "stampProgress": 0, "stampsTotal": 6 } })
 			_check("flower count up on flowerGained", scene.call("_red_flower_count"), 3)
 			var banner := scene.get("banner") as Label
-			_check("banner announces flower", banner.text.contains("小红花"), true)
+			_check("banner 只报盖章、不剧透小红花", banner.text.contains("盖章") and not banner.text.contains("小红花"), true)
+			# 章的款式进了待盖队列，等他开手机用真款式补演
+			_check("真 stampStyle 入队", (scene.get("_stamp_styles") as Array).has("medal"), true)
+		70:
+			# 心愿委托（wishes.ts 的 type='wish'）：chip 必须显示许愿人 + 魔法棒
+			# （村民自己不会魔法 → 图标就是「去找会变魔法的」这条线索）。
+			# 回归防线：这个 match 没有默认分支，漏一个 type 不会崩，只会渲出一个
+			# 残缺的 chip（靶子+箭头+盖章，中间空的）——静默的丑，测试不看就发现不了。
+			scene.call("_set_active_task", _task("wish", { "wishAbility": "create_prop" }))
+			var wchip := scene.get("task_chip") as HBoxContainer
+			_check("wish chip visible", wchip.visible, true)
+			# 许愿人改用头像点名（不再是文字）；魔法棒图标＝去找会变魔法的这条线索。
+			_check("wish chip 用头像点名许愿人(灵狐小围巾)", _chip_has_tex(wchip, (green["node"] as PaperCharacter).texture), true)
+			_check("wish chip 有许愿人头像+魔法棒+盖章三个图标", _chip_icon_count(wchip) >= 3, true)
 		72:
 			if fails == 0:
 				print("visual_rewards PASS")
@@ -127,3 +143,38 @@ func _check(name: String, got: Variant, want: Variant) -> void:
 		return
 	fails += 1
 	printerr("  FAIL %s: got %s want %s" % [name, str(got), str(want)])
+
+## 一张纯色小纹理，给 demo NPC 各设一张好在 chip 里区分头像。
+func _solid(c: Color) -> ImageTexture:
+	var img := Image.create(8, 12, false, Image.FORMAT_RGBA8)
+	img.fill(c)
+	return ImageTexture.create_from_image(img)
+
+## chip 里有没有一个 TextureRect 用的是 want 这张纹理：静态角色 portrait_tex 返回 texture 本身；
+## 动画角色（demo NPC 带 idle 图集）返回裁第 0 帧的 AtlasTexture，此时比它的 atlas 底图。
+func _chip_has_tex(chip: HBoxContainer, want: Texture2D) -> bool:
+	for c in chip.get_children():
+		if not (c is TextureRect):
+			continue
+		var t := (c as TextureRect).texture
+		if t == want:
+			return true
+		if t is AtlasTexture and (t as AtlasTexture).atlas == want:
+			return true
+	return false
+
+## chip 里所有 Label 文字拼起来（用来断言不再塞可读姓名，只留 ⇒ 箭头）。
+func _chip_text(chip: HBoxContainer) -> String:
+	var t := ""
+	for c in chip.get_children():
+		if c is Label:
+			t += (c as Label).text
+	return t
+
+## chip 里图标（TextureRect，含头像）数量——防「残缺 chip」漏渲中段。
+func _chip_icon_count(chip: HBoxContainer) -> int:
+	var n := 0
+	for c in chip.get_children():
+		if c is TextureRect:
+			n += 1
+	return n

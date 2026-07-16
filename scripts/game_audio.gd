@@ -10,24 +10,32 @@ class_name GameAudio
 # 注意 headless dummy 音频 playing 永真，逻辑状态一律自己记账，不依赖 playing 翻转。
 
 const SFX := {
-	"click": "res://assets/audio/kenney_interface/click_002.ogg",       # 通用按钮
-	"select": "res://assets/audio/kenney_interface/select_001.ogg",     # 选项选择
-	"confirm": "res://assets/audio/kenney_interface/confirmation_001.ogg", # 确认成功
-	"oops": "res://assets/audio/kenney_interface/question_001.ogg",     # 没听清/温和出错
-	"pluck": "res://assets/audio/kenney_interface/pluck_001.ogg",       # 点地移动标记
-	"pop": "res://assets/audio/kenney_interface/drop_002.ogg",          # 情绪气泡弹出
-	"bell": "res://assets/audio/kenney_interface/bong_001.ogg",         # 听到了提示
+	# ── 界面音全套「轻柔纸感暖色」（老板反馈原 kenney_interface 手机外放偏硬/刺耳，
+	# scroll_001 过场音被听成电流声）。暖调铃音(confirm/oops/bell/task)来自 VCSL/VSCO2 公有领域
+	# 乐器采样(CC0)；点击/啵声/滑音来自 Little Robot Sound Factory UI 音库(CC-BY 3.0)。
+	# 署名与来源见 assets/audio/soft_ui/CREDITS.txt。──
+	"click": "res://assets/audio/soft_ui/click.wav",       # 通用按钮（软点击）
+	"select": "res://assets/audio/soft_ui/select.wav",     # 选项选择
+	"confirm": "res://assets/audio/soft_ui/confirm.wav",   # 确认成功（暖调 chime）
+	"oops": "res://assets/audio/soft_ui/oops.wav",         # 没听清/温和出错（柔和负向）
+	"pluck": "res://assets/audio/soft_ui/pluck.wav",       # 点地移动标记
+	"pop": "res://assets/audio/soft_ui/pop.wav",           # 情绪气泡弹出（嘴巴“啵”）
+	"bell": "res://assets/audio/soft_ui/bell.wav",         # 听到了提示（软铃 ding）
 	# 新委托 chip 亮起。不复用 bell：character_response 刚播过 bell，
 	# SFX_GAP(80ms) 会把紧随其后的同名音效吞掉。
-	"task": "res://assets/audio/kenney_interface/select_002.ogg",       # 收到新委托
-	"enter": "res://assets/audio/kenney_interface/maximize_003.ogg",    # 进入对话
-	"exit": "res://assets/audio/kenney_interface/minimize_003.ogg",     # 退出对话
-	"mic_on": "res://assets/audio/kenney_interface/toggle_001.ogg",     # 开始说话
-	"mic_off": "res://assets/audio/kenney_interface/switch_002.ogg",    # 说完/提交
-	"page": "res://assets/audio/kenney_interface/scratch_001.ogg",      # 翻页(纸感)
-	"whoosh": "res://assets/audio/kenney_interface/scroll_001.ogg",     # 过场滑动
+	"task": "res://assets/audio/soft_ui/task.wav",         # 收到新委托（深铃）
+	"enter": "res://assets/audio/soft_ui/enter.wav",       # 进入对话
+	"exit": "res://assets/audio/soft_ui/exit.wav",         # 退出对话
+	"mic_on": "res://assets/audio/soft_ui/mic_on.wav",     # 开始说话
+	"mic_off": "res://assets/audio/soft_ui/mic_off.wav",   # 说完/提交
+	"page": "res://assets/audio/soft_ui/page.wav",         # 翻页(纸感)
+	"whoosh": "res://assets/audio/soft_ui/whoosh.wav",     # 过场滑动（软滑音，替换刺耳 scroll_001）
 	"fanfare": "res://assets/audio/kenney_jingles/jingles_PIZZI07.ogg", # 角色出场欢呼
 	"reveal": "res://assets/audio/kenney_jingles/jingles_PIZZI03.ogg",  # 形象揭晓
+	# 集邮册盖章那一记木槌闷响（CC0 Kenney Impact Sounds）。全套音效里原本一记撞击声都没有——
+	# 「狠狠打上一个章」全靠它，别拿 click/confirm 那种脆响凑合。
+	"thunk": "res://assets/audio/kenney_impact/impactWood_medium_000.ogg",
+	"bloom": "res://assets/audio/kenney_jingles/jingles_PIZZI01.ogg", # 三章种出一朵小红花
 }
 const BGM_STEPS := [
 	"res://assets/audio/bgm/bgm_carefree.wav",       # 尤克里里+口哨，阳光轻快（~204s，菜单也垫这首）

@@ -56,7 +56,7 @@ func _run_once() -> void:
 	# ── 音色映射：edge 原生名直通、legacy 映射、未知稳定哈希 ──
 	fails += _check("map passthrough", EdgeTts.map_voice("zh-CN-YunjianNeural"), "zh-CN-YunjianNeural")
 	fails += _check("map tw passthrough", EdgeTts.map_voice("zh-TW-HsiaoChenNeural"), "zh-TW-HsiaoChenNeural")
-	fails += _check("map fairy legacy", EdgeTts.map_voice("mock-voice-cn-fairy"), "zh-CN-XiaoyiNeural")
+	fails += _check("map fairy legacy", EdgeTts.map_voice("mock-voice-cn-fairy"), "zh-CN-YunxiaNeural")
 	fails += _check("map unknown stable", EdgeTts.map_voice("weird-id"), EdgeTts.map_voice("weird-id"))
 
 	# ── HTTP Date（RFC 2616）→ unix 秒 ──

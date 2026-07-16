@@ -1,0 +1,5 @@
+主题地形贴图（world-themes / themed-terrain P0 审定）。
+来源：Poly Haven CC0 光扫纹理（Public Domain，免署名）。
+经 tools/watercolorize.py 水彩风格化（审定参数 tools/terrain_texture_presets.json，
+画风 ①卡通光滑，老板 2026-07-12 审定）。审定样图见 docs/terrain-style-samples/。
+1024×1024 RGB，作为 chunk_manager 顶面/侧壁 Texture2DArray 的层来源。

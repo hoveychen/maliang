@@ -13,11 +13,34 @@ func _check(cond: bool, msg: String) -> void:
 		printerr("  ✗ ", msg)
 		_fails += 1
 
+## 详情面板动作按钮的文字集合（P3 图上字下：文字在按钮内层 Label）。
+func _btn_texts_of(detail: VBoxContainer) -> Array:
+	var texts := []
+	if detail == null:
+		return texts
+	for c in detail.get_children():
+		if c is VBoxContainer:  # 动作按钮竖排
+			for b in (c as VBoxContainer).get_children():
+				if b is Button:
+					for lbl in (b as Button).find_children("*", "Label", true, false):
+						texts.append((lbl as Label).text)
+	return texts
+
+## 背包格的数量角标文字（P3）：直属 Label 子节点=数量圆角标；无则返回空串。
+func _count_badge_text(cell: Control) -> String:
+	for c in cell.get_children():
+		if c is Label:
+			return (c as Label).text
+	return ""
+
 func _initialize() -> void:
 	var scene: Node = load("res://main.tscn").instantiate()
 	root.add_child(scene)
+	# ⚠️ 必须 await _run —— 它内部要等盖章/种花仪式的 Tween 跑完（真协程）。不 await 的话
+	# 第一个 await 一挂起，这个 lambda 就直接 print+quit(0) 了：后半段断言一条都没执行，
+	# 却报 fails=0 的假绿灯。
 	scene.ready.connect(func() -> void:
-		_run(scene)
+		await _run(scene)
 		print("phone_menu smoke: fails=%d" % _fails)
 		quit(_fails))
 
@@ -37,7 +60,7 @@ func _run(scene: Node) -> void:
 	# 两块屏幕视口按 PhoneUi 尺寸就绪
 	_check(phone.front_viewport() != null and phone.front_viewport().size == PhoneUi.FRONT_PX, "正面视口尺寸")
 	_check(phone.spread_viewport() != null and phone.spread_viewport().size == PhoneUi.SPREAD_PX, "跨页视口尺寸")
-	# 主屏图标分页：3x3 网格、每页 columns=3；所有页图标总数 = 已实装 app 数（3）
+	# 主屏图标分页：每页 2 列大格、居中；所有页图标总数 = 已实装 app 数（5）
 	var pager: ScrollContainer = pui.get("_phone_pager")
 	var pages_box: HBoxContainer = pui.get("_phone_pages_box")
 	_check(pager != null, "_phone_pager（图标分页横滚）存在")
@@ -46,13 +69,13 @@ func _run(scene: Node) -> void:
 	var cols_ok := true
 	if pages_box != null:
 		for page in pages_box.get_children():
-			for g in page.get_children():
-				if g is GridContainer:
-					if (g as GridContainer).columns != 3:
-						cols_ok = false
-					icon_total += g.get_child_count()
-	_check(cols_ok, "每页网格 columns=3 (3x3)")
-	_check(icon_total == 5, "图标总数 = 已实装 app 数 5（home/flowers/items/dress/settings）")
+			# 页布局：CenterContainer → GridContainer（比 3x3 版多包了一层居中容器）
+			for g in (page as Node).find_children("*", "GridContainer", true, false):
+				if (g as GridContainer).columns != PhoneUi.PHONE_GRID_COLS:
+					cols_ok = false
+				icon_total += g.get_child_count()
+	_check(cols_ok, "每页网格 columns=%d" % PhoneUi.PHONE_GRID_COLS)
+	_check(icon_total == 6, "图标总数 = 已实装 app 数 6（home/flowers/items/stickers/quiet/settings）")
 
 	var cover: Control = pui.get("_screen_cover")
 	_check(cover != null and cover.visible, "停靠常驻=熄屏黑屏")
@@ -67,7 +90,7 @@ func _run(scene: Node) -> void:
 
 	# 打开各 app：翻转到跨页、只显示该页
 	var pages: Dictionary = pui.get("_album_pages")
-	for id in ["home", "flowers", "items", "settings"]:
+	for id in ["home", "flowers", "items", "stickers", "settings"]:
 		scene._open_app(id)
 		_check(String(pui.get("_phone_open_app")) == id, "打开 app: %s" % id)
 		_check(phone.state == PaperPhone.State.SPREAD, "%s：翻转到跨页态" % id)
@@ -78,27 +101,205 @@ func _run(scene: Node) -> void:
 	_check(phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_ALWAYS,
 		"跨页态跨页视口在更新")
 
+	# 背包 2×4 纵向翻页（backpack-redesign P2，方案二改 2 列）：塞 20 件 → 按 ITEMS_PER_PAGE 分页，
+	# 验证网格列数/页数/圆点/snap。页数从常量推导，改列数不再破断言。
+	var bag := {}
+	for i in 20:
+		bag["itm_%02d" % i] = 1
+	scene.set("bag", bag)
+	pui.open_app("items")
+	await scene.get_tree().process_frame  # 冲刷上一轮空背包页的延迟 queue_free，再数页数
+	var epages := int(ceil(20.0 / float(PhoneUi.ITEMS_PER_PAGE)))  # 20 件 @ 8/页 = 3 页
+	var ipager: ScrollContainer = pui.get("_items_pager")
+	var ipages: VBoxContainer = pui.get("_items_pages_box")
+	var idots: VBoxContainer = pui.get("_items_dots")
+	_check(ipager != null and ipages != null and idots != null, "背包翻页容器/页箱/圆点就位")
+	_check(ipages != null and ipages.get_child_count() == epages, "20 件 → %d 页（%d 件/页）" % [epages, PhoneUi.ITEMS_PER_PAGE])
+	var icols_ok := true
+	var icell_total := 0
+	if ipages != null:
+		for g in ipages.get_children():
+			if (g as GridContainer).columns != PhoneUi.ITEMS_COLS:
+				icols_ok = false
+			icell_total += (g as GridContainer).get_child_count()
+	_check(icols_ok, "每页网格 columns=%d" % PhoneUi.ITEMS_COLS)
+	_check(icell_total == 20, "各页格子总数 = 物品数 20")
+	_check(idots != null and idots.get_child_count() == epages and idots.visible, "%d 页 → %d 个纵向圆点、可见" % [epages, epages])
+	# 单页视口高定死一页：容器 min 高 = ITEMS_PAGE_H，snap 目标 = 页序 × 页高
+	_check(ipager != null and is_equal_approx(ipager.custom_minimum_size.y, PhoneUi.ITEMS_PAGE_H),
+		"翻页容器高 = ITEMS_PAGE_H（固定单页高）")
+	# 翻到第 2 页：设当前页 + 步进若干帧（真帧让布局落定，翻页容器才知道可滚范围），滚动应贴到 1×页高
+	pui.set("_items_page", 1)
+	for _f in 40:
+		await scene.get_tree().process_frame
+		pui.tick(0.05)
+	_check(ipager != null and absi(ipager.scroll_vertical - int(round(PhoneUi.ITEMS_PAGE_H))) <= 3,
+		"翻到第 2 页：纵向滚动 snap 到 1×页高（%d≈%d）" % [ipager.scroll_vertical, int(round(PhoneUi.ITEMS_PAGE_H))])
+	# 数量角标（P3）：份数>1 出圆角标、=1 不出；格子已去文字名（不含物品名 Label）。
+	scene.set("bag", { "aa": 3, "bb": 1 })
+	pui.open_app("items")
+	await scene.get_tree().process_frame
+	var g0: GridContainer = (pui.get("_items_pages_box") as VBoxContainer).get_child(0) as GridContainer
+	var cell_aa: Control = g0.get_child(0) as Control  # "aa" 排在 "bb" 前
+	var cell_bb: Control = g0.get_child(1) as Control
+	_check(_count_badge_text(cell_aa) == "x3", "份数 3：出数量角标 x3")
+	_check(_count_badge_text(cell_bb) == "", "份数 1：不出数量角标")
+
+	# 详情面板（P4）：点格子→左半页出大图+名字+动作按钮；再开物品页回空态。
+	pui._select_item("aa")
+	_check(String(pui.get("_selected_item")) == "aa", "选中 aa：_selected_item 记录")
+	_check(pui.get("_detail_image") != null, "详情：大图控件就位")
+	# P3:按钮文字从 btn.text 移进按钮内的 Label(图上字下),故从内层 Label 取文字;并验大图标够大。
+	var btn_texts := []
+	var big_icon := false
+	for c in (pui.get("_items_detail") as VBoxContainer).get_children():
+		if c is VBoxContainer:
+			for b in (c as VBoxContainer).get_children():
+				if b is Button:
+					for lbl in (b as Button).find_children("*", "Label", true, false):
+						btn_texts.append((lbl as Label).text)
+					for ir in (b as Button).find_children("*", "TextureRect", true, false):
+						if (ir as TextureRect).custom_minimum_size.x >= 72.0:
+							big_icon = true
+	_check(btn_texts.has("摆到地块"), "详情：有「摆到地块」动作按钮(文字辅助)")
+	_check(big_icon, "详情：动作按钮图标够大(≥72px,P3)")
+	# P8：「再听一次」不再是大按钮，降级为大图右下角的念名喇叭 badge。
+	_check(not btn_texts.has("再听一次"), "P8：详情动作区不再有「再听一次」大按钮")
+	var has_voice_badge := false
+	for c in (pui.get("_items_detail") as VBoxContainer).get_children():
+		if not (c is VBoxContainer):  # 大图外框 img_box 是 Control（动作区才是 VBoxContainer）
+			if (c as Control).find_children("*", "Button", true, false).size() > 0:
+				has_voice_badge = true
+	_check(has_voice_badge, "P8：大图角落有念名喇叭 badge")
+	pui.open_app("items")
+	_check(String(pui.get("_selected_item")) == "", "重开物品页：详情回空态")
+
+	# 贴纸抽成独立 app（P7）：bag 里造物 + 贴纸混着放，物品页只收造物、贴纸页只收贴纸。
+	# 用真实内置贴纸 id（mount=='edge'）+ 一个造物占位 id。物品页 1 格（cc）、贴纸页 1 格（sticker_sun）。
+	scene.set("bag", { "sticker_sun": 1, "cc": 2 })
+	pui.open_app("items")
+	await scene.get_tree().process_frame
+	var items_cells := 0
+	for g in (pui.get("_items_pages_box") as VBoxContainer).get_children():
+		items_cells += (g as GridContainer).get_child_count()
+	_check(items_cells == 1, "物品页排除贴纸：只剩造物 cc 1 格（贴纸 sticker_sun 抽走，P7 分流）")
+	pui.open_app("stickers")
+	await scene.get_tree().process_frame
+	var sgrid: GridContainer = pui.get("_stickers_grid")
+	_check(sgrid != null and sgrid.get_child_count() == 1, "贴纸页拥有网格只 1 张（sticker_sun）")
+	_check(not (pui.get("_stickers_empty") as Label).visible, "有贴纸：贴纸页空态隐藏")
+	# 选中贴纸 → 详情落在贴纸页 detail 宿主、出「装到身上」（只贴纸有）。
+	pui._select_item("sticker_sun", pui.get("_stickers_detail"))
+	var s_texts := _btn_texts_of(pui.get("_stickers_detail") as VBoxContainer)
+	_check(s_texts.has("装到身上"), "贴纸详情：出「装到身上」动作")
+	_check(s_texts.has("摆到地块") and s_texts.has("扔掉"), "贴纸详情：也有「摆到地块」「扔掉」")
+
+	# 空背包：无物品仍不崩、出空态提示、只 1 页（空网格）
+	scene.set("bag", {})
+	pui.open_app("items")
+	_check((pui.get("_items_empty") as Label).visible, "空背包：空态提示可见")
+	_check((pui.get("_items_dots") as VBoxContainer).get_child_count() <= 1, "空背包：≤1 页无圆点")
+
 	pui.close_app()
 	_check(phone.state == PaperPhone.State.FRONT, "返回后回正面态")
 	_check(String(pui.get("_phone_open_app")) == "", "返回后 open_app 清空")
 
-	# 小红花/集邮 app：服务端钱包驱动 3×3 花格点亮 + 盖章进度点
+	# quiet 是动作不是页面（fairy-persona P5）：点一下哄点点睡，不开任何页、不进跨页态。
+	scene.set("_fairy_napping", false)
+	pui.open_app("quiet")
+	_check(bool(scene.get("_fairy_napping")), "点「点点睡觉」→ 点点进入安静态")
+	_check(String(pui.get("_phone_open_app")) == "", "quiet 不开页（动作型 app）")
+	_check(not (pages.has("quiet")), "quiet 不在 _album_pages（无页面）")
+
+	# ⚠️ 先等离线兜底那次 _apply_wallet 落定（连不上后端 → 几十帧后套用默认钱包）。仪式现在要跑
+	# 真 Tween（好几秒的真帧），期间那个迟到的 bootstrap 会把测试塞的钱包冲成默认值 {3,0,0}，
+	# 演完 snap 过去，断言就莫名其妙地对不上了。
+	for _f in 60:
+		await scene.get_tree().process_frame
+
+	# 小红花/集邮 app：花田/章卡画的是**见证游标**（小朋友亲眼见过的），不是服务端钱包——
+	# 欠盖的章要等他开手机亲手盖上去。这里钱包与游标一致（无欠章），画面应等于钱包。
+	# 游标显式落到「刚见证完 7 个章」——否则 world._ready 从本机 profile.json 读到的残留会让
+	# 这段随上次跑测留下的状态飘（同一台机器连跑两次结论不同）。
+	scene.set("stamp_seen", { "flowers": 2, "stampProgress": 1, "stampsTotal": 7 })
 	scene.set("wallet", { "flowers": 2, "stampProgress": 1, "stampsTotal": 7, "hearts": 5 })
-	scene._refresh_album()
-	var fcells: Array = pui.get("_flower_cells")
-	_check(fcells.size() == 9, "小红花 3×3 = 9 格")
+	scene._apply_wallet(scene.get("wallet"))  # 走对账：无欠章 → 立刻认账 → 游标=钱包
+	var seen: Dictionary = scene.get("stamp_seen")
+	_check(int(seen.get("flowers", -1)) == 2 and int(seen.get("stampsTotal", -1)) == 7,
+		"无欠章：见证游标立刻对齐钱包")
+	var field: FlowerField = pui.get("_flower_field")
+	var card: StampCard = pui.get("_stamp_card")
+	_check(field != null and card != null, "花田/章卡控件就位")
 	var lit := 0
-	for c in fcells:
-		if (c as TextureRect).modulate == Color.WHITE:
+	for i in 9:
+		if field.bloom_of(i) > 0.5:
 			lit += 1
-	_check(lit == 2, "flowers=2 → 点亮 2 格花")
-	var dots: Array = pui.get("_stamp_dots")
-	var dlit := 0
-	for d in dots:
-		if (d as TextureRect).modulate == Color.WHITE:
-			dlit += 1
-	_check(dlit == 1, "stampProgress=1 → 点亮 1 个盖章进度点")
+	_check(lit == 2, "flowers=2 → 花田长出 2 朵")
+	_check(not card.has_tool(), "无欠章：橡皮章不出来")
 	_check(scene._red_flower_count() == 2, "banner 小红花数=钱包 flowers")
+
+	# 欠 2 个章（服务端已算完账，小朋友还没见证）：画面停在游标上，等他开手机盖。
+	# 钱包按服务端的算术给：7+2=9 个章，第 9 个把第三格盖满 → 立刻兑成第 3 朵花、progress 归零。
+	scene.set("wallet", { "flowers": 3, "stampProgress": 0, "stampsTotal": 9, "hearts": 5 })
+	scene._apply_wallet(scene.get("wallet"))
+	seen = scene.get("stamp_seen")
+	_check(int(seen.get("stampsTotal", -1)) == 7, "有欠章：见证游标先不动")
+	_check(pui.has_pending_stamps(), "有欠章：手机该亮角标")
+	# 角标真的亮起来了吗（章挣到了但没盖，小朋友得看见手机上有东西）
+	var badge: Label = pui.get("_flowers_badge")
+	var notice: HBoxContainer = pui.get("_aod_notice")
+	_check(badge != null and badge.visible and badge.text == "2", "小红花 app 图标红点=2")
+	_check(notice != null and notice.visible, "熄屏锁屏浮出欠章通知")
+	var beats := StampCeremony.plan(seen, scene.get("wallet"), [])
+	pui.hover_timeout = 0.0  # 回测不空等小朋友点橡皮章
+	_check(beats.size() == 3, "欠 2 章 → 2 拍盖章 + 1 拍开花")
+	await pui.play_ceremony(beats)
+	seen = scene.get("stamp_seen")
+	_check(int(seen.get("stampsTotal", -1)) == 9 and int(seen.get("flowers", -1)) == 3,
+		"仪式演完：见证游标推到钱包（长出第 3 朵花）")
+	_check(not pui.has_pending_stamps(), "仪式演完：角标灭")
+
+	# 摘花（造角色扣 1 朵）：花田少一朵，游标跟上
+	scene.set("wallet", { "flowers": 2, "stampProgress": 0, "stampsTotal": 9, "hearts": 5 })
+	scene._apply_wallet(scene.get("wallet"))
+	await pui.play_ceremony(StampCeremony.plan(scene.get("stamp_seen"), scene.get("wallet"), []))
+	_check(int((scene.get("stamp_seen") as Dictionary).get("flowers", -1)) == 2, "摘花：游标跟到 2 朵")
+	_check(field.bloom_of(2) < 0.5, "摘花：第 3 格空了")
+
+	# 花田满 9：章卡攒满也不长花，只提示（不崩、不多长花）
+	scene.set("stamp_seen", { "flowers": 9, "stampProgress": 2, "stampsTotal": 30 })
+	scene.set("wallet", { "flowers": 9, "stampProgress": 3, "stampsTotal": 31, "hearts": 5 })
+	scene._apply_wallet(scene.get("wallet"))
+	var full_beats := StampCeremony.plan(scene.get("stamp_seen"), scene.get("wallet"), [])
+	await pui.play_ceremony(full_beats)
+	_check(int((scene.get("stamp_seen") as Dictionary).get("stampProgress", -1)) == 3, "满 9：章卡停在攒满")
+	var grown := 0
+	for i in 9:
+		if field.bloom_of(i) > 0.5:
+			grown += 1
+	_check(grown == 9, "满 9：还是 9 朵，没多长")
+
+	# 小朋友「自己点一下砸下去」这条路（默认路径！上面几段走的都是 1.2s 超时兜底）：
+	# 把兜底拉到 5s，点一下卡，仪式必须**立刻**推进完；耗时远小于兜底 = 证明是点击触发的。
+	scene.set("stamp_seen", { "flowers": 0, "stampProgress": 0, "stampsTotal": 0 })
+	scene.set("wallet", { "flowers": 0, "stampProgress": 1, "stampsTotal": 1, "hearts": 5 })
+	scene._apply_wallet(scene.get("wallet"))
+	pui.hover_timeout = 5.0
+	var t0 := Time.get_ticks_msec()
+	pui.play_ceremony(StampCeremony.plan(scene.get("stamp_seen"), scene.get("wallet"), []))  # 不 await：先让它停在招手
+	for _f in 3:
+		await scene.get_tree().process_frame
+	_check(card.has_tool(), "招手中：橡皮章浮在空槽上")
+	card.tapped.emit()   # ← 小朋友点了一下卡
+	var guard := 0
+	while pui.ceremony_playing() and guard < 600:
+		await scene.get_tree().process_frame
+		guard += 1
+	var spent := Time.get_ticks_msec() - t0
+	_check(not pui.ceremony_playing() and spent < 4500, "点一下就砸下去（%dms，没等满 5s 兜底）" % spent)
+	_check(int((scene.get("stamp_seen") as Dictionary).get("stampsTotal", -1)) == 1, "点砸完：游标认账")
+
+	StampCeremony.save_seen(StampCeremony.empty_seen())  # 别把本次测试的游标留给别的测试
 	var hearts_label: Label = pui.get("_hearts_label")
 	_check(hearts_label != null and hearts_label.text == "x5", "集邮册爱心行=钱包 hearts（player-interaction 移植）")
 
@@ -138,15 +339,14 @@ func _run(scene: Node) -> void:
 			and phone.spread_viewport().render_target_update_mode == SubViewport.UPDATE_DISABLED,
 		"收起后跨页停更、正面渲一帧熄屏黑底后自动停（UPDATE_ONCE）")
 
-	# 回家 app：跨页有「回家」按钮；离线且已在 village 时点回家 → 就地把玩家挪回原点附近空位解卡。
+	# 回家 app：跨页有「回家」按钮；点回家 → 启动传送门过场动画（软过场：召门→走进→黑幕→走出，
+	# 见 home-portal-anim）。这里只验按钮接线启动了动画；完整落位/黑幕/消散由 test_home_soft、
+	# test_home_cross、test_home_edge 覆盖（那三个逐帧驱动到动画走完）。
 	_check(pui.get("_home_btn") != null and pui.get("_home_btn") is Button, "回家页有「回家」按钮(_home_btn)")
-	var far := WorldGrid.from_tile_center(Vector2i(50, 50))
-	(scene.get("player") as Dictionary)["logical"] = far
+	(scene.get("player") as Dictionary)["logical"] = WorldGrid.from_tile_center(Vector2i(50, 50))
 	scene._go_home()
-	var home_pos: Vector2 = (scene.get("player") as Dictionary)["logical"]
-	var d_home := WorldGrid.shortest_delta(home_pos, WorldGrid.from_tile_center(Vector2i.ZERO)).length()
-	_check(d_home <= 20.0, "离线回家：玩家从(50,50)挪回原点附近（环面距原点 %.1f ≤ 20 单位）" % d_home)
-	_check(WorldGrid.shortest_delta(scene.get("focus_logical"), home_pos).length() < 0.01, "回家后相机聚焦跟到玩家")
+	_check(scene.get("_homing"), "点回家启动了传送门过场动画（_homing=true）")
+	_check((scene.get("_home_portals") as Array).size() == 1, "回家：召唤了一座临时传送门（近门）")
 
 	# 过场 loading 遮罩：_setup_hud 建好、初始隐藏；步进一帧仙子动画不崩
 	var overlay: Control = scene.get("_transition_overlay")
