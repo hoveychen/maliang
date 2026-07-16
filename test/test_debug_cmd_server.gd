@@ -591,6 +591,21 @@ func _run_once() -> void:
 	fails += _check("teleport 回包 ok", r_tp.get("ok"), true)
 	fails += _check("teleport 透传 near", (world.teleports[0] as Array)[1], true)
 
+	print("[断连自动还原摄影模式：掉线的 pilot 不把 HUD+手机藏到重启]")
+	world.photo_args.clear()
+	srv._execute(DebugCmdServer.parse_command('{"op":"photo","hud":false}'))  # 进摄影态：藏 HUD/手机
+	fails += _check("photo hud:false 置脏位", srv._photo_dirty, true)
+	srv._restore_photo_if_dirty()  # 模拟客户端断连/被顶时的清理
+	fails += _check("断连补还原一次", world.photo_args.size(), 2)
+	var restore := world.photo_args[world.photo_args.size() - 1] as Dictionary
+	fails += _check("还原=显示 HUD", restore.get("hud"), true)
+	fails += _check("还原=撤机位覆盖", restore.get("clear_cam"), true)
+	fails += _check("还原后脏位清零", srv._photo_dirty, false)
+	# 幂等：非脏态再断连不重复还原（不误扰正常收尾过的会话）
+	world.photo_args.clear()
+	srv._restore_photo_if_dirty()
+	fails += _check("非脏态断连不还原", world.photo_args.size(), 0)
+
 	print("[autoload 路径：_world=null 时 talk_fairy/reset_budget 经 current_scene 兜底]")
 	# 真机上 HarnessCmd 是 [autoload]，由 Godot 默认构造（不走 make）→ _world 恒为 null；
 	# 命令必须回退到 get_tree().current_scene（在 world 场景即 world 节点）才能路由到宿主钩子。
