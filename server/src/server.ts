@@ -3055,6 +3055,9 @@ export async function handleWsMessage(
         wallet: done.wallet,
       }));
       void pushPraiseTts(socket, adapters, store, worldId, done.task, done, session.clientTts); // 委托人音色的语音表扬（后台合成，不卡庆祝）
+      // 跑腿完成也重发漏话（M1）：链步跑腿完成后游标已推进，该村民的漏话/A4 清单卡要换下一步——
+      // 与心愿完成路径（fulfillAbility 末尾的无条件重发）同拍，清单卡的滑走跟盖章一起被看见。
+      pushWishes(socket, store, worldId, session.playerId, session.currentScene, session);
     }
     return; // 不匹配静默忽略（迟到/重复上报无副作用）
   }
@@ -3159,6 +3162,8 @@ export async function handleWsMessage(
         flowerGained: r.flowerGained, wallet: r.wallet,
       }));
       await pushPraiseTts(socket, adapters, store, worldId, r.task, r, session.clientTts);
+      // 试用盖章同样重发漏话（M1）：链步心愿两段完成在这里才推进游标，清单卡与盖章同拍滑走。
+      pushWishes(socket, store, worldId, session.playerId, session.currentScene, session);
     } else {
       // 调反了、还没到上限：仙子升一级再问一句（仍是问句，客户端播预制 refine_hint_2）。
       socket.send(JSON.stringify({

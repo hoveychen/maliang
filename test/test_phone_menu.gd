@@ -75,7 +75,7 @@ func _run(scene: Node) -> void:
 					cols_ok = false
 				icon_total += g.get_child_count()
 	_check(cols_ok, "每页网格 columns=%d" % PhoneUi.PHONE_GRID_COLS)
-	_check(icon_total == 6, "图标总数 = 已实装 app 数 6（home/flowers/items/stickers/quiet/settings）")
+	_check(icon_total == 7, "图标总数 = 已实装 app 数 7（home/wishes/flowers/items/stickers/quiet/settings）")
 
 	var cover: Control = pui.get("_screen_cover")
 	_check(cover != null and cover.visible, "停靠常驻=熄屏黑屏")
