@@ -19,6 +19,7 @@ var _reset_result: Dictionary = {}
 var _reset_called := false
 var _rolled_x := 0.0
 var _resume_x := 0.0
+var _resume_rolled := false
 
 func _initialize() -> void:
 	scene = load("res://main.tscn").instantiate()
@@ -44,6 +45,12 @@ func _tick() -> void:
 		75: _after_resume()
 		77: _finish_stage()
 		79: _after_finish()
+	# host 恢复模拟后踢的那脚，滚过 0.5 的时刻取决于 _step_balls 的推进节奏（headless 时钟非确定，
+	# 见文件头注释）：轮询窗口内滚过即里程碑，不钉死在 frame 75，避免间歇性「还没滚够」假阴。
+	if frame > 59 and not _resume_rolled:
+		var b = (scene.get("_stage_balls") as Dictionary).get("ball1")
+		if b != null and b.body.logical.x > _resume_x + 0.5:
+			_resume_rolled = true
 
 func _spawn() -> void:
 	scene.call("stage_begin", [])  # 空 cast：球不依赖演员
@@ -148,7 +155,7 @@ func _after_resume() -> void:
 	var ball = (scene.get("_stage_balls") as Dictionary).get("ball1")
 	if ball == null:
 		return
-	_check("host 恢复后球朝东滚动（物理重新生效）", ball.body.logical.x > _resume_x + 0.5, true)
+	_check("host 恢复后球朝东滚动（物理重新生效）", _resume_rolled, true)
 
 func _finish_stage() -> void:
 	scene.call("stage_finish", {}, false, "")
