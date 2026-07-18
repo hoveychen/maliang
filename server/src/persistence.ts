@@ -2,8 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, Familiarity, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
+import { coerceRelationship, deriveFamiliarity } from './social.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
 import { creationItemDef, getBuiltinItem } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
@@ -712,6 +713,27 @@ export class WorldStore {
           'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
       )
       .run(character.id, character.worldId, JSON.stringify(character));
+  }
+
+  /**
+   * 记一次玩家↔村民的实质互动，累进熟识度并持久化（村民视角，写 character.relationships[playerId]）。
+   * kind='chat' 累加会话轮数（聊过→点头之交）；kind='wish' 累加完成心愿次数（完成过→朋友）。见 social.ts。
+   * 仙子/空 playerId/角色不存在 → no-op。返回变化后的熟识度与本次是否跨级升级（供上层决定是否即时通知）。
+   */
+  recordVillagerBond(worldId: string, npcId: string, playerId: string, kind: 'chat' | 'wish', n = 1): { familiarity: Familiarity; changed: boolean } {
+    const c = this.getCharacter(worldId, npcId);
+    if (!c || c.isFairy || !playerId) return { familiarity: 'stranger', changed: false };
+    const rels: Record<string, unknown> =
+      c.relationships && typeof c.relationships === 'object' ? (c.relationships as Record<string, unknown>) : {};
+    const before = deriveFamiliarity(rels[playerId]);
+    const rel = coerceRelationship(rels[playerId]);
+    if (kind === 'chat') rel.chats += n;
+    else rel.wishesDone += n;
+    rels[playerId] = rel;
+    c.relationships = rels as Character['relationships'];
+    this.saveCharacter(c);
+    const after = deriveFamiliarity(rel);
+    return { familiarity: after, changed: after !== before };
   }
 
   // ── 物品实体（items 表，只存语音造物；内置定义见 items.ts）─────────────

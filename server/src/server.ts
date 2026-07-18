@@ -84,7 +84,8 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type CharacterView, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { deriveSocialType, familiarityFor } from './social.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
 import { avatarDescForbidden, stripAvatarOptionIds, AVATAR_EARLY_DONE, AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
@@ -1460,6 +1461,9 @@ export async function endSessionVisit(
   session.visit = null; // 先摘出，避免并发/重入重复 flush
   const jobs: Promise<void>[] = [];
   for (const [characterId, turns] of visit.pending) {
+    // 聊过一段 = 一次实质互动，升熟识度（陌生→点头之交），供内向村民下次进场景主动来打招呼。
+    // 在 turns.length===0 的 continue 之前打点：会话中途 flush 会把 turns 清零，但该角色确实聊过。
+    store.recordVillagerBond(visit.worldId, characterId, visit.playerId, 'chat');
     if (turns.length === 0) continue;
     const batch = turns.slice();
     turns.length = 0;
@@ -2148,12 +2152,13 @@ export async function createCharacterAsync(
     if (creatorId) {
       store.addMemory(creatorId, { text: `帮小朋友造过新伙伴「${character.name}」（${description.slice(0, 60)}）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
     }
-    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId, playerId) }));
+    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character: projectCharacterFor(character, playerId), wallet: store.getWallet(worldId, playerId) }));
     // 同场景其他人：实时看见新伙伴降生（排除发起者——它已经靠 gen_complete 降生过了）。
+    // 新角色对谁都是陌生人：viewer 传空 → familiarity 恒 stranger（免逐成员算），socialType 现算。
     if (spawn?.hub && sceneId) {
       spawn.hub.broadcastScene(
         worldId, sceneId,
-        { type: 'character_spawned', sceneId, character },
+        { type: 'character_spawned', sceneId, character: projectCharacterFor(character, '') },
         spawn.connKey,
       );
     }
@@ -2587,6 +2592,21 @@ export function presenceOf(store: WorldStore, worldId: string, sceneId: string, 
     tile: store.getPlayerTile(worldId, sceneId, playerId),
     ...(p?.anchors ? { anchors: p.anchors } : {}),
     ...(p?.attachments && p.attachments.length ? { attachments: p.attachments } : {}),
+  };
+}
+
+/**
+ * 把裸 Character 投影成【某个玩家视角】的下发对象：附加社交类型 + 相对该玩家的熟识度。
+ * socialType 与观察者无关（现算自 greetingStyle）；familiarity 读该村民 relationships[viewer]（村民视角持久化）。
+ * 仙子不参与社交，原样返回。见 social.ts / docs/villager-social-design.md。
+ * viewerPlayerId 为空（如新降生角色广播给一群人）→ 熟识度恒 stranger（新角色对谁都陌生）。
+ */
+export function projectCharacterFor(character: Character, viewerPlayerId: string): CharacterView {
+  if (character.isFairy) return character;
+  return {
+    ...character,
+    socialType: deriveSocialType(character),
+    familiarity: viewerPlayerId ? familiarityFor(character, viewerPlayerId) : 'stranger',
   };
 }
 
@@ -3578,7 +3598,7 @@ export async function handleWsMessage(
       worldId,
       sceneId,
       scene: scene ?? null,
-      characters: store.listCharacters(worldId, sceneId),
+      characters: store.listCharacters(worldId, sceneId).map((c) => projectCharacterFor(c, session.playerId)),
       // 物品实体定义（内置+造物）：新场景矩阵 palette 的解引用依据
       items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
       playerPos: session.playerId ? store.getPlayerTile(worldId, sceneId, session.playerId) : undefined,

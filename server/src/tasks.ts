@@ -144,6 +144,8 @@ export function completeWishOnAbility(
   if (!task || task.type !== 'wish' || task.wishAbility !== ability) return null;
   const { flowerGained, wallet } = store.addStamp(worldId, playerId);
   store.setActiveTask(worldId, playerId, null);
+  // 帮它了却心愿 = 一次实质互动，升熟识度（→朋友），供内向村民日后主动来打招呼。
+  store.recordVillagerBond(worldId, task.npcId, playerId, 'wish');
   return { task, flowerGained, wallet };
 }
 
@@ -202,6 +204,7 @@ export function completeWishRefine(
   if (correct || tries >= REFINE_MAX_TRIES) {
     const { flowerGained, wallet } = store.addStamp(worldId, playerId);
     store.setActiveTask(worldId, playerId, null);
+    store.recordVillagerBond(worldId, task.npcId, playerId, 'wish');
     return { task, satisfied: true, flowerGained, wallet };
   }
   task.refineTries = tries;
@@ -253,5 +256,7 @@ export function completeTaskOnEvent(
   if (!ok) return null;
   const { flowerGained, wallet } = store.addStamp(worldId, playerId);
   store.setActiveTask(worldId, playerId, null);
+  // 跑腿委托完成同样加深与委托村民的熟识度。
+  store.recordVillagerBond(worldId, task.npcId, playerId, 'wish');
   return { task, flowerGained, wallet };
 }
