@@ -3,9 +3,10 @@
 // （见 openrouter_llm.routeIntent 的 offerTask）；完成判定是客户端上报的确定性事件，不靠 LLM 猜。
 // 完成任一委托 = 盖 1 个集邮章；每满 3 章换 1 朵小红花（见 docs/reward-flower-design.md）。
 import { randomUUID } from 'node:crypto';
-import { MAX_FLOWERS, STAMPS_PER_FLOWER, STAMP_STYLES, type ActiveTask, type TaskType, type Wallet } from './types.ts';
+import { MAX_FLOWERS, STAMPS_PER_FLOWER, STAMP_STYLES, type ActiveTask, type Character, type TaskType, type Wallet } from './types.ts';
 import type { WorldStore } from './persistence.ts';
 import { wishFor, pickThanks, WISHES } from './wishes.ts';
+import { advanceChainOnComplete } from './task_chain.ts';
 import { sizeToScale, type CreatureSize } from './creation_options.ts';
 import { REFINE_MAX_TRIES, refineDirFor } from './refinements.ts';
 
@@ -54,6 +55,12 @@ export function pickTaskCandidate(
 
   const others = store.listCharacters(worldId, sceneId).filter((c) => c.id !== npcId && !c.isFairy);
   const locations = store.getLocations(worldId, sceneId);
+
+  // 二级：该村民的专属委托链（M1 断环修复）。心愿池空后不直接掉进通用跑腿——先把这个角色
+  // 自己的小主题走完（人设连续性），链走完（nextIndex 越界）才回落三级。
+  const chained = pickChainTask(npc, base, canAfford, others, locations, rand);
+  if (chained) return chained;
+
   const types: TaskType[] = [];
   if (others.length > 0) types.push('deliver', 'bring');
   if (locations.length > 0) types.push('visit');
@@ -71,25 +78,67 @@ export function pickTaskCandidate(
   }
 }
 
-/** 委托给意图 LLM 的一句话描述（prompt 用）。 */
-export function describeTask(task: ActiveTask): string {
-  switch (task.type) {
-    case 'deliver':
-      return `请小朋友把一句话带给${task.targetName}：「${task.message}」`;
-    case 'bring':
-      return `请小朋友把${task.targetName}带到你身边来`;
-    case 'visit':
-      return `请小朋友去「${task.locationName}」看一看`;
-    case 'wish':
-      // 心愿的兑现人是小仙子（村民不会魔法）。这句会注入【所有】角色的 prompt——
-      // 包括始终跟在小朋友身边飞的小仙子，她据此知道要造什么，哪怕小朋友只说「帮帮他」。
-      return `${task.npcName}心里的一个念想还没实现（${WISHES[task.wishAbility ?? '']?.context ?? ''}）——` +
-        `${task.npcName}自己变不出来，只有小仙子的魔法才能帮它实现`;
+/**
+ * 从链游标起找第一个「此刻可发起」的步并物化成 ActiveTask（M1 §2.2）：
+ * deliver/bring 需要场景里有别人、visit 需要有地点、wish(要花) 需要买得起——不可行就看下一步，
+ * 全不可行返回 null（回落通用跑腿，不卡链）。目标（对象/地点）发起当刻现选：链步只带语义与话术。
+ */
+function pickChainTask(
+  npc: Character,
+  base: { id: string; npcId: string; npcName: string; stampStyle: string },
+  canAfford: boolean,
+  others: Character[],
+  locations: string[],
+  rand: () => number,
+): ActiveTask | null {
+  const chain = npc.taskChain;
+  if (!chain) return null;
+  for (let i = chain.nextIndex; i < chain.steps.length; i++) {
+    const step = chain.steps[i]!;
+    const mark = { chainNpcId: npc.id, chainIndex: i, chainStep: step };
+    switch (step.type) {
+      case 'wish':
+        // costsFlower 门禁与一级心愿同一口径（见 WishDef.costsFlower 的死锁注释）：买不起就跳过该步
+        if (WISHES[step.wishAbility ?? '']?.costsFlower && !canAfford) continue;
+        return { ...base, ...mark, type: 'wish', wishAbility: step.wishAbility };
+      case 'deliver':
+        if (others.length === 0) continue;
+        return { ...base, ...mark, type: 'deliver', targetName: pick(others, rand).name, message: step.message ?? pick(DELIVER_MESSAGES, rand) };
+      case 'bring':
+        if (others.length === 0) continue;
+        return { ...base, ...mark, type: 'bring', targetName: pick(others, rand).name };
+      case 'visit':
+        if (locations.length === 0) continue;
+        return { ...base, ...mark, type: 'visit', locationName: pick(locations, rand) };
+    }
   }
+  return null;
 }
 
-/** 完成时委托类型对应的表扬前缀。 */
+/** 委托给意图 LLM 的一句话描述（prompt 用）。链步再带上这一步的请求话术底稿——发起时人设连续。 */
+export function describeTask(task: ActiveTask): string {
+  const base = (() => {
+    switch (task.type) {
+      case 'deliver':
+        return `请小朋友把一句话带给${task.targetName}：「${task.message}」`;
+      case 'bring':
+        return `请小朋友把${task.targetName}带到你身边来`;
+      case 'visit':
+        return `请小朋友去「${task.locationName}」看一看`;
+      case 'wish':
+        // 心愿的兑现人是小仙子（村民不会魔法）。这句会注入【所有】角色的 prompt——
+        // 包括始终跟在小朋友身边飞的小仙子，她据此知道要造什么，哪怕小朋友只说「帮帮他」。
+        // 链步心愿优先用这一步自己的 desire（人设主题），非链步用通用心愿库的 context。
+        return `${task.npcName}心里的一个念想还没实现（${task.chainStep?.desire ?? WISHES[task.wishAbility ?? '']?.context ?? ''}）——` +
+          `${task.npcName}自己变不出来，只有小仙子的魔法才能帮它实现`;
+    }
+  })();
+  return task.chainStep ? `${base}。你心里想这么开口：「${task.chainStep.ask}」` : base;
+}
+
+/** 完成时委托类型对应的表扬前缀。链步用这一步自己的道谢（主题收尾）。 */
 function taskIntro(task: ActiveTask, rand: () => number = Math.random): string {
+  if (task.chainStep) return task.chainStep.thanks;
   switch (task.type) {
     case 'deliver':
       return '太棒啦！话带到了！';
@@ -146,6 +195,7 @@ export function completeWishOnAbility(
   store.setActiveTask(worldId, playerId, null);
   // 帮它了却心愿 = 一次实质互动，升熟识度（→朋友），供内向村民日后主动来打招呼。
   store.recordVillagerBond(worldId, task.npcId, playerId, 'wish');
+  advanceChainOnComplete(worldId, task, store); // 链步心愿：游标推进到下一步
   return { task, flowerGained, wallet };
 }
 
@@ -205,6 +255,7 @@ export function completeWishRefine(
     const { flowerGained, wallet } = store.addStamp(worldId, playerId);
     store.setActiveTask(worldId, playerId, null);
     store.recordVillagerBond(worldId, task.npcId, playerId, 'wish');
+    advanceChainOnComplete(worldId, task, store); // 链步心愿走试用两段完成：盖章这一刻才推进游标
     return { task, satisfied: true, flowerGained, wallet };
   }
   task.refineTries = tries;
@@ -258,5 +309,6 @@ export function completeTaskOnEvent(
   store.setActiveTask(worldId, playerId, null);
   // 跑腿委托完成同样加深与委托村民的熟识度。
   store.recordVillagerBond(worldId, task.npcId, playerId, 'wish');
+  advanceChainOnComplete(worldId, task, store); // 链步跑腿：游标推进到下一步
   return { task, flowerGained, wallet };
 }

@@ -163,6 +163,14 @@ export interface ActiveTask {
   refineDir?: 'smaller' | 'bigger';// 该往哪调（按造出来的档反推，保证目标档一定够得到）
   refineFromSize?: CreatureSize;   // 造出来时的体型档（判方向调对没的基准）
   refineTries?: number;            // 已调几次；到 REFINE_MAX_TRIES 无条件盖章，绝不无止境挑刺
+  /**
+   * 链步来源标记（M1 断环修复）：本委托物化自 chainNpcId 角色委托链的第 chainIndex 步。
+   * 完成结算据此推进链游标（task_chain.advanceChainOnComplete）；缺省 = 非链步（心愿/通用跑腿）。
+   */
+  chainNpcId?: string;
+  chainIndex?: number;
+  /** 链步话术（物化时拷贝，任务自描述）：describeTask 用 ask/desire 注入 prompt，praiseLine 用 thanks 道谢。 */
+  chainStep?: ChainStep;
 }
 
 /**
@@ -178,6 +186,8 @@ export interface ChainStep {
   wishAbility?: string;
   /** type=wish 时想要的东西的一句话描述（注入 routeIntent context）。 */
   desire?: string;
+  /** type=deliver 时要带的话（可选）：不带则物化时回落通用 DELIVER_MESSAGES 池。判定不依赖文本，纯演出。 */
+  message?: string;
   /** 这一步的漏话。自言自语纪律同 wishes.ts：绝不出现「你可以/要不要/告诉我」（validateChainSteps 把关）。 */
   leak: string;
   /** 小朋友搭话时的请求话术底稿（注入 offerTask prompt 的 context，这里可以说「请你/帮我」）。 */

@@ -30,6 +30,7 @@ export const TEMPLATE_CHAINS: Record<GreetingStyle, readonly ChainStep[]> = {
     },
     {
       type: 'deliver',
+      message: '茶会就要开始啦，请来玩呀',
       leak: '茶会的事儿只有我自己知道…真想让大家也知道呀。',
       ask: '茶会的消息还没人知道呢，请你帮我把这句话带给他好不好？',
       thanks: '太好啦，消息带到啦！茶会又热闹一分！',
@@ -52,6 +53,7 @@ export const TEMPLATE_CHAINS: Record<GreetingStyle, readonly ChainStep[]> = {
   shy: [
     {
       type: 'deliver',
+      message: '那个…我一直想跟你做朋友…',
       leak: '有句话…我一直没敢当面说出口…',
       ask: '我…我想跟他说句话，可我不好意思…你能帮我带给他吗？',
       thanks: '你帮我说啦…谢谢你…我心里暖暖的。',
@@ -104,6 +106,7 @@ export const TEMPLATE_CHAINS: Record<GreetingStyle, readonly ChainStep[]> = {
     },
     {
       type: 'deliver',
+      message: '远处有个特别美的地方，风景可好啦',
       leak: '这么好的风景，光我一个人知道有点可惜呀。',
       ask: '这么美的事儿，请你帮我讲给他听好不好？',
       thanks: '你帮我把美景讲给别人听啦，真好。',
@@ -155,6 +158,10 @@ export function validateChainSteps(raw: unknown): ChainStep[] | null {
       const desire = cleanText(s.desire);
       if (desire) step.desire = desire;
     }
+    if (step.type === 'deliver') {
+      const message = cleanText(s.message);
+      if (message) step.message = message; // 可选：不带则物化时回落通用 DELIVER_MESSAGES 池
+    }
     steps.push(step);
   }
   return steps.length >= CHAIN_MIN_STEPS ? steps : null;
@@ -187,6 +194,26 @@ export async function ensureTaskChain(
     return await p;
   } finally {
     inflight.delete(key);
+  }
+}
+
+/**
+ * 完成结算推进链游标（供 tasks.ts 三个结算点调用）：完成第 chainIndex 步 → nextIndex = chainIndex+1。
+ * 游标是「跳步不回头」语义：物化时若跳过了不可行步（买不起/场景没目标），完成后面的步就把游标
+ * 一并越过它们——链是「见面礼」不是任务清单，供给持续比步步全勤重要（docs/m1-wish-supply-design.md §2.2）。
+ * 非链步（无 chainNpcId/chainIndex）no-op。
+ */
+export function advanceChainOnComplete(
+  worldId: string,
+  task: { chainNpcId?: string; chainIndex?: number },
+  store: WorldStore,
+): void {
+  if (!task.chainNpcId || task.chainIndex === undefined) return;
+  const c = store.getCharacter(worldId, task.chainNpcId);
+  if (!c?.taskChain) return;
+  if (task.chainIndex >= c.taskChain.nextIndex) {
+    c.taskChain.nextIndex = task.chainIndex + 1;
+    store.saveCharacter(c);
   }
 }
 

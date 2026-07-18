@@ -502,6 +502,7 @@ export function createMockAdapters(): ServiceAdapters {
           },
           {
             type: 'deliver',
+            message: '小聚会就要开始啦，请来玩呀',
             leak: '聚会的消息还没人知道呢…',
             ask: '帮我把这句话带过去好不好？',
             thanks: '消息带到啦，谢谢你！',

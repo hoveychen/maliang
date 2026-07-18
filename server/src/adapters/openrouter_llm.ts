@@ -823,9 +823,10 @@ ${answeringLine}
 - leak：小朋友路过时的自言自语（漏话）。铁律：只说自己想什么，绝不出现「你可以」「要不要」「告诉我」这类对着小朋友说话的词
 - ask：小朋友主动搭话时的请求话术（这里可以说「请你/帮我」）
 - thanks：这一步完成时的道谢
+- type=deliver 可带 message：要带给对方的那句话（同样不写人名）
 注意：deliver/bring/visit 一律不写具体人名或地点名——游戏发起时会现选目标，话术里用「他/那个地方」指代。
 全部中文，温暖童趣，每句不超过 40 字。绝不包含暴力、恐怖、武器、成人内容。
-严格只输出 JSON：{"steps":[{"type":"...","leak":"...","ask":"...","thanks":"...","wishAbility":"仅wish","desire":"仅wish"},...]}`;
+严格只输出 JSON：{"steps":[{"type":"...","leak":"...","ask":"...","thanks":"...","wishAbility":"仅wish","desire":"仅wish","message":"仅deliver"},...]}`;
     const content = await this.#client.chatText(
       this.#model,
       [
