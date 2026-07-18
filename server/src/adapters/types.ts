@@ -1,6 +1,7 @@
 import type {
   AvatarAttrs,
   AvatarGuideState,
+  ChainStep,
   ChatTurn,
   CharacterSpec,
   CreationState,
@@ -63,6 +64,12 @@ export interface LLMAdapter {
   guideBuild(state: CreationState, childInput: string): Promise<GuideBuildResult>;
   /** 按贴纸的中文描述给出贴纸中文名 + 英文扁平贴纸生图 prompt（喂 generateIconAsset 管线）。 */
   designSticker(intentText: string): Promise<{ name: string; prompt: string }>;
+  /**
+   * 角色专属委托链生成（M1，docs/m1-wish-supply-design.md §2.1）：按角色人设出 3-5 步 ChainStep，
+   * 围绕同一个小主题递进。只出语义与话术——deliver/bring/visit 不带目标名（发起时现选）。
+   * 产物由调用方 validateChainSteps 把关；失败/超时/不合格调用方回退模板链（task_chain.ts）。
+   */
+  designTaskChain(ctx: { name: string; personality: string }): Promise<ChainStep[]>;
   /**
    * 剧本生成（realtime-primitives P5）：把「我们来踢球吧」这类口语生成一段【真 TS】剧本。
    * 硬 codegen 任务——真实实现用【强模型】+ 对着 stage_sdk.d.ts 过 typecheck，失败带错回喂重生成 1-2 次；

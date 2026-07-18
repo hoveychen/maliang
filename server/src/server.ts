@@ -92,6 +92,7 @@ import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt 
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWishRefine, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { ensureTaskChain } from './task_chain.ts';
 import { pickComplaint, REFINE_HINT, REFINE_HINT_2 } from './refinements.ts';
 import { wishFor, IDLE_DOING, reuseHint } from './wishes.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
@@ -2175,6 +2176,10 @@ export async function createCharacterAsync(
     if (character.appearance.spriteAsset) {
       triggerCharacterAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
     }
+    // M1 断环修复：新角色的「见面礼」——异步生成角色专属委托链（LLM 失败自动回退模板链，绝不让角色无链）
+    ensureTaskChain(worldId, character.id, adapters.llm, store).catch((err) =>
+      console.warn(`委托链生成失败（${character.id}，已回退模板兜底也失败）：${String(err)}`),
+    );
     // A1 试用：造出来的新伙伴带体型 → 开「试用」（村民试用差一点，小朋友调对再盖章）。
     await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_character', clientTts, sceneId ?? DEFAULT_SCENE,
       { itemRef: character.id, size: character.appearance.size ?? scaleToSize(character.appearance.scale) }, recipient);

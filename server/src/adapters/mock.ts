@@ -4,6 +4,7 @@ import {
   BASE_ABILITIES,
   type AvatarAttrs,
   type AvatarGuideState,
+  type ChainStep,
   type CharacterSpec,
   type CreationAttrs,
   type CreationCategory,
@@ -488,6 +489,32 @@ export function createMockAdapters(): ServiceAdapters {
         const kindPrompt = kindOpt ? stickerIconPrompt(kindOpt.id) : 'a cute flat sticker';
         const prompt = colorOpt ? `${colorOpt.id} colored ${kindPrompt}` : kindPrompt;
         return { name, prompt };
+      },
+      async designTaskChain(ctx: { name: string; personality: string }): Promise<ChainStep[]> {
+        // mock：确定性三步链（visit→deliver→wish），围绕同一个小主题（想办个小聚会）递进——
+        // 单测/headless 可预期；真实实现按人设自由发挥（openrouter_llm）。
+        return [
+          {
+            type: 'visit',
+            leak: `我想找个办小聚会的好地方…可${ctx.name}还没去看过呢。`,
+            ask: '帮我去那个地方看一看好不好？',
+            thanks: '你去看过啦，太好啦！',
+          },
+          {
+            type: 'deliver',
+            leak: '聚会的消息还没人知道呢…',
+            ask: '帮我把这句话带过去好不好？',
+            thanks: '消息带到啦，谢谢你！',
+          },
+          {
+            type: 'wish',
+            wishAbility: 'create_prop',
+            desire: '一张聚会用的小桌子',
+            leak: '聚会还缺一张小桌子…我自己变不出来呀。',
+            ask: '小桌子的事儿…只有小仙子的魔法帮得上啦。',
+            thanks: '小桌子有啦！聚会成啦！',
+          },
+        ];
       },
       async generateScreenplay(ctx: ScreenplayGenContext): Promise<ScreenplayDraft | null> {
         // mock：按关键词确定性返回一段【已知过 typecheck】的最小剧本（真实实现走强模型 + typecheck 重试环）。

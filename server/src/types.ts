@@ -165,6 +165,33 @@ export interface ActiveTask {
   refineTries?: number;            // 已调几次；到 REFINE_MAX_TRIES 无条件盖章，绝不无止境挑刺
 }
 
+/**
+ * 角色专属委托链的一步（M1 断环修复，docs/m1-wish-supply-design.md §2.1）。
+ * 只带「语义与话术」——deliver/bring 的对象、visit 的地点由 pickTaskCandidate 发起当刻从当前场景现选：
+ * LLM 生成时世界还没有这些目标，写死必悬空。链贡献的是人设连续性（话术围绕同一个小主题递进），
+ * 完成判定全走现有确定性路径（completeTaskOnEvent / completeWishOnAbility）。
+ */
+export interface ChainStep {
+  /** 复用现有 TaskType，零新完成判定。 */
+  type: TaskType;
+  /** type=wish 时勾的能力（wishes.ts WISHES 的键，costsFlower 门禁照旧）。 */
+  wishAbility?: string;
+  /** type=wish 时想要的东西的一句话描述（注入 routeIntent context）。 */
+  desire?: string;
+  /** 这一步的漏话。自言自语纪律同 wishes.ts：绝不出现「你可以/要不要/告诉我」（validateChainSteps 把关）。 */
+  leak: string;
+  /** 小朋友搭话时的请求话术底稿（注入 offerTask prompt 的 context，这里可以说「请你/帮我」）。 */
+  ask: string;
+  /** 这一步完成时的道谢（走现成 pushPraiseTts，角色自己的音色）。 */
+  thanks: string;
+}
+
+/** 角色专属委托链：新角色的「见面礼」。nextIndex 越界 = 链走完，回落通用池，不循环。 */
+export interface TaskChain {
+  steps: ChainStep[];
+  nextIndex: number;
+}
+
 /** LLM 从玩家意图产出的角色设定（落地前）。 */
 export interface CharacterSpec {
   name: string;
@@ -372,6 +399,11 @@ export interface Character {
    * 贴上=玩家背包扣一份，摘下=回背包；随角色整对象下发（scene_entered/character_spawned）。
    */
   attachments?: Array<{ slot: 'headTop' | 'handL' | 'handR'; itemId: string }>;
+  /**
+   * 角色专属委托链（M1 断环修复）：缺省无链走老路；新角色 createCharacterAsync 落地后异步生成，
+   * 存量角色首次需要供给时懒生成（见 task_chain.ensureTaskChain，失败回退确定性模板链）。
+   */
+  taskChain?: TaskChain;
 }
 
 /** 造角色编排的阶段，顺序固定，用于进度推送。 */
