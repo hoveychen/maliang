@@ -233,8 +233,15 @@ export class ChromaKeyCutoutAdapter implements CutoutAdapter {
       // 绿幕越纯，恢复出的 alpha 越低；靠近主体、绿占优越弱，alpha 平滑趋近 255。
       const matte = Math.max(0, Math.min(255, Math.round(255 * (1 - dominance / FULL_KEY_DOMINANCE))));
       d[p + 3] = Math.round((d[p + 3]! * matte) / 255);
-      // 对整段 fringe 去溢色，而不是只处理紧邻背景的一圈。
-      if (d[p + 1]! > maxRB) d[p + 1] = maxRB;
+      // 对整段 fringe 反解 alpha-over-chroma，而不是只把 G 压到 max(R,B)。标准绿幕是
+      // #00B140，H.264 色度扩散会同时带入 G 与 B；只压 G 仍会留下截图里那种青色细线。
+      const alpha = matte / 255;
+      if (alpha > 0) {
+        const inv = 1 - alpha;
+        d[p] = Math.max(0, Math.min(255, Math.round(d[p]! / alpha)));
+        d[p + 1] = Math.max(0, Math.min(255, Math.round((d[p + 1]! - inv * 177) / alpha)));
+        d[p + 2] = Math.max(0, Math.min(255, Math.round((d[p + 2]! - inv * 64) / alpha)));
+      }
     }
 
     return { bytes: encodePng({ width: w, height: h, data: d }), mime: 'image/png' };
