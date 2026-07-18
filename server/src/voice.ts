@@ -3,6 +3,7 @@ import type { WorldStore } from './persistence.ts';
 import type { Character, ChatTurn, VoiceResponse } from './types.ts';
 import { effectiveAbilities, DEFAULT_SCENE } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
+import { ensureTaskChain } from './task_chain.ts';
 import { wishFor } from './wishes.ts';
 import { pickGreeting } from './greetings.ts';
 import { onboardingProfileNote, appearanceNote } from './avatar_options.ts';
@@ -64,6 +65,17 @@ export async function respondToTranscript(
 
   // 委托：进行中的给 LLM 提醒；没有进行中的生成候选让 LLM 挑时机发起（模板池确定性生成，按当前场景挑目标）
   const activeTask = store.getActiveTask(worldId, playerId) ?? undefined;
+  // M1 懒生成：存量角色首次「心愿池空且无链」需要供给时补一条专属委托链（新角色在 createCharacterAsync
+  // 已异步长链）。LLM 失败当场回退模板链（ensureTaskChain 不抛），只在首次搭话多花一次生成的功夫。
+  if (
+    !activeTask && !character.isFairy && !character.taskChain &&
+    !wishFor(characterId, store.getDiscovered(worldId, playerId), store.getWallet(worldId, playerId).flowers > 0)
+  ) {
+    const chain = await ensureTaskChain(worldId, characterId, adapters.llm, store);
+    // 同步回本函数手里的角色对象：本轮末尾 finishTurn 会整对象 saveCharacter，
+    // 拿的是函数开头读的这份引用——不回填的话刚长出的链会被它原样盖掉。
+    if (chain) character.taskChain = chain;
+  }
   const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, playerId, store, Math.random, sceneId) ?? undefined;
   // 这个角色当下的心愿背景：它刚在旁边自言自语漏过这件事，小朋友多半就是为这个凑上来的——
   // 注入后它被搭话时能自然接上自己的念想。仙子不认领心愿（她是兑现心愿的人，不是许愿的人）。

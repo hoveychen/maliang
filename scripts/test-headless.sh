@@ -134,6 +134,7 @@ UNIT_TESTS=(
   test_loading_progress
   test_dialog_camera
   test_phone_menu
+  test_wish_board
   test_paper_phone
   test_paper_book
   test_asr_guard

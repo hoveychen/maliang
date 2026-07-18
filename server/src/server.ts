@@ -92,8 +92,9 @@ import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt 
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWishRefine, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { ensureTaskChain, pendingChainStep } from './task_chain.ts';
 import { pickComplaint, REFINE_HINT, REFINE_HINT_2 } from './refinements.ts';
-import { wishFor, IDLE_DOING, reuseHint } from './wishes.ts';
+import { leakPoolFor, reuseHint } from './wishes.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
@@ -1513,19 +1514,17 @@ function pushWishes(
 ): void {
   const discovered = store.getDiscovered(worldId, playerId);
   const canAfford = store.getWallet(worldId, playerId).flowers > 0; // 买不起就不勾（见 WishDef.costsFlower）
-  const activeAbilities = new Set<string>(); // 眼前「有需求」的活跃能力（村民在漏的心愿 + 已认领委托）
+  const activeAbilities = new Set<string>(); // 眼前「有需求」的活跃能力（村民在漏的心愿/链步 + 已认领委托）
+  const dateKey = new Date().toISOString().slice(0, 10); // 三选一混合的轮换粒度：天（同一次路过听到的话稳定）
   const wishes = store
     .listCharacters(worldId, sceneId)
     .filter((c) => !c.isFairy)
     .map((c) => {
-      const wish = wishFor(c.id, discovered, canAfford);
-      if (wish) activeAbilities.add(wish.ability);
-      return {
-        characterId: c.id,
-        voiceId: c.voiceId,
-        // 心愿池空（玩法全发现/都买不起）→ 给纯氛围自语，让世界还有活气，但不再勾任何玩法
-        lines: wish ? wish.leaks : IDLE_DOING,
-      };
+      // 三选一混合（M1 拉力层）：心愿 → 该村民的待发链步 → errand:idle 稳定轮换——心愿池空后拉力不干涸。
+      // source/ability 一并下发：A4 心愿清单据 source 筛卡、据 ability 配「梦想图标」。
+      const pool = leakPoolFor(c.id, discovered, canAfford, pendingChainStep(c.taskChain, canAfford), dateKey);
+      if (pool.ability) activeAbilities.add(pool.ability);
+      return { characterId: c.id, voiceId: c.voiceId, lines: pool.lines, source: pool.source, ability: pool.ability };
     });
   // 已认领的心愿委托也算一个活跃需求（村民已被搭话、心愿变委托，但漏话池可能已因 discovered 刷掉那句）。
   const task = store.getActiveTask(worldId, playerId);
@@ -2175,6 +2174,10 @@ export async function createCharacterAsync(
     if (character.appearance.spriteAsset) {
       triggerCharacterAnimation(adapters, store, character.appearance.spriteAsset, toSpriteSheet);
     }
+    // M1 断环修复：新角色的「见面礼」——异步生成角色专属委托链（LLM 失败自动回退模板链，绝不让角色无链）
+    ensureTaskChain(worldId, character.id, adapters.llm, store).catch((err) =>
+      console.warn(`委托链生成失败（${character.id}，已回退模板兜底也失败）：${String(err)}`),
+    );
     // A1 试用：造出来的新伙伴带体型 → 开「试用」（村民试用差一点，小朋友调对再盖章）。
     await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_character', clientTts, sceneId ?? DEFAULT_SCENE,
       { itemRef: character.id, size: character.appearance.size ?? scaleToSize(character.appearance.scale) }, recipient);
@@ -3052,6 +3055,9 @@ export async function handleWsMessage(
         wallet: done.wallet,
       }));
       void pushPraiseTts(socket, adapters, store, worldId, done.task, done, session.clientTts); // 委托人音色的语音表扬（后台合成，不卡庆祝）
+      // 跑腿完成也重发漏话（M1）：链步跑腿完成后游标已推进，该村民的漏话/A4 清单卡要换下一步——
+      // 与心愿完成路径（fulfillAbility 末尾的无条件重发）同拍，清单卡的滑走跟盖章一起被看见。
+      pushWishes(socket, store, worldId, session.playerId, session.currentScene, session);
     }
     return; // 不匹配静默忽略（迟到/重复上报无副作用）
   }
@@ -3156,6 +3162,8 @@ export async function handleWsMessage(
         flowerGained: r.flowerGained, wallet: r.wallet,
       }));
       await pushPraiseTts(socket, adapters, store, worldId, r.task, r, session.clientTts);
+      // 试用盖章同样重发漏话（M1）：链步心愿两段完成在这里才推进游标，清单卡与盖章同拍滑走。
+      pushWishes(socket, store, worldId, session.playerId, session.currentScene, session);
     } else {
       // 调反了、还没到上限：仙子升一级再问一句（仍是问句，客户端播预制 refine_hint_2）。
       socket.send(JSON.stringify({

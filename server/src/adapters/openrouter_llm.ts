@@ -7,6 +7,7 @@ import {
   type AvatarCategory,
   type AvatarGuideState,
   type BehaviorScript,
+  type ChainStep,
   type CharacterSpec,
   type ChatTurn,
   type CreationCategory,
@@ -808,6 +809,39 @@ ${answeringLine}
       name: str(raw.name, '贴纸'),
       prompt: str(raw.prompt, `a cute flat sticker: ${intentText}`),
     };
+  }
+
+  async designTaskChain(ctx: { name: string; personality: string }): Promise<ChainStep[]> {
+    // 产物由调用方 validateChainSteps 把关（步数/type/wishAbility/自言自语纪律），
+    // 这里只负责生成——解析不出就回空数组，让调用方走模板回退。
+    const system = `你在为幼儿园小朋友的沙盒游戏设计一个村民的「委托链」：3-5 个小委托，围绕同一个小主题层层递进
+（例如面包师：想认识邻居 → 想要一个烤炉 → 请大家来吃面包），体现这个村民的人设。
+村民：${ctx.name}。人设：${ctx.personality}。
+每一步是一个对象，字段：
+- type：四选一。deliver=请小朋友把一句话带给别的村民；bring=请小朋友把别的村民带过来；visit=请小朋友去某个地点看一看；wish=一个要小仙子的魔法才能实现的念想
+- type=wish 时必须带 wishAbility，五选一：create_prop=变出一样东西 / create_character=造一个新伙伴 / create_sticker=做一张贴纸 / play_game=开一局大家一起玩的游戏 / guide_to=让小仙子带路去远处；并带 desire=想要的东西的一句话描述
+- leak：小朋友路过时的自言自语（漏话）。铁律：只说自己想什么，绝不出现「你可以」「要不要」「告诉我」这类对着小朋友说话的词
+- ask：小朋友主动搭话时的请求话术（这里可以说「请你/帮我」）
+- thanks：这一步完成时的道谢
+- type=deliver 可带 message：要带给对方的那句话（同样不写人名）
+注意：deliver/bring/visit 一律不写具体人名或地点名——游戏发起时会现选目标，话术里用「他/那个地方」指代。
+全部中文，温暖童趣，每句不超过 40 字。绝不包含暴力、恐怖、武器、成人内容。
+严格只输出 JSON：{"steps":[{"type":"...","leak":"...","ask":"...","thanks":"...","wishAbility":"仅wish","desire":"仅wish","message":"仅deliver"},...]}`;
+    const content = await this.#client.chatText(
+      this.#model,
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: `请为「${ctx.name}」设计委托链。` },
+      ],
+      { jsonObject: true },
+    );
+    let raw: Record<string, unknown> = {};
+    try {
+      raw = JSON.parse(stripFences(content)) as Record<string, unknown>;
+    } catch {
+      raw = {};
+    }
+    return Array.isArray(raw.steps) ? (raw.steps as ChainStep[]) : [];
   }
 
   async generateScreenplay(ctx: ScreenplayGenContext): Promise<ScreenplayDraft | null> {
