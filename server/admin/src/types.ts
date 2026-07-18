@@ -265,6 +265,11 @@ export interface Character {
   relationships: Record<string, string>;
 }
 
+/** 图集分段名（与 server sprite_sheet.ts CLIP_NAMES 对齐；moving 不生成、走客户端程序化）。 */
+export type ClipName = 'idle' | 'talking' | 'moving';
+/** 某一段在图集里的起止：start 起始帧、count 帧数（行主序全局下标）。 */
+export interface ClipRange { start: number; count: number }
+
 /** 图集动画 meta（与 server sprite_sheet.ts SpriteSheetMeta 对齐）。 */
 export interface SpriteAnimMeta {
   cols: number;
@@ -273,7 +278,16 @@ export interface SpriteAnimMeta {
   fps: number;
   cellW: number;
   cellH: number;
+  /** 多段图集（v2）：idle/talking 各自的起止帧；缺省（v1 单段）时整张当 idle。 */
+  clips?: Partial<Record<ClipName, ClipRange>>;
 }
+
+/** 分段中文标签，后台预览用。 */
+export const CLIP_LABELS: Record<ClipName, string> = {
+  idle: 'idle · 待机',
+  talking: 'talking · 说话',
+  moving: 'moving · 走动',
+};
 
 /** /sprite-anim/:hash 的返回（none/pending/ready/failed）。 */
 export interface SpriteAnimRecord {
