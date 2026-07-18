@@ -301,6 +301,7 @@ var _stage_balls := {}            ## C 档球实体 id → StageBall 节点（sp
 var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
 var fairy_voice: FairyVoice       ## 预制台词播放器（构建期 TTS，运行期零调用）
 var npc_wish_voice: NpcWishVoice  ## 村民心愿漏话（3D 定位音，按距离衰减；见 npc_wish_voice.gd）
+var npc_greeter: NpcGreeter       ## 村民主动社交调度（走过来打招呼；见 npc_greeter.gd）
 var game_audio: GameAudio         ## BGM + 音效（语音/思考时自动 duck）
 var _fairy_bubble: Sprite3D       ## 小仙子说话时的音符气泡（AIGC ic_note）
 var _fairy_greeted := false       ## 每次启动只问候一次
@@ -460,6 +461,10 @@ func _setup_audio() -> void:
 	npc_wish_voice.name = "NpcWishVoice"
 	npc_wish_voice.edge_tts = edge_tts # 复用同一个 edge-tts（共享探活与时钟纠偏）
 	add_child(npc_wish_voice)
+	# 村民主动社交调度：纯调度器，走位/出声由本场景按它返回的 action 执行（见 _update_npc_greetings）。
+	npc_greeter = NpcGreeter.new()
+	npc_greeter.name = "NpcGreeter"
+	add_child(npc_greeter)
 	game_audio = GameAudio.new()
 	game_audio.name = "GameAudio"
 	add_child(game_audio)
@@ -1228,6 +1233,50 @@ func _update_npc_wishes(delta: float) -> void:
 			or InteractionFsm.player_engaged(_fsm_inputs()) \
 			or (fairy_voice != null and fairy_voice.is_playing())
 	npc_wish_voice.update(delta, npcs, player["logical"], engaged)
+
+## 村民主动社交：合格村民（性格×熟识度）主动走过来、停下、面向玩家打招呼。
+## 纯调度在 NpcGreeter；本函数只做宿主侧的胶水：标注空闲/被抢标志，按返回的 action 驱动走位/面向/挥手。
+## engaged 与漏话同门禁（玩家在交互/录音/听人说话时不迎上来）。P3 在 arrived 加出声，P4 加送花。
+func _update_npc_greetings(delta: float) -> void:
+	if npc_greeter == null or player.is_empty():
+		return
+	# 每帧标注两类宿主才知道的状态：
+	#  greet_free  —— 可被【新】拉去迎接：没被选中/叫停、且没有执行器在驱动（含自主闲逛）。
+	#  greet_hijack—— 活跃迎接者被【抢走】：玩家点它对话(selected) / 把它叫停(_stopped)。
+	for n in npcs:
+		if n.get("is_fairy", false):
+			continue
+		var node: Node = n.get("node")
+		var hijacked: bool = n == _stopped or (selected != null and node == selected)
+		n["greet_hijack"] = hijacked
+		n["greet_free"] = not (hijacked or _has_executor_for(n))
+	var engaged := _intro_active \
+			or InteractionFsm.player_engaged(_fsm_inputs()) \
+			or (fairy_voice != null and fairy_voice.is_playing())
+	var act := npc_greeter.update(delta, npcs, player["logical"], engaged)
+	var kind := String(act.get("type", ""))
+	if kind.is_empty():
+		return
+	var gd := _find_npc(String(act.get("cid", "")))
+	if gd.is_empty():
+		return
+	match kind:
+		"approach":
+			# 复用 follow：跟移动中的玩家走过去，到 FOLLOW_NEAR(3.4) 自停并保持（见 behavior_executor）。
+			_run_behavior(gd["node"] as PaperCharacter, { "commands": [{ "type": "follow", "params": { "target_name": "玩家" } }], "loop": false })
+		"arrived":
+			# 到玩家旁：面向玩家 + 挥手 + 头顶小表情。不取消 follow，靠它把村民钉在原地。
+			var d := WorldGrid.shortest_delta(gd["logical"], player["logical"])
+			gd["paper_face"] = 0.0 if d.x >= 0.0 else PI
+			gd["paper_action"] = "wave"
+			gd["paper_action_t"] = 0.0
+			_pop_notice_bubble(gd)
+		"release", "giveup":
+			# 收尾：取消 follow（若还在）+ 恢复闲逛。
+			for ex in _executors:
+				if (ex as BehaviorExecutor).drives(gd):
+					(ex as BehaviorExecutor).cancel()
+			_resume_ambient(gd)
 
 ## 服务端下发的漏话候选（进世界/换场景/发现新玩法后重发）：整份替换，旧台词立即作废。
 ## discovered 是【持久】口径：_guide_used 本来只记「本次进世界」，重启就忘——
@@ -2052,6 +2101,7 @@ func _process(delta: float) -> void:
 	_step_remote_actors(delta) # 多人复制：先按缓冲推进被复制 NPC/远端副本的 logical，再统一渲染
 	_reposition_npcs(delta)
 	_update_npc_notice(delta)  # 近身空闲村民偶尔转头看玩家打招呼（在 reposition 后跑，paper_walk 已更新）
+	_update_npc_greetings(delta) # 合格村民主动走过来打招呼（性格×熟识度；见 npc_greeter.gd）
 	_update_npc_wishes(delta)  # 近身村民偶尔漏一句心愿（3D 定位音，走近才听清）
 	_update_portal_markers()   # 传送门拱随世界滚动（与角色同一套环面最短位移）
 	_update_home_portals()     # 回家临时门随世界滚动 + 按 rise 从地下升起/沉下
@@ -5234,6 +5284,11 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 	if logical == Vector2.INF:
 		logical = _restore_logical(c, is_fairy)
 	var dict := { "node": npc, "logical": logical, "id": cid, "is_fairy": is_fairy, "scale": body_scale }
+	# 主动社交：性格类型 + 该玩家视角的熟识度（服务端 projectCharacterFor 下发；见 npc_greeter.gd）。
+	# familiarity 只在角色被下发时刷新（进/换场景重发）；同一场景内不随聊天即时变（刻意的一期取舍）。
+	if not is_fairy:
+		dict["social_type"] = String(c.get("socialType", ""))
+		dict["familiarity"] = String(c.get("familiarity", ""))
 	if is_fairy:
 		dict["hover"] = FAIRY_HOVER # 悬浮随从：不登记占用（飞行不挡路），由 _update_fairy 驱动
 	else:
