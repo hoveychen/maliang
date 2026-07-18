@@ -736,6 +736,24 @@ export class WorldStore {
     return { familiarity: after, changed: after !== before };
   }
 
+  /**
+   * 标记「这个村民已主动给这个玩家送过花」（防重复送）。首次 → 置位 + 持久化，返回 true（可送）；
+   * 已送过 / 仙子 / 空 playerId / 角色不存在 → 返回 false（不再送）。收花不升熟识度（见 social.ts）。
+   */
+  markVillagerGifted(worldId: string, npcId: string, playerId: string): boolean {
+    const c = this.getCharacter(worldId, npcId);
+    if (!c || c.isFairy || !playerId) return false;
+    const rels: Record<string, unknown> =
+      c.relationships && typeof c.relationships === 'object' ? (c.relationships as Record<string, unknown>) : {};
+    const rel = coerceRelationship(rels[playerId]);
+    if (rel.gifted) return false;
+    rel.gifted = true;
+    rels[playerId] = rel;
+    c.relationships = rels as Character['relationships'];
+    this.saveCharacter(c);
+    return true;
+  }
+
   // ── 物品实体（items 表，只存语音造物；内置定义见 items.ts）─────────────
 
   /** 新增/更新物品实体（语音造物）。内置 id 由 upsert 侧拒绝，防止覆盖代码常量。 */

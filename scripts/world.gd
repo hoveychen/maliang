@@ -1274,6 +1274,9 @@ func _update_npc_greetings(delta: float) -> void:
 			# 开口打招呼（P3）：请服务端给一句招呼词+音色，回来走村民身上的 3D 定位音（见 _on_villager_hail_tts）。
 			if backend != null and not world_id.is_empty():
 				backend.send_villager_hail(world_id, String(act.get("cid", "")))
+				# 送花（P4，仅外向）：请服务端权威加花，回 wallet_update 再飞花庆祝（防刷/封顶在服务端）。
+				if String(gd.get("social_type", "")) == "extrovert":
+					backend.send_villager_gift(world_id, String(act.get("cid", "")))
 		"release", "giveup":
 			# 收尾：取消 follow（若还在）+ 恢复闲逛。
 			for ex in _executors:
@@ -1290,6 +1293,18 @@ func _on_villager_hail_tts(data: Dictionary) -> void:
 	if n.is_empty():
 		return
 	npc_wish_voice.say_line(n, String(data.get("text", "")), String(data.get("voiceId", "")))
+
+## 外向村民送花（P4）：钱包权威在服务端，这里只同步钱包 + 演飞花庆祝（复用委托奖励的爆点/飞花）。
+## 送花村民头顶弹拉炮，一朵小红花从屏幕中心飞进手机按钮；村民已不在则跳过头顶爆点，钱包照样同步。
+func _on_villager_gift(data: Dictionary) -> void:
+	_apply_wallet(data.get("wallet"))
+	var gift: Dictionary = data.get("gift", {})
+	var node := _find_npc_by_id(String(gift.get("villagerId", "")))
+	if node != null:
+		_spawn_burst(node)
+	if game_audio != null:
+		game_audio.play_sfx("enter")
+	_fly_reward_to_album("reward_flower")
 
 ## 服务端下发的漏话候选（进世界/换场景/发现新玩法后重发）：整份替换，旧台词立即作废。
 ## discovered 是【持久】口径：_guide_used 本来只记「本次进世界」，重启就忘——
@@ -4001,6 +4016,7 @@ func _setup_backend() -> void:
 	backend.player_emote.connect(_on_player_emote)       # 别的小朋友的表情动作：副本演起来+自动回礼
 	backend.hearts_update.connect(func(d: Dictionary) -> void: _apply_wallet(d.get("wallet"))) # 收到爱心：钱包同步,集邮册点亮
 	backend.villager_hail_tts.connect(_on_villager_hail_tts) # 村民主动打招呼：村民身上的 3D 定位音（P3）
+	backend.wallet_update.connect(_on_villager_gift) # 外向村民送花：钱包同步 + 飞花庆祝（P4）
 	backend.player_speech.connect(_on_player_speech)     # 别的小朋友的喊话：TTS 念出来+说话泡
 	backend.scene_entered.connect(_on_scene_entered) # 走 portal 换场景：卸旧场景、载新场景
 	backend.terrain_patch.connect(_on_terrain_patch) # 地形矩阵增量更新（tile 编辑广播）

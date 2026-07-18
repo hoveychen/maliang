@@ -77,6 +77,9 @@ signal hearts_update(data: Dictionary)
 ## 村民主动打招呼的招呼词（villager-social P3）：{ villagerId, text, voiceId }。
 ## 本端把它当【村民身上的 3D 定位音】播（NpcWishVoice 同款）；edge-tts 不可用则静默。
 signal villager_hail_tts(data: Dictionary)
+## 外向村民送花后的钱包更新（villager-social P4）：{ wallet, gift:{villagerId} }。
+## 本端 _apply_wallet 同步 + 从村民头顶飞花庆祝（复用 _spawn_burst/_fly_reward_to_album）。
+signal wallet_update(data: Dictionary)
 ## 换场景（模型 B，走 portal）：收到目标场景的地形 + 角色 + items 实体 + pois + 该场景玩家最后位置。
 ## data = { worldId, sceneId, scene:Dictionary|null, characters:Array, items:Array, playerPos:Dictionary|null }
 ## （摆着的造物在场景矩阵物品层里，不再单发 props）
@@ -174,6 +177,11 @@ func send_greeting(world_id: String, character_id: String) -> void:
 ## 服务端复用 greetCharacter（clientTts 只回文本），回 villager_hail_tts，客户端 3D 定位音播。
 func send_villager_hail(world_id: String, villager_id: String) -> void:
 	_send({ "type": "villager_hail", "worldId": world_id, "villagerId": villager_id })
+
+## 外向村民送花（villager-social P4）：村民走到玩家旁后请服务端给玩家钱包加一朵小红花。
+## 服务端权威校验(外向+防重复+未满)后单播 wallet_update；收花不升熟识度。
+func send_villager_gift(world_id: String, villager_id: String) -> void:
+	_send({ "type": "villager_gift", "worldId": world_id, "villagerId": villager_id })
 
 ## 玩家互动：对着别的小朋友做表情动作（喊话态表情盘，见 docs/player-interaction-design.md）。
 ## 服务端白名单校验后按同世界同场景定向转发（player_emote 下行），发送者不回环。
@@ -509,5 +517,7 @@ func _dispatch(data: Dictionary) -> void:
 			hearts_update.emit(data)
 		"villager_hail_tts":
 			villager_hail_tts.emit(data)
+		"wallet_update":
+			wallet_update.emit(data)
 		"gen_failed", "voice_failed", "error":
 			failed.emit(String(data.get("reason", data.get("error", ""))))

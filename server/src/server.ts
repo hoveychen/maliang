@@ -84,7 +84,7 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type CharacterView, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, MAX_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type CharacterView, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { deriveSocialType, familiarityFor } from './social.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
 import { avatarDescForbidden, stripAvatarOptionIds, AVATAR_EARLY_DONE, AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
@@ -3312,6 +3312,23 @@ export async function handleWsMessage(
     } catch (err) {
       console.warn(`主动打招呼失败（静默跳过）：${String(err)}`);
     }
+    return;
+  }
+
+  // 外向村民送花（P4，villager-social）：外向村民走到玩家旁后，客户端发 villager_gift。
+  // 权威在服务端：校验村民是外向 + 没给这个玩家送过（防刷，每村民×玩家一次）+ 钱包未满 → 加 1 朵、单播钱包更新。
+  // 空间到达服务端无法核验（空间权威在客户端），但花 capped MAX_FLOWERS + 每对一次，风险可控（见设计文档取舍）。
+  if (msg.type === 'villager_gift') {
+    const worldId = msg.worldId ?? '';
+    const villagerId = String(msg.villagerId ?? '');
+    if (!session.playerId) return;
+    const c = store.getCharacter(worldId, villagerId);
+    if (!c || c.isFairy || deriveSocialType(c) !== 'extrovert') return; // 只有外向村民送花
+    if (store.getWallet(worldId, session.playerId).flowers >= MAX_FLOWERS) return; // 满 9：静默不送（不标 gifted，留到有空位再送）
+    if (!store.markVillagerGifted(worldId, villagerId, session.playerId)) return; // 已给这个玩家送过 → 不重复
+    const wallet = store.refundFlower(worldId, session.playerId, 1); // 加 1 朵（capped MAX_FLOWERS）
+    // 收花的就是发起请求的这个玩家自己，直接回本连接即可（不像送爱心要经 hub 定向到别人）。
+    socket.send(JSON.stringify({ type: 'wallet_update', wallet, gift: { villagerId } }));
     return;
   }
 
