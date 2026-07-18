@@ -225,6 +225,11 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   sticker('sticker_smile', '笑脸贴纸'),
   sticker('sticker_flag', '小旗贴纸'),
   sticker('sticker_mushroom', '蘑菇贴纸'),
+  // ── 剧情纪念贴纸（M2《三只小猪》）：只随幕奖励发放（story 结算 bagAdd），小铺不卖——
+  // 纪念感的前提是买不到。renderRef 'sticker:story_*' → assets/stickers/story_*.webp（客户端打包）。──
+  { ...sticker('story_straw', '草垛纪念贴纸'), souvenir: true },
+  { ...sticker('story_plank', '木板纪念贴纸'), souvenir: true },
+  { ...sticker('story_brick', '砖房纪念贴纸'), souvenir: true },
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {

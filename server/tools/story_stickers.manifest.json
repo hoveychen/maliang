@@ -1,0 +1,8 @@
+{
+  "comment": "M2《三只小猪》剧情纪念贴纸（幕奖励专属，小铺不卖）。kind=sticker 与 sticker_items 同管线同画风；id 与 items.ts renderRef 'sticker:story_*' 对应。",
+  "assets": [
+    { "id": "story_straw", "kind": "sticker", "targetSize": 256, "prompt": "a cute little haystack bundle of golden straw tied with a rope, a few straws sticking out" },
+    { "id": "story_plank", "kind": "sticker", "targetSize": 256, "prompt": "a small stack of warm brown wooden planks with visible wood grain and two round nails" },
+    { "id": "story_brick", "kind": "sticker", "targetSize": 256, "prompt": "a sturdy little red brick house with a triangle roof and a tiny chimney, cozy and strong" }
+  ]
+}

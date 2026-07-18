@@ -195,6 +195,18 @@ export interface ActiveTask {
   chainIndex?: number;
   /** 链步话术（物化时拷贝，任务自描述）：describeTask 用 ask/desire 注入 prompt，praiseLine 用 thanks 道谢。 */
   chainStep?: ChainStep;
+  /**
+   * 剧情互动标记（M2 §4.4）：本委托物化自 storyBookId 册第 storyChapter 幕的互动。
+   * 完成结算处发现它就通知 StoryDirector（发奖/推进/入住由它判）；盖章由 story 层按
+   * rewarded[] 判重后发——带此标记的委托在 completeTaskOnEvent 里【不】当场盖章。
+   */
+  storyBookId?: string;
+  storyChapter?: number;
+  /** 剧情 build 互动：拼完这个蓝图即完成（createBuildAsync 落成点判定；且该次拼装免花）。 */
+  storyBlueprintId?: string;
+  /** 剧情互动话术（语义同链步 ask/thanks）：describeTask/praiseLine 优先用它。 */
+  storyAsk?: string;
+  storyThanks?: string;
 }
 
 /**
@@ -340,6 +352,11 @@ export interface ItemDef {
    * 'edge' 只能挂 tile 四条边缘平面（贴纸类薄片），不进占用位图。
    */
   mount?: 'tile' | 'edge';
+  /**
+   * 纪念品（M2 剧情纪念贴纸）：只随剧情奖励发放，小铺不卖（sticker_buy 拒绝，客户端小铺不列）。
+   * 纪念感的前提是买不到。
+   */
+  souvenir?: boolean;
   /** A2「给谁做的」：这件造物是给谁用的（docs/kids-thinking-made-for-whom.md），供 A1 试用/B3 起名/交付话术读取。 */
   recipient?: RecipientRef;
   /**

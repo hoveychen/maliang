@@ -6,10 +6,11 @@
 // 种入即带 storyRole{resident:false}：未入住不进任何供给面（P2 的早返回），
 // gate 角色（猪大哥）可搭话触发开演；整册完结 P4 翻 resident。
 
-import type { ServiceAdapters } from './adapters/types.ts';
+import type { LLMAdapter, ServiceAdapters } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import { generateSprite } from './orchestrator.ts';
 import { triggerCharacterAnimation, type ToSpriteSheet } from './idle_animation.ts';
+import { ensureTaskChain } from './task_chain.ts';
 import { BASE_ABILITIES, type Character } from './types.ts';
 import { storyCharacterId, type StoryBook } from './story_books.ts';
 
@@ -72,4 +73,26 @@ export async function seedStoryCharacters(
     }
   }
   return result;
+}
+
+/**
+ * 整册完结入住（M2 §4.5）：cast 里 noResidence 之外的故事角色翻 resident=true——从此各供给面
+ * （心愿/漏话/委托/社交）放行，并照 createCharacterAsync 先例 fire-and-forget 生成专属委托链
+ * （LLM 按小猪人设出链，失败回退模板链；「小猪住进村里带着盖房系列委托」即 M1 链的复用）。
+ * 幂等：已 resident 的跳过（settled 门闩在 StoryDirector，这里是纵深）。返回翻转的角色 id。
+ */
+export function settleStoryResidency(worldId: string, book: StoryBook, store: WorldStore, llm: LLMAdapter): string[] {
+  const moved: string[] = [];
+  for (const seed of book.cast) {
+    if (seed.noResidence) continue;
+    const char = store.getCharacter(worldId, storyCharacterId(book.id, seed.castId));
+    if (!char?.storyRole || char.storyRole.resident) continue;
+    char.storyRole = { ...char.storyRole, resident: true };
+    store.saveCharacter(char);
+    ensureTaskChain(worldId, char.id, llm, store).catch((err) =>
+      console.warn(`入住委托链生成失败（${char.id}，模板兜底也失败）：${String(err)}`),
+    );
+    moved.push(char.id);
+  }
+  return moved;
 }

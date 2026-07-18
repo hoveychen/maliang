@@ -91,7 +91,7 @@ import { avatarDescForbidden, stripAvatarOptionIds, AVATAR_EARLY_DONE, AVATAR_IC
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
-import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWishRefine, flowerDeniedLine, praiseLine } from './tasks.ts';
+import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWishRefine, flowerDeniedLine, materializeStoryTask, praiseLine } from './tasks.ts';
 import { ensureTaskChain, pendingChainStep } from './task_chain.ts';
 import { pickComplaint, REFINE_HINT, REFINE_HINT_2 } from './refinements.ts';
 import { leakPoolFor, reuseHint } from './wishes.ts';
@@ -100,8 +100,8 @@ import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
 import { buildDebut, buildStoryStageOpts, DebutError } from './stage_debut.ts';
 import { StoryDirector } from './story_director.ts';
-import { STORY_BOOKS, isUnsettledStoryRole } from './story_books.ts';
-import { seedStoryCharacters } from './story_seed.ts';
+import { STORY_BOOKS, isUnsettledStoryRole, type StoryBook } from './story_books.ts';
+import { seedStoryCharacters, settleStoryResidency } from './story_seed.ts';
 import { buildStageOptsFromDraft } from './screenplay_gen.ts';
 import { SCREENPLAYS, type ScreenplayName } from './screenplays.ts';
 import type { StagePropMaker } from './stage_types.ts';
@@ -1833,10 +1833,14 @@ async function openCreationSession(
   leadIn = '', // 入口那轮 routeIntent 生成的仙子应答句（缺陷 ②：此前被丢弃）
   goal: CreationGoal = 'character',
   blueprintId?: string, // goal==='build' 时：拼哪副蓝图（matchBlueprint 命中的整体）
+  stories?: StoryDirector, // M2：剧情 build 互动透传（免花判定与落成结算）
 ): Promise<void> {
   // 注：造角色的降生上下文（spawn）不在此传——recipient 预问步把首轮 advanceCreation 推迟到 handleRecipientReply，
   // 那里用同连接的 spawnCtx() 现算（等价且正确），故 openCreationSession 不再需要 spawn 参数。
-  if (!hasFlower(store, worldId, session.playerId)) {
+  // 剧情 build 互动（M2）：帮小猪盖房免花，入口闸一并绕过（createBuildAsync 落成处同口径）。
+  const storyBuild = goal === 'build' && !!blueprintId
+    && store.getActiveTask(worldId, session.playerId)?.storyBlueprintId === blueprintId;
+  if (!storyBuild && !hasFlower(store, worldId, session.playerId)) {
     // 拼装（build）与造物（prop）共用 prop_denied 拒绝 UX（都进背包、都要攒花）。
     const denyKind = goal === 'character' ? 'character' : goal === 'sticker' ? 'sticker' : 'prop';
     await denyForNoFlowers(socket, adapters, store, worldId, session.playerId, denyKind, session.clientTts);
@@ -1848,7 +1852,7 @@ async function openCreationSession(
   if (creations.length > 0) session.creation.recentCreations = creations.slice(-5).map((m) => m.text);
   // 积木拼装走 advanceBuild（按功能追问填槽）；造角色/物/贴纸走 advanceCreation（追问属性）。
   if (goal === 'build') {
-    await advanceBuild(socket, session, worldId, fairyId, request, adapters, store, leadIn);
+    await advanceBuild(socket, session, worldId, fairyId, request, adapters, store, leadIn, stories);
   } else {
     // A2「给谁做的」：造角色/物/贴纸在追问属性【之前】先问一句 recipient（软步骤）。把入口那句意图暂存进
     // pendingRequest，等收到 recipient 答复（handleRecipientReply）再喂 advanceCreation 继续——recipient
@@ -1951,9 +1955,18 @@ export async function startStoryAsync(
     return;
   }
   if (stages.atCapacity()) { await say('现在好多小朋友都在看戏，稍等一会儿再来好不好？'); return; }
-  // 互动幕没做完：提醒去完成，不重演。
-  if (stories.bookProgress(worldId, session.playerId, bookId).state === 'interacting') {
-    await say('上次拜托你的事儿还没做完呢，做完咱们再往下讲好不好？');
+
+  const book = STORY_BOOKS[bookId]!;
+  // 互动幕没做完：委托还挂着就口头提醒；委托丢了（说过「不想做了」/被普通委托顶掉）
+  // 就重物化再递一次——绝不让剧情卡死在互动态。
+  const bp = stories.bookProgress(worldId, session.playerId, bookId);
+  if (bp.state === 'interacting') {
+    const existing = store.getActiveTask(worldId, session.playerId);
+    const reoffered = existing?.storyBookId === bookId
+      ? false
+      : await offerStoryTask(socket, session, worldId, book, bp.activeChapter ?? bp.chapter, adapters, store);
+    // 委托还挂着（或补递不了，如地点/角色暂缺）：口头提醒兜底，绝不哑场
+    if (!reoffered) await say('上次拜托你的事儿还没做完呢，做完咱们再往下讲好不好？');
     return;
   }
 
@@ -1961,7 +1974,91 @@ export async function startStoryAsync(
   await say(leadIn || '好呀，你坐好，我们这就开演！');
   // 不 await 终局：演出要演几分钟，stage_begin 已广播给全场；收场时的状态迁移由 StoryDirector 落。
   // 应下到开演之间被别人抢先的窄窗口由 trigger 内部兜（startStage 返回 null → 中断回幕首）。
-  void stories.trigger(worldId, session.playerId, bookId).catch(() => {});
+  void stories
+    .trigger(worldId, session.playerId, bookId)
+    .then(async (outcome) => {
+      if (outcome.status !== 'performed') return;
+      if (outcome.outcome === 'interacting') {
+        // 演出收场 → 把本幕互动物化成委托递给孩子（幕定义话术由委托人音色念出）
+        await offerStoryTask(socket, session, worldId, book, outcome.chapter, adapters, store);
+      } else if (outcome.outcome === 'completed' && outcome.advance?.settledNow) {
+        // 尾声演完整册完结：小猪们入住（翻 resident + fire-and-forget 专属委托链），
+        // 供给面开闸——立即重发漏话，入住的惊喜（小猪开始念叨心愿）当场可见。
+        settleStoryResidency(worldId, book, store, adapters.llm);
+        pushWishes(socket, store, worldId, session.playerId, session.currentScene, session);
+      }
+    })
+    .catch(() => {});
+}
+
+/** 把某幕互动物化成委托并下发（task_offer 报文 + 委托人音色念请求话术）。返回是否递出去了（物化不了＝false，重触发可再试）。 */
+async function offerStoryTask(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  book: StoryBook,
+  chapter: number,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+): Promise<boolean> {
+  const task = materializeStoryTask(worldId, session.playerId, book, chapter, store);
+  if (!task) return false;
+  socket.send(JSON.stringify({ type: 'task_offer', worldId, task }));
+  if (task.storyAsk) {
+    const voice = store.getCharacter(worldId, task.npcId)?.voiceId ?? '';
+    await pushLineTts(socket, adapters, store, task.storyAsk, voice, session.clientTts);
+  }
+  return true;
+}
+
+/**
+ * 剧情互动完成的统一结算（M2 §4.4，task_event 跑腿与 createBuildAsync 落成两个完成点共用）：
+ * 问 StoryDirector 发不发奖（rewarded[] 判重，重看不重复发）→ 盖章 + 纪念贴纸 → 整册完结入住
+ * → task_complete（客户端盖章庆祝零改；带 sticker/bag 时客户端顺手刷背包）→ 委托人道谢 + 重发漏话。
+ */
+async function settleStoryInteraction(
+  socket: { send: (data: string) => void },
+  worldId: string,
+  playerId: string,
+  task: ActiveTask,
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  stories: StoryDirector | undefined,
+  clientTts: boolean,
+  sceneId: string,
+  session?: VoiceSession,
+): Promise<void> {
+  const book = STORY_BOOKS[task.storyBookId ?? ''];
+  if (!book || !stories) return;
+  const adv = stories.completeInteraction(worldId, playerId, book.id);
+  let settle = { flowerGained: false, wallet: store.getWallet(worldId, playerId) };
+  let sticker: string | undefined;
+  if (adv?.reward) {
+    settle = store.addStamp(worldId, playerId);
+    const ch = book.chapters[task.storyChapter ?? -1];
+    if (ch?.sticker && getBuiltinItem(ch.sticker)) {
+      store.bagAdd(worldId, playerId, ch.sticker);
+      sticker = ch.sticker;
+    }
+  }
+  if (adv?.settledNow) settleStoryResidency(worldId, book, store, adapters.llm);
+  socket.send(JSON.stringify({
+    type: 'task_complete',
+    task,
+    stampStyle: task.stampStyle,
+    flowerGained: settle.flowerGained,
+    wallet: settle.wallet,
+    ...(sticker ? { sticker, bag: store.getBag(worldId, playerId) } : {}),
+    ...(adv && !adv.reward ? { rewatch: true } : {}),
+  }));
+  // 表扬：发奖走标准盖章话术；重看只念道谢（别说「盖章送给你」却没盖）。
+  if (adv?.reward) {
+    void pushPraiseTts(socket, adapters, store, worldId, task, settle, clientTts);
+  } else if (task.storyThanks) {
+    const voice = store.getCharacter(worldId, task.npcId)?.voiceId ?? '';
+    void pushLineTts(socket, adapters, store, task.storyThanks, voice, clientTts);
+  }
+  pushWishes(socket, store, worldId, playerId, sceneId, session);
 }
 
 async function pushLineTts(
@@ -2122,8 +2219,13 @@ export async function createBuildAsync(
   clientTts = false,
   creatorId = '', // 拼装引导的角色（小仙子）：给了就在落成后记一条 creation 记忆
   sceneId = DEFAULT_SCENE, // 造完要按玩家所在场景重发漏话
+  stories?: StoryDirector, // M2：剧情 build 互动的完成点（落成即结算本幕）
 ): Promise<void> {
-  if (!store.spendFlower(worldId, playerId)) {
+  // 剧情 build 互动（M2 §4.4）：这次拼装是帮小猪盖房（进行中委托带 storyBlueprintId 且蓝图匹配）→ 免花。
+  // 不免的话 0 花的孩子会卡死在剧情幕中间（零挫败纪律：剧情主线上不设经济闸）。
+  const activeBefore = store.getActiveTask(worldId, playerId);
+  const storyBuild = activeBefore?.storyBookId && activeBefore.storyBlueprintId === blueprintId ? activeBefore : null;
+  if (!storyBuild && !store.spendFlower(worldId, playerId)) {
     await denyForNoFlowers(socket, adapters, store, worldId, playerId, 'prop', clientTts);
     return;
   }
@@ -2170,10 +2272,15 @@ export async function createBuildAsync(
       bag: store.getBag(worldId, playerId),
     }));
     await fulfillAbility(socket, adapters, store, worldId, playerId, 'create_prop', clientTts, sceneId);
+    // 剧情 build 完成点（M2 §4.4）：拼完帮小猪盖的房 → 清委托 + story 统一结算（盖章/贴纸/推进）。
+    if (storyBuild) {
+      store.setActiveTask(worldId, playerId, null);
+      await settleStoryInteraction(socket, worldId, playerId, storyBuild, adapters, store, stories, clientTts, sceneId);
+    }
   } catch (err) {
     socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
   } finally {
-    if (!created) store.refundFlower(worldId, playerId); // 落成失败：退还，别让孩子白花一朵
+    if (!created && !storyBuild) store.refundFlower(worldId, playerId); // 落成失败：退还，别让孩子白花一朵（剧情拼装没扣过）
   }
 }
 
@@ -2455,6 +2562,7 @@ export async function advanceBuild(
   adapters: ServiceAdapters,
   store: WorldStore,
   leadIn = '',
+  stories?: StoryDirector, // M2：剧情 build 互动的完成点，透传给落成
 ): Promise<void> {
   const state = session.creation;
   if (!state || !state.build) return;
@@ -2462,7 +2570,7 @@ export async function advanceBuild(
   const fairyVoice = store.getCharacter(worldId, fairyId)?.voiceId ?? FAIRY_VOICE;
   const finish = () => createBuildAsync(
     socket, worldId, session.playerId, build.blueprintId, build.filled,
-    adapters, store, session.clientTts, fairyId, session.currentScene,
+    adapters, store, session.clientTts, fairyId, session.currentScene, stories,
   );
   const bp = findBlueprint(build.blueprintId);
   // 蓝图丢失（不该发生）：用已填零件兜底落成
@@ -3119,6 +3227,11 @@ export async function handleWsMessage(
       locationName: msg.locationName,
     }, store);
     if (done) {
+      // 剧情互动（M2）：completeTaskOnEvent 只清委托不盖章，发奖/推进/入住走 story 统一结算。
+      if (done.task.storyBookId) {
+        await settleStoryInteraction(socket, worldId, session.playerId, done.task, adapters, store, stories, session.clientTts, session.currentScene, session);
+        return;
+      }
       socket.send(JSON.stringify({
         type: 'task_complete',
         task: done.task,
@@ -3180,7 +3293,7 @@ export async function handleWsMessage(
           socket.send(JSON.stringify({ type: 'voice_failed', reason: '拼装答复为空' }));
           return;
         }
-        await advanceBuild(socket, session, msg.worldId ?? '', msg.characterId ?? '', childInput, adapters, store, '');
+        await advanceBuild(socket, session, msg.worldId ?? '', msg.characterId ?? '', childInput, adapters, store, '', stories);
         return;
       }
       // 点选 → 该选项中文 label 当输入；造贴纸查贴纸图标库，造物查物品图标库，造角色查角色图标库。
@@ -3275,7 +3388,7 @@ export async function handleWsMessage(
       }
       await createBuildAsync(
         socket, worldId, session.playerId, blueprintId, filled,
-        adapters, store, session.clientTts, '', session.currentScene,
+        adapters, store, session.clientTts, '', session.currentScene, stories,
       );
     } catch (err) {
       socket.send(JSON.stringify({ type: 'prop_failed', reason: String(err) }));
@@ -3307,7 +3420,7 @@ export async function handleWsMessage(
           return;
         }
         if (session.creation.goal === 'build') {
-          await advanceBuild(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '');
+          await advanceBuild(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', stories);
         } else {
           await advanceCreation(socket, session, msg.worldId ?? '', msg.characterId ?? '', transcript, adapters, store, '', spawnCtx());
         }
@@ -3341,7 +3454,7 @@ export async function handleWsMessage(
         // 无蓝图则回落现有整体造物（优雅降级）。docs/kids-thinking-build-from-parts.md §4.1。
         const bp = matchBlueprint(response.propRequest);
         if (bp) {
-          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'build', bp.id);
+          await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'build', bp.id, stories);
         } else {
           await openCreationSession(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.propRequest, adapters, store, response.replyText, 'prop');
         }
@@ -3579,7 +3692,8 @@ export async function handleWsMessage(
     const worldId = msg.worldId ?? '';
     const itemId = msg.itemId ?? '';
     const def = getBuiltinItem(itemId);
-    if (!def || def.mount !== 'edge') {
+    if (!def || def.mount !== 'edge' || def.souvenir) {
+      // souvenir：剧情纪念贴纸只随幕奖励发放，花钱买不到（纪念感的前提）。
       socket.send(JSON.stringify({ type: 'error', error: 'not a sticker' }));
       return;
     }

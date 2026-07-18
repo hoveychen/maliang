@@ -152,5 +152,8 @@
   { "id": "sticker_strawberry", "worldId": null, "name": "草莓贴纸", "renderRef": "sticker:strawberry", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
   { "id": "sticker_smile", "worldId": null, "name": "笑脸贴纸", "renderRef": "sticker:smile", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
   { "id": "sticker_flag", "worldId": null, "name": "小旗贴纸", "renderRef": "sticker:flag", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_mushroom", "worldId": null, "name": "蘑菇贴纸", "renderRef": "sticker:mushroom", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" }
+  { "id": "sticker_mushroom", "worldId": null, "name": "蘑菇贴纸", "renderRef": "sticker:mushroom", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
+  { "id": "story_straw", "worldId": null, "name": "草垛纪念贴纸", "renderRef": "sticker:story_straw", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
+  { "id": "story_plank", "worldId": null, "name": "木板纪念贴纸", "renderRef": "sticker:story_plank", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
+  { "id": "story_brick", "worldId": null, "name": "砖房纪念贴纸", "renderRef": "sticker:story_brick", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true }
 ]
