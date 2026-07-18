@@ -1,5 +1,5 @@
 // 角色动画视频 → 透明 sprite-sheet 图集。
-// 流程：ffmpeg 按目标 fps 抽帧并缩放 → 逐帧抠绿（复用 ChromaKeyCutoutAdapter）→ 拼网格图集。
+// 流程：ffmpeg 按目标 fps 原尺寸抽帧 → 逐帧软抠绿 → alpha 预乘后缩放 → 拼网格图集。
 // 图集 + meta 交给客户端：paper shader 按 fps 推进 UV cell 播放。
 //
 // 多段（idle/moving/talking）：三段帧打进「同一张图集」，且共用「同一个并集裁剪盒」。
@@ -78,11 +78,10 @@ export interface SpriteSheetOptions {
   webpQuality?: number;
 }
 
-/** ffmpeg 按 fps 抽帧 + 缩放到 cellH（宽取 -2 保持比例且偶数）。 */
+/** ffmpeg 只按 fps 原尺寸抽帧。必须在缩放前抠绿，否则采样会把绿幕再次混进主体轮廓。 */
 export async function extractFrames(
   mp4: VideoBlob,
   fps: number,
-  cellH: number,
 ): Promise<ImageBlob[]> {
   const dir = await mkdtemp(join(tmpdir(), 'mlanim-'));
   try {
@@ -91,7 +90,7 @@ export async function extractFrames(
     await execFileP('ffmpeg', [
       '-y', '-loglevel', 'error',
       '-i', inPath,
-      '-vf', `fps=${fps},scale=-2:${cellH}`,
+      '-vf', `fps=${fps}`,
       join(dir, 'f_%04d.png'),
     ]);
     const files = (await readdir(dir)).filter((f) => f.startsWith('f_')).sort();
@@ -100,6 +99,66 @@ export async function extractFrames(
       frames.push({ bytes: new Uint8Array(await readFile(join(dir, f))), mime: 'image/png' });
     }
     return frames;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+function premultiply(frame: ImageBlob): ImageBlob {
+  const png = PNG.sync.read(Buffer.from(frame.bytes));
+  for (let i = 0; i < png.width * png.height; i++) {
+    const p = i * 4;
+    const a = png.data[p + 3]! / 255;
+    png.data[p] = Math.round(png.data[p]! * a);
+    png.data[p + 1] = Math.round(png.data[p + 1]! * a);
+    png.data[p + 2] = Math.round(png.data[p + 2]! * a);
+  }
+  return { bytes: new Uint8Array(PNG.sync.write(png)), mime: 'image/png' };
+}
+
+function unpremultiply(frame: ImageBlob): ImageBlob {
+  const png = PNG.sync.read(Buffer.from(frame.bytes));
+  for (let i = 0; i < png.width * png.height; i++) {
+    const p = i * 4;
+    const a = png.data[p + 3]!;
+    if (a <= 1) {
+      png.data[p] = 0;
+      png.data[p + 1] = 0;
+      png.data[p + 2] = 0;
+      continue;
+    }
+    png.data[p] = Math.min(255, Math.round((png.data[p]! * 255) / a));
+    png.data[p + 1] = Math.min(255, Math.round((png.data[p + 1]! * 255) / a));
+    png.data[p + 2] = Math.min(255, Math.round((png.data[p + 2]! * 255) / a));
+  }
+  return { bytes: new Uint8Array(PNG.sync.write(png)), mime: 'image/png' };
+}
+
+/**
+ * 抠绿后的 RGBA 帧缩到目标高度。RGB 先乘 alpha，再交给 ffmpeg Lanczos 缩放，最后反预乘；
+ * 否则透明区残留的绿 RGB 会在缩放时重新渗进半透明轮廓。
+ */
+export async function resizeKeyedFrames(frames: ImageBlob[], cellH: number): Promise<ImageBlob[]> {
+  if (frames.length === 0) return frames;
+  const dir = await mkdtemp(join(tmpdir(), 'mlscale-'));
+  try {
+    await Promise.all(frames.map(async (frame, i) => {
+      const name = `in_${String(i + 1).padStart(4, '0')}.png`;
+      await writeFile(join(dir, name), Buffer.from(premultiply(frame).bytes));
+    }));
+    await execFileP('ffmpeg', [
+      '-y', '-loglevel', 'error',
+      '-i', join(dir, 'in_%04d.png'),
+      '-vf', `scale=-2:${cellH}:flags=lanczos`,
+      '-frames:v', String(frames.length),
+      '-pix_fmt', 'rgba',
+      join(dir, 'out_%04d.png'),
+    ]);
+    const files = (await readdir(dir)).filter((f) => f.startsWith('out_')).sort();
+    return Promise.all(files.map(async (f) => unpremultiply({
+      bytes: new Uint8Array(await readFile(join(dir, f))),
+      mime: 'image/png',
+    })));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -215,9 +274,10 @@ async function keyedFramesOf(
   cutout: CutoutAdapter,
   dropLast: boolean,
 ): Promise<ImageBlob[]> {
-  let frames = await extractFrames(mp4, fps, cellH);
+  let frames = await extractFrames(mp4, fps);
   if (dropLast && frames.length > 2) frames = frames.slice(0, -1);
-  return Promise.all(frames.map((f) => cutout.removeBackground(f)));
+  const keyed = await Promise.all(frames.map((f) => cutout.removeBackground(f)));
+  return resizeKeyedFrames(keyed, cellH);
 }
 
 /** 单段绿幕 mp4 → 透明 sprite-sheet 图集 + meta（抽帧→抠绿→打包）。老路径，meta 不带 clips。 */

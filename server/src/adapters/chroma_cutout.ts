@@ -143,12 +143,26 @@ export class ChromaKeyCutoutAdapter implements CutoutAdapter {
     const { width: w, height: h, data: d } = decode(input.bytes);
     const n = w * h;
 
+    const greenDominance = (i: number): number => {
+      const r = d[i * 4]!;
+      const g = d[i * 4 + 1]!;
+      const b = d[i * 4 + 2]!;
+      return g - Math.max(r, b);
+    };
+
     const isGreen = (i: number): boolean => {
       const r = d[i * 4]!;
       const g = d[i * 4 + 1]!;
       const b = d[i * 4 + 2]!;
       return g > 80 && g > r * 1.2 && g > b * 1.2;
     };
+
+    // H.264/YUV420 会把绿幕色度向主体扩散 2~3px；这些浅绿像素已过不了上面的硬阈值，
+    // 但仍能用「绿通道略占优」识别。只允许从已确认背景向内扩最多 4px，避免一路吃进
+    // 与背景相连的绿色角色本体；角色内部不连通的绿色装饰仍完全不受影响。
+    const isSoftGreen = (i: number): boolean => d[i * 4 + 1]! > 40 && greenDominance(i) > 2;
+    const FRINGE_RADIUS = 4;
+    const FULL_KEY_DOMINANCE = 96;
 
     // 从四边的绿色像素 flood-fill，标记连通的背景。
     const bg = new Uint8Array(n);
@@ -177,24 +191,56 @@ export class ChromaKeyCutoutAdapter implements CutoutAdapter {
       if (y < h - 1) seed(i + w);
     }
 
+    // 从硬背景边界向主体方向扩一小段软 fringe。dist=0 是硬背景；1..4 是待恢复软 alpha 的色溢。
+    const dist = new Uint8Array(n);
+    const fringeQueue: number[] = [];
+    const enqueueFringe = (i: number, nextDist: number): void => {
+      if (!bg[i] && !dist[i] && isSoftGreen(i)) {
+        dist[i] = nextDist;
+        fringeQueue.push(i);
+      }
+    };
     for (let i = 0; i < n; i++) {
-      if (bg[i]) d[i * 4 + 3] = 0;
-    }
-    // 边缘 despill：保留像素若与背景相邻，压掉溢出的绿边
-    for (let i = 0; i < n; i++) {
-      if (bg[i] || d[i * 4 + 3] === 0) continue;
+      if (bg[i]) continue;
       const x = i % w;
       const y = (i / w) | 0;
-      const adj =
-        (x > 0 && bg[i - 1]) ||
-        (x < w - 1 && bg[i + 1]) ||
-        (y > 0 && bg[i - w]) ||
-        (y < h - 1 && bg[i + w]);
-      if (adj) {
-        const r = d[i * 4]!;
-        const b = d[i * 4 + 2]!;
-        const maxRB = r > b ? r : b;
-        if (d[i * 4 + 1]! > maxRB) d[i * 4 + 1] = maxRB;
+      if (
+        (x > 0 && bg[i - 1]) || (x < w - 1 && bg[i + 1]) ||
+        (y > 0 && bg[i - w]) || (y < h - 1 && bg[i + w])
+      ) enqueueFringe(i, 1);
+    }
+    for (let q = 0; q < fringeQueue.length; q++) {
+      const i = fringeQueue[q]!;
+      const nextDist = dist[i]! + 1;
+      if (nextDist > FRINGE_RADIUS) continue;
+      const x = i % w;
+      const y = (i / w) | 0;
+      if (x > 0) enqueueFringe(i - 1, nextDist);
+      if (x < w - 1) enqueueFringe(i + 1, nextDist);
+      if (y > 0) enqueueFringe(i - w, nextDist);
+      if (y < h - 1) enqueueFringe(i + w, nextDist);
+    }
+
+    for (let i = 0; i < n; i++) {
+      const p = i * 4;
+      if (bg[i]) {
+        d[p + 3] = 0;
+        continue;
+      }
+      if (!dist[i]) continue;
+      const maxRB = Math.max(d[p]!, d[p + 2]!);
+      const dominance = Math.max(0, d[p + 1]! - maxRB);
+      // 绿幕越纯，恢复出的 alpha 越低；靠近主体、绿占优越弱，alpha 平滑趋近 255。
+      const matte = Math.max(0, Math.min(255, Math.round(255 * (1 - dominance / FULL_KEY_DOMINANCE))));
+      d[p + 3] = Math.round((d[p + 3]! * matte) / 255);
+      // 对整段 fringe 反解 alpha-over-chroma，而不是只把 G 压到 max(R,B)。标准绿幕是
+      // #00B140，H.264 色度扩散会同时带入 G 与 B；只压 G 仍会留下截图里那种青色细线。
+      const alpha = matte / 255;
+      if (alpha > 0) {
+        const inv = 1 - alpha;
+        d[p] = Math.max(0, Math.min(255, Math.round(d[p]! / alpha)));
+        d[p + 1] = Math.max(0, Math.min(255, Math.round((d[p + 1]! - inv * 177) / alpha)));
+        d[p + 2] = Math.max(0, Math.min(255, Math.round((d[p + 2]! - inv * 64) / alpha)));
       }
     }
 

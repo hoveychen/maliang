@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PNG } from 'pngjs';
@@ -34,6 +34,40 @@ async function greenClip(boxW: number, boxH: number): Promise<VideoBlob> {
       '-pix_fmt', 'yuv420p', out,
     ]);
     return { bytes: new Uint8Array(await readFile(out)), mime: 'video/mp4' };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** 绿幕上合成带 2px 软边的白圆，再压成 yuv420p；复现真实视频轮廓的绿幕混色。 */
+async function softEdgeClip(): Promise<VideoBlob> {
+  const dir = await mkdtemp(join(tmpdir(), 'mlsoftedge-'));
+  try {
+    const w = 320;
+    const h = 180;
+    const src = new PNG({ width: w, height: h });
+    const cx = w / 2;
+    const cy = h / 2;
+    const radius = 58;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dist = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+        const a = Math.max(0, Math.min(1, (radius + 1 - dist) / 2));
+        const i = (y * w + x) * 4;
+        src.data[i] = Math.round(255 * a);
+        src.data[i + 1] = Math.round(255 * a + 177 * (1 - a));
+        src.data[i + 2] = Math.round(255 * a + 64 * (1 - a));
+        src.data[i + 3] = 255;
+      }
+    }
+    const input = join(dir, 'edge.png');
+    const output = join(dir, 'edge.mp4');
+    await writeFile(input, PNG.sync.write(src));
+    await execFileP('ffmpeg', [
+      '-y', '-loglevel', 'error', '-loop', '1', '-i', input,
+      '-t', '1', '-r', '25', '-pix_fmt', 'yuv420p', output,
+    ]);
+    return { bytes: new Uint8Array(await readFile(output)), mime: 'video/mp4' };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -134,6 +168,30 @@ test('videoToSpriteSheet: 老的单段管线不写 clips（v1 图集保持原样
   const { meta } = await videoToSpriteSheet(await greenClip(80, 150), { webp: false, fps: 8 });
   assert.equal(meta.clips, undefined, '单段管线不应写 clips 字段');
   assert.ok(meta.frameCount > 0);
+});
+
+test('videoToSpriteSheet: 原分辨率软抠后再缩放，不产生不透明绿圈', async () => {
+  const { atlas, meta } = await videoToSpriteSheet(await softEdgeClip(), {
+    webp: false,
+    fps: 1,
+    cellH: 90,
+    dropLastFrame: false,
+  });
+  const png = PNG.sync.read(Buffer.from(atlas.bytes));
+  let softAlpha = 0;
+  let opaqueGreenSpill = 0;
+  for (let y = 0; y < meta.cellH; y++) {
+    for (let x = 0; x < meta.cellW; x++) {
+      const i = (y * png.width + x) * 4;
+      const a = png.data[i + 3]!;
+      if (a > 0 && a < 255) softAlpha++;
+      if (a >= 240 && png.data[i + 1]! > Math.max(png.data[i]!, png.data[i + 2]!) + 5) {
+        opaqueGreenSpill++;
+      }
+    }
+  }
+  assert.ok(softAlpha > 0, '视频轮廓应保留软 alpha，不能退化成 0/255 硬边');
+  assert.equal(opaqueGreenSpill, 0, `不应残留不透明绿边，实际 ${opaqueGreenSpill} 像素`);
 });
 
 test('CLIP_NAMES 只含 idle 与 talking —— moving 不生成（走路是客户端程序化的）', () => {
