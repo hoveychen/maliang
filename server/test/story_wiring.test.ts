@@ -43,8 +43,8 @@ function withBook(fn: (book: StoryBook) => Promise<void> | void): Promise<void> 
     sceneId: 'village',
     gateCastId: 'pig_big',
     cast: [
-      { castId: 'pig_big', name: '猪大哥', personality: '稳重', voiceId: 'v-pig', visualDescription: '' },
-      { castId: 'wolf', name: '大灰狼', personality: '憨萌', voiceId: 'v-wolf', visualDescription: '', noResidence: true },
+      { castId: 'pig_big', name: '猪大哥', personality: '稳重', voiceId: 'v-pig', visualDescription: '', position: { tileX: 1, tileY: 1 }, greetingStyle: 'gentle' },
+      { castId: 'wolf', name: '大灰狼', personality: '憨萌', voiceId: 'v-wolf', visualDescription: '', position: { tileX: 2, tileY: 2 }, greetingStyle: 'playful', noResidence: true },
     ],
     chapters: [{ screenplay: 'three_act_play', stampStyle: 'star' }],
   };

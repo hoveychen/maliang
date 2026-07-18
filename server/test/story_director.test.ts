@@ -18,8 +18,8 @@ function testBook(): StoryBook {
     sceneId: 'village',
     gateCastId: 'pig_big',
     cast: [
-      { castId: 'pig_big', name: '猪大哥', personality: '稳重', voiceId: 'v1', visualDescription: '' },
-      { castId: 'wolf', name: '大灰狼', personality: '憨萌', voiceId: 'v2', visualDescription: '', noResidence: true },
+      { castId: 'pig_big', name: '猪大哥', personality: '稳重', voiceId: 'v1', visualDescription: '', position: { tileX: 1, tileY: 1 }, greetingStyle: 'gentle' },
+      { castId: 'wolf', name: '大灰狼', personality: '憨萌', voiceId: 'v2', visualDescription: '', position: { tileX: 2, tileY: 2 }, greetingStyle: 'playful', noResidence: true },
     ],
     chapters: [
       {

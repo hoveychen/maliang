@@ -101,6 +101,7 @@ import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } fro
 import { buildDebut, buildStoryStageOpts, DebutError } from './stage_debut.ts';
 import { StoryDirector } from './story_director.ts';
 import { STORY_BOOKS, isUnsettledStoryRole } from './story_books.ts';
+import { seedStoryCharacters } from './story_seed.ts';
 import { buildStageOptsFromDraft } from './screenplay_gen.ts';
 import { SCREENPLAYS, type ScreenplayName } from './screenplays.ts';
 import type { StagePropMaker } from './stage_types.ts';
@@ -1110,6 +1111,19 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       if (!store.getWorld(req.params.id)) return reply.code(404).send({ error: 'world not found' });
       const only = (req.query.only ?? '').split(',').map((s) => s.trim()).filter(Boolean);
       return seedForestCharacters(adapters, store, req.params.id, { only, toSpriteSheet });
+    },
+  );
+
+  // 故事角色种入（M2 章回剧情 P3）：按册 cast 走生图管线落 roster，带 storyRole（未入住零供给）。
+  // 幂等（storyCharacterId 查重跳过）。生图烧钱，admin token 门禁。
+  app.post<{ Params: { id: string; bookId: string } }>(
+    '/admin/worlds/:id/seed-story/:bookId',
+    async (req, reply) => {
+      if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+      if (!store.getWorld(req.params.id)) return reply.code(404).send({ error: 'world not found' });
+      const book = STORY_BOOKS[req.params.bookId];
+      if (!book) return reply.code(400).send({ error: `unknown book: ${req.params.bookId}` });
+      return seedStoryCharacters(adapters, store, req.params.id, book, { toSpriteSheet });
     },
   );
 

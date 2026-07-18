@@ -5,8 +5,17 @@
 
 import { readFileSync } from 'node:fs';
 
-/** 内置手写剧本（Plan 2 的 LLM 生成层上线前的样本 + 回归基线）。 */
-export const SCREENPLAYS = ['hide_and_seek', 'three_act_play', 'soccer', 'eagle_and_chicks'] as const;
+/** 内置手写剧本（Plan 2 的 LLM 生成层上线前的样本 + 回归基线）+ M2 章回剧情《三只小猪》各幕。 */
+export const SCREENPLAYS = [
+  'hide_and_seek',
+  'three_act_play',
+  'soccer',
+  'eagle_and_chicks',
+  'story_pigs_1',
+  'story_pigs_2',
+  'story_pigs_3',
+  'story_pigs_end',
+] as const;
 export type ScreenplayName = (typeof SCREENPLAYS)[number];
 
 const cache = new Map<string, string>();
