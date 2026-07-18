@@ -16,6 +16,7 @@ var green: Dictionary = {}
 var yellow: Dictionary = {}
 var chat_started := 0
 var relay_done := 0
+var errand_started := 0
 
 func _initialize() -> void:
 	# TEST_SEED 固定全局 RNG（NPC 漫游/相位都吃它）：偶发失败可用同种子确定性复跑
@@ -98,9 +99,12 @@ func _tick() -> void:
 		325:
 			# 宽限过后（这轮没 TTS 可等）：灵狐小围巾动身跑腿，近身对话随之关闭——
 			# 此前这条分支既不延迟也不关对话，灵狐小围巾转身走了、横幅和相机还锁在他身上。
-			_check("speaker runs errand", scene.call("_has_executor_for", green), true)
-			_check("跑腿后关对话（selected 清空）", scene.get("selected"), null)
+			# 动身跑腿由 errand_started 轮询里程碑判定：动身时刻取决于「说完再走」宽限，
+			# 而 speaking() 依赖音频播放（_tts_player.playing/_tts_pending/fairy_voice，全是墙钟），
+			# --fixed-fps 下帧与墙钟解耦→动身帧会抖动，钉死在 325 帧会间歇挂（同 relay_done 先例）。
+			pass
 		395:
+			_check("speaker runs errand", errand_started > 0, true)
 			_check("relay reached performer", relay_done > 0, true)
 		400:
 			if fails == 0:
@@ -114,6 +118,11 @@ func _tick() -> void:
 		relay_done = frame
 		_check("errand runner adjacent on handoff (d=%.1f)" % _dist(green, blue), _dist(green, blue) <= 4.5, true)
 		_check("performer acks with nod", String(blue.get("paper_action", "")), "nod")
+	# 动身跑腿的时刻不定（「说完再走」宽限受音频播放墙钟影响）：轮询到灵狐小围巾挂上执行器即里程碑，
+	# 此刻近身对话应随之关闭（selected 清空）。deadline 断言在 frame 395（远早于自身超时兜底 8s/80 帧）。
+	if frame > 313 and errand_started == 0 and bool(scene.call("_has_executor_for", green)):
+		errand_started = frame
+		_check("跑腿后关对话（selected 清空）", scene.get("selected"), null)
 	# chat_with 到达时刻不定（起点受闲逛影响）：轮询里程碑
 	if frame > 205 and chat_started == 0 and green.has("chat_with"):
 		chat_started = frame
