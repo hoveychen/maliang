@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError, apiPost, assetUrl, getToken, setToken } from './api.ts';
-import type { AnchorPoint, CharacterAnchors, SpriteAnimMeta, SpriteAnimRecord } from './types.ts';
+import { CLIP_LABELS, type AnchorPoint, type CharacterAnchors, type ClipName, type ClipRange, type SpriteAnimMeta, type SpriteAnimRecord } from './types.ts';
 
 /** 页头：面包屑 + 宋体大标题 + 计数 + 说明。 */
 export function PageHead(props: { crumbs?: ReactNode; title: ReactNode; count?: number; desc?: string; right?: ReactNode }) {
@@ -50,10 +50,19 @@ export function Fallback(props: { loading: boolean; error: ApiError | null; onRe
   );
 }
 
-/** 图集帧动画播放器：canvas 按 meta 逐帧画 cell，fps 驱动循环。 */
-function SheetPlayer(props: { src: string; meta: SpriteAnimMeta }) {
+/**
+ * 图集帧动画播放器：canvas 按 meta 逐帧画 cell，fps 驱动循环。
+ * 传 clip（{start,count}）只循环该段（idle / talking），不传则整张循环。
+ * 画布按 cellW/cellH 比例定尺寸，避免非方形 cell 被拉扁。
+ */
+function SheetPlayer(props: { src: string; meta: SpriteAnimMeta; clip?: ClipRange; size?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const { src, meta } = props;
+  const { src, meta, clip } = props;
+  const size = props.size ?? 320;
+  const first = clip?.start ?? 0;
+  const count = clip?.count ?? meta.frameCount;
+  const h = size;
+  const w = Math.max(1, Math.round((size * meta.cellW) / meta.cellH));
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
@@ -65,7 +74,8 @@ function SheetPlayer(props: { src: string; meta: SpriteAnimMeta }) {
     let start = 0;
     const draw = (t: number) => {
       if (!start) start = t;
-      const frame = Math.floor(((t - start) / 1000) * meta.fps) % meta.frameCount;
+      const local = count > 0 ? Math.floor(((t - start) / 1000) * meta.fps) % count : 0;
+      const frame = first + local;
       const col = frame % meta.cols;
       const row = Math.floor(frame / meta.cols);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -74,8 +84,36 @@ function SheetPlayer(props: { src: string; meta: SpriteAnimMeta }) {
     };
     img.onload = () => { raf = requestAnimationFrame(draw); };
     return () => cancelAnimationFrame(raf);
-  }, [src, meta]);
-  return <canvas ref={ref} width={320} height={320} className="sprite-canvas" />;
+  }, [src, meta, first, count, w, h]);
+  return <canvas ref={ref} width={w} height={h} className="sprite-canvas" />;
+}
+
+/**
+ * 图集分段循环预览：ready 的图集按 idle / talking 分别循环播放（各一个小画面）。
+ * v2 多段图集读 meta.clips 拆段；v1 单段（无 clips）整张当 idle 播。
+ */
+export function ClipPreviews(props: { src: string; meta: SpriteAnimMeta; size?: number }) {
+  const { src, meta } = props;
+  const size = props.size ?? 160;
+  const clips = meta.clips;
+  const segs: { name: ClipName; clip?: ClipRange; count: number }[] = clips
+    ? (['idle', 'talking'] as ClipName[])
+        .filter((n) => clips[n] && clips[n]!.count > 0)
+        .map((n) => ({ name: n, clip: clips[n], count: clips[n]!.count }))
+    : [{ name: 'idle', clip: undefined, count: meta.frameCount }];
+  if (segs.length === 0) return null;
+  return (
+    <div className="clip-previews" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+      {segs.map((s) => (
+        <figure key={s.name} style={{ margin: 0, textAlign: 'center' }}>
+          <SheetPlayer src={src} meta={meta} clip={s.clip} size={size} />
+          <figcaption className="mono" style={{ fontSize: 12, marginTop: 2 }}>
+            {CLIP_LABELS[s.name]} · {s.count}帧@{meta.fps}fps
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+  );
 }
 
 /** 立绘放大预览遮罩：左静态大图；/sprite-anim/:hash 就绪则右侧播 idle 动画。ESC/点遮罩关闭。 */
@@ -105,8 +143,8 @@ function SpriteLightbox(props: { hash: string; alt: string; onClose: () => void 
           </figure>
           {ready && anim.animAsset && anim.meta && (
             <figure>
-              <SheetPlayer src={assetUrl(anim.animAsset)} meta={anim.meta} />
-              <figcaption>idle 动画 · {anim.meta.frameCount} 帧 @{anim.meta.fps}fps</figcaption>
+              <ClipPreviews src={assetUrl(anim.animAsset)} meta={anim.meta} size={240} />
+              <figcaption>循环动画</figcaption>
             </figure>
           )}
         </div>

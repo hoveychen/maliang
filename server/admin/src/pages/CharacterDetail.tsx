@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { assetUrl, fmtTs, useApi } from '../api.ts';
 import { MEMORY_KIND_LABELS, type CharacterDetail, type MemoryItem } from '../types.ts';
-import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, ShortId, SizeBadge, Sprite } from '../components.tsx';
+import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, ClipPreviews, Fallback, PageHead, ShortId, SizeBadge, Sprite } from '../components.tsx';
 
 function groupByKind(items: MemoryItem[]): [string, MemoryItem[]][] {
   const by = new Map<string, MemoryItem[]>();
@@ -42,6 +42,11 @@ export function CharacterDetailPage() {
                 )}
                 <AnimGenerateButton spriteHash={c.appearance.spriteAsset} status={data.spriteAnim.status} onChanged={reload} />
               </div>
+              {data.spriteAnim.status === 'ready' && data.spriteAnim.animAsset && data.spriteAnim.meta && (
+                <div style={{ marginTop: 10 }}>
+                  <ClipPreviews src={assetUrl(data.spriteAnim.animAsset)} meta={data.spriteAnim.meta} size={150} />
+                </div>
+              )}
             </div>
             <dl className="kv" style={{ flex: 1, minWidth: 280 }}>
               <dt>id</dt><dd className="mono">{c.id}</dd>
