@@ -109,6 +109,19 @@ export const WISHES: Record<string, WishDef> = {
   },
 };
 
+/**
+ * 通用跑腿引子（M1 拉力层，docs/m1-wish-supply-design.md §2.3）：心愿池空、又没有链步时，
+ * 小概率漏出「有件小事想找人帮」的念想——把藏在对话里的跑腿供给外化成拉力信号。
+ * 自言自语纪律同上：只说自己想什么，绝不对着小朋友说话（有单测把关）。
+ */
+export const ERRAND_LEAKS: string[] = [
+  '好想让小伙伴知道这个消息呀…可我这会儿走不开。',
+  '我这儿有件小事儿，一个人还真办不成…',
+  '要是有人肯帮我跑一趟就好啦…唉，先记在心里吧。',
+  '总惦记着那个地方不知道怎么样了…我又腾不出空去看。',
+  '哎呀，还有件事没办呢…手头又放不下。',
+];
+
 /** 心愿池耗尽（玩法全被发现）后的纯氛围自语——不勾任何玩法，只是让世界有活气。 */
 export const IDLE_DOING: string[] = [
   '我在数天上的云…一朵，两朵，哎呀又飘走一朵。',
@@ -150,15 +163,47 @@ export function wishFor(
   return WISHES[pool[hash(characterId) % pool.length]!]!;
 }
 
-/** 该村民这次要漏的那句话（心愿池空则回落纯氛围自语）。rng 可注入以便测试确定性。 */
+/** 一个村民当下的漏话池 + 供给来源标记（npc_wishes entry 的数据形状，A4 心愿清单据此筛卡）。 */
+export interface LeakPool {
+  /** 整池下发，客户端自己轮换（见 pushWishes 头注）。 */
+  lines: string[];
+  /** 供给来源：wish=心愿 / chain=链步 / errand=通用跑腿引子；纯氛围（IDLE_DOING）不算供给信号，不带。 */
+  source?: 'wish' | 'chain' | 'errand';
+  /** 勾的玩法能力（wish 恒有；chain 仅 wish 型链步有）——A4 清单的「梦想图标」与复用提示用。 */
+  ability?: string;
+}
+
+/**
+ * 三选一混合（M1 拉力层，§2.3）：心愿 → 链步 leak → errand:idle ≈ 1:2 稳定轮换。
+ * chainStep 由调用方从角色链上取（task_chain.pendingChainStep——wishes.ts 不 import 它，防环）。
+ * dateKey（如 '2026-07-18'）进哈希：同一天同一村民永远同一池——小朋友一次路过听到的话稳定，
+ * 才会觉得「这个人一直惦记这件事」；换台以天为粒度，不是每次请求掷骰子。
+ */
+export function leakPoolFor(
+  characterId: string,
+  discovered: readonly string[],
+  canAfford: boolean,
+  chainStep: { leak: string; wishAbility?: string } | null,
+  dateKey: string,
+): LeakPool {
+  const wish = wishFor(characterId, discovered, canAfford);
+  if (wish) return { lines: wish.leaks, source: 'wish', ability: wish.ability };
+  if (chainStep) return { lines: [chainStep.leak], source: 'chain', ability: chainStep.wishAbility };
+  // 无链步：errand:idle ≈ 1:2（配比拍的，Alpha 校准）——村里要有闲话，不能人人都在派活
+  if (hash(characterId + dateKey) % 3 === 0) return { lines: ERRAND_LEAKS, source: 'errand' };
+  return { lines: IDLE_DOING };
+}
+
+/** 该村民这次要漏的那句话（三选一混合口径同 leakPoolFor）。rng 只管池内选行，可注入以便测试确定性。 */
 export function pickLeak(
   characterId: string,
   discovered: readonly string[],
   rng: () => number = Math.random,
   canAfford = true,
+  chainStep: { leak: string; wishAbility?: string } | null = null,
+  dateKey = '',
 ): string {
-  const wish = wishFor(characterId, discovered, canAfford);
-  const pool = wish ? wish.leaks : IDLE_DOING;
+  const pool = leakPoolFor(characterId, discovered, canAfford, chainStep, dateKey).lines;
   return pool[Math.floor(rng() * pool.length)]!;
 }
 

@@ -92,9 +92,9 @@ import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt 
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
 import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWishRefine, flowerDeniedLine, praiseLine } from './tasks.ts';
-import { ensureTaskChain } from './task_chain.ts';
+import { ensureTaskChain, pendingChainStep } from './task_chain.ts';
 import { pickComplaint, REFINE_HINT, REFINE_HINT_2 } from './refinements.ts';
-import { wishFor, IDLE_DOING, reuseHint } from './wishes.ts';
+import { leakPoolFor, reuseHint } from './wishes.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
@@ -1514,19 +1514,17 @@ function pushWishes(
 ): void {
   const discovered = store.getDiscovered(worldId, playerId);
   const canAfford = store.getWallet(worldId, playerId).flowers > 0; // 买不起就不勾（见 WishDef.costsFlower）
-  const activeAbilities = new Set<string>(); // 眼前「有需求」的活跃能力（村民在漏的心愿 + 已认领委托）
+  const activeAbilities = new Set<string>(); // 眼前「有需求」的活跃能力（村民在漏的心愿/链步 + 已认领委托）
+  const dateKey = new Date().toISOString().slice(0, 10); // 三选一混合的轮换粒度：天（同一次路过听到的话稳定）
   const wishes = store
     .listCharacters(worldId, sceneId)
     .filter((c) => !c.isFairy)
     .map((c) => {
-      const wish = wishFor(c.id, discovered, canAfford);
-      if (wish) activeAbilities.add(wish.ability);
-      return {
-        characterId: c.id,
-        voiceId: c.voiceId,
-        // 心愿池空（玩法全发现/都买不起）→ 给纯氛围自语，让世界还有活气，但不再勾任何玩法
-        lines: wish ? wish.leaks : IDLE_DOING,
-      };
+      // 三选一混合（M1 拉力层）：心愿 → 该村民的待发链步 → errand:idle 稳定轮换——心愿池空后拉力不干涸。
+      // source/ability 一并下发：A4 心愿清单据 source 筛卡、据 ability 配「梦想图标」。
+      const pool = leakPoolFor(c.id, discovered, canAfford, pendingChainStep(c.taskChain, canAfford), dateKey);
+      if (pool.ability) activeAbilities.add(pool.ability);
+      return { characterId: c.id, voiceId: c.voiceId, lines: pool.lines, source: pool.source, ability: pool.ability };
     });
   // 已认领的心愿委托也算一个活跃需求（村民已被搭话、心愿变委托，但漏话池可能已因 discovered 刷掉那句）。
   const task = store.getActiveTask(worldId, playerId);

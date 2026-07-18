@@ -198,6 +198,22 @@ export async function ensureTaskChain(
 }
 
 /**
+ * 该村民下一个「待发」的链步（漏话/A4 清单用）：从游标起找，买不起的 wish 步跳过
+ * （costsFlower 口径同 pickChainTask——被勾起兴趣却造不起是挫败）。
+ * 刻意不做场景目标可行性判断：deliver 没对象也可以想念这件事，那是物化（发起）时的事。
+ * 链尽/无链 → null。
+ */
+export function pendingChainStep(chain: TaskChain | undefined, canAfford: boolean): ChainStep | null {
+  if (!chain) return null;
+  for (let i = chain.nextIndex; i < chain.steps.length; i++) {
+    const step = chain.steps[i]!;
+    if (step.type === 'wish' && WISHES[step.wishAbility ?? '']?.costsFlower && !canAfford) continue;
+    return step;
+  }
+  return null;
+}
+
+/**
  * 完成结算推进链游标（供 tasks.ts 三个结算点调用）：完成第 chainIndex 步 → nextIndex = chainIndex+1。
  * 游标是「跳步不回头」语义：物化时若跳过了不可行步（买不起/场景没目标），完成后面的步就把游标
  * 一并越过它们——链是「见面礼」不是任务清单，供给持续比步步全勤重要（docs/m1-wish-supply-design.md §2.2）。
