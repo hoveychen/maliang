@@ -123,6 +123,13 @@ func _pick_line(cid: String, lines: PackedStringArray) -> String:
 			return pick
 	return lines[0]
 
+## 让某个村民【就地】用自己音色说一句（主动打招呼 villager-social P3 复用）：与漏话同一套 3D 定位音源、
+## 同一衰减、同一 _synthesizing 占坑（说招呼时不会同时漏话，反之亦然）。edge-tts 不可用/空文本则静默。
+func say_line(n: Dictionary, text: String, voice_id: String) -> void:
+	if text.is_empty():
+		return
+	_speak(n, String(n.get("id", "")), text, voice_id)
+
 ## 合成 → 挂在【这个村民身上】的 3D 音源播放（距离衰减在这里落地）。
 ## 服务端 TTS 降级不走这条路：漏话是可有可无的环境音，合成失败就算了，
 ## 不值得为它占用降级通道（那条路是留给对话的，对话丢了话小朋友会懵）。

@@ -139,7 +139,7 @@ test('projectCharacterFor: 附加 socialType + 该玩家视角的 familiarity', 
 test('projectCharacterFor: 空 viewer → 熟识度恒 stranger（新角色广播场景）', () => {
   const store = new WorldStore();
   store.createWorld('w1');
-  const c = seedChar(store, 'w1', 'npc1', 'playful');
+  seedChar(store, 'w1', 'npc1', 'playful');
   store.recordVillagerBond('w1', 'npc1', 'p1', 'wish'); // 即便有人已是朋友
   const view = projectCharacterFor(store.getCharacter('w1', 'npc1')!, '');
   assert.equal(view.familiarity, 'stranger');

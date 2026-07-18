@@ -2842,6 +2842,7 @@ export async function handleWsMessage(
     intentText?: string;
     byFairy?: boolean;
     characterId?: string;
+    villagerId?: string; // villager_hail / villager_gift：主动社交的村民 id（villager-social）
     slot?: string; // character_attach：贴纸槽位（headTop/handL/handR）
     transcript?: string; // voice_transcript：端侧 ASR 已识别的文本（唯一语音入口）
     text?: string; // tts_request：客户端 edge-tts 失败时求服务端合成的文本
@@ -3297,6 +3298,19 @@ export async function handleWsMessage(
       console.warn(`招呼失败（静默跳过，不打断进对话）：${String(err)}`);
     } finally {
       gate.release();
+    }
+    return;
+  }
+
+  // 主动打招呼（P3，villager-social）：符合性格×熟识度的村民走到玩家旁后，客户端发 villager_hail。
+  // 复用 greetCharacter 选招呼词 + 村民音色，clientTts=true 只回文本+voiceId、不开对话会话/不进 FSM/不算对话轮。
+  // 客户端把它当【村民身上的 3D 定位音】播（NpcWishVoice 同款）；edge-tts 不可用则静默——招呼是点缀，不占降级通道。
+  if (msg.type === 'villager_hail') {
+    try {
+      const resp = await greetCharacter(msg.worldId ?? '', String(msg.villagerId ?? ''), adapters, store, undefined, Math.random, true);
+      socket.send(JSON.stringify({ type: 'villager_hail_tts', villagerId: String(msg.villagerId ?? ''), text: resp.replyText, voiceId: resp.voiceId }));
+    } catch (err) {
+      console.warn(`主动打招呼失败（静默跳过）：${String(err)}`);
     }
     return;
   }
