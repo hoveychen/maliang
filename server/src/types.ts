@@ -321,6 +321,23 @@ export interface CharacterAnchors {
   source: 'vision' | 'fallback';
 }
 
+/** 村民视角的一段关系累计量（Character.relationships[playerId]）。见 social.ts。 */
+export interface RelationshipState {
+  chats: number; // 与该玩家聊完的会话轮数累计
+  wishesDone: number; // 该玩家为它完成的心愿/委托次数
+  gifted: boolean; // 它是否已主动送过该玩家花（防重复送）
+  lastSeen: number; // 最近一次实质互动时刻（备用；测试传 0）
+}
+
+/** 性格类型：外向主动迎陌生人，内向只迎熟人。派生自 greetingStyle（social.deriveSocialType）。 */
+export type SocialType = 'extrovert' | 'introvert';
+
+/** 相对某玩家的熟识度。派生自 relationships（social.deriveFamiliarity）。 */
+export type Familiarity = 'stranger' | 'acquaintance' | 'friend';
+
+/** 下发给客户端的角色视图：裸 Character + 该玩家视角的社交派生字段（projectCharacterFor 产出）。 */
+export type CharacterView = Character & { socialType?: SocialType; familiarity?: Familiarity };
+
 export interface Character {
   id: string;
   worldId: string;
@@ -344,7 +361,12 @@ export interface Character {
    */
   sceneId?: string;
   abilities: string[];
-  relationships: Record<string, string>;
+  /**
+   * 村民↔玩家的关系累计（村民视角，键=playerId）。曾是死字段（只初始化为 `{}`），现承载熟识度：
+   * 供村民主动社交按【实质互动】升级熟识度（见 social.ts / docs/villager-social-design.md）。
+   * 派生的 socialType/familiarity 不落库、下发时经 projectCharacterFor 现算附加。
+   */
+  relationships: Record<string, RelationshipState>;
   /**
    * 身上贴的贴纸（character-anchors §5）：槽位 → 贴纸实体 id（内置贴纸，mount:'edge' 两用）。
    * 贴上=玩家背包扣一份，摘下=回背包；随角色整对象下发（scene_entered/character_spawned）。

@@ -84,7 +84,8 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, MAX_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type CharacterView, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { deriveSocialType, familiarityFor } from './social.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
 import { avatarDescForbidden, stripAvatarOptionIds, AVATAR_EARLY_DONE, AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
@@ -1460,6 +1461,9 @@ export async function endSessionVisit(
   session.visit = null; // 先摘出，避免并发/重入重复 flush
   const jobs: Promise<void>[] = [];
   for (const [characterId, turns] of visit.pending) {
+    // 聊过一段 = 一次实质互动，升熟识度（陌生→点头之交），供内向村民下次进场景主动来打招呼。
+    // 在 turns.length===0 的 continue 之前打点：会话中途 flush 会把 turns 清零，但该角色确实聊过。
+    store.recordVillagerBond(visit.worldId, characterId, visit.playerId, 'chat');
     if (turns.length === 0) continue;
     const batch = turns.slice();
     turns.length = 0;
@@ -2148,12 +2152,13 @@ export async function createCharacterAsync(
     if (creatorId) {
       store.addMemory(creatorId, { text: `帮小朋友造过新伙伴「${character.name}」（${description.slice(0, 60)}）`, kind: 'creation', aboutPlayer: playerId, ts: 0 });
     }
-    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character, wallet: store.getWallet(worldId, playerId) }));
+    socket.send(JSON.stringify({ type: 'gen_complete', requestId, character: projectCharacterFor(character, playerId), wallet: store.getWallet(worldId, playerId) }));
     // 同场景其他人：实时看见新伙伴降生（排除发起者——它已经靠 gen_complete 降生过了）。
+    // 新角色对谁都是陌生人：viewer 传空 → familiarity 恒 stranger（免逐成员算），socialType 现算。
     if (spawn?.hub && sceneId) {
       spawn.hub.broadcastScene(
         worldId, sceneId,
-        { type: 'character_spawned', sceneId, character },
+        { type: 'character_spawned', sceneId, character: projectCharacterFor(character, '') },
         spawn.connKey,
       );
     }
@@ -2590,6 +2595,21 @@ export function presenceOf(store: WorldStore, worldId: string, sceneId: string, 
   };
 }
 
+/**
+ * 把裸 Character 投影成【某个玩家视角】的下发对象：附加社交类型 + 相对该玩家的熟识度。
+ * socialType 与观察者无关（现算自 greetingStyle）；familiarity 读该村民 relationships[viewer]（村民视角持久化）。
+ * 仙子不参与社交，原样返回。见 social.ts / docs/villager-social-design.md。
+ * viewerPlayerId 为空（如新降生角色广播给一群人）→ 熟识度恒 stranger（新角色对谁都陌生）。
+ */
+export function projectCharacterFor(character: Character, viewerPlayerId: string): CharacterView {
+  if (character.isFairy) return character;
+  return {
+    ...character,
+    socialType: deriveSocialType(character),
+    familiarity: viewerPlayerId ? familiarityFor(character, viewerPlayerId) : 'stranger',
+  };
+}
+
 /** 同世界同场景的其他在场玩家（排除自己）。 */
 function presenceSnapshot(
   hub: WorldHub, store: WorldStore, worldId: string, sceneId: string, exceptClientId: string,
@@ -2822,6 +2842,7 @@ export async function handleWsMessage(
     intentText?: string;
     byFairy?: boolean;
     characterId?: string;
+    villagerId?: string; // villager_hail / villager_gift：主动社交的村民 id（villager-social）
     slot?: string; // character_attach：贴纸槽位（headTop/handL/handR）
     transcript?: string; // voice_transcript：端侧 ASR 已识别的文本（唯一语音入口）
     text?: string; // tts_request：客户端 edge-tts 失败时求服务端合成的文本
@@ -3281,6 +3302,36 @@ export async function handleWsMessage(
     return;
   }
 
+  // 主动打招呼（P3，villager-social）：符合性格×熟识度的村民走到玩家旁后，客户端发 villager_hail。
+  // 复用 greetCharacter 选招呼词 + 村民音色，clientTts=true 只回文本+voiceId、不开对话会话/不进 FSM/不算对话轮。
+  // 客户端把它当【村民身上的 3D 定位音】播（NpcWishVoice 同款）；edge-tts 不可用则静默——招呼是点缀，不占降级通道。
+  if (msg.type === 'villager_hail') {
+    try {
+      const resp = await greetCharacter(msg.worldId ?? '', String(msg.villagerId ?? ''), adapters, store, undefined, Math.random, true);
+      socket.send(JSON.stringify({ type: 'villager_hail_tts', villagerId: String(msg.villagerId ?? ''), text: resp.replyText, voiceId: resp.voiceId }));
+    } catch (err) {
+      console.warn(`主动打招呼失败（静默跳过）：${String(err)}`);
+    }
+    return;
+  }
+
+  // 外向村民送花（P4，villager-social）：外向村民走到玩家旁后，客户端发 villager_gift。
+  // 权威在服务端：校验村民是外向 + 没给这个玩家送过（防刷，每村民×玩家一次）+ 钱包未满 → 加 1 朵、单播钱包更新。
+  // 空间到达服务端无法核验（空间权威在客户端），但花 capped MAX_FLOWERS + 每对一次，风险可控（见设计文档取舍）。
+  if (msg.type === 'villager_gift') {
+    const worldId = msg.worldId ?? '';
+    const villagerId = String(msg.villagerId ?? '');
+    if (!session.playerId) return;
+    const c = store.getCharacter(worldId, villagerId);
+    if (!c || c.isFairy || deriveSocialType(c) !== 'extrovert') return; // 只有外向村民送花
+    if (store.getWallet(worldId, session.playerId).flowers >= MAX_FLOWERS) return; // 满 9：静默不送（不标 gifted，留到有空位再送）
+    if (!store.markVillagerGifted(worldId, villagerId, session.playerId)) return; // 已给这个玩家送过 → 不重复
+    const wallet = store.refundFlower(worldId, session.playerId, 1); // 加 1 朵（capped MAX_FLOWERS）
+    // 收花的就是发起请求的这个玩家自己，直接回本连接即可（不像送爱心要经 hub 定向到别人）。
+    socket.send(JSON.stringify({ type: 'wallet_update', wallet, gift: { villagerId } }));
+    return;
+  }
+
   // clientTts 逐句降级口：客户端 edge-tts 合成失败时，把文本+voiceId 发回来走服务端合成。
   // 回 tts_start（带 mime）+ tts_chunk×N + tts_end——独立于 character_response，不触发客户端气泡/情绪副作用。
   // 不落 TTS 资产（降级句无历史回放需求）。失败回 tts_failed，客户端静默放弃本句。
@@ -3578,7 +3629,7 @@ export async function handleWsMessage(
       worldId,
       sceneId,
       scene: scene ?? null,
-      characters: store.listCharacters(worldId, sceneId),
+      characters: store.listCharacters(worldId, sceneId).map((c) => projectCharacterFor(c, session.playerId)),
       // 物品实体定义（内置+造物）：新场景矩阵 palette 的解引用依据
       items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
       playerPos: session.playerId ? store.getPlayerTile(worldId, sceneId, session.playerId) : undefined,

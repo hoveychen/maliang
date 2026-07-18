@@ -56,6 +56,7 @@ UNIT_TESTS=(
   test_tts_prebuffer
   test_fairy_voice
   test_npc_wish_voice
+  test_npc_greeter
   test_prebaked_voice
   test_onboarding_bgm_mute
   test_onboarding_asr_gate
