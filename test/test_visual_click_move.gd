@@ -14,6 +14,7 @@ var frame := 0
 var fails := 0
 var ground_target := Vector2.ZERO
 var npc_node: Node = null
+var entered_frame := 0 ## 玩家 approach 完成进对话的里程碑帧（worker 异步 A* 到达帧不定，轮询而非钉死 f100）
 var villager: Dictionary = {} ## 非仙子的普通村民：验「说完再走」要拿真会走路的角色
 
 func _initialize() -> void:
@@ -29,6 +30,10 @@ func _tick() -> void:
 		# headless 的假窗口视口只有 64×64，80px 拾取半径会罩住全屏、点空地必中角色；
 		# 强制成与带窗一致的尺寸（_initialize 阶段设置会被窗口初始化覆盖，须在首帧设）。
 		root.size = Vector2i(1280, 720)
+	# 点 NPC 后玩家走 worker 异步 A* approach，到达并进对话的帧不定：轮询到 selected==该 NPC 即里程碑
+	# （此后 selected 持续到退出），_check_interaction 断言里程碑达成而非钉死在恰好第 100 帧。
+	if frame > 45 and entered_frame == 0 and npc_node != null and scene.get("selected") == npc_node:
+		entered_frame = frame
 	match frame:
 		10:
 			_tap_ground()
@@ -108,8 +113,8 @@ func _tap_npc() -> void:
 
 func _check_interaction() -> void:
 	var player: Dictionary = scene.get("player")
-	var sel: Variant = scene.get("selected")
-	_check("entered interaction with tapped npc", sel == npc_node, true)
+	# selected==该 NPC 的达成由 entered_frame 里程碑轮询判定（worker 异步 approach 到达帧不定，不钉死 f100）。
+	_check("entered interaction with tapped npc", entered_frame > 0, true)
 	if npc_node != null:
 		var d := _dict_of(npc_node)
 		if not d.is_empty():
