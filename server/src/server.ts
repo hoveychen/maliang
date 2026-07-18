@@ -303,6 +303,15 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     };
   });
 
+  // 删除一个世界及全部关联数据（级联）。admin 门禁——清理无主的空壳世界（旧客户端/测试留下的脏数据）。
+  app.delete<{ Params: { id: string } }>('/admin/worlds/:id', async (req, reply) => {
+    if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    const deleted = store.deleteWorld(req.params.id);
+    if (!deleted) return reply.code(404).send({ error: 'world not found' });
+    app.log.warn({ worldId: req.params.id }, 'world deleted via admin endpoint');
+    return { ok: true, deleted: req.params.id };
+  });
+
   // 为世界里的点点补一张真实 sprite。幂等：已有则跳过；?force=true 强制重生成；
   // body 带 pngBase64 时直接存该图（部署验收过的候选，确定性替换，隐含 force）。
   app.post<{

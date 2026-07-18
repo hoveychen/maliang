@@ -705,6 +705,35 @@ export class WorldStore {
     return this.#worldExists(id);
   }
 
+  /**
+   * 删除一个世界及其全部关联数据（级联，事务原子）。返回是否真的删了（world 不存在则 false）。
+   * 唯一调用方：admin DELETE /admin/worlds/:id，清理无主的空壳世界（脏数据）。
+   * 按 world_id 分区的表全清；memories/chat_turns 按该世界的角色 id 级联（这两表不带 world_id）；
+   * locations 是纯内存态，一并清。players/creation_icons/item_icons 等全局表与世界无关，不动。
+   */
+  deleteWorld(id: string): boolean {
+    if (!this.#worldExists(id)) return false;
+    const charIds = (this.#db.prepare('SELECT id FROM characters WHERE world_id = ?').all(id) as { id: string }[]).map((r) => r.id);
+    this.#db.exec('BEGIN');
+    try {
+      if (charIds.length) {
+        const ph = charIds.map(() => '?').join(',');
+        this.#db.prepare(`DELETE FROM memories WHERE owner_character_id IN (${ph})`).run(...charIds);
+        this.#db.prepare(`DELETE FROM chat_turns WHERE character_id IN (${ph})`).run(...charIds);
+      }
+      for (const t of ['characters', 'props', 'items', 'bag', 'wallets', 'player_tasks', 'player_discovered', 'player_positions', 'scenes', 'visits']) {
+        this.#db.prepare(`DELETE FROM ${t} WHERE world_id = ?`).run(id);
+      }
+      this.#db.prepare('DELETE FROM worlds WHERE id = ?').run(id);
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
+    }
+    this.#locations.delete(id);
+    return true;
+  }
+
   addCharacter(character: Character): void {
     if (!this.#worldExists(character.worldId)) throw new Error(`world not found: ${character.worldId}`);
     this.saveCharacter(character);
