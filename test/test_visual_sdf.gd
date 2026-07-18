@@ -73,24 +73,35 @@ func _structural() -> void:
 		_check("%s 顶点带基本体索引(UV2)" % p.name, uv2.size() > 0, true)
 
 func _observe() -> void:
-	for p: SdfProp in _props:
-		if (p.position - (_pos0[p.name] as Vector3)).length() > 0.08:
-			_moved[p.name] = true
-		var last: SdfMath.Prim = p.prims[p.prims.size() - 1]
+	# 循环变量不带 SdfProp 类型标注：静止造物被 chunk_manager 烘焙成静态网格后 queue_free（预期），
+	# _props 留悬垂引用；带类型 for 对已释放元素做类型化赋值即报「freed instance」（早于循环体 guard），
+	# 故去类型 + is_instance_valid 跳过。其 _animated/_moved 在释放前已按 name 记录，判定不受影响。
+	for p in _props:
+		if not is_instance_valid(p):
+			continue
+		var sp := p as SdfProp
+		if (sp.position - (_pos0[sp.name] as Vector3)).length() > 0.08:
+			_moved[sp.name] = true
+		var last: SdfMath.Prim = sp.prims[sp.prims.size() - 1]
 		# 阈值 0.01：安静物品（纸/蜡笔）只有待机呼吸（±0.02 的 y 起伏）也要能判活
-		if (last.xform.origin - (_prim0[p.name] as Vector3)).length() > 0.01:
-			_animated[p.name] = true
+		if (last.xform.origin - (_prim0[sp.name] as Vector3)).length() > 0.01:
+			_animated[sp.name] = true
 
 func _liveness() -> void:
 	var moved_count := 0
 	var animated_count := 0
 	var unstable := 0
-	for p: SdfProp in _props:
-		if _moved[p.name]:
+	# 计数按 name 查字典（_collect 建键），不碰节点：已烘焙释放的 prop 也算数（动画在释放前已记录）。
+	for nm in _animated.keys():
+		if _moved[nm]:
 			moved_count += 1
-		if _animated[p.name]:
+		if _animated[nm]:
 			animated_count += 1
-		for pr: SdfMath.Prim in p.prims:
+	# 稳定性检查要读 prims，去类型 + 跳过已释放节点（同 _observe）。
+	for p in _props:
+		if not is_instance_valid(p):
+			continue
+		for pr: SdfMath.Prim in (p as SdfProp).prims:
 			var o := pr.xform.origin
 			if not (is_finite(o.x) and is_finite(o.y) and is_finite(o.z)) or o.length() > 20.0:
 				unstable += 1
