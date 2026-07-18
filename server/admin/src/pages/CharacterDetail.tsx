@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { assetUrl, fmtTs, useApi } from '../api.ts';
 import { MEMORY_KIND_LABELS, type CharacterDetail, type MemoryItem } from '../types.ts';
@@ -11,6 +12,30 @@ function groupByKind(items: MemoryItem[]): [string, MemoryItem[]][] {
     by.set(m.kind, arr);
   }
   return [...by.entries()];
+}
+
+/** 按玩家分组：每个玩家一组，匿名/未绑定桶（player_id 为空）排最后。 */
+function groupByPlayer<T>(items: T[], keyOf: (x: T) => string | undefined): [string, T[]][] {
+  const by = new Map<string, T[]>();
+  for (const it of items) {
+    const k = keyOf(it) ?? '';
+    const arr = by.get(k) ?? [];
+    arr.push(it);
+    by.set(k, arr);
+  }
+  return [...by.entries()].sort((a, b) => (a[0] === '' ? 1 : b[0] === '' ? -1 : 0));
+}
+
+/** 玩家分组表头：具名玩家给可点链接，匿名桶给徽章说明。 */
+function PlayerGroupHead({ id, count }: { id: string; count: number }): ReactNode {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid var(--line, #e5e0d5)' }}>
+      {id
+        ? <Link className="mono" to={`/players/${id}`}>玩家 @<ShortId id={id} /></Link>
+        : <span className="badge" title="没有玩家 id 的历史遗留数据（老客户端/迁移产生），对所有玩家可见">匿名 / 未绑定玩家</span>}
+      <span className="mono" style={{ color: 'var(--dim, #999)' }}>×{count}</span>
+    </div>
+  );
 }
 
 export function CharacterDetailPage() {
@@ -65,34 +90,38 @@ export function CharacterDetailPage() {
             </dl>
           </div>
 
-          <h2 className="sect">记忆（{data.memories.length}）</h2>
-          {data.memories.length === 0 ? <div className="empty">还没有记忆</div> : groupByKind(data.memories).map(([kind, items]) => (
-            <div className="panel" style={{ marginBottom: 10 }} key={kind}>
-              <div style={{ marginBottom: 4 }}><span className="badge seal">{MEMORY_KIND_LABELS[kind] ?? kind}</span> <span className="mono">×{items.length}</span></div>
-              {items.map((m, i) => (
-                <div className="mem" key={i}>
-                  <span>{m.text}</span>
-                  {m.aboutPlayer && <Link className="mono" to={`/players/${m.aboutPlayer}`} style={{ marginLeft: 'auto' }}>@<ShortId id={m.aboutPlayer} /></Link>}
-                  <span className="mono" style={m.aboutPlayer ? {} : { marginLeft: 'auto' }}>{m.ts ? fmtTs(m.ts) : ''}</span>
+          <h2 className="sect">记忆（{data.memories.length}）· 按玩家分开</h2>
+          {data.memories.length === 0 ? <div className="empty">还没有记忆</div> : groupByPlayer(data.memories, (m) => m.aboutPlayer).map(([pid, mems]) => (
+            <div className="panel" style={{ marginBottom: 10 }} key={pid || '__anon'}>
+              <PlayerGroupHead id={pid} count={mems.length} />
+              {groupByKind(mems).map(([kind, items]) => (
+                <div style={{ marginBottom: 6 }} key={kind}>
+                  <div style={{ marginBottom: 4 }}><span className="badge seal">{MEMORY_KIND_LABELS[kind] ?? kind}</span> <span className="mono">×{items.length}</span></div>
+                  {items.map((m, i) => (
+                    <div className="mem" key={i}>
+                      <span>{m.text}</span>
+                      <span className="mono" style={{ marginLeft: 'auto' }}>{m.ts ? fmtTs(m.ts) : ''}</span>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
           ))}
 
-          <h2 className="sect">近期对话（{data.chatTurns.length}）</h2>
-          {data.chatTurns.length === 0 ? <div className="empty">还没有对话</div> : (
-            <div className="panel">
+          <h2 className="sect">近期对话（{data.chatTurns.length}）· 按玩家分开</h2>
+          {data.chatTurns.length === 0 ? <div className="empty">还没有对话</div> : groupByPlayer(data.chatTurns, (t) => t.playerId).map(([pid, turns]) => (
+            <div className="panel" style={{ marginBottom: 10 }} key={pid || '__anon'}>
+              <PlayerGroupHead id={pid} count={turns.length} />
               <div className="chat">
-                {data.chatTurns.map((t, i) => (
+                {turns.map((t, i) => (
                   <div className={`turn ${t.role}`} key={i}>
                     <span className="who">{t.role === 'child' ? '小朋友' : c.name.slice(0, 3)}</span>
                     <span className="bubble">{t.text}</span>
-                    {t.playerId && <Link className="mono" to={`/players/${t.playerId}`}><ShortId id={t.playerId} /></Link>}
                   </div>
                 ))}
               </div>
             </div>
-          )}
+          ))}
 
           <h2 className="sect">行为脚本</h2>
           <pre className="code">{JSON.stringify(c.behaviorScript, null, 2)}</pre>
