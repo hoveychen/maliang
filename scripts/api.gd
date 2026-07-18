@@ -120,21 +120,6 @@ func _compress_for_gpu(img: Image) -> void:
 	if img.compress(mode as Image.CompressMode, Image.COMPRESS_SOURCE_SRGB) != OK:
 		push_warning("图集显存压缩失败（回退未压缩）：%dx%d" % [img.get_width(), img.get_height()])
 
-## 新建世界（后端会种入点点）。失败返回空字典。
-func create_world() -> Dictionary:
-	var http := HTTPRequest.new()
-	add_child(http)
-	var err := http.request(base + "/worlds", [], HTTPClient.METHOD_POST)
-	if err != OK:
-		http.queue_free()
-		return {}
-	var res: Array = await http.request_completed
-	http.queue_free()
-	if int(res[1]) != 200:
-		return {}
-	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
-	return data if typeof(data) == TYPE_DICTIONARY else {}
-
 ## GET JSON → JSON（path 自带 query）。失败/非 200 返回空字典。
 func get_json(path: String) -> Dictionary:
 	var http := HTTPRequest.new()

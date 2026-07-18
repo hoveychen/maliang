@@ -4064,7 +4064,7 @@ func _on_failed(reason: String) -> void:
 		banner.visible = true
 		_vc.cancel() # 录音中则静默丢弃本段，麦克风继续开着让孩子重说（幂等）
 
-## 在线引导：POST /worlds → 连 WS → 按世界状态生成角色（含点点）。离线则保留占位 NPC。
+## 在线引导：GET /worlds/default → 连 WS → 按世界状态生成角色（含点点）。离线则保留占位 NPC。
 ## _bootstrapping 全程置位，无论在线/离线都在收尾清零——world_ready 就绪判定据此知道引导已结束。
 ## 当前场景 id（模型 B：world 含多 scene）。进世界时按初始场景置初值，走 portal（enter_scene）时更新。
 var _scene_id := "village"

@@ -12,6 +12,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
 import { WorldStore, BACKUP_VERSION, type BackupManifest } from '../src/persistence.ts';
 import { startBackup, restoreBackup } from '../src/backup.ts';
 import { buildServer } from '../src/server.ts';
@@ -222,11 +223,14 @@ describe('全量备份导入', () => {
 describe('备份端点门禁', () => {
   let app: FastifyInstance;
   let dataDir: string;
+  let store: WorldStore;
   before(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'maliang-ep-'));
     process.env.MALIANG_ADMIN_TOKEN = TOKEN;
     process.env.MALIANG_DATA_DIR = join(dataDir, 'data');
-    app = await buildServer();
+    // 注入 store：POST /worlds 已下线，往返测试改用 store.createWorld 造世界（restoreBackup 原地重载同一 store）。
+    store = new WorldStore(join(dataDir, 'data'));
+    app = await buildServer({ store });
   });
   after(async () => {
     await app.close();
@@ -286,13 +290,9 @@ describe('备份端点门禁', () => {
    * 世界毁了以后，拿着导出的包，能不能把数据一模一样地拿回来。
    */
   it('往返：导出 → 数据被毁 → 导入 → 数据一模一样回来了', async () => {
-    // 通过公开 API 造一个真实世界（不是直接戳 store）
-    const created = await app.inject({
-      method: 'POST',
-      url: '/worlds',
-      payload: {},
-    });
-    const worldId = JSON.parse(created.payload).id as string;
+    // 造一个真实世界（POST /worlds 已下线，直接经注入的 store 建）
+    const worldId = randomUUID();
+    store.createWorld(worldId);
 
     // 导出
     const dump = await app.inject({
@@ -308,7 +308,7 @@ describe('备份端点门禁', () => {
     ) as { worlds: number };
 
     // 毁数据：再造几个世界，让现状明显偏离备份那一刻
-    for (let i = 0; i < 3; i++) await app.inject({ method: 'POST', url: '/worlds', payload: {} });
+    for (let i = 0; i < 3; i++) store.createWorld(randomUUID());
     const damaged = JSON.parse(
       (await app.inject({ method: 'GET', url: '/debug/api/overview', headers: { 'x-admin-token': TOKEN } })).payload,
     ) as { worlds: number };

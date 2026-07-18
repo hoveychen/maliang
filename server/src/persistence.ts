@@ -700,6 +700,40 @@ export class WorldStore {
     return this.#db.prepare('SELECT 1 FROM worlds WHERE id = ?').get(id) !== undefined;
   }
 
+  /** world 是否存在（轻量：只查主键，不加载角色）。调用方据此拒绝对不存在世界的注册/落库。 */
+  worldExists(id: string): boolean {
+    return this.#worldExists(id);
+  }
+
+  /**
+   * 删除一个世界及其全部关联数据（级联，事务原子）。返回是否真的删了（world 不存在则 false）。
+   * 唯一调用方：admin DELETE /admin/worlds/:id，清理无主的空壳世界（脏数据）。
+   * 按 world_id 分区的表全清；memories/chat_turns 按该世界的角色 id 级联（这两表不带 world_id）；
+   * locations 是纯内存态，一并清。players/creation_icons/item_icons 等全局表与世界无关，不动。
+   */
+  deleteWorld(id: string): boolean {
+    if (!this.#worldExists(id)) return false;
+    const charIds = (this.#db.prepare('SELECT id FROM characters WHERE world_id = ?').all(id) as { id: string }[]).map((r) => r.id);
+    this.#db.exec('BEGIN');
+    try {
+      if (charIds.length) {
+        const ph = charIds.map(() => '?').join(',');
+        this.#db.prepare(`DELETE FROM memories WHERE owner_character_id IN (${ph})`).run(...charIds);
+        this.#db.prepare(`DELETE FROM chat_turns WHERE character_id IN (${ph})`).run(...charIds);
+      }
+      for (const t of ['characters', 'props', 'items', 'bag', 'wallets', 'player_tasks', 'player_discovered', 'player_positions', 'scenes', 'visits']) {
+        this.#db.prepare(`DELETE FROM ${t} WHERE world_id = ?`).run(id);
+      }
+      this.#db.prepare('DELETE FROM worlds WHERE id = ?').run(id);
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
+    }
+    this.#locations.delete(id);
+    return true;
+  }
+
   addCharacter(character: Character): void {
     if (!this.#worldExists(character.worldId)) throw new Error(`world not found: ${character.worldId}`);
     this.saveCharacter(character);
@@ -1462,6 +1496,9 @@ export class WorldStore {
    * device 为本次连接的设备快照（activity 记录）；无则 null。
    */
   startVisit(worldId: string, playerId: string, startedAt: number, device?: DeviceSnapshot | null): number {
+    // 纵深护栏：world 不存在就不落 visit（否则 world_info 带个乱 worldId 连上来会留孤儿 visit 行）。
+    // 返回 -1 表示未落库，调用方（startSessionVisit）据此不起会话。
+    if (!this.#worldExists(worldId)) return -1;
     const info = this.#db
       .prepare('INSERT INTO visits (world_id, player_id, started_at, ended_at, device) VALUES (?, ?, ?, NULL, ?)')
       .run(worldId, playerId, startedAt, device ? JSON.stringify(device) : null);

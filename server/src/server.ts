@@ -278,12 +278,10 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { ok: true, levels: levels ?? sample.levels, samples: store.listDeviceLevels(sample.gpu, sample.benchVersion).length };
   });
 
-  // 新建世界（种入点点）
-  app.post('/worlds', async () => {
-    const world = store.createWorld();
-    store.addCharacter(seedFairy(world.id));
-    return { id: world.id, characters: characterListView(store, world.id) };
-  });
+  // 世界只有固定的 "default" 一个：由下面的 GET /worlds/:id 首次访问时自动创建并种入点点。
+  // 曾有 POST /worlds（建随机 UUID 世界 + 只种点点），但现网客户端固定加载 default、无任何合法调用方，
+  // 它只会被旧客户端/指向 prod 的测试凭空造出「只有点点」的空壳世界（脏数据），故已下线。
+  // 将来真要多世界，再按需重建带鉴权的建世界入口。
 
   // 拉世界状态。固定的 "default" 世界不存在时自动创建并种入点点
   // （初始村民由 seed 脚本生成；客户端默认加载 default 世界）。
@@ -303,6 +301,15 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       scenes: store.listScenes(world.id),
       items: [...BUILTIN_ITEMS, ...store.listWorldItems(world.id)],
     };
+  });
+
+  // 删除一个世界及全部关联数据（级联）。admin 门禁——清理无主的空壳世界（旧客户端/测试留下的脏数据）。
+  app.delete<{ Params: { id: string } }>('/admin/worlds/:id', async (req, reply) => {
+    if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    const deleted = store.deleteWorld(req.params.id);
+    if (!deleted) return reply.code(404).send({ error: 'world not found' });
+    app.log.warn({ worldId: req.params.id }, 'world deleted via admin endpoint');
+    return { ok: true, deleted: req.params.id };
   });
 
   // 为世界里的点点补一张真实 sprite。幂等：已有则跳过；?force=true 强制重生成；
@@ -1414,7 +1421,9 @@ export function startSessionVisit(
   device?: DeviceSnapshot | null,
 ): void {
   if (session.visit) void endSessionVisit(session, adapters, store, now); // 收尾旧的（同步排空 pending，抽取后台跑）
-  session.visit = { id: store.startVisit(worldId, playerId, now, device), worldId, playerId, pending: new Map(), history: new Map(), summary: new Map(), compacting: new Set() };
+  const id = store.startVisit(worldId, playerId, now, device);
+  if (id < 0) { session.visit = null; return; } // world 不存在（startVisit 拒绝）→ 不起会话
+  session.visit = { id, worldId, playerId, pending: new Map(), history: new Map(), summary: new Map(), compacting: new Set() };
 }
 
 /** 记一轮对话进当前 Visit 的增量；单角色超阈值即中途 flush 兜底（后台跑，不阻塞回复路径）。 */
@@ -2979,7 +2988,8 @@ export async function handleWsMessage(
     const device = buildDeviceSnapshot(session, msg.profile?.device);
     startSessionVisit(session, worldId, session.playerId, adapters, store, Date.now(), device);
     // 多人基座：登记进 world 分组；首位进入者为 host（NPC 模拟所有权），换世界时旧世界可能换 host。
-    if (hub) {
+    // world 不存在（乱 worldId 连上来）就不入 hub——现网只连必然存在的 default，此护栏零误伤。
+    if (hub && store.worldExists(worldId)) {
       const joined = hub.join(worldId, {
         clientId: connKey,
         playerId: session.playerId,
