@@ -176,6 +176,12 @@
       "prompt": "a cute cozy little cottage house with a warm red triangular roof, a round wooden door and a glowing yellow window, a small heart floating above the chimney, welcoming and toy-like"
     },
     {
+      "id": "app_wishes",
+      "kind": "sticker",
+      "targetSize": 256,
+      "prompt": "a cute cream wish list note pinned with a tiny wooden clip, three rounded blank lines and a big glowing golden wish star at the top, a small pink heart floating beside it"
+    },
+    {
       "id": "reward_flower",
       "kind": "sticker",
       "targetSize": 256,
