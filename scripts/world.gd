@@ -1249,7 +1249,8 @@ func _update_npc_greetings(delta: float) -> void:
 		var node: Node = n.get("node")
 		var hijacked: bool = n == _stopped or (selected != null and node == selected)
 		n["greet_hijack"] = hijacked
-		n["greet_free"] = not (hijacked or _has_executor_for(n))
+		# 闲逛(ambient)不算忙——否则村民默认都在闲逛就永远没人能被拉去迎接；只有真任务执行器才算占用。
+		n["greet_free"] = not (hijacked or _has_task_executor_for(n))
 	var engaged := _intro_active \
 			or InteractionFsm.player_engaged(_fsm_inputs()) \
 			or (fairy_voice != null and fairy_voice.is_playing())
@@ -2570,6 +2571,16 @@ func _resume_ambient(n: Dictionary) -> void:
 func _has_executor_for(dict: Dictionary) -> bool:
 	for ex in _executors:
 		if not (ex as BehaviorExecutor).is_done() and (ex as BehaviorExecutor).drives(dict):
+			return true
+	return false
+
+## 有【非 ambient】执行器（真任务：送信/跑腿/正在被主动迎接的 follow）正在驱动这个角色吗。
+## 主动社交资格判定用它——ambient 闲逛不算忙，否则每个村民默认都在闲逛就永远没人能被拉去迎接
+## （主动迎接本就用 _run_behavior 抢占闲逛，见 _update_npc_greetings 的 approach 分支）。
+func _has_task_executor_for(dict: Dictionary) -> bool:
+	for ex in _executors:
+		var e := ex as BehaviorExecutor
+		if not e.is_done() and e.drives(dict) and not e.ambient:
 			return true
 	return false
 
