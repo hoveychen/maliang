@@ -700,6 +700,11 @@ export class WorldStore {
     return this.#db.prepare('SELECT 1 FROM worlds WHERE id = ?').get(id) !== undefined;
   }
 
+  /** world 是否存在（轻量：只查主键，不加载角色）。调用方据此拒绝对不存在世界的注册/落库。 */
+  worldExists(id: string): boolean {
+    return this.#worldExists(id);
+  }
+
   addCharacter(character: Character): void {
     if (!this.#worldExists(character.worldId)) throw new Error(`world not found: ${character.worldId}`);
     this.saveCharacter(character);
@@ -1462,6 +1467,9 @@ export class WorldStore {
    * device 为本次连接的设备快照（activity 记录）；无则 null。
    */
   startVisit(worldId: string, playerId: string, startedAt: number, device?: DeviceSnapshot | null): number {
+    // 纵深护栏：world 不存在就不落 visit（否则 world_info 带个乱 worldId 连上来会留孤儿 visit 行）。
+    // 返回 -1 表示未落库，调用方（startSessionVisit）据此不起会话。
+    if (!this.#worldExists(worldId)) return -1;
     const info = this.#db
       .prepare('INSERT INTO visits (world_id, player_id, started_at, ended_at, device) VALUES (?, ?, ?, NULL, ?)')
       .run(worldId, playerId, startedAt, device ? JSON.stringify(device) : null);

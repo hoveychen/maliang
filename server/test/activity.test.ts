@@ -65,6 +65,7 @@ describe('buildDeviceSnapshot：连接层 + 客户端上报合并', () => {
 describe('startVisit/listActivity：设备快照落库与读回', () => {
   it('存进去能原样读回来', () => {
     const store = new WorldStore();
+    store.createWorld('w1');
     const dev = { ip: '1.2.3.4', ua: 'UA', model: 'MatePad', os: 'Android', osVersion: '14', screen: '2000x1200', godot: '4.6', app: 'g' };
     store.startVisit('w1', 'p1', 1000, dev);
     const acts = store.listActivity();
@@ -74,11 +75,13 @@ describe('startVisit/listActivity：设备快照落库与读回', () => {
   });
   it('不带设备（旧路径）→ device 为 null，不炸', () => {
     const store = new WorldStore();
+    store.createWorld('w1');
     store.startVisit('w1', 'p1', 1000);
     assert.equal(store.listActivity()[0]!.device, null);
   });
   it('倒序 + 分页', () => {
     const store = new WorldStore();
+    store.createWorld('w1');
     for (let i = 0; i < 5; i++) store.startVisit('w1', `p${i}`, 1000 + i);
     const page = store.listActivity(2, 0);
     assert.equal(page.length, 2);
@@ -107,6 +110,7 @@ describe('迁移：旧库 visits 无 device 列 → 补列，旧行读为 null',
       assert.equal(acts[0]!.device, null, '旧行的 device 读为 null');
 
       // 迁移后还能正常写带设备的新会话
+      store.createWorld('w1'); // 新会话要求 world 存在（startVisit 纵深护栏）
       store.startVisit('w1', 'new-player', 700, { ip: '9.9.9.9' });
       assert.equal(store.listActivity()[0]!.device?.ip, '9.9.9.9');
     } finally {
