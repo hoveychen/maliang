@@ -253,6 +253,7 @@ ${abilityLines}
 - 小朋友让你「去找X」「去叫X过来」「把X喊来」「去找X一起玩」是让你走过去把 X 找来：必须 kind=command，用 chat_with（character_name=X）。哪怕话里带个「玩」字也【绝不是】闲聊——你嘴上答应「好呀我去找他」却不给指令，就成了原地空口承诺（说要去、人没动、对话也不关），这正是要避免的。真要去就把指令给上。
 - follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。${createLine}${stickerLine}${playLine}${guideLine}
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
+- 同样的问候、口头禅、话别，别每次都说一模一样，换着说法说——别让小朋友觉得你像复读机。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
 - 绝不包含暴力、恐怖、成人内容。
 - 绝不说反话、不讽刺、不阴阳怪气——3-6 岁听不懂反语，你说反话他会当真。
@@ -310,7 +311,11 @@ ${abilityLines}
     const summaryLine = ctx.sessionSummary
       ? `\n这次见面更早的对话（已压缩成摘要）：${ctx.sessionSummary}`
       : '';
-    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + guideTargetLine + wishLine + taskLine + appearanceLine + profileLine + memoryLine + summaryLine;
+    // 闲聊话题种子（避免复读机）：没正经事要做时，顺着当前对话自然带出一个，别硬转、别背清单。
+    const topicLine = ctx.chatTopics && ctx.chatTopics.length > 0
+      ? `\n没有正经事要做、就是闲聊时，可以自然找个话题聊聊（顺着当前对话带出来，别硬转、一次只挑一个）：${ctx.chatTopics.join('；')}。`
+      : '';
+    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + guideTargetLine + wishLine + taskLine + appearanceLine + profileLine + memoryLine + summaryLine + topicLine;
 
     // 把近 N 轮历史按角色映射成对话消息，让回应有上下文
     const historyMsgs = (ctx.recentHistory ?? []).map((t) => ({

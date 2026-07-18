@@ -6,6 +6,7 @@ import { pickTaskCandidate } from './tasks.ts';
 import { wishFor } from './wishes.ts';
 import { pickGreeting } from './greetings.ts';
 import { onboardingProfileNote, appearanceNote } from './avatar_options.ts';
+import { pickChatTopics } from './chat_topics.ts';
 import { planGuide, listGuideTargets } from './guide.ts';
 import { matchByName } from './names.ts';
 
@@ -105,6 +106,8 @@ export async function respondToTranscript(
     childProfile: character.isFairy ? onboardingProfileNote(profile) : undefined,
     // 外观 + 身上贴纸（当面可见）：点点/村民都注入；都空为 undefined，零 token。
     appearanceNote: appearanceNote(profile?.visualDescription, stickerNames),
+    // 闲聊话题种子（避免复读机）：村民得了解型（借机问喜好）、点点得已知型；排除已聊过的。
+    chatTopics: pickChatTopics({ isFairy: !!character.isFairy, profile, memory: memories }),
     // 稳定缓存键：绑 world×角色×玩家，做 OpenRouter sticky routing 命中 prompt cache（同一对话连续命中）。
     cacheKey: `${worldId}:${characterId}:${playerId}`,
   });
