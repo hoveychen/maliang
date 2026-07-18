@@ -348,6 +348,18 @@
       "trigger": "reuse_hint",
       "cooldown": 45,
       "text": "点点记得你造过一个差不多的呢，就在小册子里哦！"
+    },
+    {
+      "id": "fairy_story_pigs_1",
+      "trigger": "poi_story_pigs",
+      "cooldown": 300,
+      "text": "这里住着三只小猪哦，猪大哥肚子里有好听的故事呢。"
+    },
+    {
+      "id": "fairy_story_pigs_2",
+      "trigger": "poi_story_pigs",
+      "cooldown": 300,
+      "text": "咦，是小猪的家呀……想听故事的话，去跟猪大哥说说话吧。"
     }
   ]
 }

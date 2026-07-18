@@ -38,6 +38,8 @@ signal failed(reason: String)
 # 奖赏系统：world_info 后的状态同步 / 委托完成盖章升花
 signal world_state(data: Dictionary)
 signal task_complete(data: Dictionary)
+## 剧情互动委托（M2）：演出收场服务端直接递来的委托（不经 character_response）。
+signal task_offer(data: Dictionary)
 ## 村民的心愿漏话候选 + 玩家已发现的玩法（服务端持久口径，进世界/换场景/发现新玩法后重发）。
 signal npc_wishes(wishes: Array, discovered: Array, reuse_hint: Variant)  ## reuse_hint: {itemId,itemName} 或 null（B3 复用提示）
 signal praise_tts(data: Dictionary)
@@ -441,6 +443,8 @@ func _dispatch(data: Dictionary) -> void:
 			world_state.emit(data)
 		"task_complete":
 			task_complete.emit(data)
+		"task_offer":
+			task_offer.emit(data)
 		"npc_wishes":
 			npc_wishes.emit(data.get("wishes", []), data.get("discovered", []), data.get("reuseHint", null))
 		"praise_tts":
