@@ -30,6 +30,13 @@ func _ready() -> void:
 			# 后台预加载：演出推进时不再同步 load 卡帧
 			ResourceLoader.load_threaded_request("%s/%s.wav" % [VOICE_DIR, String(l["id"])])
 
+## 退出时排空在飞的线程化加载，防 worker mid-load 时进程退出崩溃（见 GameAudio._drain_threaded_loads）。
+func _exit_tree() -> void:
+	var paths: Array = []
+	for id in _lines.keys():
+		paths.append("%s/%s.wav" % [VOICE_DIR, String(id)])
+	GameAudio._drain_threaded_loads(paths)
+
 func _process(delta: float) -> void:
 	_t += delta
 
