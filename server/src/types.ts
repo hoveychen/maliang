@@ -418,8 +418,20 @@ export interface IntentContext {
    * 玩家 onboarding 档案摘要（喜好接线，docs/onboarding-avatar-redesign-design.md §2.5）：
    * 称呼/喜欢的图案/主色/形象创作原话——注入后点点/村民能自然提起（「你不是最喜欢小恐龙嘛」）。
    * 由 onboardingProfileNote(store.getOnboardingProfile(playerId)) 生成，无档案则 undefined。
+   * 【信息不对称】现在只对点点（isFairy）注入——村民不先天知道小朋友的名字/喜好，靠对话积累。
    */
   childProfile?: string;
+  /**
+   * 当前对话玩家的外观 + 身上贴纸的文字描述（当面可见，点点/村民都注入）：
+   * 由 appearanceNote(profile.visualDescription, 贴纸名) 生成，都空则 undefined。
+   * 让角色能自然夸夸小朋友的样子、提到TA身上贴的贴纸。
+   */
+  appearanceNote?: string;
+  /**
+   * 本轮可选的闲聊话题种子（挑没聊过的，避免复读机）：村民得「了解型」开放话题（借机问出喜好），
+   * 点点得「已知型」基于喜好深入的话题。由 pickChatTopics 生成，无话题则 undefined/空。
+   */
+  chatTopics?: string[];
 }
 
 /** session 超长压缩（compactSession）的上下文：把较旧轮次压成一段中文摘要，session 内继续对话时注入。 */

@@ -285,7 +285,12 @@ ${abilityLines}
       ? `\n你自己的一个念想：${ctx.wishContext}\n小朋友要是问起、或者话赶话聊到了，就用你的口吻说说这个念想（你有多想要、想着它的时候什么心情）。` +
         `\n但【绝不要】开口求他帮忙、也不要提「小仙子能变出来」——你只是在说自己的心事。他愿不愿意帮、想到去找谁帮，都由他自己决定。`
       : '';
+    // 外观 + 身上贴纸（点点/村民都注入——当面看得到，不做信息不对称）：给角色一点「看得见」的谈资。
+    const appearanceLine = ctx.appearanceNote
+      ? `\n你现在看到的这个小朋友：${ctx.appearanceNote}。可以自然地夸夸TA的样子、或提到TA身上贴的贴纸，但别每句都提。`
+      : '';
     // onboarding 档案喜好（P5 接线）：让角色能自然提起小朋友的喜好——但只做谈资，不做清单背诵。
+    // 【信息不对称】ctx.childProfile 现在只有点点非空（村民 voice.ts 传 undefined），村民自然不出现这行。
     const profileLine = ctx.childProfile
       ? `\n关于这位小朋友（TA创建自己形象时留下的）：${ctx.childProfile}。` +
         `聊天时机合适可以自然提起（如「你不是最喜欢小恐龙嘛」），一次最多提一样，别每句都提、别背清单。`
@@ -305,7 +310,7 @@ ${abilityLines}
     const summaryLine = ctx.sessionSummary
       ? `\n这次见面更早的对话（已压缩成摘要）：${ctx.sessionSummary}`
       : '';
-    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + guideTargetLine + wishLine + taskLine + profileLine + memoryLine + summaryLine;
+    const system = staticSystem + PROMPT_DYNAMIC_BOUNDARY + rosterLine + locationLine + guideTargetLine + wishLine + taskLine + appearanceLine + profileLine + memoryLine + summaryLine;
 
     // 把近 N 轮历史按角色映射成对话消息，让回应有上下文
     const historyMsgs = (ctx.recentHistory ?? []).map((t) => ({

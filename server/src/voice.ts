@@ -5,7 +5,7 @@ import { effectiveAbilities, DEFAULT_SCENE } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
 import { wishFor } from './wishes.ts';
 import { pickGreeting } from './greetings.ts';
-import { onboardingProfileNote } from './avatar_options.ts';
+import { onboardingProfileNote, appearanceNote } from './avatar_options.ts';
 import { planGuide, listGuideTargets } from './guide.ts';
 import { matchByName } from './names.ts';
 
@@ -76,6 +76,12 @@ export async function respondToTranscript(
 
   // 长期记忆按「当前玩家」维度取该 NPC 对他的记忆（含 aboutPlayer='' 未绑定历史），带 kind 注入（分组）。
   const memories = store.getMemories(characterId, playerId).map((m) => ({ text: m.text, kind: m.kind }));
+  // 玩家 onboarding 档案取一次，喜好摘要与外观描述共用。
+  const profile = store.getOnboardingProfile(playerId);
+  // 玩家身上贴的贴纸（服务端权威，装扮 app 的 player_attach 写入）→ 解出显示名，拼进「你看到的样子」。
+  const stickerNames = (store.getPlayer(playerId)?.attachments ?? [])
+    .map((a) => store.getItemDef(worldId, a.itemId)?.name)
+    .filter((n): n is string => !!n);
   const abilities = effectiveAbilities(character);
   // 引路候选只对有 guide_to 的角色（小仙子）算：村民带不了路，白搭 prompt token。
   const guideTargets = abilities.includes('guide_to')
@@ -95,8 +101,10 @@ export async function respondToTranscript(
     activeTask,
     taskCandidate,
     wishContext,
-    // onboarding 档案喜好摘要（点点/村民都注入——对话都走本函数）：无档案为 undefined，零 token
-    childProfile: onboardingProfileNote(store.getOnboardingProfile(playerId)),
+    // onboarding 档案喜好摘要（名字/喜好）：【信息不对称】现在只对点点注入——村民不先天知道，靠聊积累。
+    childProfile: character.isFairy ? onboardingProfileNote(profile) : undefined,
+    // 外观 + 身上贴纸（当面可见）：点点/村民都注入；都空为 undefined，零 token。
+    appearanceNote: appearanceNote(profile?.visualDescription, stickerNames),
     // 稳定缓存键：绑 world×角色×玩家，做 OpenRouter sticky routing 命中 prompt cache（同一对话连续命中）。
     cacheKey: `${worldId}:${characterId}:${playerId}`,
   });
