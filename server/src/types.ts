@@ -438,6 +438,12 @@ export interface Character {
    * 存量角色首次需要供给时懒生成（见 task_chain.ensureTaskChain，失败回退确定性模板链）。
    */
   taskChain?: TaskChain;
+  /**
+   * 故事角色标记（M2 章回剧情，docs/m2-story-director-design.md §4.1）：随世界 seed 落 roster 的
+   * 册内角色。resident=false（未入住）时不进任何供给面（心愿/漏话/委托/主动社交）——防止狼在村里
+   * 漏话；整册完结翻 resident=true 才放行。gate 角色（册的 gateCastId）例外：可搭话，搭话即触发。
+   */
+  storyRole?: { bookId: string; castId: string; resident: boolean };
 }
 
 /** 造角色编排的阶段，顺序固定，用于进度推送。 */
@@ -575,6 +581,8 @@ export interface VoiceResponse {
   guideStop?: boolean;
   /** play_game 意图的游戏口语描述（「踢球」「老鹰抓小鸡」）：不下发客户端，由 WS 层摘走→LLM 生成剧本→过 typecheck→开演（stage_begin 广播）。仅小仙子有此能力。 */
   gameRequest?: string;
+  /** start_story 意图命中的册 id（M2 章回剧情）：不下发客户端，由 WS 层摘走→startStoryAsync 开演本幕。仅故事 gate 角色有此能力。 */
+  storyRequest?: string;
   /** 主动招呼（进对话对方先开口）：transcript 为空且非玩家发起，客户端据此跳过「没听清」提示。 */
   greeting?: boolean;
 }

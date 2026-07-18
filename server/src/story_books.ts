@@ -70,3 +70,16 @@ export interface StoryBook {
 
 /** 全部册注册表（bookId → 册）。首册《三只小猪》P3 注册。 */
 export const STORY_BOOKS: Record<string, StoryBook> = {};
+
+/**
+ * 故事角色在 roster 里的 characterId 约定（seed 与选角共用同一推导，不查表）：
+ * 同一册同一 castId 在任何世界都是同一个 id——选角（buildStoryStageOpts）按它直取角色。
+ */
+export function storyCharacterId(bookId: string, castId: string): string {
+  return `story_${bookId}_${castId}`;
+}
+
+/** 未入住的故事角色（供给面早返回的统一判据：狼/还没演到入住的小猪不漏话不派活不迎客）。 */
+export function isUnsettledStoryRole(c: { storyRole?: { resident: boolean } }): boolean {
+  return !!c.storyRole && !c.storyRole.resident;
+}

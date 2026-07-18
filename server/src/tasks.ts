@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { MAX_FLOWERS, STAMPS_PER_FLOWER, STAMP_STYLES, type ActiveTask, type Character, type TaskType, type Wallet } from './types.ts';
 import type { WorldStore } from './persistence.ts';
 import { wishFor, pickThanks, WISHES } from './wishes.ts';
+import { isUnsettledStoryRole } from './story_books.ts';
 import { advanceChainOnComplete } from './task_chain.ts';
 import { sizeToScale, type CreatureSize } from './creation_options.ts';
 import { REFINE_MAX_TRIES, refineDirFor } from './refinements.ts';
@@ -38,6 +39,8 @@ export function pickTaskCandidate(
   if (store.getActiveTask(worldId, playerId)) return null;
   const npc = store.getCharacter(worldId, npcId);
   if (!npc || npc.isFairy) return null;
+  // 未入住的故事角色不派活（M2 §4.1）：它们的戏在 StoryDirector，入住（resident 翻真）才进供给面。
+  if (isUnsettledStoryRole(npc)) return null;
   const base = {
     id: randomUUID(),
     npcId,

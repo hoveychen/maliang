@@ -98,7 +98,9 @@ import { leakPoolFor, reuseHint } from './wishes.ts';
 import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
-import { buildDebut, DebutError } from './stage_debut.ts';
+import { buildDebut, buildStoryStageOpts, DebutError } from './stage_debut.ts';
+import { StoryDirector } from './story_director.ts';
+import { STORY_BOOKS, isUnsettledStoryRole } from './story_books.ts';
 import { buildStageOptsFromDraft } from './screenplay_gen.ts';
 import { SCREENPLAYS, type ScreenplayName } from './screenplays.ts';
 import type { StagePropMaker } from './stage_types.ts';
@@ -1189,6 +1191,13 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   // 全局并发演出上限(worker 内存/线程防线):环境变量 MAX_CONCURRENT_STAGES 覆盖缺省。
   const maxStages = Number(process.env.MAX_CONCURRENT_STAGES) || DEFAULT_MAX_CONCURRENT_STAGES;
   const stages = new StageDirector(hub, makeStageProp, maxStages);
+  // 章回剧情编排（M2）：stage 启动函数直供 StageStartOpts（选角按册 cast，绕 LLM 编剧）。
+  // 选角失败（角色缺席/剧本缺文件）在 trigger 内部转中断回幕首；startStage 返回 null（被抢先）同理。
+  const stories = new StoryDirector(store, async ({ worldId, playerId, book, chapter }) => {
+    const opts = buildStoryStageOpts(store, hub, worldId, playerId, book, chapter);
+    const run = stages.startStage(worldId, opts);
+    return run ?? { status: 'error', message: '这个世界正在演出' };
+  });
 
   // 管理端点：拿一个手写剧本在指定世界开演（试演/真机验收用；Plan 2 上线后由语音意图触发）。
   // 演出广播给世界里所有连接，孩子的平板会直接进观演态——所以世界里得先有人。
@@ -1248,7 +1257,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
         }
         return;
       }
-      void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session, hub, stages);
+      void handleWsMessage(socket, raw.toString(), adapters, store, limiter, connKey, session, hub, stages, stories);
     });
     // 心跳空闲扫描：新客户端会发 ping 刷新 lastSeen；超时无任何消息即判半开连接，
     // terminate 触发下面的 close 处理清 hub 幽灵（含 host 重选）+ 释限流位。老客户端永不误杀（见 isConnectionDead）。
@@ -1518,7 +1527,8 @@ function pushWishes(
   const dateKey = new Date().toISOString().slice(0, 10); // 三选一混合的轮换粒度：天（同一次路过听到的话稳定）
   const wishes = store
     .listCharacters(worldId, sceneId)
-    .filter((c) => !c.isFairy)
+    // 未入住的故事角色不漏话（M2 §4.1）：狼/还没演到入住的小猪不进供给面，入住（resident）才放行。
+    .filter((c) => !c.isFairy && !isUnsettledStoryRole(c))
     .map((c) => {
       // 三选一混合（M1 拉力层）：心愿 → 该村民的待发链步 → errand:idle 稳定轮换——心愿池空后拉力不干涸。
       // source/ability 一并下发：A4 心愿清单据 source 筛卡、据 ability 配「梦想图标」。
@@ -1894,6 +1904,50 @@ export async function startGameAsync(
   void run.catch(() => {});
   // 真开演了才算「发现了能一起玩游戏」——前面每个 return 都是没开成，不能算。
   await fulfillAbility(socket, adapters, store, worldId, session.playerId, 'play_game', session.clientTts, session.currentScene);
+}
+
+/**
+ * start_story 异步落地（M2 章回剧情，docs/m2-story-director-design.md §4.2）：gate 角色搭话触发 →
+ * 先判「能不能开」再应下 → StoryDirector.trigger 从幕首开演（选角/剧本直供 StageStartOpts，绕 LLM 编剧）。
+ * 与 play_game 同一条兜底纪律：已在演出/并发满只说兜底句，别先应下又落空；
+ * 互动幕没做完先提醒去做，不重演（进度在 story_progress 持久化，断线回来还认账）。
+ */
+export async function startStoryAsync(
+  socket: { send: (data: string) => void },
+  session: VoiceSession,
+  worldId: string,
+  gateCharacterId: string,
+  bookId: string,
+  leadIn: string, // routeIntent 生成的 gate 角色应答句（如「好呀，我们这就开演！」）
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  hub?: WorldHub,
+  stages?: StageDirector,
+  stories?: StoryDirector,
+): Promise<void> {
+  const gate = store.getCharacter(worldId, gateCharacterId);
+  const voiceId = gate?.voiceId ?? '';
+  const say = (text: string) => pushLineTts(socket, adapters, store, text, voiceId, session.clientTts);
+  if (!hub || !stages || !stories || !STORY_BOOKS[bookId]) return; // 编程错误/册未注册；prod 不会到这
+  if (!store.getWorld(worldId)) { await say('咦，这个世界好像不见啦，我们待会儿再讲好不好？'); return; }
+
+  // 先判「能不能开」再应下——别先说「我们这就开演」又紧跟「其实正在演呢」自相矛盾。
+  if (stages.activeIn(worldId) || stories.isPerforming(worldId)) {
+    await say('现在正在演别的呢，看完这场再讲我们的故事好不好？');
+    return;
+  }
+  if (stages.atCapacity()) { await say('现在好多小朋友都在看戏，稍等一会儿再来好不好？'); return; }
+  // 互动幕没做完：提醒去完成，不重演。
+  if (stories.bookProgress(worldId, session.playerId, bookId).state === 'interacting') {
+    await say('上次拜托你的事儿还没做完呢，做完咱们再往下讲好不好？');
+    return;
+  }
+
+  // 能开了才应下：孩子立刻听到「我们这就开演」。
+  await say(leadIn || '好呀，你坐好，我们这就开演！');
+  // 不 await 终局：演出要演几分钟，stage_begin 已广播给全场；收场时的状态迁移由 StoryDirector 落。
+  // 应下到开演之间被别人抢先的窄窗口由 trigger 内部兜（startStage 返回 null → 中断回幕首）。
+  void stories.trigger(worldId, session.playerId, bookId).catch(() => {});
 }
 
 async function pushLineTts(
@@ -2615,6 +2669,9 @@ export function presenceOf(store: WorldStore, worldId: string, sceneId: string, 
  */
 export function projectCharacterFor(character: Character, viewerPlayerId: string): CharacterView {
   if (character.isFairy) return character;
+  // 未入住的故事角色不参与主动社交（M2 §4.1）：不附 socialType/familiarity，
+  // 客户端 NpcGreeter.greet_eligible 对空 social_type 恒 false——它们不会主动迎客。
+  if (isUnsettledStoryRole(character)) return character;
   return {
     ...character,
     socialType: deriveSocialType(character),
@@ -2845,6 +2902,7 @@ export async function handleWsMessage(
   session: VoiceSession,
   hub?: WorldHub,
   stages?: StageDirector,
+  stories?: StoryDirector,
 ): Promise<void> {
   // 造角色的降生上下文：取当下所在场景（enter_scene 会改它，故求值而非提前快照）。
   const spawnCtx = (): SpawnCtx => ({ sceneId: session.currentScene, hub, connKey });
@@ -3284,6 +3342,11 @@ export async function handleWsMessage(
         await startGameAsync(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.gameRequest, response.replyText, adapters, store, hub, stages);
         return;
       }
+      // 章回剧情入口（M2）：gate 角色应下→StoryDirector 从幕首开演（stage_begin 广播全场），不发普通回应。
+      if (response.storyRequest) {
+        await startStoryAsync(socket, session, msg.worldId ?? '', msg.characterId ?? '', response.storyRequest, response.replyText, adapters, store, hub, stages, stories);
+        return;
+      }
       // 仙子答应带路 = 发现了「引路」玩法（宽松口径：应下就算，不等走到——
       // 中途反悔的 3 岁小朋友不该被剥夺盖章）。若有村民正盼着去哪儿 → 心愿达成。
       if (response.guide) await fulfillAbility(socket, adapters, store, msg.worldId ?? '', session.playerId, 'guide_to', session.clientTts, session.currentScene);
@@ -3325,6 +3388,9 @@ export async function handleWsMessage(
   // 客户端把它当【村民身上的 3D 定位音】播（NpcWishVoice 同款）；edge-tts 不可用则静默——招呼是点缀，不占降级通道。
   if (msg.type === 'villager_hail') {
     try {
+      // 未入住的故事角色不迎客（M2 §4.1 纵深防线：投影层已不给社交字段，客户端不该发到这）。
+      const hailChar = store.getCharacter(msg.worldId ?? '', String(msg.villagerId ?? ''));
+      if (hailChar && isUnsettledStoryRole(hailChar)) return;
       const resp = await greetCharacter(msg.worldId ?? '', String(msg.villagerId ?? ''), adapters, store, undefined, Math.random, true);
       socket.send(JSON.stringify({ type: 'villager_hail_tts', villagerId: String(msg.villagerId ?? ''), text: resp.replyText, voiceId: resp.voiceId }));
     } catch (err) {
