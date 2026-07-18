@@ -14,6 +14,10 @@ var spoke := false
 var returned := false ## 说完台词后曾回到玩家身边
 
 func _initialize() -> void:
+	# 固定 RNG：FairyVoice.try_play 用 randi() 选台词，不同台词 WAV 时长不同→里程碑落定帧漂移、
+	# 吃截止余量而间歇挂。无条件播种（TEST_SEED 可覆盖以复现）使选词确定、时长稳定。
+	var s := OS.get_environment("TEST_SEED")
+	seed(int(s) if not s.is_empty() else 20260718)
 	scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	scene.ready.connect(_teleport)
