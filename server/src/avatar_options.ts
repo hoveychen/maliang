@@ -208,6 +208,24 @@ export function onboardingProfileNote(p: PlayerOnboardingProfile | undefined): s
 }
 
 /**
+ * 玩家形象文字（onboarding 的 visualDescription）+ 身上贴纸名 → 对话 prompt 里「你看到的样子」。
+ * 当面可见的信息（点点/村民都注入，不做信息不对称）：外观和贴纸缺哪块省哪块，都空返回 undefined。
+ * 贴纸名由调用方（voice.ts）经 itemLookup 解析后传入，本函数只负责拼文案。纯函数，可单测。
+ */
+export function appearanceNote(
+  visualDescription: string | undefined,
+  stickerNames: string[],
+): string | undefined {
+  const bits: string[] = [];
+  const look = visualDescription?.trim();
+  if (look) bits.push(`长得是「${look}」`);
+  const stickers = stickerNames.map((s) => s.trim()).filter((s) => s.length > 0);
+  if (stickers.length > 0) bits.push(`身上贴着${stickers.join('、')}`);
+  if (bits.length === 0) return undefined;
+  return bits.join('，');
+}
+
+/**
  * 提前收工的口头信号（「就这样」类；含不耐烦——onboarding 无反悔语义，不想选=done）。
  * 导出给 /onboarding/avatar-chat 端点做确定性拦截：生产实测（2026-07-15）真 LLM 会无视
  * prompt 里的「立刻画」连问 6 轮——终止性必须写死在端点，不靠 LLM 自觉（A1 refineTries 同款纪律）。

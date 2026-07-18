@@ -57,8 +57,8 @@ test('respondToTranscript：有档案注入 childProfile，无档案不注入', 
 
     await respondToTranscript('default', fairy.id, 'p-nobody', '你好呀', adapters, store);
     assert.equal(captured[1]!.childProfile, undefined, '无档案玩家不注入');
-    // 村民对话走同一条 respondToTranscript（注入点在 ctx 组装处，与角色无关）——
-    // mock 种子世界只有点点没有村民，仙子路径的覆盖即等价覆盖。
+    // 注：childProfile 现在做了信息不对称——只对点点注入，村民恒 undefined（靠聊积累）。
+    // 村民侧的断言见 player_awareness_inject.test.ts。
   } finally {
     await app.close();
   }
