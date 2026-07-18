@@ -134,6 +134,30 @@ export interface Wallet {
 /** 集邮盖章款式目录：完成委托时随机挑一款（纯演出，不影响经济）。id 稳定入存档，客户端映射到 AIGC 盖章图（P5）。 */
 export const STAMP_STYLES: readonly string[] = ['star', 'smile', 'paw', 'medal', 'heart'];
 
+// ── M2 主线剧情：章回进度（docs/m2-story-director-design.md §3.1）──
+
+/**
+ * 一册的进度（幕状态机，story_director.ts）。
+ * performing/rewarded 是瞬态：持久化里只会出现 idle/interacting——
+ * 崩溃/断线/世界空一律回本幕 idle，重进世界永远停在幕首重演。
+ */
+export interface StoryBookProgress {
+  /** 当前幕游标（0 起）；== 册章数即整册演完。 */
+  chapter: number;
+  state: 'idle' | 'performing' | 'interacting' | 'rewarded';
+  /** 已发过奖的幕——重看不重复发奖的唯一判据。 */
+  rewarded: number[];
+  /** 整册完结（入住已发生，幂等门闩）。 */
+  settled: boolean;
+  /** 正在互动的幕（state=interacting 时有意义；重看旧幕时 ≠ chapter 游标）。 */
+  activeChapter?: number;
+}
+
+/** 每世界每玩家的剧情进度（story_progress 表，照 wallets 先例；匿名键归一同钱包）。 */
+export interface StoryProgress {
+  books: Record<string, StoryBookProgress>;
+}
+
 /** 委托类型：完成判定全部是客户端确定性事件（送达回调/相邻/到点），不靠 LLM 猜。 */
 export type TaskType = 'deliver' | 'bring' | 'visit' | 'wish';
 

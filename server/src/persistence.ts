@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, Familiarity, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, Familiarity, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, StoryProgress, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { coerceRelationship, deriveFamiliarity } from './social.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
@@ -50,6 +50,32 @@ function settleWallet(w: Wallet): boolean {
   // 满 9 溢出：最多把一组已满的章留作待兑换（停在 STAMPS_PER_FLOWER），多出来的丢弃，避免无限累积。
   if (w.stampProgress > STAMPS_PER_FLOWER) w.stampProgress = STAMPS_PER_FLOWER;
   return gained;
+}
+
+/**
+ * 把持久化里读到的原始值归一成 StoryProgress。非法/损坏的册整个丢弃——最坏结果是
+ * 那册从头重看一遍，不该因此崩。performing/rewarded 瞬态读回一律归稳态
+ * （崩溃时若真落了库，等价于「断线回幕首」的既定语义）。
+ */
+function coerceStoryProgress(raw: unknown): StoryProgress {
+  const out: StoryProgress = { books: {} };
+  const books = raw && typeof raw === 'object' ? (raw as { books?: unknown }).books : null;
+  if (!books || typeof books !== 'object') return out;
+  for (const [bookId, bp] of Object.entries(books as Record<string, unknown>)) {
+    if (!bp || typeof bp !== 'object') continue;
+    const b = bp as { chapter?: unknown; state?: unknown; rewarded?: unknown; settled?: unknown; activeChapter?: unknown };
+    const chapter = Math.max(0, Math.floor(Number(b.chapter) || 0));
+    const state = b.state === 'interacting' ? 'interacting' : 'idle';
+    const rewarded = Array.isArray(b.rewarded)
+      ? [...new Set(b.rewarded.filter((n): n is number => Number.isInteger(n) && (n as number) >= 0))]
+      : [];
+    const activeChapter =
+      state === 'interacting' && Number.isInteger(b.activeChapter) && (b.activeChapter as number) >= 0
+        ? (b.activeChapter as number)
+        : undefined;
+    out.books[bookId] = { chapter, state, rewarded, settled: b.settled === true, ...(activeChapter !== undefined ? { activeChapter } : {}) };
+  }
+  return out;
 }
 
 /**
@@ -424,6 +450,14 @@ export class WorldStore {
         data TEXT NOT NULL,
         PRIMARY KEY (world_id, player_id)
       );
+      -- M2 章回剧情进度（docs/m2-story-director-design.md §3.1）：每玩家每世界一份 StoryProgress JSON。
+      -- 只存 idle/interacting 稳态——performing 是内存态，断线/崩溃重进永远停在幕首。
+      CREATE TABLE IF NOT EXISTS story_progress (
+        world_id TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (world_id, player_id)
+      );
       -- 玩家已发现的玩法（造物/造角色/玩游戏…）：村民只漏【还没被发现】的心愿，
       -- 发现一个就再没人念叨它——「已发现的不再提」是发现感成立的前提（见 wishes.ts）。
       CREATE TABLE IF NOT EXISTS player_discovered (
@@ -721,7 +755,7 @@ export class WorldStore {
         this.#db.prepare(`DELETE FROM memories WHERE owner_character_id IN (${ph})`).run(...charIds);
         this.#db.prepare(`DELETE FROM chat_turns WHERE character_id IN (${ph})`).run(...charIds);
       }
-      for (const t of ['characters', 'props', 'items', 'bag', 'wallets', 'player_tasks', 'player_discovered', 'player_positions', 'scenes', 'visits']) {
+      for (const t of ['characters', 'props', 'items', 'bag', 'wallets', 'player_tasks', 'player_discovered', 'player_positions', 'story_progress', 'scenes', 'visits']) {
         this.#db.prepare(`DELETE FROM ${t} WHERE world_id = ?`).run(id);
       }
       this.#db.prepare('DELETE FROM worlds WHERE id = ?').run(id);
@@ -1178,6 +1212,33 @@ export class WorldStore {
           'ON CONFLICT(world_id, player_id) DO UPDATE SET data = excluded.data',
       )
       .run(worldId, key, JSON.stringify(task));
+  }
+
+  // ── M2 章回剧情进度（story_progress 表；键归一与钱包一致，匿名落 ANON_PLAYER）──
+
+  /** 读某玩家在某世界的剧情进度。没有行/行损坏 → 空进度（不写库，懒惰到第一次 set）。 */
+  getStoryProgress(worldId: string, playerId: string): StoryProgress {
+    const row = this.#db
+      .prepare('SELECT data FROM story_progress WHERE world_id = ? AND player_id = ?')
+      .get(worldId, this.#walletKey(playerId)) as { data: string } | undefined;
+    if (!row) return { books: {} };
+    let raw: unknown = null;
+    try {
+      raw = JSON.parse(row.data);
+    } catch {
+      raw = null;
+    }
+    return coerceStoryProgress(raw);
+  }
+
+  setStoryProgress(worldId: string, playerId: string, sp: StoryProgress): void {
+    if (!this.#worldExists(worldId)) return;
+    this.#db
+      .prepare(
+        'INSERT INTO story_progress (world_id, player_id, data) VALUES (?, ?, ?) ' +
+          'ON CONFLICT(world_id, player_id) DO UPDATE SET data = excluded.data',
+      )
+      .run(worldId, this.#walletKey(playerId), JSON.stringify(sp));
   }
 
   /** 列出某世界里所有玩家的进行中委托（debug 后台用）。 */
