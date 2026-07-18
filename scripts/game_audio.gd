@@ -102,6 +102,23 @@ func _ready() -> void:
 	for path in SFX.values():
 		ResourceLoader.load_threaded_request(path)
 
+## 退出时排空所有在飞的线程化加载。worker 线程 mid-load 时进程退出，引擎 teardown 释放
+## ResourceLoader 内部状态会 use-after-free 崩溃（headless 短测 quit() 抢在预热完成前，
+## 实测 ~4% SIGSEGV，栈在 ResourceLoader::_run_load_task）。load_threaded_get 阻塞到该项加载
+## 完成、把请求消费掉；排空后 worker 池无在飞任务，teardown 不再竞态。幂等：已消费的 status 非
+## IN_PROGRESS/LOADED，跳过。
+func _exit_tree() -> void:
+	var paths: Array = SFX.values()
+	paths.append_array(_bgm_want)
+	_drain_threaded_loads(paths)
+
+## 排空一批线程化加载请求（供退出兜底用）。只 get 仍在飞/已就绪未取的，避免对已消费项重复 get。
+static func _drain_threaded_loads(paths: Array) -> void:
+	for path in paths:
+		var st := ResourceLoader.load_threaded_get_status(path)
+		if st == ResourceLoader.THREAD_LOAD_IN_PROGRESS or st == ResourceLoader.THREAD_LOAD_LOADED:
+			ResourceLoader.load_threaded_get(path)
+
 func play_sfx(sfx_name: String) -> bool:
 	if not SFX.has(sfx_name):
 		push_warning("GameAudio: 未知音效 %s" % sfx_name)

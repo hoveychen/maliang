@@ -31,6 +31,13 @@ func _ready() -> void:
 	for l in _lines:
 		ResourceLoader.load_threaded_request("%s/%s.wav" % [VOICE_DIR, String(l["id"])])
 
+## 退出时排空在飞的线程化加载，防 worker mid-load 时进程退出崩溃（见 GameAudio._drain_threaded_loads）。
+func _exit_tree() -> void:
+	var paths: Array = []
+	for l in _lines:
+		paths.append("%s/%s.wav" % [VOICE_DIR, String(l["id"])])
+	GameAudio._drain_threaded_loads(paths)
+
 func _process(delta: float) -> void:
 	_t += delta
 
