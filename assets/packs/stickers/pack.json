@@ -2,17 +2,65 @@
   "name": "stickers",
   "license": "AIGC 生成（gen_ui_assets sticker 模式，server/tools/sticker_items.manifest.json 可复现）",
   "entries": {
-    "sun": { "category": "sticker", "path": "res://assets/stickers/sun.webp" },
-    "flower": { "category": "sticker", "path": "res://assets/stickers/flower.webp" },
-    "star": { "category": "sticker", "path": "res://assets/stickers/star.webp" },
-    "rainbow": { "category": "sticker", "path": "res://assets/stickers/rainbow.webp" },
-    "heart": { "category": "sticker", "path": "res://assets/stickers/heart.webp" },
-    "butterfly": { "category": "sticker", "path": "res://assets/stickers/butterfly.webp" },
-    "moon": { "category": "sticker", "path": "res://assets/stickers/moon.webp" },
-    "cloud": { "category": "sticker", "path": "res://assets/stickers/cloud.webp" },
-    "strawberry": { "category": "sticker", "path": "res://assets/stickers/strawberry.webp" },
-    "smile": { "category": "sticker", "path": "res://assets/stickers/smile.webp" },
-    "flag": { "category": "sticker", "path": "res://assets/stickers/flag.webp" },
-    "mushroom": { "category": "sticker", "path": "res://assets/stickers/mushroom.webp" }
+    "sun": {
+      "category": "sticker",
+      "path": "res://assets/stickers/sun.webp"
+    },
+    "flower": {
+      "category": "sticker",
+      "path": "res://assets/stickers/flower.webp"
+    },
+    "star": {
+      "category": "sticker",
+      "path": "res://assets/stickers/star.webp"
+    },
+    "rainbow": {
+      "category": "sticker",
+      "path": "res://assets/stickers/rainbow.webp"
+    },
+    "heart": {
+      "category": "sticker",
+      "path": "res://assets/stickers/heart.webp"
+    },
+    "butterfly": {
+      "category": "sticker",
+      "path": "res://assets/stickers/butterfly.webp"
+    },
+    "moon": {
+      "category": "sticker",
+      "path": "res://assets/stickers/moon.webp"
+    },
+    "cloud": {
+      "category": "sticker",
+      "path": "res://assets/stickers/cloud.webp"
+    },
+    "strawberry": {
+      "category": "sticker",
+      "path": "res://assets/stickers/strawberry.webp"
+    },
+    "smile": {
+      "category": "sticker",
+      "path": "res://assets/stickers/smile.webp"
+    },
+    "flag": {
+      "category": "sticker",
+      "path": "res://assets/stickers/flag.webp"
+    },
+    "mushroom": {
+      "category": "sticker",
+      "path": "res://assets/stickers/mushroom.webp"
+    },
+    "story_straw": {
+      "category": "sticker",
+      "path": "res://assets/stickers/story_straw.webp"
+    },
+    "story_plank": {
+      "category": "sticker",
+      "path": "res://assets/stickers/story_plank.webp"
+    },
+    "story_brick": {
+      "category": "sticker",
+      "path": "res://assets/stickers/story_brick.webp"
+    }
   }
 }
