@@ -6580,6 +6580,8 @@ func _raise_build_preview() -> void:
 	if _build_preview != null and is_instance_valid(_build_preview):
 		return
 	var cp := ComposedProp.new()
+	# 落地尺寸放大一档（HEIGHT 5m）后，预览缩回原 3m 观感——全尺寸预览会怼脸挡问题卡
+	cp.scale = Vector3.ONE * (ComposedProp.PREVIEW_HEIGHT / ComposedProp.HEIGHT)
 	# 引导拼装挂仙子身旁（特写同框）；改装无仙子会话 → 挂玩家身旁（关手机后玩家一定在屏上）。
 	var anchor: Node3D = null
 	if _remixing and not player.is_empty() and is_instance_valid(player["node"]):
