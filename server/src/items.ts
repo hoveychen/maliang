@@ -298,7 +298,9 @@ export function creationStickerDef(worldId: string, id: string, name: string, as
  * 积木式造物的实体行（B1，docs/kids-thinking-build-from-parts.md §3.1）：renderRef='composed:'，
  * spec 存「骨架 + 零件树」（ComposedSpec），永久保留可拆改结构，绝不拍平成一张图。
  * 摆放/拾取/背包全走 items 现成通路（万物皆物品）；客户端 ComposedProp 渲染器（P4）读 spec 画多片子 quad。
- * footprint 先给 1×1（P4 客户端按蓝图定最终占地）；组合物挡路、可压路面（与造物 createPropAsync 同档）。
+ * footprint 3×3（放大一档，与 big 造物同档、奇数边锚点居中）：拼的房子要有「盖了一栋房」的分量
+ * （曾 1×1，落地只有一格贴纸大小，与 M2 尾声叙事不匹配）。只影响新落成——存量 items 行不变。
+ * 组合物挡路、可压路面（与造物 createPropAsync 同档）。
  */
 export function creationBuildDef(worldId: string, id: string, name: string, spec: ComposedSpec): ItemDef {
   return {
@@ -307,8 +309,8 @@ export function creationBuildDef(worldId: string, id: string, name: string, spec
     name: name || '拼装作品',
     renderRef: 'composed:',
     spec,
-    footprintW: 1,
-    footprintH: 1,
+    footprintW: 3,
+    footprintH: 3,
     blocking: true,
     pathOk: true,
     wander: 0,
