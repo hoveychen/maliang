@@ -229,12 +229,15 @@ export class WorldStore {
   }
 
   /**
-   * 给存量世界的仙子补【后续新增】的能力（create_sticker=fairy-stickers、play_game=realtime-primitives P5、guide_to/guide_stop=fairy-guide）。
-   * seedFairy 只在建世界时跑（新世界自带），老库里的仙子从 DB 读能力、缺哪条就不认对应意图（「做个贴纸」「我们来踢球」）。
-   * 幂等：把缺的能力补齐，非仙子/已齐全的跳过；只 UPDATE 真改到的行（getCharacter 直读 DB，无内存 Map 需刷新）。
+   * 给存量世界的仙子补齐全部看家本领。seedFairy 只在建世界时跑（新世界自带），老库里的仙子
+   * 从 DB 读能力、缺哪条就不认对应意图（「做个贴纸」「我们来踢球」「帮我造一个小房子」）。
+   * REQUIRED 曾只列「后续新增」的四条，漏了 create_prop/create_character 这类「一直都该有」的——
+   * 在那之前的历史窗口期建的库，点点造物入口永远是死的（本地遗留库实证撞见）。现在列全量：
+   * 与 seedFairy 的 abilities 保持同一份清单，缺谁补谁。
+   * 幂等：非仙子/已齐全的跳过；只 UPDATE 真改到的行（getCharacter 直读 DB，无内存 Map 需刷新）。
    */
   #migrateFairyAbilities(): void {
-    const REQUIRED = ['create_sticker', 'play_game', 'guide_to', 'guide_stop'];
+    const REQUIRED = ['create_character', 'create_prop', 'create_sticker', 'play_game', 'guide_to', 'guide_stop'];
     const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
     const upd = this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?');
     for (const r of rows) {
