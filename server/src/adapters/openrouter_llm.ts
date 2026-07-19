@@ -228,6 +228,11 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     const createLine = abilities.includes('create_character')
       ? `\n- 小朋友想要一个「新的活伙伴」（小动物/小人/小精灵，如「我想要一只小猫」「变个小恐龙陪我」）→ kind=command，behaviorScript 一条 {"type":"create_character","params":{"description":"新伙伴的样子/颜色/名字/性格，尽量保留原话"}}；replyText 用你的口吻应下（如「好呀，我这就变出来！」）。要的是没生命的物件/植物/建筑才用 create_prop，别混。`
       : '';
+    // 造物规则：明确「拼/搭/造一个物件」走 create_prop——尤其「给某人/帮某人造」的受益人句式
+    // （M2 剧情里孩子最常说「给小猪拼一个砖房子」），真 LLM 回归抓到它常被当闲聊应付（命中 1/12）。
+    const propLine = abilities.includes('create_prop')
+      ? `\n- 小朋友想「拼/搭/造/变一个物件或小建筑」（小花/风车/小房子/砖房…），**包括给别人做**（如「给小猪拼一个砖房子」「帮小兔造个风车」——「给谁」只是受益人，这仍是造物请求不是闲聊）→ kind=command，behaviorScript 一条 {"type":"create_prop","params":{"description":"物件的中文描述，尽量保留小朋友的原话"}}；replyText 用你的口吻应下（如「好呀，看点点变出来！」）。【绝不】回「点点拼不了/不会盖」这种推脱——拼搭由小朋友亲手完成，你只负责开工。`
+      : '';
     // 造贴纸规则：明确「贴纸/贴画」这类扁平小图案走 create_sticker，与造物（立体物件）、造角色（活伙伴）区分开。
     const stickerLine = abilities.includes('create_sticker')
       ? `\n- 小朋友想做「贴纸/贴画」（太阳/花/星星/爱心/彩虹这类扁平的平面小图案，用来贴在地上或角色身上，如「做个太阳贴纸」「我想要一张彩虹贴画」）→ kind=command，behaviorScript 一条 {"type":"create_sticker","params":{"description":"贴纸的图案和颜色，尽量保留原话"}}；replyText 用你的口吻应下（如「好呀，我们来做贴纸！」）。贴纸是扁平图案，立体的物件/建筑用 create_prop，活的伙伴用 create_character，别混。`
@@ -257,7 +262,7 @@ ${abilityLines}
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - 小朋友说「告诉X…」「帮我跟X说…」是带话：用 deliver_message（to=X，message=要带的话），不要用 move_to——光走过去话就丢了。
 - 小朋友让你「去找X」「去叫X过来」「把X喊来」「去找X一起玩」是让你走过去把 X 找来：必须 kind=command，用 chat_with（character_name=X）。哪怕话里带个「玩」字也【绝不是】闲聊——你嘴上答应「好呀我去找他」却不给指令，就成了原地空口承诺（说要去、人没动、对话也不关），这正是要避免的。真要去就把指令给上。
-- follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。${createLine}${stickerLine}${playLine}${storyLine}${guideLine}
+- follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。${createLine}${propLine}${stickerLine}${playLine}${storyLine}${guideLine}
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - 同样的问候、口头禅、话别，别每次都说一模一样，换着说法说——别让小朋友觉得你像复读机。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。
