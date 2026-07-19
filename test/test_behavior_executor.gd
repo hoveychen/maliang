@@ -298,6 +298,33 @@ func _init() -> void:
 	fails += _check("relay unknown performer not fired", relayed2.is_empty(), true)
 	OccupancyMap.clear()
 
+	# wander 锚定：圆心必须是首次 wander 的位置（出生锚）而非当前位置——否则 radius
+	# 只是步长不是活动范围，随机游走漂满全图（M2 实拍：radius 3 的小猪漫游全地图，
+	# 「把话带给猪小弟」变大海捞针）。锚记在角色字典上，交互后重建执行器仍沿用。
+	OccupancyMap.clear()
+	var w_anchor := TerrainMap.tile_center(Vector2i(30, 30))
+	OccupancyMap.char_register("pig", w_anchor, 2)
+	var dw := { "logical": w_anchor, "id": "pig" }
+	var wander_script := { "commands": [ { "type": "wander", "params": { "radius": 3, "duration": 8 } }, { "type": "wait", "params": { "duration": 0.1 } } ], "loop": true }
+	var exw := BehaviorExecutor.new()
+	exw.setup(dw, wander_script)
+	exw.step(dt) # 首次 wander 启动：建锚 + 选目标
+	fails += _check("wander sets anchor on first start", dw.has("wander_anchor"), true)
+	fails += _check("wander anchor is spawn pos", dw.get("wander_anchor", Vector2.INF), w_anchor)
+	# off 是 [-r,r]² 方形采样，角上距离可达 r·√2≈4.24——界取 4.25（修前圆心=当前位置时距锚 ~20，红绿区分依然悬殊）
+	fails += _check("wander target within radius of anchor",
+		WorldGrid.shortest_delta(exw._move_to, w_anchor).length() <= 4.25, true)
+	exw.cancel()
+	# 角色被挪远（模拟已漂移/被剧情带走）后重建执行器：wander 必须拉回锚圈，而非以新位置为圆心继续漂
+	dw["logical"] = WorldGrid.wrap_pos(w_anchor + Vector2(20, 0))
+	var exw2 := BehaviorExecutor.new()
+	exw2.setup(dw, wander_script)
+	exw2.step(dt)
+	fails += _check("wander re-centers on anchor after displacement",
+		WorldGrid.shortest_delta(exw2._move_to, w_anchor).length() <= 4.25, true)
+	exw2.cancel()
+	OccupancyMap.clear()
+
 	# --- 异步寻路机制（P2）：派发/直线兜底/完成回填/孤儿回收 ---
 	# 断言用真实等待（_drain_orphans/_wait_plan 内含 OS.delay_msec），不依赖循环快慢——
 	# 合成紧循环里主线程微秒级空转会跑赢 worker 的毫秒级 A*，必须给 worker 真实墙上时间。
