@@ -57,7 +57,10 @@ static func sticker_ids() -> Array:
 	ensure_builtin()
 	var out := []
 	for id in _defs:
-		if String((_defs[id] as Dictionary).get("mount", "tile")) == "edge":
+		var d: Dictionary = _defs[id]
+		# souvenir（M2 剧情纪念贴纸）不上架：只随幕奖励发放，服务端 sticker_buy 同口径拒卖。
+		# 孩子拥有的纪念贴纸仍在贴纸页显示（那是 bag 驱动），只是小铺买不到。
+		if String(d.get("mount", "tile")) == "edge" and not bool(d.get("souvenir", false)):
 			out.append(String(id))
 	out.sort()
 	return out

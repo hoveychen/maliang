@@ -17,7 +17,10 @@ func _init() -> void:
 
 	# ── 小铺货架数据源 ─────────────────────────────────────────────────────
 	var ids: Array = ItemCatalog.sticker_ids()
-	_check("内置贴纸 12 张", ids.size(), 12)
+	_check("在售内置贴纸 12 张（souvenir 纪念贴纸不上架）", ids.size(), 12)
+	_check("纪念贴纸不在货架上", 1 if not ids.has("story_straw") else 0, 1)
+	_check("纪念贴纸实体仍可解析（bag 驱动的贴纸页要用）",
+		String(ItemCatalog.get_def("story_straw").get("mount", "")), "edge")
 	_check("贴纸实体 mount=edge", String(ItemCatalog.get_def("sticker_sun").get("mount", "")), "edge")
 
 	# ── apply_patch：挂贴纸到边缘（palette 追加）────────────────────────────
