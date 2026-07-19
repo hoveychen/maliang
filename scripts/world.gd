@@ -6912,6 +6912,16 @@ func _build_creation_cards(options: Array) -> void:
 		var icon_asset := String((opt as Dictionary).get("iconAsset", ""))
 		if not icon_asset.is_empty():
 			_apply_card_icon(card, icon_asset) # 图标就绪：异步贴图（不阻塞卡片弹出）
+		else:
+			# 打包资源图（build 零件卡带 renderRef 'part:<id>'）：同步取 PackRegistry 贴零件真图。
+			# 幼儿不识字——「三角屋顶/平平屋顶」纯文字卡等于让孩子瞎选（实拍抓到的缺口）。
+			var rref := String((opt as Dictionary).get("renderRef", ""))
+			if rref.begins_with("part:"):
+				var part_tex := PackRegistry.load_resource(rref.get_slice(":", 1)) as Texture2D
+				if part_tex != null:
+					card.icon = part_tex
+					card.expand_icon = true
+					card.text = "" # 有图就不显字（与造角色卡同策）
 		card.pressed.connect(_on_creation_card.bind(oid, card)) # 带上卡片自己：点了要把它扔进蛋/炉
 		_creation_cards.add_child(card)
 	# 选项卡摆上桌：一记轻「翻纸」声（发牌感），配合仙子随后念问题。空选项（快捷路径）不响。

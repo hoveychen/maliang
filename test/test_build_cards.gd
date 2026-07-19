@@ -67,6 +67,10 @@ func _test_first_prompt() -> void:
 	_check("当前槽 body", scene.get("_build_slot"), "body")
 	_check("创造视图点亮", (scene.get("_creation_view") as Control).visible, true)
 	_check("渲出 2 张零件卡", _cards().get_child_count(), 2)
+	# 零件卡必须带零件真图（renderRef part:* 走 PackRegistry 打包图）——幼儿不识字，纯文字卡等于瞎选
+	var card0 := _cards().get_child(0) as Button
+	_check("零件卡贴上零件真图", card0 != null and card0.icon != null, true)
+	_check("有图就不显字(与造角色卡同策)", card0 != null and card0.text.is_empty(), true)
 	_check("问题字幕就位", (scene.get("_creation_q") as Label).text, "小车要坐得住，得有个什么呀？")
 	var pv := _preview()
 	_check("拼装台预览已立", pv != null and is_instance_valid(pv), true)
