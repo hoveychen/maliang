@@ -135,6 +135,13 @@ func _start(cmd: Dictionary) -> void:
 				return
 			_begin_move()
 		"wander":
+			# 圆心锚定首次 wander 的位置（记在角色字典上，重建执行器仍沿用）。以当前
+			# 位置为圆心是随机游走：radius 只是步长不是活动范围，村民会布朗运动漂满
+			# 全图——M2 实拍 radius 3 的小猪漫游全地图，「把话带给猪小弟」变大海捞针。
+			# 被剧情/指令带走后恢复 wander 会自己走回锚圈（村民回家）。
+			if not _target.has("wander_anchor"):
+				_target["wander_anchor"] = _target["logical"]
+			var anchor: Vector2 = _target["wander_anchor"]
 			# 目标预检：随机点落在占用格/水面就换一个（几次哈希查询）。不预检时
 			# 落进房子/树丛/水里的目标会烧一次注定失败的全预算 A*（真机 ~300ms），
 			# 十来个村民各自每几秒 wander 一次 = 「原地间歇掉帧」的持续来源。
@@ -142,7 +149,7 @@ func _start(cmd: Dictionary) -> void:
 			var picked := Vector2.INF
 			for _try in range(6):
 				var off := Vector2(randf() * 2.0 - 1.0, randf() * 2.0 - 1.0) * radius
-				var cand := WorldGrid.wrap_pos(_target["logical"] + off)
+				var cand := WorldGrid.wrap_pos(anchor + off)
 				if TerrainMap.tile_type(WorldGrid.to_tile(cand)) != TerrainMap.T_WATER \
 						and Pathfinder.cell_free(OccupancyMap.to_cell(cand), _span(), _char_id()):
 					picked = cand
