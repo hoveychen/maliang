@@ -5,6 +5,7 @@ import { effectiveAbilities, DEFAULT_SCENE } from './types.ts';
 import { pickTaskCandidate } from './tasks.ts';
 import { ensureTaskChain } from './task_chain.ts';
 import { wishFor } from './wishes.ts';
+import { STORY_BOOKS, isUnsettledStoryRole } from './story_books.ts';
 import { pickGreeting } from './greetings.ts';
 import { onboardingProfileNote, appearanceNote } from './avatar_options.ts';
 import { pickChatTopics } from './chat_topics.ts';
@@ -68,7 +69,7 @@ export async function respondToTranscript(
   // M1 懒生成：存量角色首次「心愿池空且无链」需要供给时补一条专属委托链（新角色在 createCharacterAsync
   // 已异步长链）。LLM 失败当场回退模板链（ensureTaskChain 不抛），只在首次搭话多花一次生成的功夫。
   if (
-    !activeTask && !character.isFairy && !character.taskChain &&
+    !activeTask && !character.isFairy && !character.taskChain && !isUnsettledStoryRole(character) &&
     !wishFor(characterId, store.getDiscovered(worldId, playerId), store.getWallet(worldId, playerId).flowers > 0)
   ) {
     const chain = await ensureTaskChain(worldId, characterId, adapters.llm, store);
@@ -78,8 +79,9 @@ export async function respondToTranscript(
   }
   const taskCandidate = activeTask ? undefined : pickTaskCandidate(worldId, characterId, playerId, store, Math.random, sceneId) ?? undefined;
   // 这个角色当下的心愿背景：它刚在旁边自言自语漏过这件事，小朋友多半就是为这个凑上来的——
-  // 注入后它被搭话时能自然接上自己的念想。仙子不认领心愿（她是兑现心愿的人，不是许愿的人）。
-  const wishContext = character.isFairy
+  // 注入后它被搭话时能自然接上自己的念想。仙子不认领心愿（她是兑现心愿的人，不是许愿的人）；
+  // 未入住的故事角色也不认领（M2 §4.1：它们的戏在 StoryDirector，入住才进供给面）。
+  const wishContext = character.isFairy || isUnsettledStoryRole(character)
     ? undefined
     : wishFor(
         characterId,
@@ -96,6 +98,13 @@ export async function respondToTranscript(
     .map((a) => store.getItemDef(worldId, a.itemId)?.name)
     .filter((n): n is string => !!n);
   const abilities = effectiveAbilities(character);
+  // 故事 gate 角色（M2 §4.1）：册门口的角色（gateCastId）加 start_story 能力——孩子说
+  // 「讲故事/演一个/这是什么」归一到它。settled 后保留（重看入口）；已在演出的兜底在 startStoryAsync。
+  const storyGateBookId =
+    character.storyRole && STORY_BOOKS[character.storyRole.bookId]?.gateCastId === character.storyRole.castId
+      ? character.storyRole.bookId
+      : undefined;
+  if (storyGateBookId) abilities.push('start_story');
   // 引路候选只对有 guide_to 的角色（小仙子）算：村民带不了路，白搭 prompt token。
   const guideTargets = abilities.includes('guide_to')
     ? listGuideTargets(store, worldId, sceneId ?? character.sceneId ?? DEFAULT_SCENE)
@@ -159,6 +168,12 @@ export async function respondToTranscript(
       if (desc) response.stickerRequest = desc;
       intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'create_sticker');
     }
+    // start_story 同理：摘走交给 WS 层——startStoryAsync→StoryDirector 开演本幕（stage_begin 广播）。仅故事 gate 角色会发。
+    const storyCmd = intent.behaviorScript.commands.find((c) => c.type === 'start_story');
+    if (storyCmd) {
+      if (storyGateBookId) response.storyRequest = storyGateBookId;
+      intent.behaviorScript.commands = intent.behaviorScript.commands.filter((c) => c.type !== 'start_story');
+    }
     // play_game 同理：摘走交给 WS 层——LLM 生成剧本→过 typecheck→startStage 开演（stage_begin 广播）。仅小仙子会发。
     const gameCmd = intent.behaviorScript.commands.find((c) => c.type === 'play_game');
     if (gameCmd) {
@@ -198,7 +213,7 @@ export async function respondToTranscript(
   }
   // 造角色/造物/造贴纸入口：不在这里合成/发普通回应，交给 WS 层的引导会话（guideCreation/guideProp/guideSticker）驱动——
   // 由它合成仙子的问句 TTS 并下发 creation_prompt（含图标选项），避免入口这轮重复出声。
-  if (response.characterRequest || response.propRequest || response.stickerRequest || response.gameRequest) return response;
+  if (response.characterRequest || response.propRequest || response.stickerRequest || response.gameRequest || response.storyRequest) return response;
   // 小朋友说「不想做了」→ 清掉进行中委托，随回应通知客户端撤提示 chip（优先于回带/发起）。
   if (intent.abandonTask && activeTask) {
     store.setActiveTask(worldId, playerId, null);

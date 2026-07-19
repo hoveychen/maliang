@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { MAX_FLOWERS, STAMPS_PER_FLOWER, STAMP_STYLES, type ActiveTask, type Character, type TaskType, type Wallet } from './types.ts';
 import type { WorldStore } from './persistence.ts';
 import { wishFor, pickThanks, WISHES } from './wishes.ts';
+import { isUnsettledStoryRole, storyCharacterId, type StoryBook } from './story_books.ts';
 import { advanceChainOnComplete } from './task_chain.ts';
 import { sizeToScale, type CreatureSize } from './creation_options.ts';
 import { REFINE_MAX_TRIES, refineDirFor } from './refinements.ts';
@@ -38,6 +39,8 @@ export function pickTaskCandidate(
   if (store.getActiveTask(worldId, playerId)) return null;
   const npc = store.getCharacter(worldId, npcId);
   if (!npc || npc.isFairy) return null;
+  // 未入住的故事角色不派活（M2 §4.1）：它们的戏在 StoryDirector，入住（resident 翻真）才进供给面。
+  if (isUnsettledStoryRole(npc)) return null;
   const base = {
     id: randomUUID(),
     npcId,
@@ -115,6 +118,56 @@ function pickChainTask(
   return null;
 }
 
+/**
+ * 剧情互动物化（M2 §4.4）：把某幕 StoryInteraction 物化成 ActiveTask 并设为进行中。
+ * visit 不带地点则按场景现有地点现选（与通用跑腿同法：村庄没有「草房废墟」POI，话术写成地点无关）；
+ * deliver/bring 目标是册内角色本名；build 记 storyBlueprintId（createBuildAsync 落成点判定，且免花）。
+ * 返回 null = 此刻物化不了（角色缺席/visit 无地点）——不设任务，孩子重触发可再试。
+ * 注意会顶掉进行中的普通委托（幼儿单任务心智，孩子刚看完戏、剧情优先；被顶的链步不推游标，之后会再发起）。
+ */
+export function materializeStoryTask(
+  worldId: string,
+  playerId: string,
+  book: StoryBook,
+  chapter: number,
+  store: WorldStore,
+  rand: () => number = Math.random,
+  sceneId?: string,
+): ActiveTask | null {
+  const ch = book.chapters[chapter];
+  const it = ch?.interaction;
+  if (!it) return null;
+  const npc = store.getCharacter(worldId, storyCharacterId(book.id, it.npcCastId));
+  if (!npc) return null;
+  const base = {
+    id: randomUUID(),
+    npcId: npc.id,
+    npcName: npc.name,
+    stampStyle: ch!.stampStyle ?? pick(STAMP_STYLES, rand),
+    storyBookId: book.id,
+    storyChapter: chapter,
+    storyAsk: it.ask,
+    storyThanks: it.thanks,
+  };
+  let task: ActiveTask;
+  if (it.kind === 'build') {
+    task = { ...base, type: 'wish', storyBlueprintId: it.blueprintId };
+  } else if (it.type === 'visit') {
+    const locations = store.getLocations(worldId, sceneId ?? book.sceneId);
+    const loc = it.locationName ?? (locations.length ? pick(locations, rand) : undefined);
+    if (!loc) return null;
+    task = { ...base, type: 'visit', locationName: loc };
+  } else {
+    const target = it.targetCastId ? store.getCharacter(worldId, storyCharacterId(book.id, it.targetCastId)) : undefined;
+    if (!target) return null;
+    task = it.type === 'deliver'
+      ? { ...base, type: 'deliver', targetName: target.name, message: it.message ?? pick(DELIVER_MESSAGES, rand) }
+      : { ...base, type: 'bring', targetName: target.name };
+  }
+  store.setActiveTask(worldId, playerId, task);
+  return task;
+}
+
 /** 委托给意图 LLM 的一句话描述（prompt 用）。链步再带上这一步的请求话术底稿——发起时人设连续。 */
 export function describeTask(task: ActiveTask): string {
   const base = (() => {
@@ -126,6 +179,8 @@ export function describeTask(task: ActiveTask): string {
       case 'visit':
         return `请小朋友去「${task.locationName}」看一看`;
       case 'wish':
+        // 剧情 build 互动：孩子亲手拼（不是仙子变），描述别把它引到造物魔法上。
+        if (task.storyBlueprintId) return `${task.npcName}请小朋友帮忙亲手拼一样东西`;
         // 心愿的兑现人是小仙子（村民不会魔法）。这句会注入【所有】角色的 prompt——
         // 包括始终跟在小朋友身边飞的小仙子，她据此知道要造什么，哪怕小朋友只说「帮帮他」。
         // 链步心愿优先用这一步自己的 desire（人设主题），非链步用通用心愿库的 context。
@@ -133,11 +188,13 @@ export function describeTask(task: ActiveTask): string {
           `${task.npcName}自己变不出来，只有小仙子的魔法才能帮它实现`;
     }
   })();
-  return task.chainStep ? `${base}。你心里想这么开口：「${task.chainStep.ask}」` : base;
+  const ask = task.storyAsk ?? task.chainStep?.ask;
+  return ask ? `${base}。你心里想这么开口：「${ask}」` : base;
 }
 
 /** 完成时委托类型对应的表扬前缀。链步用这一步自己的道谢（主题收尾）。 */
 function taskIntro(task: ActiveTask, rand: () => number = Math.random): string {
+  if (task.storyThanks) return task.storyThanks; // 剧情互动：幕定义里的道谢（主题收尾）
   if (task.chainStep) return task.chainStep.thanks;
   switch (task.type) {
     case 'deliver':
@@ -305,6 +362,12 @@ export function completeTaskOnEvent(
     (task.type === 'bring' && event.kind === 'bring_done' && sameName(event.targetName, task.targetName)) ||
     (task.type === 'visit' && event.kind === 'visit_done' && sameName(event.locationName, task.locationName));
   if (!ok) return null;
+  // 剧情互动（M2）：不当场盖章——发不发奖由 StoryDirector 按 rewarded[] 判（重看不重复发），
+  // 调用方（WS 层）拿到 storyBookId 后走 story 结算。熟识度也不在这记（入住前不参与社交）。
+  if (task.storyBookId) {
+    store.setActiveTask(worldId, playerId, null);
+    return { task, flowerGained: false, wallet: store.getWallet(worldId, playerId) };
+  }
   const { flowerGained, wallet } = store.addStamp(worldId, playerId);
   store.setActiveTask(worldId, playerId, null);
   // 跑腿委托完成同样加深与委托村民的熟识度。

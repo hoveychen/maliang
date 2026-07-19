@@ -134,6 +134,30 @@ export interface Wallet {
 /** 集邮盖章款式目录：完成委托时随机挑一款（纯演出，不影响经济）。id 稳定入存档，客户端映射到 AIGC 盖章图（P5）。 */
 export const STAMP_STYLES: readonly string[] = ['star', 'smile', 'paw', 'medal', 'heart'];
 
+// ── M2 主线剧情：章回进度（docs/m2-story-director-design.md §3.1）──
+
+/**
+ * 一册的进度（幕状态机，story_director.ts）。
+ * performing/rewarded 是瞬态：持久化里只会出现 idle/interacting——
+ * 崩溃/断线/世界空一律回本幕 idle，重进世界永远停在幕首重演。
+ */
+export interface StoryBookProgress {
+  /** 当前幕游标（0 起）；== 册章数即整册演完。 */
+  chapter: number;
+  state: 'idle' | 'performing' | 'interacting' | 'rewarded';
+  /** 已发过奖的幕——重看不重复发奖的唯一判据。 */
+  rewarded: number[];
+  /** 整册完结（入住已发生，幂等门闩）。 */
+  settled: boolean;
+  /** 正在互动的幕（state=interacting 时有意义；重看旧幕时 ≠ chapter 游标）。 */
+  activeChapter?: number;
+}
+
+/** 每世界每玩家的剧情进度（story_progress 表，照 wallets 先例；匿名键归一同钱包）。 */
+export interface StoryProgress {
+  books: Record<string, StoryBookProgress>;
+}
+
 /** 委托类型：完成判定全部是客户端确定性事件（送达回调/相邻/到点），不靠 LLM 猜。 */
 export type TaskType = 'deliver' | 'bring' | 'visit' | 'wish';
 
@@ -171,6 +195,18 @@ export interface ActiveTask {
   chainIndex?: number;
   /** 链步话术（物化时拷贝，任务自描述）：describeTask 用 ask/desire 注入 prompt，praiseLine 用 thanks 道谢。 */
   chainStep?: ChainStep;
+  /**
+   * 剧情互动标记（M2 §4.4）：本委托物化自 storyBookId 册第 storyChapter 幕的互动。
+   * 完成结算处发现它就通知 StoryDirector（发奖/推进/入住由它判）；盖章由 story 层按
+   * rewarded[] 判重后发——带此标记的委托在 completeTaskOnEvent 里【不】当场盖章。
+   */
+  storyBookId?: string;
+  storyChapter?: number;
+  /** 剧情 build 互动：拼完这个蓝图即完成（createBuildAsync 落成点判定；且该次拼装免花）。 */
+  storyBlueprintId?: string;
+  /** 剧情互动话术（语义同链步 ask/thanks）：describeTask/praiseLine 优先用它。 */
+  storyAsk?: string;
+  storyThanks?: string;
 }
 
 /**
@@ -316,6 +352,11 @@ export interface ItemDef {
    * 'edge' 只能挂 tile 四条边缘平面（贴纸类薄片），不进占用位图。
    */
   mount?: 'tile' | 'edge';
+  /**
+   * 纪念品（M2 剧情纪念贴纸）：只随剧情奖励发放，小铺不卖（sticker_buy 拒绝，客户端小铺不列）。
+   * 纪念感的前提是买不到。
+   */
+  souvenir?: boolean;
   /** A2「给谁做的」：这件造物是给谁用的（docs/kids-thinking-made-for-whom.md），供 A1 试用/B3 起名/交付话术读取。 */
   recipient?: RecipientRef;
   /**
@@ -414,6 +455,12 @@ export interface Character {
    * 存量角色首次需要供给时懒生成（见 task_chain.ensureTaskChain，失败回退确定性模板链）。
    */
   taskChain?: TaskChain;
+  /**
+   * 故事角色标记（M2 章回剧情，docs/m2-story-director-design.md §4.1）：随世界 seed 落 roster 的
+   * 册内角色。resident=false（未入住）时不进任何供给面（心愿/漏话/委托/主动社交）——防止狼在村里
+   * 漏话；整册完结翻 resident=true 才放行。gate 角色（册的 gateCastId）例外：可搭话，搭话即触发。
+   */
+  storyRole?: { bookId: string; castId: string; resident: boolean };
 }
 
 /** 造角色编排的阶段，顺序固定，用于进度推送。 */
@@ -551,6 +598,8 @@ export interface VoiceResponse {
   guideStop?: boolean;
   /** play_game 意图的游戏口语描述（「踢球」「老鹰抓小鸡」）：不下发客户端，由 WS 层摘走→LLM 生成剧本→过 typecheck→开演（stage_begin 广播）。仅小仙子有此能力。 */
   gameRequest?: string;
+  /** start_story 意图命中的册 id（M2 章回剧情）：不下发客户端，由 WS 层摘走→startStoryAsync 开演本幕。仅故事 gate 角色有此能力。 */
+  storyRequest?: string;
   /** 主动招呼（进对话对方先开口）：transcript 为空且非玩家发起，客户端据此跳过「没听清」提示。 */
   greeting?: boolean;
 }

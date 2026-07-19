@@ -1,0 +1,43 @@
+{
+  "voice": "zh-CN-YunxiaNeural",
+  "lines": [
+    { "id": "three_pigs_0_1", "role": "narrate", "text": "从前，有三只小猪，他们要各自盖一座小房子。" },
+    { "id": "three_pigs_0_2", "role": "猪小弟", "voice": "zh-TW-HsiaoChenNeural", "text": "我用软软的稻草，一下子就盖好啦！" },
+    { "id": "three_pigs_0_3", "role": "narrate", "text": "猪小弟的草房子刚盖好，大灰狼就晃晃悠悠地来了。" },
+    { "id": "three_pigs_0_4", "role": "大灰狼", "voice": "zh-CN-YunjianNeural", "text": "小猪小猪，看我吹一口大大的气！" },
+    { "id": "three_pigs_0_5", "role": "narrate", "text": "呼——草房子一下子就被吹倒啦。" },
+    { "id": "three_pigs_0_6", "role": "猪小弟", "voice": "zh-TW-HsiaoChenNeural", "text": "哎呀呀，我的草房子！" },
+    { "id": "three_pigs_0_7", "role": "猪小弟", "voice": "zh-TW-HsiaoChenNeural", "text": "二哥二哥，快让我进去躲一躲！" },
+    { "id": "three_pigs_0_8", "role": "猪二哥", "voice": "zh-CN-YunxiNeural", "text": "快进来快进来，我的木头房子可结实啦！" },
+    { "id": "three_pigs_0_9", "role": "narrate", "text": "猪小弟躲进了猪二哥的木房子。大灰狼还会追来吗？" },
+
+    { "id": "three_pigs_1_1", "role": "narrate", "text": "大灰狼摇摇摆摆，跟着追到了木房子前面。" },
+    { "id": "three_pigs_1_2", "role": "大灰狼", "voice": "zh-CN-YunjianNeural", "text": "木头房子？我也吹得倒！呼——" },
+    { "id": "three_pigs_1_3", "role": "narrate", "text": "呼——呼——木房子摇摇晃晃，也倒下啦。" },
+    { "id": "three_pigs_1_4", "role": "猪二哥", "voice": "zh-CN-YunxiNeural", "text": "哎呀，我的木房子也倒啦！" },
+    { "id": "three_pigs_1_5", "role": "猪小弟", "voice": "zh-TW-HsiaoChenNeural", "text": "快跑快跑，去大哥家！" },
+    { "id": "three_pigs_1_6", "role": "narrate", "text": "两只小猪撒腿就跑。猪二哥跑到了大哥家，咦，猪小弟呢？" },
+    { "id": "three_pigs_1_7", "role": "猪大哥", "voice": "zh-CN-YunyangNeural", "text": "猪小弟怎么没跟来呀？" },
+    { "id": "three_pigs_1_8", "role": "猪二哥", "voice": "zh-CN-YunxiNeural", "text": "他吓坏了，躲到别处去啦！" },
+    { "id": "three_pigs_1_9", "role": "猪大哥", "voice": "zh-CN-YunyangNeural", "text": "得快点告诉他，到我的砖房这儿来！" },
+    { "id": "three_pigs_1_10", "role": "narrate", "text": "猪小弟还躲着呢，谁去把大哥的话带给他呀？" },
+
+    { "id": "three_pigs_2_1", "role": "narrate", "text": "三只小猪终于都到齐了，可是砖头房子还差好多砖呢。" },
+    { "id": "three_pigs_2_2", "role": "猪大哥", "voice": "zh-CN-YunyangNeural", "text": "大灰狼快追来啦，砖房子还没盖完！" },
+    { "id": "three_pigs_2_3", "role": "大灰狼", "voice": "zh-CN-YunjianNeural", "text": "嘿嘿嘿，我闻到小猪的味道啦——" },
+    { "id": "three_pigs_2_4", "role": "猪小弟", "voice": "zh-TW-HsiaoChenNeural", "text": "怎么办呀，怎么办呀！" },
+    { "id": "three_pigs_2_5", "role": "猪二哥", "voice": "zh-CN-YunxiNeural", "text": "对啦！请我们的小朋友来帮忙呀！" },
+    { "id": "three_pigs_2_6", "role": "猪大哥", "voice": "zh-CN-YunyangNeural", "text": "小朋友，帮我们一起把砖房子拼起来，好不好？" },
+    { "id": "three_pigs_2_7", "role": "narrate", "text": "快帮小猪们把砖头房子盖好吧！" },
+
+    { "id": "three_pigs_3_1", "role": "narrate", "text": "砖头房子盖好啦！大灰狼气冲冲地跑了过来。" },
+    { "id": "three_pigs_3_2", "role": "大灰狼", "voice": "zh-CN-YunjianNeural", "text": "我吹我吹，我吹吹吹！" },
+    { "id": "three_pigs_3_3", "role": "narrate", "text": "砖房子稳稳当当，一动也不动。" },
+    { "id": "three_pigs_3_4", "role": "大灰狼", "voice": "zh-CN-YunjianNeural", "text": "哎哟哟，头都吹晕啦……我再也不吹房子啦！" },
+    { "id": "three_pigs_3_5", "role": "narrate", "text": "大灰狼揉着脑袋，灰溜溜地跑远啦，再也没有回来。" },
+    { "id": "three_pigs_3_6", "role": "猪大哥", "voice": "zh-CN-YunyangNeural", "text": "谢谢你，小朋友！这是我们最结实的家！" },
+    { "id": "three_pigs_3_7", "role": "猪二哥", "voice": "zh-CN-YunxiNeural", "text": "太棒啦！以后我们就住在村子里啦！" },
+    { "id": "three_pigs_3_8", "role": "猪小弟", "voice": "zh-TW-HsiaoChenNeural", "text": "我们做好朋友吧，天天一起玩！" },
+    { "id": "three_pigs_3_9", "role": "narrate", "text": "从此，三只小猪就在村子里住了下来，和大家做了邻居。" }
+  ]
+}

@@ -111,7 +111,8 @@ for (const line of spec.lines) {
   let mp3;
   for (let attempt = 1; ; attempt++) {
     try {
-      mp3 = await edgeSynth(line.text, spec.voice);
+      // 每行可覆盖音色（story 音包多角色各用各声）；缺省用包级 voice（fairy/intro 等单声包不变）。
+      mp3 = await edgeSynth(line.text, line.voice ?? spec.voice);
       break;
     } catch (err) {
       if (attempt >= 4) throw err;

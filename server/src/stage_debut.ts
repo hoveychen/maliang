@@ -7,6 +7,7 @@
 // 设计: docs/script-runtime-design.md
 
 import { loadScreenplay, type ScreenplayName } from './screenplays.ts';
+import { storyCharacterId, type StoryBook } from './story_books.ts';
 import { DEFAULT_SCENE } from './types.ts';
 import type { WorldStore } from './persistence.ts';
 import type { WorldHub } from './world_hub.ts';
@@ -61,6 +62,39 @@ export function buildDebut(
   }));
   const [pond, lake] = pickSpots(store, worldId, sceneId);
   return { code, actors, params: { pond, lake } };
+}
+
+/**
+ * 章回剧情选角（M2 §4.2）：不走 buildDebut 的 roster 随机——演员就是册 cast 本人，
+ * 按 storyCharacterId 约定直取（seed 时已落 roster），actor.name 用角色本名（剧本 cast('猪大哥')）。
+ * 在线的小朋友也进演员表（剧本可 cast 到他/对他说话；不用则闲置无害）。
+ * 幕的 screenplay 名在 P3 随剧本文件注册进 SCREENPLAYS；名字对不上 loadScreenplay 会抛，
+ * 与角色缺席一样转成 DebutError——宁可不演也别演一半炸。
+ */
+export function buildStoryStageOpts(
+  store: WorldStore,
+  hub: WorldHub,
+  worldId: string,
+  playerId: string,
+  book: StoryBook,
+  chapter: number,
+): StageStartOpts {
+  const ch = book.chapters[chapter];
+  if (!ch) throw new DebutError(`册「${book.id}」没有第 ${chapter} 幕`);
+  let code: string;
+  try {
+    code = loadScreenplay(ch.screenplay as ScreenplayName);
+  } catch {
+    throw new DebutError(`剧本「${ch.screenplay}」不存在`);
+  }
+  const actors: StageActorInfo[] = book.cast.map((c) => {
+    const char = store.getCharacter(worldId, storyCharacterId(book.id, c.castId));
+    if (!char) throw new DebutError(`故事角色「${c.name}」还没落进这个世界`);
+    return { id: char.id, name: c.name, isPlayer: false, voiceId: char.voiceId };
+  });
+  const kid = playerId && hub.membersIn(worldId).some((m) => m.playerId === playerId) ? playerId : '';
+  if (kid) actors.push({ id: kid, name: playerName(store, kid), isPlayer: true });
+  return { code, actors };
 }
 
 /** 玩家在剧本里的称呼：优先小名。档案没建出来就叫「小朋友」。 */

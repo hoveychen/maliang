@@ -211,6 +211,16 @@ export function createMockAdapters(): ServiceAdapters {
             emotion: 'happy',
           };
         }
+        // 讲故事意图（仅故事 gate 角色，M2 章回剧情）：想听/看这个角色的故事。
+        // 放在 play_game/create_prop 前：「演一个故事」的「演一个」别被游戏/造物关键词抢走。
+        if (ctx.abilities.includes('start_story') && /(讲故事|讲个故事|演一个|演个故事|什么故事|后来呢|再讲一遍|你们的故事)/.test(transcript)) {
+          return {
+            kind: 'command',
+            replyText: '好呀，你坐好，我们这就开演！',
+            behaviorScript: { commands: [{ type: 'start_story', params: {} }], loop: false },
+            emotion: 'happy',
+          };
+        }
         // 玩游戏意图（仅拥有 play_game 能力的角色，如点点）：想玩多人小游戏。
         // 放在 create_prop 前：「做个游戏」的「做个」也会命中造物，游戏关键词优先归 play_game。
         if (ctx.abilities.includes('play_game') && /(踢球|玩球|老鹰抓小鸡|捉迷藏|丢手绢|一起玩|玩游戏|做游戏|玩个游戏|做个游戏|来玩)/.test(transcript)) {

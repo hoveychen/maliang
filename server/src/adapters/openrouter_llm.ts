@@ -112,6 +112,7 @@ const ABILITY_DESC: Record<string, string> = {
   create_character: 'create_character=按小朋友的想法变出一个新的活伙伴/小动物/小人（小猫/小恐龙/小精灵/小朋友…），params:{"description":"新伙伴的中文描述，尽量保留小朋友的原话细节：长什么样、什么颜色、叫什么名字、什么性格"}',
   create_sticker: 'create_sticker=按小朋友的想法做一张扁平的贴纸/贴画（太阳/花/星星/爱心/彩虹…这类平面小图案，用来贴在地上或角色身上），params:{"description":"贴纸图案的中文描述，尽量保留小朋友的原话细节：什么图案、什么颜色"}',
   play_game: 'play_game=小朋友想玩一个【多人小游戏】（踢球/老鹰抓小鸡/捉迷藏/丢手绢…这类有规则、大家一起动起来的游戏），params:{"game":"游戏的中文口语描述，尽量保留小朋友的原话，如「踢球」「老鹰抓小鸡」"}',
+  start_story: 'start_story=小朋友想听/看你的故事（「讲故事」「演一个」「你们的故事是什么」「后来呢」「再讲一遍」这类），params:{}',
   guide_to: 'guide_to=带小朋友去某个地方，或带他去找某个人（你飞在前面领路，他自己走），params:{"location_name":"地点名"} 或 {"character_name":"角色名"}',
   guide_stop: 'guide_stop=小朋友不想去了/让你别带路了 → 停止领路，params:{}',
 };
@@ -235,6 +236,10 @@ export class OpenRouterLLMAdapter implements LLMAdapter {
     const playLine = abilities.includes('play_game')
       ? `\n- 小朋友想「玩一个游戏」（踢球/老鹰抓小鸡/捉迷藏/丢手绢这类有规则、大家一起动起来的多人小游戏，如「我们来踢球吧」「玩老鹰抓小鸡」「一起做个游戏」）→ kind=command，behaviorScript 一条 {"type":"play_game","params":{"game":"游戏的口语描述，尽量保留原话，如『踢球』"}}；replyText 用你的口吻应下（如「好呀，我们来玩！」）。这是要开一局游戏，不是造东西——造物/造角色/造贴纸别混进来。`
       : '';
+    // 讲故事规则：只有故事 gate 角色有 start_story（M2 章回剧情）。演出由服务端 StoryDirector 编排，LLM 只识别意图并应下。
+    const storyLine = abilities.includes('start_story')
+      ? `\n- 小朋友想「听/看你的故事」（如「给我讲故事吧」「演一个故事」「你们的故事是什么呀」「后来怎么样了」「再讲一遍」）→ kind=command，behaviorScript 一条 {"type":"start_story","params":{}}；replyText 用你的口吻应下（如「好呀，你坐好，我们这就开演！」）。这是要看一场演出，不是闲聊也不是玩游戏——别混。`
+      : '';
     // 引路规则：只有小仙子有 guide_to。她自己不会走路，「带路」是她飞在前面领、小朋友自己走过去。
     const guideLine = abilities.includes('guide_to')
       ? `\n- 小朋友想「去某个地方」或「去找某个人」（如「带我去风车那儿」「我想找小明」「小明在哪呀」「我们去海边吧」）→ kind=command，behaviorScript 一条 {"type":"guide_to","params":{"location_name":"地点名"}} 或 {"type":"guide_to","params":{"character_name":"角色名"}}；replyText 用你的口吻应下并招呼他跟上（如「好呀，跟我来！」）。地点名/角色名必须用下面「可以带小朋友去的地方和人」里的名字，那里没有的**不要编**——你带不了，就老实说你不知道那在哪儿（kind=chat）。
@@ -252,7 +257,7 @@ ${abilityLines}
 - 小朋友点名让「别的」角色做事时（如对你说「小蓝跳一下」），必须 kind=command，performer:"小蓝"，behaviorScript 填「小蓝要做的那件事」（此例 {"type":"do_action","params":{"action":"jump"}}）——指令绝不能省，也绝不要填 move_to 去找它：你跑过去传话由游戏自动演出，不用写进指令。replyText 仍由你来说，像去传话（如「好，我这就去告诉小蓝！」）；让你自己做就省略 performer。
 - 小朋友说「告诉X…」「帮我跟X说…」是带话：用 deliver_message（to=X，message=要带的话），不要用 move_to——光走过去话就丢了。
 - 小朋友让你「去找X」「去叫X过来」「把X喊来」「去找X一起玩」是让你走过去把 X 找来：必须 kind=command，用 chat_with（character_name=X）。哪怕话里带个「玩」字也【绝不是】闲聊——你嘴上答应「好呀我去找他」却不给指令，就成了原地空口承诺（说要去、人没动、对话也不关），这正是要避免的。真要去就把指令给上。
-- follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。${createLine}${stickerLine}${playLine}${guideLine}
+- follow 的 target_name 是「跟着谁」：小朋友说「跟我来/跟着我」时填"玩家"。${createLine}${stickerLine}${playLine}${storyLine}${guideLine}
 - replyText 用简单、温暖、童趣的中文，符合角色个性，并参考你们之前的对话保持连贯。
 - 同样的问候、口头禅、话别，别每次都说一模一样，换着说法说——别让小朋友觉得你像复读机。
 - replyText 最多两个短句、40 字以内——听的人是幼儿园小朋友，说太长会走神；一次只说一个意思，别列举。

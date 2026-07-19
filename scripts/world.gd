@@ -304,6 +304,7 @@ var _stage_speaks: Array = []     ## 进行中的舞台念白 { done:Callable, d
 var _stage_balls := {}            ## C 档球实体 id → StageBall 节点（spawn_ball 建、收场统一 free）
 var _fairy_drift_t := 0.0         ## 小仙子漂移/浮动相位
 var fairy_voice: FairyVoice       ## 预制台词播放器（构建期 TTS，运行期零调用）
+var story_voice: StoryVoice       ## 故事音包（M2）：章回剧本台词预烧 WAV，miss 回落 clientTts
 var npc_wish_voice: NpcWishVoice  ## 村民心愿漏话（3D 定位音，按距离衰减；见 npc_wish_voice.gd）
 var npc_greeter: NpcGreeter       ## 村民主动社交调度（走过来打招呼；见 npc_greeter.gd）
 var game_audio: GameAudio         ## BGM + 音效（语音/思考时自动 duck）
@@ -339,6 +340,8 @@ const POIS := [
 	{ "tile": Vector2i(31, 7), "radius": 22.0, "trigger": "poi_mountain", "name": "大山", "aliases": ["山", "高山", "山顶"] },
 	{ "tile": Vector2i(59, 54), "radius": 20.0, "trigger": "poi_windmill", "name": "风车", "aliases": ["大风车", "风车山"] },
 	{ "tile": Vector2i(13, 50), "radius": 18.0, "trigger": "poi_marsh", "name": "小水潭", "aliases": ["水潭", "树林", "小树林"] },
+	# M2 章回剧情：三只小猪的家（seed 站位旁）。仙子只提示有故事听，不催促（cooldown 长）。
+	{ "tile": Vector2i(30, 46), "radius": 16.0, "trigger": "poi_story_pigs", "name": "小猪家", "aliases": ["三只小猪", "猪大哥家", "砖房"] },
 ]
 ## 运行期 POI：服务端 scenes.pois 下发则替换，否则沿用上面的内置常量（离线/老服务端）。
 ## POIS 仍是类常量，test_fairy_voice 据它校验「每个内置触发器都有台词」。
@@ -967,6 +970,9 @@ func _setup_fairy_offline() -> void:
 	fairy_voice = FairyVoice.new()
 	fairy_voice.name = "FairyVoice"
 	add_child(fairy_voice)
+	story_voice = StoryVoice.new()
+	story_voice.name = "StoryVoice"
+	add_child(story_voice)
 	_fairy_bubble = UiAssets.bubble_sprite("ic_note", 1.4)
 	add_child(_fairy_bubble)
 
@@ -4004,6 +4010,8 @@ func _setup_backend() -> void:
 	backend.character_response.connect(_on_character_response)
 	backend.world_state.connect(_on_world_state)
 	backend.task_complete.connect(_on_task_complete)
+	backend.task_offer.connect(_on_task_offer)          # 剧情互动委托（M2）：演出收场直接递
+
 	backend.npc_wishes.connect(_on_npc_wishes)
 	backend.praise_tts.connect(_on_praise_tts)
 	backend.wish_trial.connect(_on_wish_trial)          # A1 试用：开变大/变小箭头
@@ -7975,6 +7983,12 @@ func _stage_speak(text: String, voice_id: String, done: Callable) -> void:
 		if done.is_valid():
 			done.call(true, {})
 		return
+	# 故事音包优先（M2 §4.3）：预烧台词精确命中播 WAV（零 TTS、脱网可演、音色在烧制时已定）；
+	# miss 回落 clientTts 现场合成。完成轮询同一套（_is_tts_busy 已含 story_voice）。
+	if story_voice != null and story_voice.play_line(text):
+		var est_pack := clampf(0.22 * float(text.strip_edges().length()), 1.5, 12.0)
+		_stage_speaks.append({ "done": done, "deadline": Time.get_ticks_msec() / 1000.0 + est_pack, "started": false })
+		return
 	_speak_line(text, voice_id) # async：内部 await edge 合成后播放；此处不 await，完成靠轮询
 	# 时长兜底（0.22s/字，1.5–12s）：真机 TTS 空闲检测可靠，但 headless dummy 音频 playing 永真，
 	# 靠此兜底保证 ack 必达不卡场。
@@ -7982,7 +7996,8 @@ func _stage_speak(text: String, voice_id: String, done: Callable) -> void:
 	_stage_speaks.append({ "done": done, "deadline": Time.get_ticks_msec() / 1000.0 + est, "started": false })
 
 func _is_tts_busy() -> bool:
-	return (_tts_player != null and _tts_player.playing) or _tts_pending
+	return (_tts_player != null and _tts_player.playing) or _tts_pending \
+		or (story_voice != null and story_voice.is_playing())
 
 ## 舞台完成轮询：走位/动作执行器跑完、念白 TTS 播完（或超时兜底）→ 回 done（StageAgent 据此回 ack）。
 func _step_stage(_delta: float) -> void:
@@ -8325,11 +8340,18 @@ func _stamp_icon(style: String) -> String:
 
 ## 委托完成：得 1 个章（服务端已算完账；小红花要小朋友自己打开手机盖满三个章才种得出来）。
 ## 章的款式先记下来，等他开手机补演时用真款式（离线挣的走确定性兜底，见 take_stamp_styles）。
+## 剧情互动委托（M2）：不经 character_response，演出收场服务端直接下发。
+## _set_active_task 自带新委托音效与 chip 刷新。
+func _on_task_offer(data: Dictionary) -> void:
+	if typeof(data.get("task")) == TYPE_DICTIONARY:
+		_set_active_task(data["task"])
+
 func _on_task_complete(data: Dictionary) -> void:
 	var style := String(data.get("stampStyle", ""))
 	if not style.is_empty():
 		_stamp_styles.append(style)
 	_apply_wallet(data.get("wallet"))
+	_apply_bag(data.get("bag")) # 剧情幕奖励带纪念贴纸时随包下发（M2）；无 bag 字段则只刷 UI 无害
 	_set_active_task(null)
 	if _refine_active:
 		_end_refine() # 试用满意/达上限盖章了：收起变大变小箭头 + 指示器
