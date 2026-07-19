@@ -89,8 +89,10 @@ def main():
     p.add_argument("tile_x", type=int, nargs="?")
     p.add_argument("tile_y", type=int, nargs="?")
     p.add_argument("--near", action="store_true")
-    for name in ("inject", "accept", "replay", "retry", "talk-fairy", "talk-npc", "reset-budget", "reset-intro"):
+    for name in ("inject", "accept", "replay", "retry", "talk-fairy", "reset-budget", "reset-intro"):
         sub.add_parser(name)
+    p = sub.add_parser("talk-npc")
+    p.add_argument("--name", default="", help="按名找村民进对话（缺省=列表第一个真实村民）")
     p = sub.add_parser("wait-world")
     p.add_argument("--timeout", type=float, default=120.0, dest="wtimeout")
     p.add_argument("--no-vc", action="store_true",
@@ -169,6 +171,11 @@ def main():
         if c == "wait-banner":
             b = h.wait_banner_stable(secs=args.secs, timeout=args.wtimeout)
             return out({"ok": True, "banner_text": b})
+        if c == "talk-npc":
+            msg = {"op": "talk_npc"}
+            if args.name:
+                msg["name"] = args.name
+            return out(h.send(msg))
         # 无参 op（inject/accept/…）：连字符转下划线直发
         return out(h.send({"op": c.replace("-", "_")}))
     except HarnessError as e:
