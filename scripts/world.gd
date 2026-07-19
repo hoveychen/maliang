@@ -1815,7 +1815,9 @@ func harness_talk_fairy() -> bool:
 ## 进与第一个【真实非仙子 NPC】的对话（e2e 验 NPC 招呼链：send_greeting → character_response(greeting)）。
 ## 盲点选 NPC 不可靠（tap 没命中会把玩家支使走），这条直接从 npcs 找村民发起靠近+进对话，
 ## 随后轮询 selected/last_greeting 即可。返回 entered=是否找到村民并发起（对话开在几帧后）。
-func harness_talk_npc() -> bool:
+func harness_talk_npc(who := "") -> bool:
+	# who 非空＝按名找村民（含子串互配，同 sameName 口径）——deliver/bring 委托要对【指定】角色
+	# 进对话才算送达，列表首个村民赌不中（e2e 追猪小弟实证）。空＝原行为（首个真实村民）。
 	for n in npcs:
 		if bool(n.get("is_fairy", false)):
 			continue
@@ -1824,6 +1826,10 @@ func harness_talk_npc() -> bool:
 			continue # 只找有后端 id 的真实村民（跳过本地占位/仙子）
 		if not is_instance_valid(n.get("node")):
 			continue
+		if not who.is_empty():
+			var nm := String((n["node"] as PaperCharacter).char_name)
+			if nm != who and not nm.contains(who) and not who.contains(nm):
+				continue
 		_approach_npc(n["node"])
 		return true
 	return false

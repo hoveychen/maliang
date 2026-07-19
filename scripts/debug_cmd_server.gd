@@ -163,7 +163,13 @@ static func parse_command(line: String) -> Dictionary:
 			if dict.has("quality"):
 				scap["quality"] = float(dict["quality"])
 			return scap
-		"inject", "state", "accept", "replay", "retry", "talk_fairy", "talk_npc", "reset_budget", "reset_intro":
+		"talk_npc":
+			# name 可选：按名找村民（deliver/bring 要对指定角色进对话，列表首个赌不中）
+			var tn := {"ok": true, "op": op}
+			if dict.has("name"):
+				tn["name"] = String(dict["name"])
+			return tn
+		"inject", "state", "accept", "replay", "retry", "talk_fairy", "reset_budget", "reset_intro":
 			return {"ok": true, "op": op}
 		_:
 			return {"ok": false, "error": "unknown op: %s" % op}
@@ -305,7 +311,7 @@ func _execute(cmd: Dictionary) -> Dictionary:
 		"talk_fairy":
 			return _do_talk_fairy()
 		"talk_npc":
-			return _do_talk_npc()
+			return _do_talk_npc(String(cmd.get("name", "")))
 		"pick":
 			return _do_pick(String(cmd["optionId"]))
 		"pickup":
@@ -848,12 +854,12 @@ func _do_talk_fairy() -> Dictionary:
 	return {"ok": ok, "op": "talk_fairy", "entered": ok}
 
 ## talk_npc：进与第一个真实非仙子村民的对话（走宿主 harness_talk_npc），验 NPC 招呼链。
-func _do_talk_npc() -> Dictionary:
+func _do_talk_npc(who := "") -> Dictionary:
 	var w := _host()
 	if w == null or not w.has_method("harness_talk_npc"):
 		return {"ok": false, "error": "world 无 harness_talk_npc"}
-	var ok := bool(w.call("harness_talk_npc"))
-	return {"ok": ok, "op": "talk_npc", "entered": ok}
+	var ok := bool(w.call("harness_talk_npc", who))
+	return {"ok": ok, "op": "talk_npc", "entered": ok, "who": who}
 
 ## pickup：拾起 tile 上一件物品进背包（走宿主 harness_pickup → 服务端 item_pickup），验复用提示需背包旧物。
 ## pick：引导式造物按 optionId 点卡（走宿主 harness_pick_option → _on_creation_card → send_creation_reply）。
