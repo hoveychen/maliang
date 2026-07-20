@@ -199,6 +199,9 @@ var _os_name := OS.get_name()       ## 平台名（headless 测试可覆盖成 "
 # 形成连环录。空结果不再当一轮正常结束，而是闭麦退避一段（连续空则指数退避，见 InteractionFsm）。
 var _empty_streak := 0              ## 连续空识别次数（拿到有效转写即清零）
 var _cooldown_t := 0.0              ## 退避剩余秒数（>0 即闭麦，派生为 COOLDOWN 态）
+## 焦点视频 LOD（docs/video-hero-lod-design.md）：进对话的焦点角色叠一路真视频，离开撤回。
+## 记住当前视频英雄，_exit_interaction / 切换对象时撤下。空=当前无视频档角色（任意时刻 ≤1）。
+var _video_hero: PaperCharacter = null
 # 「说完再走」（缺陷 ④）：leave 指令先挂起，等回应说完再动身 + 关对话。
 # { npc, script, seen, arm, deadline }；空 = 没有挂起的离开。
 var _pending_leave: Dictionary = {}
@@ -2697,11 +2700,17 @@ func _update_paper_motion(n: Dictionary, node: PaperCharacter, lean: float, delt
 ## 注意这里的分层：段（sprite 帧）管「角色本身在做什么」，而 set_paper_motion/action_pose
 ## 那套顶点位移管「纸片被怎么摆弄」。两者叠加——走路时既播 moving 帧，又有纸片摇摆飘动。
 func _update_anim_clip(n: Dictionary, node: PaperCharacter, walk: float) -> void:
-	if node == null or node.current_clip().is_empty():
+	if node == null:
+		return
+	# 焦点视频档：讲话播 talking 段、停顿播 idle 段（服务端只有这两段 ogv，moving 归到 idle）。
+	# 换 VideoStreamPlayer 的 stream，同段重复调是零成本快路径（PaperCharacter.set_video_clip）。
+	if node.is_video_lod():
+		node.set_video_clip("talking" if _is_char_speaking(n, node) else "idle")
+	if node.current_clip().is_empty():
 		return
 	var r := pick_clip(_is_char_speaking(n, node), walk, bool(n.get("clip_moving", false)))
 	n["clip_moving"] = bool(r[1])
-	node.set_clip(String(r[0]))
+	node.set_clip(String(r[0])) # 底层图集段照常维护（撤回视频档时即恢复到正确段）
 
 ## 踏步弹跳（米，加到脚底高度上）。纯函数，供单测。
 ## |sin| 而非 sin：走路摇摆一个周期里左右脚各落一次地，弹跳要一个周期颠两下，且恒为正
@@ -3544,6 +3553,30 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 		_greet_on_enter(d) # 对方先开口打招呼（播放期间 should_capture 自动闭麦，说完再放开）
 	_sticker_pick = ""
 	_refresh_sticker_view() # 背包有贴纸就亮贴纸盘（character-anchors P4）
+	_start_video_hero(npc) # 焦点视频 LOD：拉 ogv 把这个角色升成 24fps 真视频（fire-and-forget）
+
+## 焦点视频 LOD：向服务端拉该角色 idle/talking 两段 ogv，成功则把它从图集升成真视频。
+## fire-and-forget（_enter_interaction 不 await）。拉取期间玩家可能已离开/换了对象——每次 await
+## 后核对它仍是当前焦点（_locked）才继续，否则弃掉。无 clip/离线/404 → 静默留图集，绝不阻断对话。
+func _start_video_hero(npc: PaperCharacter) -> void:
+	_stop_video_hero() # 切换对话对象/重入：先撤上一个，保证任意时刻 ≤1 路解码
+	if npc == null or npc.sprite_hash.is_empty() or not online:
+		return
+	var target_h := npc.visible_height() # 用图集档身高当目标，切成视频观感不跳
+	var idle: VideoStream = await api.fetch_clip_ogv(npc.sprite_hash, "idle")
+	if idle == null or not is_instance_valid(npc) or _locked != npc:
+		return # 无 idle 段 / 拉取期间已离开或换了对象
+	var talking: VideoStream = await api.fetch_clip_ogv(npc.sprite_hash, "talking")
+	if not is_instance_valid(npc) or _locked != npc:
+		return
+	npc.start_video_lod(idle, talking, target_h)
+	_video_hero = npc
+
+## 撤回当前视频英雄（换回图集）。幂等；节点已释放（离场）时安全跳过。
+func _stop_video_hero() -> void:
+	if _video_hero != null and is_instance_valid(_video_hero):
+		_video_hero.stop_video_lod()
+	_video_hero = null
 
 ## 进「玩家喊话」态：站桩构图面对对方副本。对方端无感知（无会话锁）——他继续玩他的；
 ## 走远/离场/换场景由 _step_remote_actors 的维持判定自动退出。P3 在此态叠表情盘，P5 叠开放麦喊话。
@@ -3985,6 +4018,7 @@ func _exit_interaction() -> void:
 		if online:
 			backend.send_creation_cancel()
 	_vc.close() # 关麦（录音中则先静默取消，不留半开会话）
+	_stop_video_hero() # 焦点视频 LOD：撤回真视频、换回图集（无残留解码）
 	selected = null
 	_sync_guide_button() # 退出对话：引路继续，按钮跟着回来
 	if _sticker_view != null:
@@ -5314,6 +5348,7 @@ func _spawn_server_character(c: Dictionary, at_logical: Vector2, prefetched := {
 	add_child(npc)
 	var appearance: Dictionary = c.get("appearance", {})
 	var asset := String(appearance.get("spriteAsset", ""))
+	npc.sprite_hash = asset  # 焦点视频 LOD 据此拉 ogv（进对话时）
 	# 体型：服务端 size→scale（明显档 小0.7/中1.0/大1.4，见 docs/character-size-design.md）。
 	# 缺失/存量角色恒 1.0=不变。只作用于村民/角色，仙子与占位另有固定高度。
 	var body_scale := _body_scale(appearance)

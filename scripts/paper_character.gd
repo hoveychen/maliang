@@ -9,6 +9,8 @@ extends MeshInstance3D
 ## 对外保持 Sprite3D 同名属性（texture/pixel_size/offset/modulate），上层零改动。
 
 var char_name: String = "小伙伴"
+## 该角色静态立绘的资产 hash（world.gd spawn 时灌入）。焦点视频 LOD 据此向服务端拉 ogv 段。空=占位/无真图。
+var sprite_hash: String = ""
 
 ## 占位立绘的世界高度（米）。在线生成 sprite 由 world.gd 覆盖为 ~6 单位。
 const PLACEHOLDER_HEIGHT := 3.2
