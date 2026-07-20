@@ -73,6 +73,9 @@ import { detectCharacterAnchors } from './anchors.ts';
 import { trimToContent } from './adapters/chroma_cutout.ts';
 import { generateCharacterAnimation, triggerCharacterAnimation, backfillCharacterAnimations, repackFromStoredClips, type ToSpriteSheet } from './idle_animation.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
+import { CLIP_NAMES } from './sprite_sheet.ts';
+import { mp4ToTheoraOgv, type ToClipOgv } from './clip_video.ts';
+import type { ClipName } from './adapters/types.ts';
 import { FAIRY_VISUAL_DESC } from './adapters/sprite_style.ts';
 import { respondToTranscript, greetCharacter, flushMemory } from './voice.ts';
 import { validateSdfPropSpec } from './sdf_prop.ts';
@@ -112,6 +115,8 @@ export interface ServerDeps {
   store?: WorldStore;
   /** 视频→图集转换缝（缺省真实 ffmpeg；测试注入假实现以免依赖网络/ffmpeg）。 */
   toSpriteSheet?: ToSpriteSheet;
+  /** mp4→ogv 转换缝（焦点视频 LOD；缺省真实 ffmpeg libtheora；测试注入假实现）。 */
+  toClipOgv?: ToClipOgv;
   /** 启动时回填存量角色的 idle 动画（只在真实进程入口 index.ts 开；测试建 server 不触发生成）。 */
   backfillOnBoot?: boolean;
 }
@@ -256,6 +261,10 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   const adapters = deps.adapters ?? createAdapters(loadConfig());
   const store = deps.store ?? new WorldStore(process.env.MALIANG_DATA_DIR ?? './data');
   const toSpriteSheet = deps.toSpriteSheet;
+  const toClipOgv = deps.toClipOgv ?? mp4ToTheoraOgv;
+  // 焦点视频 LOD 的按需转码去重：同一 (立绘hash, 段) 并发请求（一个立绘被多个世界共用时，
+  // 多个孩子同时对话会撞同一 hash）只跑一次 ffmpeg，其余等同一个 promise。
+  const ogvInFlight = new Map<string, Promise<string>>();
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   await app.register(websocket);
 
@@ -862,6 +871,67 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const rec = store.getSpriteAnim(req.params.hash);
     return rec ?? { status: 'none' };
   });
+
+  // 焦点角色真视频 LOD 的 ogv 供给（见 docs/video-hero-lod-design.md）：把某立绘某段的原始
+  // 绿幕 mp4（clipVideos[name]，H.264）惰转成 Godot 能读的 Ogg Theora，内容寻址缓存进 clipOgv，
+  // 之后永久命中。客户端只在「进入对话的焦点角色」上请求，任意时刻 ≤1 路视频解码。
+  //
+  // 路由取 :file 再校验 .ogv 后缀（find-my-way 对 `:name.ogv` 这种参数带字面后缀支持不稳，
+  // 手动解析更稳）。段名不在 CLIP_NAMES / 无该段原片 / 记录未 ready → 404，客户端静默留图集。
+  app.get<{ Params: { hash: string; file: string } }>(
+    '/sprite-anim/:hash/clip/:file',
+    async (req, reply) => {
+      const { hash, file } = req.params;
+      if (!file.endsWith('.ogv')) return reply.code(404).send({ error: 'expect .ogv' });
+      const name = file.slice(0, -'.ogv'.length) as ClipName;
+      if (!CLIP_NAMES.includes(name)) return reply.code(404).send({ error: 'unknown clip' });
+
+      const rec = store.getSpriteAnim(hash);
+      if (!rec || rec.status !== 'ready') return reply.code(404).send({ error: 'no sprite-anim' });
+
+      // 缓存命中：clipOgv 里记着且资产还在盘上 → 直接回。
+      const serve = (ogvHash: string) => {
+        const ogv = store.getAsset(ogvHash);
+        if (!ogv) return null;
+        const etag = `"${ogvHash}"`;
+        reply.header('cache-control', 'public, max-age=31536000, immutable').header('etag', etag);
+        if (etagMatches(req.headers['if-none-match'], etag)) return reply.code(304).send();
+        return reply.header('content-type', 'video/ogg').send(Buffer.from(ogv.bytes));
+      };
+      const cached = rec.clipOgv?.[name];
+      if (cached) {
+        const hit = serve(cached);
+        if (hit !== null) return hit; // 命中缓存资产在库 → 回它；不在（被清）则往下重转
+      }
+
+      // 无缓存：取原片 → 惰转（并发去重）→ 入库 → 记 clipOgv → 回。
+      const mp4Hash = rec.clipVideos?.[name];
+      if (!mp4Hash) return reply.code(404).send({ error: 'no clip video' });
+      const mp4 = store.getAsset(mp4Hash);
+      if (!mp4) return reply.code(404).send({ error: 'clip video asset missing' });
+
+      const key = `${hash}:${name}`;
+      let pending = ogvInFlight.get(key);
+      if (!pending) {
+        pending = (async () => {
+          const ogv = await toClipOgv(mp4);
+          const ogvHash = store.putAsset(ogv);
+          store.setSpriteClipOgv(hash, name, ogvHash);
+          return ogvHash;
+        })().finally(() => ogvInFlight.delete(key));
+        ogvInFlight.set(key, pending);
+      }
+      let ogvHash: string;
+      try {
+        ogvHash = await pending;
+      } catch (err) {
+        req.log.warn({ err, hash, name }, 'clip ogv 转码失败');
+        return reply.code(500).send({ error: 'transcode failed' });
+      }
+      const done = serve(ogvHash);
+      return done === null ? reply.code(500).send({ error: 'ogv asset missing after transcode' }) : done;
+    },
+  );
 
   // 管理端点：直接上传一张预生成的 idle 图集并绑定到某立绘 hash（不重新跑生成管线）。
   // 用于把线下已确认好的动画上线（如仙子），或用同一张立绘复用现成动画——避免烧钱重生成、

@@ -248,6 +248,14 @@ export interface SpriteAnimRecord {
    * 本地 ffmpeg，零成本；不存就得重新向 Seedance 买一遍。原片不下发给客户端。
    */
   clipVideos?: Partial<Record<ClipName, string>>;
+  /**
+   * 段名 → 该段转出的 Ogg Theora（.ogv）资产 hash——焦点角色真视频 LOD 的按需转码缓存。
+   *
+   * clipVideos 里存的是 H.264 mp4，Godot 内置的 VideoStreamPlayer 只认 Theora。首次有人请求
+   * `GET /sprite-anim/:hash/clip/:name.ogv` 时惰转一次并记在这里，之后永久命中（转码确定性、
+   * 源片内容寻址不变），不必每次对话都重转。见 clip_video.ts / docs/video-hero-lod-design.md。
+   */
+  clipOgv?: Partial<Record<ClipName, string>>;
 }
 
 /** scenes 表的一行（列名 snake_case；terrain blob 单独走 getSceneTerrain，不在此）。 */
@@ -2138,6 +2146,17 @@ export class WorldStore {
     extra?: { version?: number; packVersion?: number; clipVideos?: Partial<Record<ClipName, string>> },
   ): void {
     this.#spriteAnims.set(spriteHash, { status: 'ready', animAsset, meta, ...extra });
+    this.#persistSpriteAnims();
+  }
+
+  /**
+   * 记下某段转出的 ogv 资产 hash（焦点视频 LOD 的按需转码缓存）。合并进现有记录、不动别的字段。
+   * 记录不存在时静默忽略（调用方在有 ready 记录 + clipVideos 时才会转码，故正常路径必有记录）。
+   */
+  setSpriteClipOgv(spriteHash: string, name: ClipName, ogvHash: string): void {
+    const rec = this.#spriteAnims.get(spriteHash);
+    if (!rec) return;
+    rec.clipOgv = { ...rec.clipOgv, [name]: ogvHash };
     this.#persistSpriteAnims();
   }
 

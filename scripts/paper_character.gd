@@ -9,6 +9,8 @@ extends MeshInstance3D
 ## 对外保持 Sprite3D 同名属性（texture/pixel_size/offset/modulate），上层零改动。
 
 var char_name: String = "小伙伴"
+## 该角色静态立绘的资产 hash（world.gd spawn 时灌入）。焦点视频 LOD 据此向服务端拉 ogv 段。空=占位/无真图。
+var sprite_hash: String = ""
 
 ## 占位立绘的世界高度（米）。在线生成 sprite 由 world.gd 覆盖为 ~6 单位。
 const PLACEHOLDER_HEIGHT := 3.2
@@ -63,6 +65,29 @@ var _sheet: Dictionary = {}
 var _clips: Dictionary = {}
 ## 当前播放的段名。
 var _clip := ""
+
+# ── 焦点视频 LOD（docs/video-hero-lod-design.md）─────────────────────────────
+## 进对话的「焦点」角色叠一路 24fps 真视频（图集档只有 8fps），离开对话即撤回图集。
+## 任意时刻 ≤1 路解码——单个 VideoStreamPlayer，切 idle/talking 时换它的 stream（不同时开两路）。
+## 真机实测 1 路 ~56fps 稳、8 路掉到 47fps（memory video-as-animation-tablet-decode-limit）。
+static var _video_shader: Shader = null  ## 抠绿视频 shader，首次开视频才 load（多数角色永不用）
+var _video_mat: ShaderMaterial = null
+var _vsp: VideoStreamPlayer = null
+var _video_lod := false
+var _video_clip := ""
+var _video_idle: VideoStream = null
+var _video_talking: VideoStream = null
+var _video_height := 0.0   ## 目标角色世界高度（米）：进视频用图集档身高，观感不跳
+var _video_wait := 0.0     ## 等首帧解码的累计秒数（超时=平台不支持/坏流，放弃留图集）
+
+## 首帧解码迟迟不来的放弃阈值（秒）：Theora 软解在目标机都能出帧（spike 实证华为 ~56fps），
+## 超过此值仍无首帧 = 平台不支持/坏流，静默撤回留图集，别让 VideoStreamPlayer 空转 CPU。
+const VIDEO_FIRST_FRAME_TIMEOUT := 3.0
+
+## 视频帧里角色竖向占比（源立绘/视频角色约占帧高 86~93%，见 sprite_sheet.ts cellH 注释）。P3/P4 调参旋钮。
+const VIDEO_FILL := 0.9
+## 角色脚底在视频帧里的归一化 y（原点顶，越接近 1 越靠帧底）。P3/P4 调参旋钮。
+const VIDEO_FOOT := 0.97
 
 func _init() -> void:
 	if _shader == null:
@@ -348,6 +373,118 @@ func portrait_tex() -> Texture2D:
 	at.atlas = texture
 	at.region = Rect2(0.0, 0.0, cw, ch)  # 第 0 帧在图集左上角
 	return at
+
+# ── 焦点视频 LOD 原语 ────────────────────────────────────────────────────────
+
+## 开启视频 LOD：牌子材质换成抠绿视频 shader，建一个隐藏的 VideoStreamPlayer 只取解码纹理。
+## ★核心坑（spike 实证）：VideoStreamPlayer 是 Control，加进树后默认把原始视频画在 2D 层盖住
+## 3D 视口——只取解码纹理时必须 visible=false + 挪出屏幕（见 docs/video-hero-lod-design.md）。
+## idle/talking 两段传入 VideoStream，起手播 idle；talking 缺省（null）则只有 idle。
+## world_height：目标角色世界高度（米），传图集档 visible_height() 保持切换观感不跳；<=0 用当前可见高。
+func start_video_lod(idle_stream: VideoStream, talking_stream: VideoStream = null, world_height := 0.0) -> void:
+	if idle_stream == null:
+		return
+	_video_idle = idle_stream
+	_video_talking = talking_stream
+	_video_height = world_height if world_height > 0.0 else visible_height()
+	if _video_mat == null:
+		if _video_shader == null:
+			_video_shader = load("res://shaders/chroma_video.gdshader")
+		_video_mat = ShaderMaterial.new()
+		_video_mat.shader = _video_shader
+	if _vsp == null:
+		_vsp = VideoStreamPlayer.new()
+		_vsp.name = "video_lod"
+		_vsp.loop = true
+		_vsp.volume_db = -80.0
+		_vsp.expand = false
+		_vsp.visible = false                       # 只取解码纹理，不让它自绘到 2D 层（★核心坑）
+		_vsp.position = Vector2(-100000, -100000)  # 双保险：挪出屏幕
+		add_child(_vsp)
+	_video_lod = true
+	_video_clip = "idle"
+	_video_wait = 0.0
+	_vsp.stream = idle_stream
+	_play_vsp()
+	# ★不立刻换材质：解码要几十 ms 才吐首帧，此刻换成视频材质会因 video_tex 未设而透明闪一下；
+	# 更糟的是平台不支持时永远无帧 → 角色永久隐身。改为在 _process 拿到首帧那刻才无缝换材质，
+	# 首帧前一直显示图集档。这就是 P4「ogv 失败/平台不支持 → 静默留图集」的兜底。
+	set_process(true)
+
+## 切视频段（idle/talking）：换 VideoStreamPlayer 的 stream，保持单路解码。缺该段（如没 talking
+## 原片）→ 保持当前段不动。同段重复调是零成本快路径。
+func set_video_clip(name: String) -> void:
+	if not _video_lod or name == _video_clip:
+		return
+	var stream: VideoStream = _video_idle if name == "idle" else _video_talking
+	if stream == null:
+		return  # 没这段原片 → 保持当前段
+	_video_clip = name
+	_vsp.stream = stream
+	_play_vsp()
+
+## VideoStreamPlayer.play() 要求节点已在树内（否则 ERR_FAIL）。正常路径（world.gd 在活动
+## 场景里对已 spawn 的角色调）必在树内；防御性地对「尚未入树」延迟到入树后再播。
+func _play_vsp() -> void:
+	if _vsp.is_inside_tree():
+		_vsp.play()
+	else:
+		_vsp.play.call_deferred()
+
+## 撤回视频 LOD：停播、释放 VideoStreamPlayer（无残留解码/泄漏）、材质换回图集档、几何复原。幂等。
+func stop_video_lod() -> void:
+	if not _video_lod:
+		return
+	_video_lod = false
+	_video_clip = ""
+	set_process(false)
+	if _vsp != null:
+		_vsp.stop()
+		_vsp.queue_free()
+		_vsp = null
+	material_override = _mat  # 换回图集主材质（含其 xray next_pass）
+	_refresh_geometry()       # 从图集档的 texture/_sheet/pixel_size/offset 复原 quad 几何
+
+func is_video_lod() -> bool:
+	return _video_lod
+
+## 当前请求的视频段名（""=没在视频档）。
+func current_video_clip() -> String:
+	return _video_clip
+
+func _process(delta: float) -> void:
+	if not _video_lod or _vsp == null:
+		return
+	var vt := _vsp.get_video_texture()
+	# 坏流/平台不支持时 get_video_texture 返回的不是 null，而是一张 0×0 的空纹理（实测）——
+	# 必须按尺寸判有无真帧，只判 null 会把空纹理当成有效帧、换过去后角色变黑/透明。
+	if vt == null or vt.get_width() <= 0 or vt.get_height() <= 0:
+		# 还没首帧：累计等待，超时判定平台不支持/坏流 → 撤回留图集（别让解码器空转）。
+		_video_wait += delta
+		if _video_wait > VIDEO_FIRST_FRAME_TIMEOUT:
+			stop_video_lod()
+		return
+	_video_mat.set_shader_parameter("video_tex", vt)
+	if material_override != _video_mat:
+		# 首帧到手：此刻才无缝把图集换成视频（之前一直显图集，无透明闪）。
+		# 同帧按真视频宽高比重算几何——目标身高取自图集档 visible_height，故切换观感不跳。
+		_apply_video_geometry(vt)
+		material_override = _video_mat  # 视频档不带 xray next_pass（穿透剪影是图集档专属）
+
+## 首帧到手后按视频宽高比重算 quad 几何：让视频里的角色（竖向占 VIDEO_FILL）身高对齐图集档身高、
+## 脚底落在节点原点。只改 QuadMesh 尺寸/中心偏移——不碰 texture/_sheet/pixel_size/offset（那是图集档
+## 状态，stop 时 _refresh_geometry 靠它复原）。VIDEO_FILL/VIDEO_FOOT 是 P3/P4 真机调参旋钮。
+func _apply_video_geometry(vt: Texture2D) -> void:
+	var vw := float(vt.get_width())
+	var vh := float(vt.get_height())
+	if vw <= 0.0 or vh <= 0.0 or _video_height <= 0.0:
+		return
+	var frame_h := _video_height / VIDEO_FILL   # 整帧世界高（角色只占其中 VIDEO_FILL）
+	var frame_w := frame_h * (vw / vh)
+	var q := mesh as QuadMesh
+	q.size = Vector2(frame_w, frame_h)
+	# 脚底（帧内归一化 y=VIDEO_FOOT，原点顶）对齐节点原点 y=0 → center_offset.y = frame_h*(VIDEO_FOOT-0.5)
+	q.center_offset = Vector3(0.0, frame_h * (VIDEO_FOOT - 0.5), 0.0)
 
 func _refresh_geometry() -> void:
 	if texture == null:

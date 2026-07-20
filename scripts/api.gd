@@ -309,6 +309,34 @@ func fetch_sprite_anim(sprite_hash: String) -> Dictionary:
 	var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
 	return data if typeof(data) == TYPE_DICTIONARY else { "status": "none" }
 
+## 焦点视频 LOD：拉某立绘某段的 Ogg Theora（GET /sprite-anim/:hash/clip/:name.ogv）→ VideoStream。
+## VideoStreamTheora 要一个文件路径（不能从内存 buffer 直接建流），故落盘到 asset_cache 再指过去。
+## 键 = clipogv_<sprite>_<clip>.ogv（服务端 ogv 内容寻址+不可变 → 缓存永久有效）。
+## 失败/404（无该 clip、未 ready、离线）→ null，调用方静默留图集（绝不阻断对话）。
+func fetch_clip_ogv(sprite_hash: String, clip_name: String) -> VideoStream:
+	if sprite_hash.is_empty() or clip_name.is_empty():
+		return null
+	var key := "clipogv_%s_%s.ogv" % [sprite_hash, clip_name]
+	var path := _cache_path(key)
+	if not FileAccess.file_exists(path):
+		var http := HTTPRequest.new()
+		http.timeout = REQUEST_TIMEOUT_SEC
+		add_child(http)
+		var err := http.request("%s/sprite-anim/%s/clip/%s.ogv" % [base, sprite_hash, clip_name])
+		if err != OK:
+			http.queue_free()
+			return null
+		var res: Array = await http.request_completed
+		http.queue_free()
+		if int(res[1]) != 200:
+			return null  # 404=无 clip/未 ready；其它非 200 同样静默留图集
+		_cache_write(key, res[3] as PackedByteArray)
+	if not FileAccess.file_exists(path):
+		return null  # 落盘失败（磁盘满等）→ 留图集
+	var vs := VideoStreamTheora.new()
+	vs.file = path
+	return vs
+
 ## 拉取音频资源 hash → { "bytes": PackedByteArray, "rate": int }。
 ## 采样率从 content-type 解析（audio/L16;rate=24000 —— local Kokoro 24k / 讯飞 16k），缺失回落 16k。
 func fetch_audio(asset_hash: String) -> Dictionary:
