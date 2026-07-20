@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { buildServer, handleWsMessage, newVoiceSession, type VoiceSession } from '../src/server.ts';
+import { seedFairyWorld } from './helpers/world_seed.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 import { recipientDefaultSize, recipientPhrase } from '../src/creation_options.ts';
@@ -28,7 +29,7 @@ function villager(worldId: string, id: string, name: string, size: 'small' | 'me
 async function seeded(): Promise<{ store: WorldStore; fairyId: string; close: () => Promise<void> }> {
   const store = new WorldStore();
   const app = await buildServer({ adapters: createMockAdapters(), store });
-  await app.inject({ method: 'GET', url: '/worlds/default' });
+  seedFairyWorld(store);
   const fairy = store.listCharacters('default').find((c) => c.isFairy)!;
   // 在场两个村民：小兔子（small）、大熊（big）——用来验 recipient→size 默认。
   store.addCharacter(villager('default', 'bunny', '小兔子', 'small'));

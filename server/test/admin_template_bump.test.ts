@@ -20,9 +20,9 @@ function villager(worldId: string, id: string, name: string): Character {
 
 test('admin template bump: token 门禁 + 版本自增 + 触发存量世界 additive 补齐', async (t) => {
   const store = new WorldStore();
-  store.createWorld('default');
-  store.saveCharacter(villager('default', 'rabbit1', '舞舞兔'));
-  const wa = store.getOrCreateMyWorld('alice'); // 存量玩家世界（提升 template + clone）
+  store.ensureTemplateWorld(); // P6：空建 template，内容直接 seed 进去
+  store.saveCharacter(villager(TEMPLATE_WORLD_ID, 'rabbit1', '舞舞兔'));
+  const wa = store.getOrCreateMyWorld('alice'); // 存量玩家世界（从 template clone）
 
   // debugAuthed 的 token 在 buildServer 构造时一次性捕获（server.ts:961），故必须在 build 前设 env。
   const prevToken = process.env.MALIANG_ADMIN_TOKEN;

@@ -16,11 +16,13 @@
 世界谱系：
 
 ```
-default ──(ensureTemplateWorld 提升,只一次)──▶ template ──(cloneWorldInstances,新世界建立时)──▶ w_<playerId> / sandbox_<uuid>
+template（唯一权威母版，内容直接 seed 进来）──(cloneWorldInstances,新世界建立时)──▶ w_<playerId> / sandbox_<uuid>
 ```
 
-- `default`：现兼任「模板内容来源」。首次访问只种点点仙子，**不种村民/故事**（`server/src/server.ts:307-312`）。
-- `template`：由 default 提升（`ensureTemplateWorld`，`persistence.ts:1035`）。新玩家世界从它 clone 放置。
+- `template`：**唯一权威母版**。P6 起 `ensureTemplateWorld` 只**空建**（`persistence.ts`），内容由作者
+  **直接 seed 进 template**（seed 端点传 `worldId='template'`，见 §3/§6）。新玩家世界从它 clone 放置。
+- `default`：**已退役**（P6）。不再是特殊世界、不再自动重建、不再向 template 提升内容；`GET /worlds/:id`
+  对不存在的世界（含 `default`）一律 404。历史上它曾兼任「模板内容来源」，现由 template 完全取代。
 - `w_<playerId>`：每人一世界。玩家走完 onboarding、踏进游戏世界那刻由 `getOrCreateMyWorld` 建立
   （`server/src/server.ts:296`）。**onboarding 阶段不连任何世界**，只调无状态 `/onboarding/*`。
 - `sandbox_<uuid>`：测试沙箱（`POST /admin/worlds/sandbox`）。作者验内容隔离用，验完 DELETE。
@@ -37,10 +39,10 @@ default ──(ensureTemplateWorld 提升,只一次)──▶ template ──(cl
 
 **两个坑（都坐实，务必记住）：**
 
-1. **改 `default` ≠ 改 `template`**。`ensureTemplateWorld` 幂等：template 已存在就短路返回，**不会**把你对
-   default 的新改动提升过去（`persistence.ts:1030-1036` 注释明写「不重复克隆覆盖作者对模板的编辑」）。
-   prod 的 template 早已存在。**正解：放置级新内容直接种进 `template` 世界**（seed 端点接受任意世界 id，见下），
-   别改 default 指望自动提升。
+1. **内容只种进 `template`，`default` 已退役**。P6 起 `ensureTemplateWorld` 只空建 template、**绝不**从 default
+   提升任何内容；`default` 不再是特殊世界（访问即 404）。放置级新内容**必须直接种进 `template` 世界**
+   （seed 端点接受任意世界 id，见下）——改 `default` 不会到达任何玩家。`ensureTemplateWorld` 仍幂等：
+   template 已存在就短路返回，不覆盖作者对模板的编辑（prod 的 template 早已存在）。
 2. **存量世界补齐要显式 bump**：加了放置级内容后，只有**全新**世界（clone）自动拿到；存量 `w_<playerId>`
    要调 `POST /admin/template/bump-version` 自增版本触发 `#migrateWorldPlacements` 补入，下次进入才补齐
    （见 §6，该端点已就位）。
@@ -104,7 +106,7 @@ default ──(ensureTemplateWorld 提升,只一次)──▶ template ──(cl
 **注意**：补齐是**被动**的——玩家下次进游戏才补，不是 bump 当下推给在线客户端（符合 P5「进入时迁移」设计）。
 **只有放置级改动需要 bump**；定义级改动（改已有角色长相/台词/能力）走共享定义、当场全世界生效，无需 bump。
 
-## 7. 验内容（沙箱隔离，不污染 default/template）
+## 7. 验内容（沙箱隔离，不污染 template）
 
 1. `POST /admin/worlds/sandbox` 开一个 `sandbox_<uuid>`（从 template clone）。
 2. 客户端用 `MALIANG_WORLD=<sandboxId>` 指向它（`scripts/api.gd:163` bootstrap 覆盖钩子），或 harness 直接跑。
@@ -114,5 +116,6 @@ default ──(ensureTemplateWorld 提升,只一次)──▶ template ──(cl
 ## 8. 后台看到什么
 
 管理台「世界」页调 `/debug/api/worlds` → `listWorlds()`（`persistence.ts:2042`，`SELECT id FROM worlds` 无过滤），
-按 id 混排列出**每一个**世界：default / template / 每个 `w_<player>` / 每个 `sandbox_<uuid>`（无分组标签，玩家越多
+按 id 混排列出**每一个**世界：template（母版）/ 每个 `w_<player>` / 每个 `sandbox_<uuid>`（`default` 已 P6 退役，
+现网删除后不再出现；无分组标签，玩家越多
 行越多）。角色页是**每世界实例视角**（`listCharacters(world_id)`）；共享定义层 `character_defs` 后台不单独展示。

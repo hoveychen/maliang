@@ -978,6 +978,37 @@ export class WorldStore {
     return true;
   }
 
+  /**
+   * 清一个世界的【玩家档案数据】（A 类：按 (world_id, player_id) 分区的 6 张表），保留世界本身、
+   * 角色（characters 实例 + character_defs 共享定义）、造物（items）与地形（scenes）——世界模板架构 v2 P6
+   * 现网切换收尾用（清 default 的开发期脏数据）。老板硬约束：**角色/造物/地形绝不清**，故本方法只碰
+   * wallets/player_tasks/story_progress/player_discovered/player_positions/bag 六表。
+   *
+   * 默认 dry-run（apply=false）：只 COUNT 各表将删行数、一个字节都不动（仿 /admin/integrity/fix 安全姿势）。
+   * apply=true 才在一个事务里真删。返回 { applied, counts:{表→行数} }。世界不存在 → applied=false、counts 全 0。
+   */
+  purgeWorldPlayerData(worldId: string, apply: boolean): { applied: boolean; counts: Record<string, number> } {
+    const PLAYER_TABLES = ['wallets', 'player_tasks', 'story_progress', 'player_discovered', 'player_positions', 'bag'];
+    const counts: Record<string, number> = {};
+    if (!this.#worldExists(worldId)) {
+      for (const t of PLAYER_TABLES) counts[t] = 0;
+      return { applied: false, counts };
+    }
+    for (const t of PLAYER_TABLES) {
+      counts[t] = (this.#db.prepare(`SELECT COUNT(*) AS c FROM ${t} WHERE world_id = ?`).get(worldId) as { c: number }).c;
+    }
+    if (!apply) return { applied: false, counts };
+    this.#db.exec('BEGIN');
+    try {
+      for (const t of PLAYER_TABLES) this.#db.prepare(`DELETE FROM ${t} WHERE world_id = ?`).run(worldId);
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
+    }
+    return { applied: true, counts };
+  }
+
   addCharacter(character: Character): void {
     if (!this.#worldExists(character.worldId)) throw new Error(`world not found: ${character.worldId}`);
     this.saveCharacter(character);
@@ -1036,14 +1067,14 @@ export class WorldStore {
   }
 
   /**
-   * 确立模板世界：不存在则建 + 由现网 default 内容提升（复制 default 的实例放置成模板放置）。
-   * 幂等：template 已存在直接返回（不重复克隆覆盖作者对模板的编辑）。template 不接客——
-   * GET /worlds/:id 的自动建世界分支只对 id==='default' 生效，别的世界要显式经此路径或克隆产生。
+   * 确立模板世界：不存在则【空建】。P6 起 template 是唯一权威母版——内容由作者直接 seed 进 template
+   * （seed-forest/seed-story 等 admin 端点传 worldId='template'），不再从退役的 default 提升。
+   * 幂等：template 已存在直接返回（不重建、不覆盖作者对模板的编辑）。template 不接客——
+   * GET /worlds/:id 已不自动建任何世界，template 只经此路径或克隆产生。
    */
   ensureTemplateWorld(): void {
     if (this.#worldExists(TEMPLATE_WORLD_ID)) return;
     this.createWorld(TEMPLATE_WORLD_ID);
-    this.cloneWorldInstances(DEFAULT_WORLD_ID, TEMPLATE_WORLD_ID);
   }
 
   /**

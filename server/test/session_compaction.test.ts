@@ -13,6 +13,8 @@ const { createMockAdapters } = await import('../src/adapters/mock.ts');
 const { buildServer, handleWsMessage, newVoiceSession, maybeCompactVisit } = await import('../src/server.ts');
 const { WorldStore } = await import('../src/persistence.ts');
 const { RateLimiter } = await import('../src/ratelimit.ts');
+// 动态 import（同全文件）：本文件须在 import server.ts 前设好 SESSION_COMPACT_CHARS；helper 顶层 import server.ts，故也走动态。
+const { seedFairyWorld } = await import('./helpers/world_seed.ts');
 type VoiceSession = ReturnType<typeof newVoiceSession>;
 
 function fakeSocket(): { send: (d: string) => void; sent: Array<Record<string, unknown>> } {
@@ -23,7 +25,7 @@ function fakeSocket(): { send: (d: string) => void; sent: Array<Record<string, u
 async function seeded() {
   const store = new WorldStore();
   const app = await buildServer({ adapters: createMockAdapters(), store });
-  await app.inject({ method: 'GET', url: '/worlds/default' });
+  seedFairyWorld(store);
   const fairy = store.listCharacters('default').find((c) => c.isFairy)!;
   return { store, fairyId: fairy.id, close: () => app.close() };
 }

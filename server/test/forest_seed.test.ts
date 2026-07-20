@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildServer, handleWsMessage, newVoiceSession } from '../src/server.ts';
+import { seedFairyWorld } from './helpers/world_seed.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
@@ -73,7 +74,7 @@ test('mock 全链路：admin 端点种入 → WS enter_scene 回森林村民 + �
   const app = await buildServer({ adapters, store });
   try {
     // default 世界是 GET /worlds/default 懒创建的（顺带种 seedFairy）——先走一遍真实链路
-    await app.inject({ method: 'GET', url: '/worlds/default' });
+    seedFairyWorld(store);
     assert.ok(store.getWorld('default'));
 
     // 无 token → 403；坏 token → 403

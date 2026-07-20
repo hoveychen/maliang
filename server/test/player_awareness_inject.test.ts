@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { buildServer } from '../src/server.ts';
+import { seedFairyWorld } from './helpers/world_seed.ts';
 import { respondToTranscript } from '../src/voice.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { appearanceNote } from '../src/avatar_options.ts';
@@ -43,7 +44,7 @@ test('respondToTranscript：点点拿到 childProfile+appearanceNote，村民只
   const adapters = createMockAdapters();
   const app = await buildServer({ adapters, store });
   try {
-    await app.inject({ method: 'GET', url: '/worlds/default' }); // 种默认世界（含点点）
+    seedFairyWorld(store);
     const fairy = store.listCharacters('default').find((c) => c.isFairy)!;
     // 造一个村民：克隆点点、翻转 isFairy、换 id（种子世界只有点点，没有村民可用）。
     const villager: Character = { ...fairy, id: 'villager-1', name: '小蓝', isFairy: false };
