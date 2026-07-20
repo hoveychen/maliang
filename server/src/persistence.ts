@@ -337,6 +337,7 @@ export class WorldStore {
       this.#migrateLegacyPlayerPositions();
       this.#migrateLegacyEntityScenes();
       this.#migrateVisitsDevice();
+      this.#migrateWorldsTemplateVersion(); // 存量 worlds 表补 template_version 列（P5 放置级迁移记账）
       this.#migrateFairyAbilities(); // 存量仙子补新增能力（create_sticker / play_game / guide_to / guide_stop）
       this.#migrateFairyPersona(); // 存量仙子改名换人设（小神仙 → 点点，神笔的笔灵）
       this.#loadAssets();
@@ -354,6 +355,18 @@ export class WorldStore {
     const cols = this.#db.prepare('PRAGMA table_info(visits)').all() as { name: string }[];
     if (!cols.some((c) => c.name === 'device')) {
       this.#db.exec('ALTER TABLE visits ADD COLUMN device TEXT');
+    }
+  }
+
+  /**
+   * 存量 worlds 表补 template_version 列（世界模板架构 v2 P5，§6）。旧库建表时无此列，
+   * 加列后所有世界默认版本 0——模板与存量玩家世界同为 0，故首次跑迁移是 no-op（无放置差异要补），
+   * 直到作者第一次 bumpTemplateVersion 才产生落差、触发 additive 补入。幂等：列已在则跳过。
+   */
+  #migrateWorldsTemplateVersion(): void {
+    const cols = this.#db.prepare('PRAGMA table_info(worlds)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'template_version')) {
+      this.#db.exec('ALTER TABLE worlds ADD COLUMN template_version INTEGER NOT NULL DEFAULT 0');
     }
   }
 
@@ -538,7 +551,12 @@ export class WorldStore {
       CREATE TABLE IF NOT EXISTS worlds (
         id TEXT PRIMARY KEY,
         inventory TEXT NOT NULL DEFAULT '{}',
-        active_task TEXT
+        active_task TEXT,
+        -- 放置级 additive 迁移的版本记账（世界模板架构 v2 P5，§6）：
+        -- template 世界自持「当前模板放置版本」（作者加村民/加册后 bumpTemplateVersion 自增）；
+        -- 每个 w_<player>/sandbox 世界持「克隆/迁移到的版本」，进入时若落后于模板即补入新放置。
+        -- 旧库无此列，由 #migrateWorldsTemplateVersion 补齐（默认 0）。
+        template_version INTEGER NOT NULL DEFAULT 0
       );
       -- 复合主键 (world_id, id)：世界模板架构 v2 P2——两玩家世界要各持同一 story 角色一份
       -- （instance id = defId = storyCharacterId，story_director 直接按此 id 查角色，不能 mangle 改名），
@@ -1031,7 +1049,12 @@ export class WorldStore {
    */
   getOrCreateMyWorld(playerId: string, makeFairy?: (worldId: string) => Character): string {
     const worldId = `${PLAYER_WORLD_PREFIX}${playerId}`;
-    if (this.#worldExists(worldId)) return worldId;
+    if (this.#worldExists(worldId)) {
+      // P5：世界已存在时不再直接返回，先跑放置级 additive 迁移（模板加的新村民/新册补进来）。
+      // additive 只加不改——绝不冲掉孩子对自己世界的改动（移动的 NPC/入住/造物），保住 P2 语义。
+      this.#migrateWorldPlacements(worldId);
+      return worldId;
+    }
     this.#buildWorldFromTemplate(worldId, makeFairy);
     return worldId;
   }
@@ -1054,6 +1077,67 @@ export class WorldStore {
     this.cloneWorldInstances(TEMPLATE_WORLD_ID, worldId);
     if (makeFairy && !this.listCharacters(worldId).some((c) => c.isFairy)) {
       this.saveCharacter(makeFairy(worldId));
+    }
+    // P5：新世界克隆时即拿到模板【全部】放置，故其已迁移版本就是模板当前版本——记账诚实，
+    // 免得下次进入因 0<version 误触发一轮 no-op 迁移（补入的都已在，虽不出错但白跑）。
+    this.#db
+      .prepare('UPDATE worlds SET template_version = ? WHERE id = ?')
+      .run(this.getTemplateVersion(TEMPLATE_WORLD_ID), worldId);
+  }
+
+  /** 读世界的模板版本记账（world 不存在 → 0）。template 世界的这个值 = 当前模板放置版本。 */
+  getTemplateVersion(worldId: string): number {
+    const row = this.#db.prepare('SELECT template_version FROM worlds WHERE id = ?').get(worldId) as
+      | { template_version: number }
+      | undefined;
+    return row ? row.template_version : 0;
+  }
+
+  /**
+   * 作者改完模板放置（加村民/挪 NPC/加新册）后自增模板版本，返回新版本（世界模板架构 v2 P5，§6）。
+   * 这是触发存量世界 additive 迁移的唯一开关：版本一涨，各世界下次 getOrCreateMyWorld 就会补入
+   * 模板里它还没有的放置。ensureTemplateWorld 保证模板存在。
+   */
+  bumpTemplateVersion(): number {
+    this.ensureTemplateWorld();
+    const next = this.getTemplateVersion(TEMPLATE_WORLD_ID) + 1;
+    this.#db.prepare('UPDATE worlds SET template_version = ? WHERE id = ?').run(next, TEMPLATE_WORLD_ID);
+    return next;
+  }
+
+  /**
+   * 放置级 additive 迁移（世界模板架构 v2 P5，§6）：世界已存在时，把 template 里该世界【还没有】的
+   * 放置补进去，据此把世界的已迁移版本追平模板。**只加不改**——按实例 id 查重，已存在的实例一律跳过，
+   * 绝不覆盖孩子改过的放置（移动的 NPC/入住翻转/造物）；故模板里【挪已存在 NPC 的位置】这类改动
+   * 【不会】传播到存量世界（只有新世界经 clone 才拿到新位置）。定义层共享，补入只复制实例行、不复制定义。
+   * 查重键 = 实例 id：clone 保持模板 id，同 id 即同一放置；story 角色 id=defId=storyCharacterId 稳定。
+   * 幂等：世界版本 >= 模板版本时直接返回。事务原子。迁移只覆盖 characters（与 cloneWorldInstances
+   * 同口径——props/items/scenes 本就不从模板克隆，不在放置迁移范围）。
+   */
+  #migrateWorldPlacements(worldId: string): void {
+    const templateVersion = this.getTemplateVersion(TEMPLATE_WORLD_ID);
+    if (this.getTemplateVersion(worldId) >= templateVersion) return;
+    const templateRows = this.#db
+      .prepare('SELECT data FROM characters WHERE world_id = ?')
+      .all(TEMPLATE_WORLD_ID) as { data: string }[];
+    const existingIds = new Set(
+      (this.#db.prepare('SELECT id FROM characters WHERE world_id = ?').all(worldId) as { id: string }[]).map(
+        (r) => r.id,
+      ),
+    );
+    this.#db.exec('BEGIN');
+    try {
+      for (const r of templateRows) {
+        const inst = JSON.parse(r.data) as CharacterInstanceRecord;
+        if (existingIds.has(inst.id)) continue; // additive 只加不改：孩子已有的实例一律不覆盖
+        const defId = typeof inst.defId === 'string' ? inst.defId : inst.id;
+        this.#writeInstanceRow({ ...inst, worldId, defId });
+      }
+      this.#db.prepare('UPDATE worlds SET template_version = ? WHERE id = ?').run(templateVersion, worldId);
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
     }
   }
 
