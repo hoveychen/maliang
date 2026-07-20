@@ -7,7 +7,7 @@ import type { GreetingStyle } from './greetings.ts';
 
 /**
  * 册内故事角色档案。seed 时随世界落 roster（story_seed.seedStoryCharacters，立绘走
- * generateSprite 服务端管线现生成——照 seedForestCharacters 已上线先例；prod 实际单世界，
+ * generateSprite 服务端管线现生成；prod 实际单世界，
  * seed 只跑一次，成本与确定性都可控）。
  */
 export interface StoryCastDef {

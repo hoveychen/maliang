@@ -1,5 +1,5 @@
 // M2 章回剧情：故事角色种入（docs/m2-story-director-design.md §4.1/§5）。
-// 照 seedForestCharacters 先例：立绘走 generateSprite 服务端管线在 seed 当刻生成——
+// 立绘走 generateSprite 服务端管线在 seed 当刻生成——
 // prod 实际单世界、seed 只跑一次（admin 端点触发），成本与形象确定性都可控；
 // 本地/回测用 mock adapters，零网络。幂等：按 storyCharacterId 查重，已在 roster 就跳过。
 //
