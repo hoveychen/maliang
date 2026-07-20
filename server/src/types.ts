@@ -463,6 +463,26 @@ export interface Character {
   storyRole?: { bookId: string; castId: string; resident: boolean };
 }
 
+/**
+ * 角色【定义层】（世界模板架构 v2，docs/world-template-instancing-design.md §1）：
+ * 一个角色的「身份」——全局共享、按 defId 引用、永不复制进每个世界。改这里全世界引用者自动生效。
+ * 与之相对的【实例层】= Character 里的 position/sceneId/relationships/behaviorScript/attachments/
+ * taskChain + storyRole.resident（每世界一份、可变）。
+ * P1a：先落定义层的类型 + 持久化（character_defs 表），尚未改 getCharacter/saveCharacter 读写路径。
+ */
+export interface CharacterDef {
+  defId: string;
+  isFairy: boolean;
+  name: string;
+  personality: string;
+  voiceId: string;
+  greetingStyle?: string;
+  appearance: { visualDescription: string; spriteAsset: string; scale: number; size?: CreatureSize; anchors?: CharacterAnchors; recipient?: RecipientRef };
+  abilities: string[];
+  /** 故事原型（属于哪册的哪个角色）；resident 不在此——它是每世界实例状态。 */
+  storyArchetype?: { bookId: string; castId: string };
+}
+
 /** 造角色编排的阶段，顺序固定，用于进度推送。 */
 export type GenStage = 'spec' | 'moderate_text' | 'image' | 'cutout' | 'persist';
 

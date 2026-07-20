@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, DeviceSnapshot, Familiarity, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, StoryProgress, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, CharacterDef, DeviceSnapshot, Familiarity, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, StoryProgress, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { coerceRelationship, deriveFamiliarity } from './social.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
@@ -76,6 +76,55 @@ function coerceStoryProgress(raw: unknown): StoryProgress {
     out.books[bookId] = { chapter, state, rewarded, settled: b.settled === true, ...(activeChapter !== undefined ? { activeChapter } : {}) };
   }
   return out;
+}
+
+/**
+ * 从完整 Character 抽出【定义层】字段（世界模板架构 v2 §1）。纯函数，P1b 迁移与 saveCharacter
+ * 拆分都用它。resident 不进 def（是每世界实例状态）；storyRole 的 bookId/castId 收进 storyArchetype。
+ */
+export function characterDefFromCharacter(c: Character): CharacterDef {
+  return {
+    defId: c.id,
+    isFairy: c.isFairy,
+    name: c.name,
+    personality: c.personality,
+    voiceId: c.voiceId,
+    ...(c.greetingStyle !== undefined ? { greetingStyle: c.greetingStyle } : {}),
+    appearance: c.appearance,
+    abilities: c.abilities,
+    ...(c.storyRole ? { storyArchetype: { bookId: c.storyRole.bookId, castId: c.storyRole.castId } } : {}),
+  };
+}
+
+/** 归一持久化读到的原始值成 CharacterDef；缺关键字段（defId/name）视为损坏，返回 null 丢弃。 */
+function coerceCharacterDef(raw: unknown): CharacterDef | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const defId = typeof r.defId === 'string' ? r.defId : '';
+  const name = typeof r.name === 'string' ? r.name : '';
+  if (!defId || !name) return null;
+  const ap = (r.appearance && typeof r.appearance === 'object' ? r.appearance : {}) as Record<string, unknown>;
+  const arch = r.storyArchetype && typeof r.storyArchetype === 'object' ? (r.storyArchetype as Record<string, unknown>) : null;
+  return {
+    defId,
+    isFairy: r.isFairy === true,
+    name,
+    personality: typeof r.personality === 'string' ? r.personality : '',
+    voiceId: typeof r.voiceId === 'string' ? r.voiceId : '',
+    ...(typeof r.greetingStyle === 'string' ? { greetingStyle: r.greetingStyle } : {}),
+    appearance: {
+      visualDescription: typeof ap.visualDescription === 'string' ? ap.visualDescription : '',
+      spriteAsset: typeof ap.spriteAsset === 'string' ? ap.spriteAsset : '',
+      scale: typeof ap.scale === 'number' ? ap.scale : 1,
+      ...(ap.size !== undefined ? { size: ap.size as CharacterDef['appearance']['size'] } : {}),
+      ...(ap.anchors !== undefined ? { anchors: ap.anchors as CharacterDef['appearance']['anchors'] } : {}),
+      ...(ap.recipient !== undefined ? { recipient: ap.recipient as CharacterDef['appearance']['recipient'] } : {}),
+    },
+    abilities: Array.isArray(r.abilities) ? r.abilities.filter((a): a is string => typeof a === 'string') : [],
+    ...(arch && typeof arch.bookId === 'string' && typeof arch.castId === 'string'
+      ? { storyArchetype: { bookId: arch.bookId, castId: arch.castId } }
+      : {}),
+  };
 }
 
 /**
@@ -378,6 +427,13 @@ export class WorldStore {
         data TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_characters_world ON characters(world_id);
+      -- 角色【定义层】（世界模板架构 v2，docs/world-template-instancing-design.md §1）：
+      -- 全局共享的角色身份（长相/性格/音色/能力/故事原型），按 def_id 引用、不随世界复制。
+      -- 每世界的放置与可变状态仍在 characters 表（实例层）。P1a 只落表+读写方法，尚未接入 getCharacter。
+      CREATE TABLE IF NOT EXISTS character_defs (
+        def_id TEXT PRIMARY KEY,
+        data TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS props (
         id TEXT PRIMARY KEY,
         world_id TEXT NOT NULL,
@@ -784,6 +840,31 @@ export class WorldStore {
           'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
       )
       .run(character.id, character.worldId, JSON.stringify(character));
+  }
+
+  // ── 角色定义层（character_defs，世界模板架构 v2 §1）──────────────────────────
+  // 全局共享的角色身份，按 defId 引用（无 world_id）。P1a：只提供读写，尚未接入 getCharacter/saveCharacter。
+
+  /** 读一份共享角色定义（不存在返回 undefined）。 */
+  getCharacterDef(defId: string): CharacterDef | undefined {
+    const row = this.#db.prepare('SELECT data FROM character_defs WHERE def_id = ?').get(defId) as { data: string } | undefined;
+    if (!row) return undefined;
+    return coerceCharacterDef(JSON.parse(row.data)) ?? undefined;
+  }
+
+  /** UPSERT 一份共享角色定义（改这里全世界引用者自动生效）。 */
+  upsertCharacterDef(def: CharacterDef): void {
+    const clean = coerceCharacterDef(def);
+    if (!clean) throw new Error(`invalid character def: ${def?.defId}`);
+    this.#db
+      .prepare('INSERT INTO character_defs (def_id, data) VALUES (?, ?) ON CONFLICT(def_id) DO UPDATE SET data = excluded.data')
+      .run(clean.defId, JSON.stringify(clean));
+  }
+
+  /** 列出全部共享角色定义（迁移/盘点用）。 */
+  listCharacterDefs(): CharacterDef[] {
+    const rows = this.#db.prepare('SELECT data FROM character_defs').all() as { data: string }[];
+    return rows.map((r) => coerceCharacterDef(JSON.parse(r.data))).filter((d): d is CharacterDef => d !== null);
   }
 
   /**
