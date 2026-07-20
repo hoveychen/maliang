@@ -79,6 +79,7 @@ UNIT_TESTS=(
   test_anim_clip_pick
   test_atlas_compress
   test_player_profile
+  test_my_world_api
   test_stamp_ceremony
   test_composed_prop
   test_build_parts

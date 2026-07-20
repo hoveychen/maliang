@@ -25,6 +25,9 @@ class StubApi extends Api:
 				  "appearance": { "spriteAsset": "spriteX" } },
 			],
 		}
+	# 世界模板架构 v2 P3：_bootstrap_fetch 改走 get_my_world（每人一世界），存根回同一份假在线世界。
+	func get_my_world(_player_id: String) -> Dictionary:
+		return get_world("")
 	func fetch_texture(_asset_hash: String, _gpu_compress := false) -> Texture2D:
 		var img := Image.create(40, 60, false, Image.FORMAT_RGBA8)
 		img.fill(Color(0, 1, 0, 1))
