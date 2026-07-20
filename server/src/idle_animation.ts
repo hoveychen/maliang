@@ -5,6 +5,7 @@
 import type { ClipName, ImageBlob, ServiceAdapters, VideoBlob } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 import { CLIP_NAMES, videosToSpriteSheet, type SpriteSheetMeta } from './sprite_sheet.ts';
+import { mp4ToTheoraOgv, pregenerateClipOgv, type ToClipOgv } from './clip_video.ts';
 
 /**
  * 当前图集版本。1 = 单段 idle（老记录，可能连 version 字段都没有）；2 = 三段。
@@ -37,6 +38,7 @@ export async function generateCharacterAnimation(
   store: WorldStore,
   spriteHash: string,
   toSpriteSheet: ToSpriteSheet = (clips) => videosToSpriteSheet(clips),
+  toClipOgv: ToClipOgv = mp4ToTheoraOgv,
 ): Promise<void> {
   const sprite = store.getAsset(spriteHash);
   if (!sprite) return; // 立绘不在库里，无从生成
@@ -50,10 +52,13 @@ export async function generateCharacterAnimation(
     // 原片入库（内容寻址，重复内容天然去重）。放在图集之后：图集打不出来就没必要存原片。
     const clipVideos: Partial<Record<ClipName, string>> = {};
     for (const { name, mp4 } of mp4s) clipVideos[name] = store.putAsset(mp4);
+    // 焦点视频 LOD：顺手把各段转成 ogv 预缓存，孩子首次对话即命中（尽力而为，失败留给端点惰转）。
+    const clipOgv = await pregenerateClipOgv(store, mp4s, toClipOgv);
     store.setSpriteAnimReady(spriteHash, animAsset, meta, {
       version: SPRITE_ANIM_VERSION,
       packVersion: SPRITE_PACK_VERSION,
       clipVideos,
+      clipOgv,
     });
   } catch (err) {
     store.setSpriteAnimFailed(spriteHash);
@@ -69,6 +74,7 @@ export async function repackFromStoredClips(
   store: WorldStore,
   spriteHash: string,
   toSpriteSheet: ToSpriteSheet = (clips) => videosToSpriteSheet(clips),
+  toClipOgv: ToClipOgv = mp4ToTheoraOgv,
 ): Promise<boolean> {
   const vids = store.getSpriteAnim(spriteHash)?.clipVideos;
   if (!vids) return false;
@@ -82,10 +88,12 @@ export async function repackFromStoredClips(
   }
   const { atlas, meta } = await toSpriteSheet(clips);
   const animAsset = store.putAsset(atlas);
+  const clipOgv = await pregenerateClipOgv(store, clips, toClipOgv); // 重打时也刷新 ogv 预缓存
   store.setSpriteAnimReady(spriteHash, animAsset, meta, {
     version: SPRITE_ANIM_VERSION,
     packVersion: SPRITE_PACK_VERSION,
     clipVideos: vids,
+    clipOgv,
   });
   return true;
 }

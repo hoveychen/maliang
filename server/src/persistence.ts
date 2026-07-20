@@ -2143,7 +2143,12 @@ export class WorldStore {
     spriteHash: string,
     animAsset: string,
     meta: SpriteSheetMeta,
-    extra?: { version?: number; packVersion?: number; clipVideos?: Partial<Record<ClipName, string>> },
+    extra?: {
+      version?: number;
+      packVersion?: number;
+      clipVideos?: Partial<Record<ClipName, string>>;
+      clipOgv?: Partial<Record<ClipName, string>>;
+    },
   ): void {
     this.#spriteAnims.set(spriteHash, { status: 'ready', animAsset, meta, ...extra });
     this.#persistSpriteAnims();
