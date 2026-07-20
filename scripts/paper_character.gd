@@ -78,7 +78,11 @@ var _video_clip := ""
 var _video_idle: VideoStream = null
 var _video_talking: VideoStream = null
 var _video_height := 0.0   ## 目标角色世界高度（米）：进视频用图集档身高，观感不跳
-var _video_sized := false  ## 首帧解码纹理到手后按视频宽高比重算 quad 几何，只做一次
+var _video_wait := 0.0     ## 等首帧解码的累计秒数（超时=平台不支持/坏流，放弃留图集）
+
+## 首帧解码迟迟不来的放弃阈值（秒）：Theora 软解在目标机都能出帧（spike 实证华为 ~56fps），
+## 超过此值仍无首帧 = 平台不支持/坏流，静默撤回留图集，别让 VideoStreamPlayer 空转 CPU。
+const VIDEO_FIRST_FRAME_TIMEOUT := 3.0
 
 ## 视频帧里角色竖向占比（源立绘/视频角色约占帧高 86~93%，见 sprite_sheet.ts cellH 注释）。P3/P4 调参旋钮。
 const VIDEO_FILL := 0.9
@@ -399,10 +403,12 @@ func start_video_lod(idle_stream: VideoStream, talking_stream: VideoStream = nul
 		add_child(_vsp)
 	_video_lod = true
 	_video_clip = "idle"
-	_video_sized = false
+	_video_wait = 0.0
 	_vsp.stream = idle_stream
 	_play_vsp()
-	material_override = _video_mat  # 视频档不带 xray next_pass（穿透剪影是图集档专属）
+	# ★不立刻换材质：解码要几十 ms 才吐首帧，此刻换成视频材质会因 video_tex 未设而透明闪一下；
+	# 更糟的是平台不支持时永远无帧 → 角色永久隐身。改为在 _process 拿到首帧那刻才无缝换材质，
+	# 首帧前一直显示图集档。这就是 P4「ogv 失败/平台不支持 → 静默留图集」的兜底。
 	set_process(true)
 
 ## 切视频段（idle/talking）：换 VideoStreamPlayer 的 stream，保持单路解码。缺该段（如没 talking
@@ -446,16 +452,24 @@ func is_video_lod() -> bool:
 func current_video_clip() -> String:
 	return _video_clip
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not _video_lod or _vsp == null:
 		return
 	var vt := _vsp.get_video_texture()
-	if vt == null:
-		return  # 解码还没吐首帧
+	# 坏流/平台不支持时 get_video_texture 返回的不是 null，而是一张 0×0 的空纹理（实测）——
+	# 必须按尺寸判有无真帧，只判 null 会把空纹理当成有效帧、换过去后角色变黑/透明。
+	if vt == null or vt.get_width() <= 0 or vt.get_height() <= 0:
+		# 还没首帧：累计等待，超时判定平台不支持/坏流 → 撤回留图集（别让解码器空转）。
+		_video_wait += delta
+		if _video_wait > VIDEO_FIRST_FRAME_TIMEOUT:
+			stop_video_lod()
+		return
 	_video_mat.set_shader_parameter("video_tex", vt)
-	if not _video_sized:
+	if material_override != _video_mat:
+		# 首帧到手：此刻才无缝把图集换成视频（之前一直显图集，无透明闪）。
+		# 同帧按真视频宽高比重算几何——目标身高取自图集档 visible_height，故切换观感不跳。
 		_apply_video_geometry(vt)
-		_video_sized = true
+		material_override = _video_mat  # 视频档不带 xray next_pass（穿透剪影是图集档专属）
 
 ## 首帧到手后按视频宽高比重算 quad 几何：让视频里的角色（竖向占 VIDEO_FILL）身高对齐图集档身高、
 ## 脚底落在节点原点。只改 QuadMesh 尺寸/中心偏移——不碰 texture/_sheet/pixel_size/offset（那是图集档

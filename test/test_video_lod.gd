@@ -59,9 +59,8 @@ func _init() -> void:
 	_ok("测试素材 tiny.ogv 加载成功", idle != null)
 	pc.start_video_lod(idle, talking, 6.0)
 	_ok("start 后 is_video_lod=true", pc.is_video_lod())
-	_ok("start 后材质换成视频材质", pc.material_override != atlas_mat)
-	_ok("视频材质 shader 是 chroma_video", (pc.material_override as ShaderMaterial).shader == load("res://shaders/chroma_video.gdshader"))
-	_ok("视频材质无 xray next_pass", (pc.material_override as ShaderMaterial).next_pass == null)
+	# ★首帧到手前材质仍是图集——不透明闪、平台不支持也留图集（P4 兜底）
+	_ok("start 后材质仍是图集（首帧前不换）", pc.material_override == atlas_mat)
 	_eq("起手段是 idle", pc.current_video_clip(), "idle")
 
 	# ── ② 隐藏 VideoStreamPlayer 的属性（★核心坑：只取纹理不自绘）───────────────
@@ -73,16 +72,17 @@ func _init() -> void:
 	_ok("VSP 静音", vsp.volume_db <= -60.0)
 	_ok("VSP stream 指向 idle", vsp.stream == idle)
 
-	# 真解码冒烟：跑几帧让 theora 吐首帧，_process 应把解码纹理喂进视频材质的 video_tex。
-	# 直接轮询喂给点（而非 get_video_texture）——纹理可能在某帧 _process 跑完后才就绪，
-	# 盯 video_tex 才能确认「解码→_process 喂料」整条路通了。
-	var fed := false
-	for i in range(60):
+	# 真解码冒烟：跑几帧让 theora 吐首帧，首帧到手时 _process 才把材质无缝换成视频材质并喂 video_tex。
+	var swapped := false
+	for i in range(120):
 		await process_frame
-		if (pc.material_override as ShaderMaterial).get_shader_parameter("video_tex") != null:
-			fed = true
+		if pc.material_override == pc._video_mat:
+			swapped = true
 			break
-	_ok("真 ogv 解码→_process 喂进视频材质(video_tex 非空)", fed)
+	_ok("首帧到手后无缝换成视频材质", swapped)
+	_ok("视频材质 shader 是 chroma_video", (pc.material_override as ShaderMaterial).shader == load("res://shaders/chroma_video.gdshader"))
+	_ok("视频材质无 xray next_pass", (pc.material_override as ShaderMaterial).next_pass == null)
+	_ok("解码纹理已喂进 video_tex", (pc.material_override as ShaderMaterial).get_shader_parameter("video_tex") != null)
 
 	# ── ③ 段切换：idle↔talking 换 stream（单路解码）──────────────────────────
 	pc.set_video_clip("talking")
@@ -135,6 +135,20 @@ func _init() -> void:
 	_ok("idle_stream=null → 不进视频档", not pc3.is_video_lod())
 	_ok("idle_stream=null → 材质仍是图集", pc3.material_override == pc3._mat)
 	pc3.queue_free()
+
+	# ── ⑧ 坏流兜底（P4 平台不支持/坏 ogv）：永远不吐帧 → 材质始终留图集，绝不透明闪 ────
+	var pc4 := PaperCharacter.new()
+	get_root().add_child(pc4)
+	pc4.play_anim(a["tex"], a["meta"], 6.0)
+	var atlas_mat4 := pc4.material_override
+	var broken := VideoStreamTheora.new()
+	broken.file = "res://test/fixtures/__nonexistent__.ogv"  # 解不出帧
+	pc4.start_video_lod(broken)
+	for i in range(15):
+		await process_frame
+	_ok("坏流：材质始终留图集（无透明闪）", pc4.material_override == atlas_mat4)
+	pc4.stop_video_lod()
+	pc4.queue_free()
 
 	if _fails == 0:
 		print("video_lod tests PASS")
