@@ -93,7 +93,6 @@ import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, rec
 import { avatarDescForbidden, stripAvatarOptionIds, AVATAR_EARLY_DONE, AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
 import { findPropOption, composePropDesc, PROP_CREATION_OPTIONS, propIconPrompt } from './prop_creation_options.ts';
 import { findStickerOption, composeStickerDesc, STICKER_CREATION_OPTIONS, stickerIconPrompt } from './sticker_creation_options.ts';
-import { seedForestCharacters } from './forest_characters.ts';
 import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWishRefine, flowerDeniedLine, materializeStoryTask, praiseLine } from './tasks.ts';
 import { ensureTaskChain, pendingChainStep } from './task_chain.ts';
 import { pickComplaint, REFINE_HINT, REFINE_HINT_2 } from './refinements.ts';
@@ -1198,17 +1197,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { itemId, iconAsset };
   });
 
-  // 森林村民种入（forest-inhabitants P3）：按 FOREST_CHARACTER_SEEDS 走生图管线落库
-  // sceneId=forest。幂等（同名跳过）；?only=名字,名字 限定只种指定角色。生图烧钱，admin token 门禁。
-  app.post<{ Params: { id: string }; Querystring: { only?: string } }>(
-    '/admin/worlds/:id/seed-forest',
-    async (req, reply) => {
-      if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
-      if (!store.getWorld(req.params.id)) return reply.code(404).send({ error: 'world not found' });
-      const only = (req.query.only ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-      return seedForestCharacters(adapters, store, req.params.id, { only, toSpriteSheet });
-    },
-  );
+  // （森林场景与 seed-forest 端点已随 scene-retire 退役——forest 村民不再种入。）
 
   // 故事角色种入（M2 章回剧情 P3）：按册 cast 走生图管线落 roster，带 storyRole（未入住零供给）。
   // 幂等（storyCharacterId 查重跳过）。生图烧钱，admin token 门禁。

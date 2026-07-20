@@ -190,31 +190,11 @@ static func _ring(c: Vector2i, r: int) -> Array:
 # ── 分区散布规则（迁自 chunk_manager._deco_kind_*，逐行对齐；P4 删除那份）──
 
 static func _deco_kind(scene_id: String, gt: Vector2i) -> int:
-	if scene_id == "forest":
-		return _deco_kind_forest(gt)
-	if scene_id == "seafloor":
-		return DECO_NONE  # 海底切片仅地形，无散布物品（themed-terrain P2）
-	if scene_id == "icesnow":
-		return DECO_NONE  # 冰雪切片仅地形，无散布物品（themed-terrain P3）
-	if scene_id == "jurassic":
-		return DECO_NONE  # 侏罗纪切片仅地形，无散布物品（themed-terrain P3）
-	if scene_id == "medieval":
-		return DECO_NONE  # 中世纪切片仅地形，无散布物品（themed-terrain P3）
-	if scene_id == "roman":
-		return DECO_NONE  # 罗马切片仅地形，无散布物品（themed-terrain P3）
-	if scene_id == "ancient_china":
-		return DECO_NONE  # 中国古代切片仅地形，无散布物品（themed-terrain P3）
-	if scene_id == "modern_city":
-		return DECO_NONE  # 现代城市切片仅地形，无散布物品（themed-terrain P3）
-	if scene_id == "toy_room":
-		return DECO_NONE  # 玩具房间切片仅地形，无散布物品（themed-terrain P3）
-	if scene_id == "kitchen":
-		return DECO_NONE  # 厨房切片仅地形，无散布物品（themed-terrain P3）
-	if scene_id == "hospital":
-		return DECO_NONE  # 医院切片仅地形，无散布物品（themed-terrain P3）
-	if scene_id == "future_robot":
-		return DECO_NONE  # 未来机器人切片仅地形，无散布物品（themed-terrain P3）
-	return _deco_kind_village(gt)
+	# village 是唯一存活的旧场景；其余主题场景已退役（scene-retire）。
+	# 新场景各自定义散布规则时在此加分支。
+	if scene_id == "village":
+		return _deco_kind_village(gt)
+	return DECO_NONE
 
 ## village 分区散布：从北往南——山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、
 ## 果园（规则行距的浆果灌木）、瞭望丘坡面、村核心（整洁）、出生空地（开阔）、
@@ -279,32 +259,6 @@ static func _deco_kind_village(gt: Vector2i) -> int:
 	if roll < 11:
 		return DECO_ROCK
 	return DECO_TUFT if roll < 21 else DECO_NONE
-
-## forest 林地散布：林地草铺满树（郁闭林冠）、河岸芦苇灌木、高地/knoll 留白空地。
-static func _deco_kind_forest(gt: Vector2i) -> int:
-	if TerrainMap.tile_type(gt) != TerrainMap.T_GRASS:
-		return DECO_NONE
-	var roll := posmod(hash(Vector2i(gt.x * 3 + 11, gt.y * 7 + 5)), 100)
-	# 河岸一圈：芦苇灌木 + 草丛（紧邻小河/水潭）
-	if _near_water(gt):
-		if roll < 30:
-			return DECO_BUSH
-		return DECO_TUFT if roll < 60 else DECO_NONE
-	# 空地/高地（knoll，height>0）：留白便于活动——疏草 + 零星石，几乎不长树
-	if TerrainMap.tile_height(gt) > 0:
-		if roll < 5:
-			return DECO_ROCK
-		return DECO_TUFT if roll < 18 else DECO_NONE
-	# 林地草（平坦林床）：疏林可穿行——树 + 灌木下层 + 草丛。
-	# 挡路密度（树+灌+石）必须低于连通阈值(~40%)，否则密林把空地围成孤岛、玩家落地即卡死
-	# （test_forest_reach 实测：66% 挡路时从落点只能到 123/2058 tile）。开阔度靠草丛/空地撑。
-	if roll < 28:
-		return DECO_TREE
-	if roll < 34:
-		return DECO_BUSH
-	if roll < 37:
-		return DECO_ROCK
-	return DECO_TUFT if roll < 64 else DECO_NONE
 
 ## 8 邻里有水（环面 wrap 由 TerrainMap._idx 兜底）。
 static func _near_water(gt: Vector2i) -> bool:

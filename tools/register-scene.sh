@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 把导出的 .mltr（+ 可选 POI json）入库到 maliang-server：POST /admin/scenes。
 # 地形二进制走 base64 传入，服务端 decodeTerrain 校验后进内容寻址资产库，scenes 表记 hash。
-# 见 docs/multi-scene-design.md、server/src/server.ts 的 /admin/scenes、tools/export_forest.gd。
+# 见 docs/multi-scene-design.md、server/src/server.ts 的 /admin/scenes、tools/export_terrain.gd。
 #
 # 用法:
 #   SERVER_URL=http://127.0.0.1:8080 ADMIN_TOKEN=xxx \
