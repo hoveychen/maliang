@@ -978,6 +978,37 @@ export class WorldStore {
     return true;
   }
 
+  /**
+   * 清一个世界的【玩家档案数据】（A 类：按 (world_id, player_id) 分区的 6 张表），保留世界本身、
+   * 角色（characters 实例 + character_defs 共享定义）、造物（items）与地形（scenes）——世界模板架构 v2 P6
+   * 现网切换收尾用（清 default 的开发期脏数据）。老板硬约束：**角色/造物/地形绝不清**，故本方法只碰
+   * wallets/player_tasks/story_progress/player_discovered/player_positions/bag 六表。
+   *
+   * 默认 dry-run（apply=false）：只 COUNT 各表将删行数、一个字节都不动（仿 /admin/integrity/fix 安全姿势）。
+   * apply=true 才在一个事务里真删。返回 { applied, counts:{表→行数} }。世界不存在 → applied=false、counts 全 0。
+   */
+  purgeWorldPlayerData(worldId: string, apply: boolean): { applied: boolean; counts: Record<string, number> } {
+    const PLAYER_TABLES = ['wallets', 'player_tasks', 'story_progress', 'player_discovered', 'player_positions', 'bag'];
+    const counts: Record<string, number> = {};
+    if (!this.#worldExists(worldId)) {
+      for (const t of PLAYER_TABLES) counts[t] = 0;
+      return { applied: false, counts };
+    }
+    for (const t of PLAYER_TABLES) {
+      counts[t] = (this.#db.prepare(`SELECT COUNT(*) AS c FROM ${t} WHERE world_id = ?`).get(worldId) as { c: number }).c;
+    }
+    if (!apply) return { applied: false, counts };
+    this.#db.exec('BEGIN');
+    try {
+      for (const t of PLAYER_TABLES) this.#db.prepare(`DELETE FROM ${t} WHERE world_id = ?`).run(worldId);
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
+    }
+    return { applied: true, counts };
+  }
+
   addCharacter(character: Character): void {
     if (!this.#worldExists(character.worldId)) throw new Error(`world not found: ${character.worldId}`);
     this.saveCharacter(character);

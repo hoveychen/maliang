@@ -1237,6 +1237,22 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { version: store.bumpTemplateVersion() };
   });
 
+  // 清一个世界的玩家档案脏数据（世界模板架构 v2 P6 现网切换收尾，docs/world-template-p6-cutover-review.md）：
+  // 只清 A 类 6 表（钱包/委托/剧情进度/已发现/位置/背包）的该世界行，**保留角色/造物/地形/世界本身**。
+  // 用于清 default 的开发期测试玩家数据（切每人一世界后这些成孤儿）。**默认 dry-run**——不带 apply=true
+  // 只报告将删多少行、一个字节都不动；真删必须显式 ?apply=true。admin token 门禁。
+  app.post<{ Params: { id: string }; Querystring: { apply?: string } }>(
+    '/admin/worlds/:id/purge-player-data',
+    async (req, reply) => {
+      if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+      if (!store.worldExists(req.params.id)) return reply.code(404).send({ error: 'world not found' });
+      const apply = req.query.apply === 'true' || req.query.apply === '1';
+      const result = store.purgeWorldPlayerData(req.params.id, apply);
+      if (apply) app.log.warn({ worldId: req.params.id, counts: result.counts }, 'purge player data applied — 生产库玩家档已清');
+      return result;
+    },
+  );
+
   // 昂贵操作限流：每连接 N/分钟 + 全局并发上限（防刷付费 API）
   const limiter = new RateLimiter(
     Number(process.env.RATE_PER_MIN ?? 8),
