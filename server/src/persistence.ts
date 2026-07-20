@@ -19,6 +19,8 @@ export const DEFAULT_WORLD_ID = 'default';
 export const TEMPLATE_WORLD_ID = 'template';
 /** 每人一世界的 id 前缀（w_<playerId>），绑玩家、非匿名 UUID（防空壳，§7）。 */
 export const PLAYER_WORLD_PREFIX = 'w_';
+/** 测试沙箱世界的 id 前缀（sandbox_<uuid>），临时、可随手 DELETE（§5 P4）。 */
+export const SANDBOX_WORLD_PREFIX = 'sandbox_';
 
 /** 初始钱包（冷启动/旧档迁移）：预置初始小红花，零盖章进度。 */
 function freshWallet(): Wallet {
@@ -1030,13 +1032,29 @@ export class WorldStore {
   getOrCreateMyWorld(playerId: string, makeFairy?: (worldId: string) => Character): string {
     const worldId = `${PLAYER_WORLD_PREFIX}${playerId}`;
     if (this.#worldExists(worldId)) return worldId;
+    this.#buildWorldFromTemplate(worldId, makeFairy);
+    return worldId;
+  }
+
+  /**
+   * 测试沙箱（世界模板架构 v2 §5 P4）：从 template 复制放置成一个**全新的临时世界**，返回其 id。
+   * 与 getOrCreateMyWorld 同源（都从模板铺一个新世界），差别是 id 现生成、每次都是全新一份——
+   * 作者「开沙箱 → harness 跑整册 → DELETE 丢掉」验隔离用，零污染 default/template。删走 admin DELETE（级联已有）。
+   */
+  createSandboxWorld(makeFairy?: (worldId: string) => Character): string {
+    const worldId = `${SANDBOX_WORLD_PREFIX}${randomUUID()}`;
+    this.#buildWorldFromTemplate(worldId, makeFairy);
+    return worldId;
+  }
+
+  /** 从 template 铺一个新世界（ensure 模板 + 建世界 + 复制放置 + 保证点点）。getOrCreate/沙箱共用。 */
+  #buildWorldFromTemplate(worldId: string, makeFairy?: (worldId: string) => Character): void {
     this.ensureTemplateWorld();
     this.createWorld(worldId);
     this.cloneWorldInstances(TEMPLATE_WORLD_ID, worldId);
     if (makeFairy && !this.listCharacters(worldId).some((c) => c.isFairy)) {
       this.saveCharacter(makeFairy(worldId));
     }
-    return worldId;
   }
 
   /** 读某实例行现有的 defId（不存在或旧全量 blob 无 defId → undefined）。 */

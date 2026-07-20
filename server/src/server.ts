@@ -322,6 +322,21 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     };
   });
 
+  // 测试沙箱（世界模板架构 v2 §5 P4）：从 template 复制放置成一个全新临时世界,返回其 id。
+  // admin 门禁。作者「开沙箱 → harness 指它跑整册故事 → DELETE 丢掉」验隔离,零污染 default/template。
+  // 静态段 /admin/worlds/sandbox 在 find-my-way 里优先于参数段 /admin/worlds/:id,不会被 DELETE 那条截走。
+  app.post('/admin/worlds/sandbox', async (req, reply) => {
+    if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    const worldId = store.createSandboxWorld(seedFairy);
+    app.log.warn({ worldId }, 'sandbox world created via admin endpoint');
+    return {
+      id: worldId,
+      characters: characterListView(store, worldId),
+      scenes: store.listScenes(worldId),
+      items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
+    };
+  });
+
   // 删除一个世界及全部关联数据（级联）。admin 门禁——清理无主的空壳世界（旧客户端/测试留下的脏数据）。
   app.delete<{ Params: { id: string } }>('/admin/worlds/:id', async (req, reply) => {
     if (!backupAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
