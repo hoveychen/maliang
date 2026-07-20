@@ -4,6 +4,7 @@ import { createMockAdapters } from '../src/adapters/mock.ts';
 import { ANON_PLAYER, INITIAL_FLOWERS, newCreationState, type CreationState, type GuideCreationResult } from '../src/types.ts';
 import { CREATION_OPTIONS, findOption, optionsByCategory } from '../src/creation_options.ts';
 import { buildServer, handleWsMessage, newVoiceSession, type VoiceSession } from '../src/server.ts';
+import { seedFairyWorld } from './helpers/world_seed.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 
@@ -15,7 +16,7 @@ function fakeSocket(): { send: (d: string) => void; sent: Array<Record<string, u
 async function seeded(): Promise<{ store: WorldStore; fairyId: string; close: () => Promise<void> }> {
   const store = new WorldStore();
   const app = await buildServer({ adapters: createMockAdapters(), store });
-  await app.inject({ method: 'GET', url: '/worlds/default' });
+  seedFairyWorld(store);
   const fairy = store.listCharacters('default').find((c) => c.isFairy)!;
   return { store, fairyId: fairy.id, close: () => app.close() };
 }

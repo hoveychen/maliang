@@ -291,10 +291,10 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { ok: true, levels: levels ?? sample.levels, samples: store.listDeviceLevels(sample.gpu, sample.benchVersion).length };
   });
 
-  // 世界只有固定的 "default" 一个：由下面的 GET /worlds/:id 首次访问时自动创建并种入点点。
-  // 曾有 POST /worlds（建随机 UUID 世界 + 只种点点），但现网客户端固定加载 default、无任何合法调用方，
-  // 它只会被旧客户端/指向 prod 的测试凭空造出「只有点点」的空壳世界（脏数据），故已下线。
-  // 将来真要多世界，再按需重建带鉴权的建世界入口。
+  // 世界模型：每人一世界（w_<playerId>，从 template 克隆），template 是唯一权威母版（内容直接 seed 进 template）。
+  // P6 已退役 default——GET /worlds/:id 不再对 default 特殊自动重建；不存在的世界一律 404。
+  // 曾有 POST /worlds（建随机 UUID 世界），因只会被凭空造出空壳世界（脏数据）而下线。
+  // 将来真要新的建世界入口，再按需重建带鉴权的那种。
 
   // 每人一世界（世界模板架构 v2 §5）：按 playerId 解析/建 w_<playerId>，从 template 复制放置 + 保证点点，
   // 返回该世界完整状态（与 GET /worlds/:id 同形）。P2 只加端点，客户端仍写死 default（P3 才改用下发 id）。
@@ -311,14 +311,10 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     };
   });
 
-  // 拉世界状态。固定的 "default" 世界不存在时自动创建并种入点点
-  // （初始村民由 seed 脚本生成；客户端默认加载 default 世界）。
+  // 拉世界状态。P6 后 default 已退役——不再对 id==='default' 特殊自动重建；任何不存在的世界一律 404。
+  // 客户端走每人一世界（GET /worlds/mine → w_<playerId>，从 template 克隆）；内容改由作者直接 seed 进 template。
   app.get<{ Params: { id: string } }>('/worlds/:id', async (req, reply) => {
-    let world = store.getWorld(req.params.id);
-    if (!world && req.params.id === 'default') {
-      world = store.createWorld('default');
-      store.addCharacter(seedFairy('default'));
-    }
+    const world = store.getWorld(req.params.id);
     if (!world) return reply.code(404).send({ error: 'world not found' });
     // scenes 可能为空（地形还没入库）——客户端据此回退本地确定性生成，不影响老客户端。
     // items = 物品实体定义（内置 + 该世界造物）：矩阵 palette 引用的语义/渲染依据，

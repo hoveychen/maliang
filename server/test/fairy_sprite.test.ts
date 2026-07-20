@@ -4,6 +4,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildServer } from '../src/server.ts';
+import { seedFairyWorld } from './helpers/world_seed.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 
@@ -11,9 +12,11 @@ import { createMockAdapters } from '../src/adapters/mock.ts';
 test('fairy-sprite: idempotent by default, force regenerates', async () => {
   const dir = join(tmpdir(), 'maliang-test-fairy-sprite');
   rmSync(dir, { recursive: true, force: true });
-  const app = await buildServer({ adapters: createMockAdapters(), store: new WorldStore(dir) });
+  const store = new WorldStore(dir);
+  const app = await buildServer({ adapters: createMockAdapters(), store });
   try {
-    // default 世界由 GET 自动创建并种入小神仙
+    // P6 前 default 世界由 GET 自动创建；现显式 seed（建世界 + 种小神仙），GET 只作读回校验
+    seedFairyWorld(store);
     const world = await app.inject({ method: 'GET', url: '/worlds/default' });
     assert.equal(world.statusCode, 200);
 

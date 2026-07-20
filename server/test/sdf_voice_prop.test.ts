@@ -5,6 +5,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildServer, createPropAsync, createCharacterAsync, handleWsMessage, newVoiceSession } from '../src/server.ts';
+import { seedFairyWorld } from './helpers/world_seed.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { respondToTranscript } from '../src/voice.ts';
@@ -18,7 +19,7 @@ function fakeSocket(): { send: (d: string) => void; sent: Array<Record<string, u
 async function seededStore(): Promise<{ store: WorldStore; fairyId: string; close: () => Promise<void> }> {
   const store = new WorldStore();
   const app = await buildServer({ adapters: createMockAdapters(), store });
-  await app.inject({ method: 'GET', url: '/worlds/default' }); // 建 default 世界 + 种小神仙
+  seedFairyWorld(store);
   const fairy = store.listCharacters('default').find((c) => c.isFairy);
   assert.ok(fairy);
   return { store, fairyId: fairy!.id, close: () => app.close() };
@@ -164,7 +165,7 @@ test('item_created 入背包 + 磁盘 roundtrip + 无矩阵摆放拒绝', async 
   const store = new WorldStore(dir);
   const app = await buildServer({ adapters, store });
   try {
-    await app.inject({ method: 'GET', url: '/worlds/default' });
+    seedFairyWorld(store);
     const sock = fakeSocket();
     await createPropAsync(sock, 'default', ANON_PLAYER, '造一个小风车', adapters, store);
     const itemId = ((sock.sent.find((m) => m.type === 'item_created'))!.item as { id: string }).id;

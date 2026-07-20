@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { buildServer } from '../src/server.ts';
+import { seedFairyWorld } from './helpers/world_seed.ts';
 import { respondToTranscript } from '../src/voice.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { onboardingProfileNote } from '../src/avatar_options.ts';
@@ -39,7 +40,7 @@ test('respondToTranscript：有档案注入 childProfile，无档案不注入', 
   const adapters = createMockAdapters();
   const app = await buildServer({ adapters, store });
   try {
-    await app.inject({ method: 'GET', url: '/worlds/default' }); // 种默认世界（含点点与村民）
+    seedFairyWorld(store);
     const fairy = store.listCharacters('default').find((c) => c.isFairy)!;
     // 包一层 routeIntent 抓 ctx（mock 行为不变，只旁路观察）。用数组存以绕开
     // TS 对「赋 null 后经 await 被回调改写」的控制流窄化（会把 captured 判成 never）。

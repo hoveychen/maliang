@@ -4,6 +4,7 @@ import { createMockAdapters } from '../src/adapters/mock.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 import { handleWsMessage, newVoiceSession } from '../src/server.ts';
+import { seedFairyWorld } from './helpers/world_seed.ts';
 import { respondToTranscript, greetCharacter } from '../src/voice.ts';
 import type { Character } from '../src/types.ts';
 import type { AudioBlob, TTSStreamCallbacks, TTSAdapter, ServiceAdapters } from '../src/adapters/types.ts';
@@ -176,7 +177,7 @@ test('造角色引导 + clientTts：creation_prompt 带 voiceId、ttsAsset 空�
   const { buildServer } = await import('../src/server.ts');
   const app = await buildServer({ adapters: createMockAdapters(), store });
   try {
-    await app.inject({ method: 'GET', url: '/worlds/default' }); // 种默认世界+仙子
+    seedFairyWorld(store);
     const fairy = store.listCharacters('default').find((c) => c.isFairy)!;
     const calls: { text: string; voice: string; stream: boolean }[] = [];
     const sent: any[] = [];

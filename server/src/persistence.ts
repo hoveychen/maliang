@@ -1067,14 +1067,14 @@ export class WorldStore {
   }
 
   /**
-   * 确立模板世界：不存在则建 + 由现网 default 内容提升（复制 default 的实例放置成模板放置）。
-   * 幂等：template 已存在直接返回（不重复克隆覆盖作者对模板的编辑）。template 不接客——
-   * GET /worlds/:id 的自动建世界分支只对 id==='default' 生效，别的世界要显式经此路径或克隆产生。
+   * 确立模板世界：不存在则【空建】。P6 起 template 是唯一权威母版——内容由作者直接 seed 进 template
+   * （seed-forest/seed-story 等 admin 端点传 worldId='template'），不再从退役的 default 提升。
+   * 幂等：template 已存在直接返回（不重建、不覆盖作者对模板的编辑）。template 不接客——
+   * GET /worlds/:id 已不自动建任何世界，template 只经此路径或克隆产生。
    */
   ensureTemplateWorld(): void {
     if (this.#worldExists(TEMPLATE_WORLD_ID)) return;
     this.createWorld(TEMPLATE_WORLD_ID);
-    this.cloneWorldInstances(DEFAULT_WORLD_ID, TEMPLATE_WORLD_ID);
   }
 
   /**

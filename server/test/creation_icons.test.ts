@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildServer, generateCreationIcons, handleWsMessage, newVoiceSession } from '../src/server.ts';
+import { seedFairyWorld } from './helpers/world_seed.ts';
 import { WorldStore } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
@@ -112,7 +113,7 @@ test('生成后 creation_prompt 的选项带上真实 iconAsset', async () => {
   const store = new WorldStore();
   const app = await buildServer({ adapters: createMockAdapters(), store });
   try {
-    await app.inject({ method: 'GET', url: '/worlds/default' }); // 种小神仙
+    seedFairyWorld(store);
     await generateCreationIcons(createMockAdapters(), store); // 先生成图标
     const fairy = store.listCharacters('default').find((c) => c.isFairy)!;
     const session = newVoiceSession();
