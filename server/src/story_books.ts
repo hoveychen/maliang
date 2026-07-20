@@ -184,6 +184,17 @@ export function storyCharacterId(bookId: string, castId: string): string {
   return `story_${bookId}_${castId}`;
 }
 
+/**
+ * 册 → 预烧音包目录约定（bookId 'three_pigs' → 'story_three_pigs'）。以前是隐式散落在
+ * 客户端 story_voice.gd 与服务端测试里的字符串常量，现显式化为单一来源：
+ * - 服务端：`assets/voice/${storyVoiceDir(book.id)}/lines.json` 定位该册预烧清单；
+ * - 客户端 StoryVoice 扫 `res://assets/voice/story_*` 目录（同源约定：每册目录都以 `story_` 前缀）。
+ * 加一册只需把台词烧进 `assets/voice/story_<新册 id>/`，无需任何映射登记。
+ */
+export function storyVoiceDir(bookId: string): string {
+  return `story_${bookId}`;
+}
+
 /** 未入住的故事角色（供给面早返回的统一判据：狼/还没演到入住的小猪不漏话不派活不迎客）。 */
 export function isUnsettledStoryRole(c: { storyRole?: { resident: boolean } }): boolean {
   return !!c.storyRole && !c.storyRole.resident;
