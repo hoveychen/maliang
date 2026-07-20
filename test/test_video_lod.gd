@@ -81,7 +81,8 @@ func _init() -> void:
 			break
 	_ok("首帧到手后无缝换成视频材质", swapped)
 	_ok("视频材质 shader 是 chroma_video", (pc.material_override as ShaderMaterial).shader == load("res://shaders/chroma_video.gdshader"))
-	_ok("视频材质无 xray next_pass", (pc.material_override as ShaderMaterial).next_pass == null)
+	_ok("视频材质带 xray 穿透剪影 next_pass（被挡显蓝白白边）", (pc.material_override as ShaderMaterial).next_pass == pc._video_xray_mat)
+	_ok("xray next_pass 是 chroma_video_xray shader", (pc._video_xray_mat as ShaderMaterial).shader == load("res://shaders/chroma_video_xray.gdshader"))
 	_ok("解码纹理已喂进 video_tex", (pc.material_override as ShaderMaterial).get_shader_parameter("video_tex") != null)
 
 	# ── ③ 段切换：idle↔talking 换 stream（单路解码）──────────────────────────
