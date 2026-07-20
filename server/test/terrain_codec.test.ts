@@ -100,10 +100,10 @@ test('拒收：版本号不认识', () => {
   assert.throws(() => decodeTerrain(buf), TerrainFormatError);
 });
 
-test('拒收：网格尺寸不是 75×75（第一版锁死）', () => {
+test('拒收：网格尺寸非预设（只接受 50/75/100 方形）', () => {
   const buf = encodeTerrain(terrain());
-  buf[5] = 64;
-  assert.throws(() => decodeTerrain(buf), /只接受 75x75/);
+  buf[5] = 76; buf[6] = 76; // 方形但非预设
+  assert.throws(() => decodeTerrain(buf), /方形预设/);
 });
 
 test('拒收：长度对不上（截断/palette 后多余尾巴）', () => {
