@@ -1157,6 +1157,16 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     },
   );
 
+  // 模板放置版本自增（世界模板架构 v2 P5 的下发开关，docs/content-authoring-guide.md §6）：
+  // 作者把放置级新内容（村民/整册）seed 进 template 世界后调它一次，template 版本 +1；
+  // 存量玩家世界下次 getOrCreateMyWorld 进入时按版本落差跑 additive 迁移，把它们还没有的放置补入
+  // （只加不改，不覆盖孩子改过的实例）。全新世界经 clone 本就带全、无需 bump。bumpTemplateVersion
+  // 内部 ensureTemplateWorld，模板不存在也不炸。admin token 门禁。
+  app.post('/admin/template/bump-version', async (req, reply) => {
+    if (!debugAuthed(req)) return reply.code(403).send({ error: 'admin token required' });
+    return { version: store.bumpTemplateVersion() };
+  });
+
   // 昂贵操作限流：每连接 N/分钟 + 全局并发上限（防刷付费 API）
   const limiter = new RateLimiter(
     Number(process.env.RATE_PER_MIN ?? 8),
