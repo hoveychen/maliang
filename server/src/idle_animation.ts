@@ -12,6 +12,14 @@ import { CLIP_NAMES, videosToSpriteSheet, type SpriteSheetMeta } from './sprite_
  */
 export const SPRITE_ANIM_VERSION = 2;
 
+/**
+ * 当前「打包管线」版本，与 SPRITE_ANIM_VERSION（结构版本）正交。
+ * 1 = 绿边修复前的抠图；2 = 绿边去色溢修复（f365eab）后的抠图/打包。
+ * 抠图/去绿溢/帧率/裁剪盒等打包参数变了就 +1。回填据此判断哪些 ready 记录只需从存量原片
+ * 零成本 repack（而非重新买视频）——见 backfillCharacterAnimations。
+ */
+export const SPRITE_PACK_VERSION = 2;
+
 /** 视频→图集的转换缝（默认真实 ffmpeg 实现；测试注入假实现以免依赖网络/ffmpeg）。 */
 export type ToSpriteSheet = (
   clips: { name: ClipName; mp4: VideoBlob }[],
@@ -44,6 +52,7 @@ export async function generateCharacterAnimation(
     for (const { name, mp4 } of mp4s) clipVideos[name] = store.putAsset(mp4);
     store.setSpriteAnimReady(spriteHash, animAsset, meta, {
       version: SPRITE_ANIM_VERSION,
+      packVersion: SPRITE_PACK_VERSION,
       clipVideos,
     });
   } catch (err) {
@@ -75,6 +84,7 @@ export async function repackFromStoredClips(
   const animAsset = store.putAsset(atlas);
   store.setSpriteAnimReady(spriteHash, animAsset, meta, {
     version: SPRITE_ANIM_VERSION,
+    packVersion: SPRITE_PACK_VERSION,
     clipVideos: vids,
   });
   return true;
@@ -97,12 +107,15 @@ export function triggerCharacterAnimation(
 }
 
 /**
- * 存量回填：遍历所有世界的所有角色，凡其静态立绘「没有当前版本的动画」的，fire-and-forget
- * 触发一次生成。覆盖两种：①从未生成过（无记录）②旧版单段 idle 图集（ready 但 version<2）。
+ * 存量回填：遍历所有世界的所有角色，凡其静态立绘的动画「不是当前版本」的，fire-and-forget 补一次。
+ * 三条路（按代价从贵到便宜）：
+ *   ①从未生成（无记录）或结构陈旧（version<当前，如新增段）→ 完整重生成（要向 Seedance 买视频）。
+ *   ②只是打包管线陈旧（packVersion<当前，如绿边修复/换帧率）且存有原片 → 零成本 repack，不买视频。
+ *   ③打包管线陈旧但无原片（v1 老记录）→ 只能回退完整重生成。
+ * 结构+打包都已是当前 → 跳过。
  *
  * failed 一律不重试——避免坏立绘每次启动反复烧钱。pending 也跳过（正在跑）。
- * 同一立绘 hash 多角色共用时只触发一次。服务启动跑一次（buildServer 的 backfillOnBoot），
- * 返回触发条数。
+ * 同一立绘 hash 多角色共用时只触发一次。服务启动跑一次（buildServer 的 backfillOnBoot），返回触发条数。
  */
 export function backfillCharacterAnimations(
   adapters: ServiceAdapters,
@@ -118,8 +131,24 @@ export function backfillCharacterAnimations(
       seen.add(hash);
       const rec = store.getSpriteAnim(hash);
       if (rec && rec.status !== 'ready') continue; // pending 在跑 / failed 不重试
-      if (rec?.status === 'ready' && (rec.version ?? 1) >= SPRITE_ANIM_VERSION) continue;
-      triggerCharacterAnimation(adapters, store, hash, toSpriteSheet);
+
+      // ①无记录 / 结构陈旧 → 完整重生成（triggerCharacterAnimation 的去重看 version，此处必放行）。
+      if (!rec || (rec.version ?? 1) < SPRITE_ANIM_VERSION) {
+        triggerCharacterAnimation(adapters, store, hash, toSpriteSheet);
+        triggered++;
+        continue;
+      }
+      // 结构已是当前；只剩打包管线是否陈旧。
+      if ((rec.packVersion ?? 1) >= SPRITE_PACK_VERSION) continue; // 全都当前 → 跳过
+      if (rec.clipVideos) {
+        // ②有原片 → 零成本 repack（version 已是当前，triggerCharacterAnimation 会跳过，故直接 repack）。
+        void repackFromStoredClips(store, hash, toSpriteSheet).catch((err) =>
+          console.warn(`回填 repack 失败 sprite=${hash}:`, err instanceof Error ? err.message : err),
+        );
+      } else {
+        // ③无原片 → 只能重新买视频（同样绕过 triggerCharacterAnimation 的 version 去重）。
+        void generateCharacterAnimation(adapters, store, hash, toSpriteSheet);
+      }
       triggered++;
     }
   }

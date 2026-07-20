@@ -228,10 +228,16 @@ export interface SpriteAnimRecord {
   animAsset?: string;
   meta?: SpriteSheetMeta;
   /**
-   * 图集版本。缺省 = 1 = 单段 idle（本字段上线前的老记录）；2 = 三段 idle/moving/talking。
-   * 回填据此判断哪些 ready 记录需要重跑（见 backfillCharacterAnimations）。
+   * 图集「结构」版本。缺省 = 1 = 单段 idle（本字段上线前的老记录）；2 = 三段 idle/moving/talking。
+   * 结构变化（新增段）要重新向 Seedance 买视频才能补，回填走完整重生成。见 backfillCharacterAnimations。
    */
   version?: number;
+  /**
+   * 图集「打包管线」版本。缺省 = 1。抠图/去绿溢/帧率/裁剪盒等打包参数变了就 bump（见
+   * idle_animation.ts 的 SPRITE_PACK_VERSION）。它与 version 正交：结构没变、只是打包管线变了，
+   * 回填从存量原片零成本 repack 即可，不必再买视频。缺省视为 1，好让存量记录被自动 repack 一次。
+   */
+  packVersion?: number;
   /**
    * 段名 → 该段原始绿幕 mp4 的资产 hash。
    *
@@ -2027,7 +2033,7 @@ export class WorldStore {
     spriteHash: string,
     animAsset: string,
     meta: SpriteSheetMeta,
-    extra?: { version?: number; clipVideos?: Partial<Record<ClipName, string>> },
+    extra?: { version?: number; packVersion?: number; clipVideos?: Partial<Record<ClipName, string>> },
   ): void {
     this.#spriteAnims.set(spriteHash, { status: 'ready', animAsset, meta, ...extra });
     this.#persistSpriteAnims();

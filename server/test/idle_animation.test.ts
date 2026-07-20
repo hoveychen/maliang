@@ -12,6 +12,7 @@ import {
   backfillCharacterAnimations,
   repackFromStoredClips,
   SPRITE_ANIM_VERSION,
+  SPRITE_PACK_VERSION,
   type ToSpriteSheet,
 } from '../src/idle_animation.ts';
 import { CLIP_NAMES, type SpriteSheetMeta } from '../src/sprite_sheet.ts';
@@ -36,10 +37,16 @@ function putSprite(store: WorldStore): string {
   return store.putAsset({ bytes: Uint8Array.from([9, 9, 9]), mime: 'image/png' });
 }
 
-/** 置一条「当前版本」的 ready 记录（去重逻辑要看 version，不能只看 status）。 */
+// backfill 只读 appearance.spriteAsset；但 appearance 现落在共享定义层（世界模板架构 v2），
+// 定义要求带 name/id，故最小对象也得有名字（拆写抽定义时会校验）。
+const mkChar = (id: string, worldId: string, hash: string): Character =>
+  ({ id, worldId, name: id, appearance: { spriteAsset: hash } } as unknown as Character);
+
+/** 置一条「当前版本」的 ready 记录（去重逻辑要看 version + packVersion，不能只看 status）。 */
 function setReadyV2(store: WorldStore, sprite: string, animAsset: string): void {
   store.setSpriteAnimReady(sprite, animAsset, META, {
     version: SPRITE_ANIM_VERSION,
+    packVersion: SPRITE_PACK_VERSION,
     clipVideos: { idle: 'vi', talking: 'vt' },
   });
 }
@@ -197,6 +204,70 @@ test('backfillCharacterAnimations: 回填「无记录」与「v1 老图集」，
   assert.notEqual(store.getSpriteAnim(h4)?.animAsset, 'a4old', 'h4 应换上新图集');
   assert.equal(store.getSpriteAnim(h1)?.animAsset, 'a1', 'h1 已是 v2 → 不动');
   assert.equal(store.getSpriteAnim(h3)?.status, 'failed', 'h3 failed 未被重试');
+});
+
+test('backfillCharacterAnimations: 打包管线陈旧（packVersion<当前）且有原片 → 零成本 repack，不买视频，戳新 packVersion', async () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  const sprite = putSprite(store);
+  // 结构是当前版本、但打包管线是绿边修复前（packVersion 1）——正是这次线上兔子的处境。
+  const vi = store.putAsset({ bytes: Uint8Array.from([10, 11]), mime: 'video/mp4' });
+  const vt = store.putAsset({ bytes: Uint8Array.from([12, 13]), mime: 'video/mp4' });
+  store.setSpriteAnimReady(sprite, 'oldGreenAtlas', META, {
+    version: SPRITE_ANIM_VERSION,
+    packVersion: 1,
+    clipVideos: { idle: vi, talking: vt },
+  });
+  store.addCharacter(mkChar('c1', 'w1', sprite));
+
+  // 视频适配器一调就炸：pack 陈旧但有原片，必须走零成本 repack，绝不能再去买视频。
+  const adapters = createMockAdapters();
+  adapters.video = {
+    async generateClip() {
+      throw new Error('packVersion 陈旧且有原片时应零成本 repack，不该买视频');
+    },
+  };
+  let repackCalled = false;
+  const repack: ToSpriteSheet = async (clips) => {
+    repackCalled = true;
+    assert.deepEqual(clips.map((c) => c.name), [...CLIP_NAMES], 'repack 应从库里取回各段原片');
+    return { atlas: { bytes: Uint8Array.from([7, 7, 7, 7]), mime: 'image/png' }, meta: { ...META } };
+  };
+
+  const n = backfillCharacterAnimations(adapters, store, repack);
+  assert.equal(n, 1, 'pack 陈旧的记录应被回填');
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(repackCalled, true, '应走 repack（而非重新生成）');
+  const rec = store.getSpriteAnim(sprite)!;
+  assert.notEqual(rec.animAsset, 'oldGreenAtlas', '应换上重打后的新图集');
+  assert.equal(rec.packVersion, SPRITE_PACK_VERSION, '应戳上当前打包管线版本（否则每次开机反复 repack）');
+  assert.deepEqual(rec.clipVideos, { idle: vi, talking: vt }, '原片 hash 不变（没重新买视频）');
+});
+
+test('backfillCharacterAnimations: 打包管线陈旧但无原片（v1 存量）→ 回退完整重生成', async () => {
+  const store = new WorldStore();
+  store.createWorld('w1');
+  const sprite = putSprite(store);
+  // packVersion 陈旧，但没有 clipVideos（老记录）——repack 无从下手，只能重新买视频。
+  store.setSpriteAnimReady(sprite, 'oldNoClips', META, { version: SPRITE_ANIM_VERSION, packVersion: 1 });
+  store.addCharacter(mkChar('c1', 'w1', sprite));
+
+  let generated = false;
+  const spy: ToSpriteSheet = async (clips) => {
+    generated = true;
+    assert.equal(clips.length, CLIP_NAMES.length, '完整重生成应打全部段');
+    return { atlas: { bytes: Uint8Array.from([5, 5]), mime: 'image/png' }, meta: { ...META } };
+  };
+  const n = backfillCharacterAnimations(createMockAdapters(), store, spy);
+  assert.equal(n, 1);
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(generated, true, '无原片时应回退到完整重生成');
+  const rec = store.getSpriteAnim(sprite)!;
+  assert.notEqual(rec.animAsset, 'oldNoClips', '应换上新图集');
+  assert.equal(rec.packVersion, SPRITE_PACK_VERSION, '重生成也要戳当前打包版本');
+  assert.ok(rec.clipVideos, '重生成会补上原片');
 });
 
 test('GET /sprite-anim/:hash: ready 返回记录（含 clips meta）；未知返回 none', async () => {
