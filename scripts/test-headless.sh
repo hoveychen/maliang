@@ -75,6 +75,7 @@ UNIT_TESTS=(
   test_sdf_bake_swap
   test_paper_idle
   test_paper_clips
+  test_video_lod
   test_task_chip_portrait
   test_anim_clip_pick
   test_atlas_compress
