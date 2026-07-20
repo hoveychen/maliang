@@ -12,10 +12,11 @@ extends Node3D
 ## 不判定、不找位、不登记占地（静态占用由 ItemCatalog.apply_static_occupancy 派生）。
 
 const CHUNK_TILES := 25
-const CHUNK_WORLD := float(CHUNK_TILES) * WorldGrid.TILE_SIZE          ## 50.0
-const CHUNKS_PER_SIDE := WorldGrid.GRID_TILES / CHUNK_TILES            ## 3（75/25）
-const R := 1                                                          ## 半径(区块)→ 3×3 = 正好整个小世界一遍，无重复
-const RENDER_RADIUS := 110.0                                          ## 圆形渲染半径，覆盖全部 3×3（远处由雾渐隐）
+const CHUNK_WORLD := float(CHUNK_TILES) * WorldGrid.TILE_SIZE          ## 50.0（TILE_SIZE 恒定）
+## 每边区块数 = GRID_TILES / CHUNK_TILES，随场景网格运行时派生（50→2 / 75→3 / 100→4）。
+## 曾是编译期 const（锁死 3）；改运行时后由 _ensure_slots 建/重建 CHUNKS_PER_SIDE² 个常驻槽。
+var _chunks_per_side := 0                                             ## 0 = 尚未建槽（_ensure_slots 首次填）
+const RENDER_RADIUS := 110.0                                          ## 圆形渲染半径（固定视距，远处由雾渐隐）
 ## world-bending 在 GPU 位移顶点，但视锥裁剪按原始 AABB → 高处/远处网格会被误剔除。
 ## 外扩量的推导见 BendMat.CULL_MARGIN（最坏下压 30m，取 35）。
 const CULL_MARGIN := BendMat.CULL_MARGIN
@@ -153,18 +154,37 @@ func set_props_shown(on: bool) -> void:
 var _dynamic_props: Array = []
 
 func _ready() -> void:
-	# 槽位与 wrapped 区块恒等绑定：3×3 槽位恰好覆盖 3×3 环面世界一遍（CHUNKS_PER_SIDE
-	# == 2R+1 是本设计前提），每个 wrapped 只需铺一次内容，之后 update 只挪位置——
-	# 旧的「跨界换 wrapped 就重铺」在真机上单帧连铺 3~4 块（实测 300~1000ms，移动顿到 1fps）。
-	for x in range(CHUNKS_PER_SIDE):
-		for z in range(CHUNKS_PER_SIDE):
+	_ensure_slots()
+
+## 按当前 WorldGrid.GRID_TILES 建齐 CHUNKS_PER_SIDE² 个常驻槽（每 wrapped 区块一个，恒等绑定）。
+## 幂等：网格没变时零成本直接返回；变了（换到不同尺寸场景）则推倒旧槽重建。
+##
+## 槽位与 wrapped 区块恒等绑定 = 每个 wrapped 只需铺一次内容，之后 update 只挪位置——
+## 旧的「跨界换 wrapped 就重铺」在真机上单帧连铺 3~4 块（实测 300~1000ms，移动顿到 1fps）。
+## 常驻槽数随网格：50→2×2、75→3×3、100→4×4。update() 每帧把每个槽摆到离焦点最近的
+## 环面镜像并按 RENDER_RADIUS 圆形裁剪（不再依赖「奇数窗口恰好覆盖世界」的旧前提，
+## 故 100 格的 4×4 偶数边也能无缝——见 update 注释）。
+func _ensure_slots() -> void:
+	var cps := WorldGrid.GRID_TILES / CHUNK_TILES
+	if cps == _chunks_per_side and not _slots.is_empty():
+		return
+	for slot in _slots:
+		var root: Variant = slot.get("root", null)
+		if root != null and is_instance_valid(root):
+			(root as Node3D).queue_free()
+	_slots.clear()
+	_chunk_meshes.clear()
+	_water_meshes.clear()
+	_chunks_per_side = cps
+	for x in range(cps):
+		for z in range(cps):
 			var slot := _make_slot()
 			slot["wrapped"] = Vector2i(x, z)
 			slot["skinned"] = false
 			_slots.append(slot)
 
 ## 首屏是否铺完：所有槽位都 skin 过一轮（loading 过场据此判定世界可揭开）。
-## update() 每帧铺最近未铺的一块，~9 帧内全 true；槽位数 == 3×3 面世界，恒定。
+## update() 每帧铺最近未铺的一块，CHUNKS_PER_SIDE² 帧内全 true（75→9、100→16）。
 func all_skinned() -> bool:
 	if _slots.is_empty():
 		return false # _ready 尚未建槽，未就绪
@@ -184,9 +204,9 @@ func skinned_fraction() -> float:
 			n += 1
 	return float(n) / float(_slots.size())
 
-## 恒等索引：wrapped → 槽位（_ready 的创建顺序 x*边长+z）。
+## 恒等索引：wrapped → 槽位（_ensure_slots 的创建顺序 x*边长+z）。
 func _slot_of(wrapped: Vector2i) -> Dictionary:
-	return _slots[wrapped.x * CHUNKS_PER_SIDE + wrapped.y]
+	return _slots[wrapped.x * _chunks_per_side + wrapped.y]
 
 func _make_slot() -> Dictionary:
 	if _ground_mat == null:
@@ -269,6 +289,7 @@ static func _make_water_mat() -> ShaderMaterial:
 ## docs/multi-scene-design.md 步骤⑤边界1；玩家/角色/动态物件的卸载由换场景流程另管。
 ## 复位期间槽位仍显示旧网格，直到被 update() 逐帧重铺（换场景走过场遮挡，见步骤⑤）。
 func rebuild() -> void:
+	_ensure_slots()        # 换场景可能换网格尺寸 → 先按新尺寸建齐槽（尺寸没变则幂等直返）
 	_refresh_base_layer()  # 换场景可能换主题 → 按新地形定万物基底层（themed-terrain P2）
 	_chunk_meshes.clear()
 	_water_meshes.clear()
@@ -313,29 +334,26 @@ func clear_dynamic_props() -> void:
 	_dynamic_props.clear()
 
 func update(player_logical: Vector2) -> void:
-	var pcx := int(floor(player_logical.x / CHUNK_WORLD))
-	var pcz := int(floor(player_logical.y / CHUNK_WORLD))
+	_ensure_slots()  # 换到不同尺寸场景后自愈重建槽（幂等，尺寸没变零成本）
 	var pending: Array = []  # 未铺设槽位 [距离, slot, wrapped]，每帧只铺最近的一块
-	for i in range(-R, R + 1):
-		for j in range(-R, R + 1):
-			var cx := pcx + i
-			var cz := pcz + j
-			# 区块中心的逻辑坐标
-			var center_logical := Vector2(
-				(float(cx) + 0.5) * CHUNK_WORLD,
-				(float(cz) + 0.5) * CHUNK_WORLD)
-			var d := WorldGrid.shortest_delta(player_logical, center_logical)
-			# 槽位按 wrapped 恒等绑定（见 _ready 注释）：内容只铺一次，之后只挪位置
-			var wrapped := Vector2i(
-				posmod(cx, CHUNKS_PER_SIDE),
-				posmod(cz, CHUNKS_PER_SIDE))
-			var slot := _slot_of(wrapped)
-			var root: Node3D = slot["root"]
-			root.position = Vector3(d.x, 0.0, d.y)
-			# 圆形裁剪：超出半径的区块隐藏 → 圆形地平线，无正方形四角对角缺口
-			root.visible = d.length() < RENDER_RADIUS
-			if not slot["skinned"]:
-				pending.append([d.length(), slot, wrapped])
+	# 遍历全部常驻槽（每 wrapped 区块一个），把每个摆到离焦点最近的环面镜像、按半径圆形裁剪。
+	# 不再用「以焦点为中心的 (2R+1)² 奇数窗口」——那要求 CHUNKS_PER_SIDE==2R+1（奇数）才能
+	# 无缝无重复覆盖世界，而 100 格的 4×4 是偶数、奇数窗口永远盖不平。直接遍历所有槽 +
+	# shortest_delta 取最近镜像，对任意边长（偶/奇）都无缝，且成本恒为 CHUNKS_PER_SIDE² 次
+	# 定位（75→9、100→16，皆廉价）；75 格下与旧窗口逐槽落点完全一致。
+	for slot in _slots:
+		var wrapped: Vector2i = slot["wrapped"]
+		# 该 wrapped 区块的规范逻辑中心（0..CHUNKS_PER_SIDE-1 区块索引）
+		var center_logical := Vector2(
+			(float(wrapped.x) + 0.5) * CHUNK_WORLD,
+			(float(wrapped.y) + 0.5) * CHUNK_WORLD)
+		var d := WorldGrid.shortest_delta(player_logical, center_logical)
+		var root: Node3D = slot["root"]
+		root.position = Vector3(d.x, 0.0, d.y)
+		# 圆形裁剪：超出半径的区块隐藏 → 圆形地平线，无正方形四角对角缺口
+		root.visible = d.length() < RENDER_RADIUS
+		if not slot["skinned"]:
+			pending.append([d.length(), slot, wrapped])
 	# 入场铺设分帧：单块在平板小核上 80~200ms，一帧铺 9 块曾实测卡 ~1s；
 	# 每帧只铺离焦点最近的一块（玩家脚下先有地），~9 帧内铺完
 	if not pending.is_empty():
@@ -1086,7 +1104,7 @@ func add_dynamic_prop(spec_data: Dictionary, want_tile: Vector2i, yaw := 0.0, wa
 	var n := WorldGrid.GRID_TILES
 	want_tile = Vector2i(posmod(want_tile.x, n), posmod(want_tile.y, n))
 	var wrapped := Vector2i(want_tile.x / CHUNK_TILES, want_tile.y / CHUNK_TILES)
-	# 找当前持有该 wrapped 区块的 slot（3×3 池覆盖全图，必在）
+	# 找当前持有该 wrapped 区块的 slot（常驻槽池覆盖全部 wrapped 区块，必在）
 	var deco: Node3D = null
 	for slot in _slots:
 		if slot["wrapped"] == wrapped:
