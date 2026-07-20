@@ -250,10 +250,18 @@ export interface CharacterSpec {
 
 /** 落地后的完整角色。 */
 /**
- * 环面世界的边长（tile 数），与客户端 WorldGrid.GRID_TILES 必须一致。
- * 坐标上报的唯一合法域是 [0, GRID_TILES)²——早年 1000×1000 大世界留下的 tile 500 在此域外。
+ * 环面世界的默认边长（tile 数），与客户端 WorldGrid 默认 GRID_TILES 一致。
+ * 场景实际尺寸由 Scene.gridTiles 逐场景决定（预设 50/75/100，见 terrain.ts PRESET_GRIDS）；
+ * 这里的 75 仅作默认档与降生占位（WORLD_CENTER_TILE）之用。
  */
 export const GRID_TILES = 75;
+
+/**
+ * 任意场景 tile 坐标的最宽合法上界（= 最大预设）。坐标上报校验（isValidTile）用它兜底：
+ * 不同场景尺寸不一，而 isValidTile 的多数调用点手上没有场景尺寸，故取最松的预设上界，
+ * 只挡住明显越界的垃圾坐标（早年 1000×1000 大世界留下的 tile 500 在此域外）。
+ */
+export const MAX_GRID_TILES = 100;
 
 /** 世界正中心 tile：新角色/点点的降生点（客户端首次上报前的占位值）。 */
 export const WORLD_CENTER_TILE: TilePos = { tileX: Math.floor(GRID_TILES / 2), tileY: Math.floor(GRID_TILES / 2) };
@@ -375,9 +383,12 @@ export interface ItemDef {
   nameText?: string;
 }
 
-/** tile 是否落在环面世界内（整数且在 [0, GRID_TILES)）。越界/非整数一律拒收，不做 wrap。 */
+/**
+ * tile 是否落在任意合法场景内（整数且在 [0, MAX_GRID_TILES)）。越界/非整数一律拒收，不做 wrap。
+ * 用最松的预设上界兜底——精确到具体场景尺寸的边界由客户端 WorldGrid.is_valid_tile 按下发尺寸判。
+ */
 export function isValidTile(tile: TilePos): boolean {
-  const inRange = (v: number) => Number.isInteger(v) && v >= 0 && v < GRID_TILES;
+  const inRange = (v: number) => Number.isInteger(v) && v >= 0 && v < MAX_GRID_TILES;
   return inRange(tile.tileX) && inRange(tile.tileY);
 }
 

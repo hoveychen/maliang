@@ -45,10 +45,15 @@ export const PLANES_V2 = 9;
 export const MAX_PALETTE = 65535;
 
 /**
- * 第一版所有场景一律 75×75。
- * 客户端 WorldGrid.GRID_TILES 有两处编译期 const 推导（chunk_manager 的 CHUNKS_PER_SIDE、
- * occupancy_map 的 CELLS），运行期值喂不进去——放开尺寸要先改那两处，是独立的一件事。
+ * 网格尺寸预设：50/75/100（都是客户端 CHUNK_TILES=25 的倍数，分块整除干净）。
+ * 场景可按需选一档（龟兔赛跑 large=100 跑道等）。非预设一律拒收——
+ * 客户端 chunk_manager/occupancy 已运行时化按下发尺寸自适应，但只保证这三档整除干净。
  */
+export const PRESET_GRIDS: ReadonlySet<number> = new Set([50, 75, 100]);
+export function isPresetGrid(n: number): boolean {
+  return PRESET_GRIDS.has(n);
+}
+/** 默认档：新建空场景与向后兼容路径（不指定尺寸时）一律 75×75。 */
 export const REQUIRED_GRID = 75;
 export const DEFAULT_TILE_SIZE = 2.0;
 
@@ -164,11 +169,11 @@ export class TerrainFormatError extends Error {
   }
 }
 
-/** 空地形（全草地、无物品）：测试与迁移的起点。 */
-export function emptyTerrain(): Terrain {
-  const n = REQUIRED_GRID * REQUIRED_GRID;
+/** 空地形（全草地、无物品）：测试与迁移的起点。默认 75×75，可指定预设尺寸。 */
+export function emptyTerrain(grid: number = REQUIRED_GRID): Terrain {
+  const n = grid * grid;
   return {
-    gridW: REQUIRED_GRID, gridH: REQUIRED_GRID, tileSize: DEFAULT_TILE_SIZE,
+    gridW: grid, gridH: grid, tileSize: DEFAULT_TILE_SIZE,
     types: new Uint8Array(n), heights: new Uint8Array(n), depths: new Uint8Array(n),
     itemRef: new Uint16Array(n), itemArg: new Uint8Array(n),
     edges: [new Uint16Array(n), new Uint16Array(n), new Uint16Array(n), new Uint16Array(n)],
@@ -276,8 +281,8 @@ export function decodeTerrain(buf: Uint8Array): Terrain {
 
   const gridW = buf[5]!;
   const gridH = buf[6]!;
-  if (gridW !== REQUIRED_GRID || gridH !== REQUIRED_GRID) {
-    throw new TerrainFormatError(`grid ${gridW}x${gridH}, 第一版只接受 ${REQUIRED_GRID}x${REQUIRED_GRID}`);
+  if (gridW !== gridH || !isPresetGrid(gridW)) {
+    throw new TerrainFormatError(`grid ${gridW}x${gridH}, 只接受方形预设 ${[...PRESET_GRIDS].join('/')}`);
   }
 
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -285,7 +290,7 @@ export function decodeTerrain(buf: Uint8Array): Terrain {
   if (!Number.isFinite(tileSize) || tileSize <= 0) throw new TerrainFormatError(`tileSize ${tileSize}`);
 
   const n = gridW * gridH;
-  const t = emptyTerrain();
+  const t = emptyTerrain(gridW);  // 按解出尺寸建，t.gridW/gridH 随之正确（planes 随后覆写）
   t.tileSize = tileSize;
 
   if (version === TERRAIN_VERSION_1) {

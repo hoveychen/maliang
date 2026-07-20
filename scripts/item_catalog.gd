@@ -77,6 +77,7 @@ static func footprint(id: String, arg: int) -> Vector2i:
 ## 与服务端 buildStaticOccupancy 同构：blocking footprint 锚点居中展开、环面 wrap、
 ## 草丛等非 blocking 不占位。地形载入/patch 应用后调用。
 static func apply_static_occupancy() -> void:
+	OccupancyMap.sync_grid()  # 换尺寸场景后先把 CELLS/占用图同步到当前网格，再据 CELLS 建位图
 	var n := WorldGrid.GRID_TILES
 	var cells := PackedByteArray()
 	cells.resize(OccupancyMap.CELLS * OccupancyMap.CELLS)

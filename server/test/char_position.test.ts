@@ -4,7 +4,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WorldStore } from '../src/persistence.ts';
-import { GRID_TILES, WORLD_CENTER_TILE, isValidTile, type Character } from '../src/types.ts';
+import { GRID_TILES, MAX_GRID_TILES, WORLD_CENTER_TILE, isValidTile, type Character } from '../src/types.ts';
 
 function char(worldId: string, id: string): Character {
   return {
@@ -22,13 +22,14 @@ function freshStore(tag: string): WorldStore {
   return new WorldStore(dir);
 }
 
-test('isValidTile：只接受 [0, GRID_TILES) 的整数，旧世界的 tile 500 被拒', () => {
+test('isValidTile：只接受 [0, MAX_GRID_TILES) 的整数，旧世界的 tile 500 被拒', () => {
   assert.equal(isValidTile({ tileX: 0, tileY: 0 }), true);
   assert.equal(isValidTile({ tileX: GRID_TILES - 1, tileY: GRID_TILES - 1 }), true);
+  assert.equal(isValidTile({ tileX: MAX_GRID_TILES - 1, tileY: MAX_GRID_TILES - 1 }), true, '100 格场景边角合法');
   assert.equal(isValidTile(WORLD_CENTER_TILE), true);
 
   assert.equal(isValidTile({ tileX: 500, tileY: 500 }), false, '旧 1000×1000 世界的死值必须越界');
-  assert.equal(isValidTile({ tileX: GRID_TILES, tileY: 0 }), false, '上界开区间');
+  assert.equal(isValidTile({ tileX: MAX_GRID_TILES, tileY: 0 }), false, '上界开区间（= 最大预设）');
   assert.equal(isValidTile({ tileX: -1, tileY: 0 }), false);
   assert.equal(isValidTile({ tileX: 1.5, tileY: 0 }), false, '非整数拒收');
   assert.equal(isValidTile({ tileX: NaN, tileY: 0 }), false);

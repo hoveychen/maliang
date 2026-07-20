@@ -12,7 +12,6 @@
  */
 
 import type { ItemDef, } from './types.ts';
-import { GRID_TILES } from './types.ts';
 import type { SdfPropSpec } from './sdf_prop.ts';
 import type { ComposedSpec } from './build_blueprints.ts';
 import { scaleToSize } from './creation_options.ts';
@@ -340,8 +339,6 @@ export function rotatedFootprint(def: ItemDef, arg: number): [number, number] {
   return quadrant === 1 || quadrant === 3 ? [def.footprintH, def.footprintW] : [def.footprintW, def.footprintH];
 }
 
-const wrap = (v: number) => ((v % GRID_TILES) + GRID_TILES) % GRID_TILES;
-
 /**
  * 从矩阵派生静态占用位图（tile 分辨率，1=被 blocking 物品 footprint 覆盖）。
  * 客户端 TerrainMap 的派生占用与此逐字节对齐（P4 参照实现）。
@@ -350,6 +347,8 @@ const wrap = (v: number) => ((v % GRID_TILES) + GRID_TILES) % GRID_TILES;
 export function buildStaticOccupancy(t: Terrain, resolve: ItemResolver): Uint8Array {
   const n = t.gridW * t.gridH;
   const occ = new Uint8Array(n);
+  // 环面 wrap 按本地形的实际边长——不同尺寸场景 footprint 跨界回绕才对齐（方形，W=H）
+  const wrap = (v: number) => ((v % t.gridW) + t.gridW) % t.gridW;
 
   // palette 全部可解析（未被引用的空悬 palette 项也算错——palette 该压实）
   const defs: ItemDef[] = t.palette.map((id) => {

@@ -7,17 +7,20 @@ extends RefCounted
 ## 由 OccupancyMap.snapshot() 构造（那里做 duplicate()）；本类只读自己的副本，
 ## 不引用任何全局可变态——worker 线程可安全并发读多个不同快照。
 
-const CELLS := WorldGrid.GRID_TILES * 2  ## 150，与 OccupancyMap.CELLS 一致
-
 var _occ: PackedByteArray
 var _chars: Dictionary
+## 半格边长，从快照自身的 _occ 大小推出（_occ 恒为 CELLS×CELLS 方阵）。刻意不读
+## WorldGrid.GRID_TILES：快照要在 worker 线程只读、且必须与被拍下时的网格一致——
+## 若换场景把全局 GRID_TILES 改了，正在跑的 A* 仍须按拍照时的边长索引，否则错位（见类注释）。
+var _cells: int
 
 func _init(occ: PackedByteArray, chars: Dictionary) -> void:
 	_occ = occ
 	_chars = chars
+	_cells = int(round(sqrt(float(occ.size()))))
 
 func _idx(c: Vector2i) -> int:
-	return posmod(c.y, CELLS) * CELLS + posmod(c.x, CELLS)
+	return posmod(c.y, _cells) * _cells + posmod(c.x, _cells)
 
 ## origin 起 w×h 半格矩形全空闲（物件层）。与 OccupancyMap.is_free_rect 逐条一致。
 func is_free_rect(origin: Vector2i, w: int, h: int) -> bool:
