@@ -107,6 +107,7 @@ UNIT_TESTS=(
   test_matrix_skin
   test_terrain_patch
   test_terrain_rebuild
+  test_grid_presets
   test_terrain_layers
   test_terrain_deco
   test_sticker_edges
