@@ -4875,9 +4875,10 @@ func _bootstrap_fetch() -> Dictionary:
 	_player_restore_pending = true
 	_boot_status = "连接精灵世界…"
 	_apply_player_sprite() # 玩家自己的档案形象替换占位（并行拉取，不阻塞）——是占位的自我替换，非服务端状态
-	# 每人一世界（世界模板架构 v2 §5）：按玩家 id 拿 w_<playerId>（服务端不存在则建+从 template 复制放置）。
-	# 不再写死 default；玩家 id 是设备端稳定 UUID（与下方 backend.player_id 同源）。
-	var world: Dictionary = await api.get_my_world(PlayerProfile.ensure_player_id())
+	# 每人一世界（世界模板架构 v2 §5）：默认按玩家 id 拿 w_<playerId>（服务端不存在则建+从 template 复制）；
+	# MALIANG_WORLD 环境变量可覆盖成指定世界（harness 指沙箱/特定世界的测试钩子，见 P4）。不再写死 default；
+	# 玩家 id 是设备端稳定 UUID（与下方 backend.player_id 同源）。
+	var world: Dictionary = await api.get_bootstrap_world(PlayerProfile.ensure_player_id())
 	_boot_stage = 1 # 网络已定音（成功或离线），loading 进度推进到中段
 	if world.is_empty():
 		return {}

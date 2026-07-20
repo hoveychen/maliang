@@ -156,6 +156,16 @@ func get_my_world(player_id: String) -> Dictionary:
 static func my_world_path(player_id: String) -> String:
 	return "/worlds/mine?playerId=" + player_id.uri_encode()
 
+## bootstrap 取哪个世界（世界模板架构 v2 §5 P4）：MALIANG_WORLD 环境变量非空 → 按它拉【指定世界】
+## （get_world；harness「开沙箱 → 指它跑整册」的测试钩子，把客户端指向 sandbox_<uuid>）；否则走
+## 每人一世界 get_my_world(playerId)。正常玩家路径不设该变量。派发经 self.get_world/get_my_world（可被
+## 存根覆盖，故 test_bootstrap_world_select 能不起真网地断言派发）。
+func get_bootstrap_world(player_id: String) -> Dictionary:
+	var override_id := OS.get_environment("MALIANG_WORLD")
+	if not override_id.is_empty():
+		return await get_world(override_id)
+	return await get_my_world(player_id)
+
 ## get_world / get_my_world 共用的 HTTP 取世界 JSON。失败/非 200 返回空字典。
 func _fetch_world_json(path: String) -> Dictionary:
 	var http := HTTPRequest.new()

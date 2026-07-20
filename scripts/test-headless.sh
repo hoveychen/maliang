@@ -80,6 +80,7 @@ UNIT_TESTS=(
   test_atlas_compress
   test_player_profile
   test_my_world_api
+  test_bootstrap_world_select
   test_stamp_ceremony
   test_composed_prop
   test_build_parts
