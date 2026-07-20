@@ -156,8 +156,6 @@ static func reset() -> void:
 ## 调用方按 changed 主动 rebuild()；地形必须在 chunk 重铺、角色落位之前就位
 ## （见 docs/multi-scene-design.md 步骤⑤）。
 static func load_from_bytes(buf: PackedByteArray) -> Dictionary:
-	var n := WorldGrid.GRID_TILES
-	var count := n * n
 	if buf.size() < MLTR_HEADER:
 		return _load_err("too short: %d B" % buf.size())
 	for i in range(4):
@@ -166,8 +164,15 @@ static func load_from_bytes(buf: PackedByteArray) -> Dictionary:
 	var version := buf[4]
 	if version != MLTR_VERSION_1 and version != MLTR_VERSION and version != MLTR_VERSION_3:
 		return _load_err("version %d" % version)
-	if buf[5] != n or buf[6] != n:
-		return _load_err("grid %dx%d, expect %dx%d" % [buf[5], buf[6], n, n])
+	# 网格尺寸自描述：从地形头读边长并 configure 全局 WorldGrid（地形二进制是唯一权威，
+	# 服务端 Scene.gridTiles 与此同源）。须方形、CHUNK_TILES(25) 整除（预设 50/75/100）。
+	var gw := int(buf[5])
+	var gh := int(buf[6])
+	if gw != gh or gw <= 0 or gw > 200 or gw % 25 != 0:
+		return _load_err("grid %dx%d, 须方形且 25 整除（预设 50/75/100）" % [gw, gh])
+	WorldGrid.configure(gw)
+	var n := gw
+	var count := n * n
 
 	var types: PackedByteArray
 	var heights: PackedByteArray

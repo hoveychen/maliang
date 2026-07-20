@@ -3,10 +3,22 @@ extends RefCounted
 ## Toroidal（环面）世界坐标数学——纯静态工具，无状态。
 ## 世界是 GRID_TILES × GRID_TILES 个 tile 的有限网格，首尾循环。
 ## 逻辑坐标用世界单位表示（不是 tile 索引），范围 [0, WORLD_SPAN)。
+##
+## GRID_TILES 逐场景可变（预设 50/75/100，服务端 Scene.gridTiles / 地形二进制头）：
+## 由 TerrainMap.load_from_bytes 按地形头 configure()（地形是自描述的唯一权威）。
+## 未 configure 前用默认 75（向后兼容/离线）。TILE_SIZE 恒定，只有边长 tile 数变。
 
-const GRID_TILES := 75
+const DEFAULT_GRID_TILES := 75
 const TILE_SIZE := 2.0
-const WORLD_SPAN := float(GRID_TILES) * TILE_SIZE  ## = 150.0（god 一屏≈60 单位 → 左右拖约 2.5 屏绕回原点）
+
+static var GRID_TILES: int = DEFAULT_GRID_TILES
+static var WORLD_SPAN: float = float(DEFAULT_GRID_TILES) * TILE_SIZE  ## = GRID_TILES × TILE_SIZE（god 一屏≈60 单位）
+
+## 按当前场景的网格边长（tile 数）重配。必须在 TerrainMap.load_from_bytes、
+## OccupancyMap.sync_grid、chunk 重建之前生效——这些下游按 GRID_TILES 派生尺寸。
+static func configure(grid_tiles: int) -> void:
+	GRID_TILES = grid_tiles
+	WORLD_SPAN = float(grid_tiles) * TILE_SIZE
 
 ## 把单个坐标分量 wrap 回 [0, WORLD_SPAN)。
 static func wrap_scalar(v: float) -> float:
