@@ -12,7 +12,14 @@ import { promisify } from 'node:util';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { VideoBlob } from './adapters/types.ts';
+import type { ClipName, VideoBlob } from './adapters/types.ts';
+import type { WorldStore } from './persistence.ts';
+
+/**
+ * 低于此字节数的「视频」视为占位/损坏（测试的 mock mp4 才 9 字节，真 Seedance mp4 ~1.9MB），
+ * 预生成时直接跳过——省得对着假字节 spawn ffmpeg 报错刷屏。真视频远超此阈值。
+ */
+const MIN_TRANSCODABLE_BYTES = 512;
 
 const execFileP = promisify(execFile);
 
@@ -48,4 +55,29 @@ export async function mp4ToTheoraOgv(mp4: VideoBlob): Promise<VideoBlob> {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * 预生成 clipVideos 各段的 ogv（焦点视频 LOD）：anim 生成/repack 时顺手转好、入库，返回
+ * 段名→ogv 资产 hash 的 clipOgv 映射。这样孩子第一次跟某角色对话时端点直接命中缓存，
+ * 不必现场惰转（省掉首次对话 ~1-2s 的转码延迟）。
+ *
+ * 尽力而为：某段转码失败只 warn 并跳过（端点日后仍会对缺的段惰转兜底），绝不拖垮整条 anim 生成。
+ * 占位/损坏的小 blob（测试 mock mp4）直接跳过，不 spawn ffmpeg。
+ */
+export async function pregenerateClipOgv(
+  store: WorldStore,
+  clips: { name: ClipName; mp4: VideoBlob }[],
+  toClipOgv: ToClipOgv = mp4ToTheoraOgv,
+): Promise<Partial<Record<ClipName, string>>> {
+  const out: Partial<Record<ClipName, string>> = {};
+  for (const { name, mp4 } of clips) {
+    if (mp4.bytes.length < MIN_TRANSCODABLE_BYTES) continue; // 占位/损坏 → 跳过
+    try {
+      out[name] = store.putAsset(await toClipOgv(mp4));
+    } catch (err) {
+      console.warn(`clip ogv 预生成失败 ${name}:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return out;
 }

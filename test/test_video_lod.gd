@@ -81,7 +81,8 @@ func _init() -> void:
 			break
 	_ok("首帧到手后无缝换成视频材质", swapped)
 	_ok("视频材质 shader 是 chroma_video", (pc.material_override as ShaderMaterial).shader == load("res://shaders/chroma_video.gdshader"))
-	_ok("视频材质无 xray next_pass", (pc.material_override as ShaderMaterial).next_pass == null)
+	_ok("视频材质带 xray 穿透剪影 next_pass（被挡显蓝白白边）", (pc.material_override as ShaderMaterial).next_pass == pc._video_xray_mat)
+	_ok("xray next_pass 是 chroma_video_xray shader", (pc._video_xray_mat as ShaderMaterial).shader == load("res://shaders/chroma_video_xray.gdshader"))
 	_ok("解码纹理已喂进 video_tex", (pc.material_override as ShaderMaterial).get_shader_parameter("video_tex") != null)
 
 	# ── ③ 段切换：idle↔talking 换 stream（单路解码）──────────────────────────
@@ -149,6 +150,19 @@ func _init() -> void:
 	_ok("坏流：材质始终留图集（无透明闪）", pc4.material_override == atlas_mat4)
 	pc4.stop_video_lod()
 	pc4.queue_free()
+
+	# ── ⑨ 两路共存（玩家+NPC 对话时都上视频）：各自独立 start/stop 互不影响 ──────────
+	var h1 := PaperCharacter.new(); get_root().add_child(h1); h1.play_anim(a["tex"], a["meta"], 6.0)
+	var h2 := PaperCharacter.new(); get_root().add_child(h2); h2.play_anim(a["tex"], a["meta"], 6.0)
+	h1.start_video_lod(_load_ogv(), null, 6.0)
+	h2.start_video_lod(_load_ogv(), null, 6.0)
+	_ok("两个角色可同时进视频档（2 路）", h1.is_video_lod() and h2.is_video_lod())
+	_ok("各自独立 VideoStreamPlayer", _find_vsp(h1) != null and _find_vsp(h2) != null and _find_vsp(h1) != _find_vsp(h2))
+	h1.stop_video_lod()
+	_ok("撤一个不影响另一个", not h1.is_video_lod() and h2.is_video_lod())
+	h2.stop_video_lod()
+	_ok("两个都撤后全退出", not h1.is_video_lod() and not h2.is_video_lod())
+	h1.queue_free(); h2.queue_free()
 
 	if _fails == 0:
 		print("video_lod tests PASS")

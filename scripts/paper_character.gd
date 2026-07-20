@@ -71,7 +71,9 @@ var _clip := ""
 ## 任意时刻 ≤1 路解码——单个 VideoStreamPlayer，切 idle/talking 时换它的 stream（不同时开两路）。
 ## 真机实测 1 路 ~56fps 稳、8 路掉到 47fps（memory video-as-animation-tablet-decode-limit）。
 static var _video_shader: Shader = null  ## 抠绿视频 shader，首次开视频才 load（多数角色永不用）
+static var _video_xray_shader: Shader = null  ## 视频档穿透剪影 shader（被挡时的蓝白白边）
 var _video_mat: ShaderMaterial = null
+var _video_xray_mat: ShaderMaterial = null  ## 视频材质的 xray next_pass（_xray_enabled 时挂）
 var _vsp: VideoStreamPlayer = null
 var _video_lod := false
 var _video_clip := ""
@@ -392,6 +394,13 @@ func start_video_lod(idle_stream: VideoStream, talking_stream: VideoStream = nul
 			_video_shader = load("res://shaders/chroma_video.gdshader")
 		_video_mat = ShaderMaterial.new()
 		_video_mat.shader = _video_shader
+	if _video_xray_mat == null:
+		if _video_xray_shader == null:
+			_video_xray_shader = load("res://shaders/chroma_video_xray.gdshader")
+		_video_xray_mat = ShaderMaterial.new()
+		_video_xray_mat.shader = _video_xray_shader
+	# 被房子/树挡住时画半透明剪影(与图集档 _xray_mat 一致)；xray 被弱机 benchmark 摘除时不挂。
+	_video_mat.next_pass = _video_xray_mat if _xray_enabled else null
 	if _vsp == null:
 		_vsp = VideoStreamPlayer.new()
 		_vsp.name = "video_lod"
@@ -465,11 +474,13 @@ func _process(delta: float) -> void:
 			stop_video_lod()
 		return
 	_video_mat.set_shader_parameter("video_tex", vt)
+	if _video_xray_mat != null:
+		_video_xray_mat.set_shader_parameter("video_tex", vt)  # 穿透剪影同步取当前解码帧
 	if material_override != _video_mat:
 		# 首帧到手：此刻才无缝把图集换成视频（之前一直显图集，无透明闪）。
 		# 同帧按真视频宽高比重算几何——目标身高取自图集档 visible_height，故切换观感不跳。
 		_apply_video_geometry(vt)
-		material_override = _video_mat  # 视频档不带 xray next_pass（穿透剪影是图集档专属）
+		material_override = _video_mat  # 含 xray next_pass（被挡时画蓝白剪影，与图集档一致）
 
 ## 首帧到手后按视频宽高比重算 quad 几何：让视频里的角色（竖向占 VIDEO_FILL）身高对齐图集档身高、
 ## 脚底落在节点原点。只改 QuadMesh 尺寸/中心偏移——不碰 texture/_sheet/pixel_size/offset（那是图集档
