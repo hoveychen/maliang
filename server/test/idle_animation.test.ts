@@ -178,9 +178,10 @@ test('backfillCharacterAnimations: 回填「无记录」与「v1 老图集」，
   setReadyV2(store, h1, 'a1');
   store.setSpriteAnimFailed(h3);
   store.setSpriteAnimReady(h4, 'a4old', META_V1);
-  // backfill 只读 appearance.spriteAsset，存最小对象即可（saveCharacter 存 JSON、listCharacters 原样解析）。
+  // backfill 只读 appearance.spriteAsset；但 appearance 现落在共享定义层（世界模板架构 v2），
+  // 而定义要求有 name/id，故最小对象也得带个名字（拆写时抽定义会校验）。
   const mk = (id: string, hash: string): Character =>
-    ({ id, worldId: 'w1', appearance: { spriteAsset: hash } } as unknown as Character);
+    ({ id, worldId: 'w1', name: id, appearance: { spriteAsset: hash } } as unknown as Character);
   store.addCharacter(mk('c1', h1));
   store.addCharacter(mk('c2', h2));
   store.addCharacter(mk('c3', h3));
