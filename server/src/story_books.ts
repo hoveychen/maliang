@@ -121,13 +121,13 @@ export const THREE_PIGS: StoryBook = {
     {
       castId: 'wolf',
       name: '大灰狼',
-      personality: '爱吹牛皮的大灰狼，整天鼓着腮帮子想吹倒房子，其实笨手笨脚一吹就头晕，凶不起来只剩滑稽。',
+      personality: '爱吹牛皮的大灰狼，整天鼓着腮帮子想吹倒房子，其实笨手笨脚一吹就头晕，凶不起来只剩滑稽；心里又馋又孤单，最想的其实是有人陪他一起玩。',
       voiceId: 'zh-CN-YunjianNeural',
       visualDescription:
         'a goofy chubby grey wolf with soft fluffy fur, puffed round cheeks like blowing air, crossed silly eyes, tiny stubby tail, clumsy harmless cartoon look, not scary at all, standing upright like a person',
-      position: { tileX: 8, tileY: 10 },
+      // 村边一角自己的小窝（小猪群西侧、同属南部可行走带）：故事后翻 resident 成可搭话村民，孩子好找他玩。
+      position: { tileX: 20, tileY: 50 },
       greetingStyle: 'playful',
-      noResidence: true,
     },
   ],
   chapters: [
