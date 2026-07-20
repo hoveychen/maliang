@@ -287,6 +287,21 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
   // 它只会被旧客户端/指向 prod 的测试凭空造出「只有点点」的空壳世界（脏数据），故已下线。
   // 将来真要多世界，再按需重建带鉴权的建世界入口。
 
+  // 每人一世界（世界模板架构 v2 §5）：按 playerId 解析/建 w_<playerId>，从 template 复制放置 + 保证点点，
+  // 返回该世界完整状态（与 GET /worlds/:id 同形）。P2 只加端点，客户端仍写死 default（P3 才改用下发 id）。
+  // 静态段 /worlds/mine 在 find-my-way 里优先于参数段 /worlds/:id，不会被后者截走。
+  app.get<{ Querystring: { playerId?: string } }>('/worlds/mine', async (req, reply) => {
+    const playerId = req.query.playerId;
+    if (!playerId) return reply.code(400).send({ error: 'playerId required' });
+    const worldId = store.getOrCreateMyWorld(playerId, seedFairy);
+    return {
+      id: worldId,
+      characters: characterListView(store, worldId),
+      scenes: store.listScenes(worldId),
+      items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
+    };
+  });
+
   // 拉世界状态。固定的 "default" 世界不存在时自动创建并种入点点
   // （初始村民由 seed 脚本生成；客户端默认加载 default 世界）。
   app.get<{ Params: { id: string } }>('/worlds/:id', async (req, reply) => {

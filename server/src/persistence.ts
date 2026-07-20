@@ -13,6 +13,13 @@ import type { ClipName, ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { sanitizeLevels, type DeviceSample, type Levels } from './device_profile.ts';
 
+/** 现网单例世界 id（存量玩家档、seed 脚本、模板提升的内容来源）。 */
+export const DEFAULT_WORLD_ID = 'default';
+/** 模板世界 id（作者面：摆放置、不接客；每人一世界从这里复制放置）。世界模板架构 v2 §4。 */
+export const TEMPLATE_WORLD_ID = 'template';
+/** 每人一世界的 id 前缀（w_<playerId>），绑玩家、非匿名 UUID（防空壳，§7）。 */
+export const PLAYER_WORLD_PREFIX = 'w_';
+
 /** 初始钱包（冷启动/旧档迁移）：预置初始小红花，零盖章进度。 */
 function freshWallet(): Wallet {
   return { flowers: INITIAL_FLOWERS, stampProgress: 0, stampsTotal: 0, hearts: 0 };
@@ -309,6 +316,10 @@ export class WorldStore {
     this.#initSchema();
     if (this.#dir !== null) {
       this.#migrateFromJson();
+      // 复合 PK 迁移必须在拆定义/实例【之前】：其后所有对 characters 的写（拆实例行、fairy/记忆/对话
+      // 迁移的 UPDATE）都按 (world_id,id) 复合键操作。放在 json 迁移之后（先把老 worlds.json 导进单列
+      // PK 表，再整体重建成复合），既吃老库也幂等吃已复合的库（新库 initSchema 直接建复合，这步跳过）。
+      this.#migrateCharactersCompositePk();
       // 拆定义/实例必须最先跑：其后每个角色迁移都按【拆分后】的形态操作——身份字段（isFairy/name/
       // abilities）走定义层（fairy 迁移读 character_defs），可变态（memory/chatHistory/sceneId）走实例行。
       // 放在最前，既能吃下老库的全量 blob（首开），也能吃下已拆分的库（重开/新格式），两条路都幂等。
@@ -382,6 +393,31 @@ export class WorldStore {
         // 顺手清掉历史残留：她拿到 move_to/deliver_message 也兑现不了（effectiveAbilities 恒剔除）。
         abilities: (Array.isArray(def.abilities) ? def.abilities : []).filter((a) => !LOCOMOTION_ABILITIES.includes(a)),
       });
+    }
+  }
+
+  /**
+   * characters 表单列 PK (id) → 复合 PK (world_id, id)（世界模板架构 v2 P2）。
+   * 幂等：PRAGMA table_info 看 world_id 那列的 pk 序号 > 0（已是主键成员）就跳过；否则就地重建。
+   * 新库/内存库 initSchema 已直接建复合 PK，这步只对老单列 PK 库生效。事务原子包裹。
+   */
+  #migrateCharactersCompositePk(): void {
+    const cols = this.#db.prepare('PRAGMA table_info(characters)').all() as { name: string; pk: number }[];
+    const worldCol = cols.find((c) => c.name === 'world_id');
+    if (!worldCol || worldCol.pk > 0) return; // 表不存在（不该发生）或 world_id 已是 PK 成员 → 已复合
+    this.#db.exec('BEGIN');
+    try {
+      this.#db.exec(
+        'CREATE TABLE characters_new (world_id TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (world_id, id));',
+      );
+      this.#db.exec('INSERT INTO characters_new (world_id, id, data) SELECT world_id, id, data FROM characters;');
+      this.#db.exec('DROP TABLE characters;');
+      this.#db.exec('ALTER TABLE characters_new RENAME TO characters;');
+      this.#db.exec('CREATE INDEX IF NOT EXISTS idx_characters_world ON characters(world_id);');
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
     }
   }
 
@@ -496,10 +532,14 @@ export class WorldStore {
         inventory TEXT NOT NULL DEFAULT '{}',
         active_task TEXT
       );
+      -- 复合主键 (world_id, id)：世界模板架构 v2 P2——两玩家世界要各持同一 story 角色一份
+      -- （instance id = defId = storyCharacterId，story_director 直接按此 id 查角色，不能 mangle 改名），
+      -- 全局单列 PK 装不下同 id 两行。旧库的单列 PK 由 #migrateCharactersCompositePk 就地重建。
       CREATE TABLE IF NOT EXISTS characters (
-        id TEXT PRIMARY KEY,
         world_id TEXT NOT NULL,
-        data TEXT NOT NULL
+        id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (world_id, id)
       );
       CREATE INDEX IF NOT EXISTS idx_characters_world ON characters(world_id);
       -- 角色【定义层】（世界模板架构 v2，docs/world-template-instancing-design.md §1）：
@@ -938,6 +978,61 @@ export class WorldStore {
     this.#writeInstanceRow(inst);
   }
 
+  /**
+   * 克隆世界的【实例层放置】：把 src 世界的每行实例复制进 dst 世界（世界模板架构 v2 §4.2）。
+   * id/defId/位置/场景/状态原样，只换 worldId——**定义永不复制**（dst 的实例仍引用同一份共享定义，
+   * 故「改共享定义→全世界当场生效」对克隆出的世界照样成立）。dst 不存在则先建（防空壳：调用方给的是
+   * 有主的 w_<playerId>/template，非匿名 UUID）。事务原子。旧全量 blob（无 defId）兜底 defId=自身 id。
+   */
+  cloneWorldInstances(srcWorldId: string, dstWorldId: string): void {
+    if (!this.#worldExists(dstWorldId)) this.createWorld(dstWorldId);
+    const rows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(srcWorldId) as { data: string }[];
+    this.#db.exec('BEGIN');
+    try {
+      for (const r of rows) {
+        const inst = JSON.parse(r.data) as CharacterInstanceRecord;
+        const defId = typeof inst.defId === 'string' ? inst.defId : inst.id;
+        this.#writeInstanceRow({ ...inst, worldId: dstWorldId, defId });
+      }
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  /**
+   * 确立模板世界：不存在则建 + 由现网 default 内容提升（复制 default 的实例放置成模板放置）。
+   * 幂等：template 已存在直接返回（不重复克隆覆盖作者对模板的编辑）。template 不接客——
+   * GET /worlds/:id 的自动建世界分支只对 id==='default' 生效，别的世界要显式经此路径或克隆产生。
+   */
+  ensureTemplateWorld(): void {
+    if (this.#worldExists(TEMPLATE_WORLD_ID)) return;
+    this.createWorld(TEMPLATE_WORLD_ID);
+    this.cloneWorldInstances(DEFAULT_WORLD_ID, TEMPLATE_WORLD_ID);
+  }
+
+  /**
+   * 每人一世界解析（世界模板架构 v2 §5 get-or-create-my-world）：按 playerId 得到 `w_<playerId>`，
+   * 不存在则建 + 从 template 复制放置 + 保证有点点，返回其 world_id；已存在直接返回（**不重新克隆**，
+   * 免得冲掉孩子对自己世界的改动——移动的 NPC/入住/造物）。
+   *
+   * 点点保证：template 通常已含点点（default 首访种入、随克隆带过来）；若模板缺点点，用调用方注入的
+   * makeFairy 补种一个。seedFairy 落在 server.ts（用到 FAIRY_VISUAL_DESC 等），故以回调注入而非在此
+   * 层重造轮子——persistence 不依赖 server。makeFairy 缺省则不补种（测试可依赖模板自带点点）。
+   */
+  getOrCreateMyWorld(playerId: string, makeFairy?: (worldId: string) => Character): string {
+    const worldId = `${PLAYER_WORLD_PREFIX}${playerId}`;
+    if (this.#worldExists(worldId)) return worldId;
+    this.ensureTemplateWorld();
+    this.createWorld(worldId);
+    this.cloneWorldInstances(TEMPLATE_WORLD_ID, worldId);
+    if (makeFairy && !this.listCharacters(worldId).some((c) => c.isFairy)) {
+      this.saveCharacter(makeFairy(worldId));
+    }
+    return worldId;
+  }
+
   /** 读某实例行现有的 defId（不存在或旧全量 blob 无 defId → undefined）。 */
   #existingInstanceDefId(id: string, worldId: string): string | undefined {
     const row = this.#db.prepare('SELECT data FROM characters WHERE id = ? AND world_id = ?').get(id, worldId) as
@@ -953,7 +1048,7 @@ export class WorldStore {
     this.#db
       .prepare(
         'INSERT INTO characters (id, world_id, data) VALUES (?, ?, ?) ' +
-          'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
+          'ON CONFLICT(world_id, id) DO UPDATE SET data = excluded.data',
       )
       .run(inst.id, inst.worldId, JSON.stringify(inst));
   }
@@ -1624,19 +1719,20 @@ export class WorldStore {
    * 这种引用会让客户端拿到一个 404 的立绘。已知成因：2026-07-09 切 ghcr 部署时
    * assets/ 里 7/9 之前的文件没搬过去（world.db 搬过去了）——库记得那张图，盘上没有。
    */
-  listDeadSpriteRefs(): { kind: 'player' | 'character'; id: string; name: string; hash: string }[] {
-    const dead: { kind: 'player' | 'character'; id: string; name: string; hash: string }[] = [];
+  listDeadSpriteRefs(): { kind: 'player' | 'character'; id: string; name: string; hash: string; worldId?: string }[] {
+    const dead: { kind: 'player' | 'character'; id: string; name: string; hash: string; worldId?: string }[] = [];
     for (const p of this.listPlayers()) {
       if (p.spriteAsset && !this.hasAsset(p.spriteAsset)) {
         dead.push({ kind: 'player', id: p.id, name: p.nickname || p.name || '(无名)', hash: p.spriteAsset });
       }
     }
-    const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
+    // 复合 PK 后同 id 可跨世界共存：带上 world_id 供 clearDeadSpriteRefs 精确回写这一行。
+    const rows = this.#db.prepare('SELECT id, world_id, data FROM characters').all() as { id: string; world_id: string; data: string }[];
     for (const r of rows) {
       const c = this.#hydrateCharacter(JSON.parse(r.data)); // 立绘在定义层：合并后才看得到 appearance/name
       const hash = c.appearance?.spriteAsset;
       if (hash && !this.hasAsset(hash)) {
-        dead.push({ kind: 'character', id: c.id, name: c.name, hash });
+        dead.push({ kind: 'character', id: c.id, name: c.name, hash, worldId: r.world_id });
       }
     }
     return dead;
@@ -1653,7 +1749,9 @@ export class WorldStore {
         const p = this.getPlayer(d.id);
         if (p) this.upsertPlayer({ ...p, spriteAsset: '' });
       } else {
-        const row = this.#db.prepare('SELECT data FROM characters WHERE id = ?').get(d.id) as
+        // 复合 PK：按 (world_id, id) 精确取这一行；appearance 虽在共享定义层、清一次即全世界生效，
+        // 但仍精确回写自己那行避免 .get() 命中同 id 的另一世界实例（行为无害但不精确）。
+        const row = this.#db.prepare('SELECT data FROM characters WHERE id = ? AND world_id = ?').get(d.id, d.worldId ?? '') as
           | { data: string }
           | undefined;
         if (row) {
@@ -1670,7 +1768,8 @@ export class WorldStore {
 
   /** 旧存量 Character.memory[] → memories 表（aboutPlayer='' 未绑定历史）。幂等：搬完清空 memory[]。 */
   #migrateLegacyMemories(): void {
-    const rows = this.#db.prepare('SELECT data FROM characters').all() as { data: string }[];
+    // 复合 PK 后 UPDATE 必须带 world_id，否则同 id 跨世界会被一起写脏（用 DB 列而非 blob 字段，稳）。
+    const rows = this.#db.prepare('SELECT id, world_id, data FROM characters').all() as { id: string; world_id: string; data: string }[];
     for (const row of rows) {
       const c = JSON.parse(row.data) as Character;
       if (!Array.isArray(c.memory) || c.memory.length === 0) continue;
@@ -1680,7 +1779,7 @@ export class WorldStore {
         }
       }
       c.memory = []; // 清空，避免重复迁移（幂等）
-      this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?').run(JSON.stringify(c), c.id);
+      this.#db.prepare('UPDATE characters SET data = ? WHERE id = ? AND world_id = ?').run(JSON.stringify(c), row.id, row.world_id);
     }
   }
 
@@ -1722,7 +1821,8 @@ export class WorldStore {
 
   /** 旧存量 Character.chatHistory[] → chat_turns（player_id='' 未绑定历史）。幂等：搬完清空。 */
   #migrateLegacyChatHistory(): void {
-    const rows = this.#db.prepare('SELECT data FROM characters').all() as { data: string }[];
+    // 复合 PK 后 UPDATE 必须带 world_id（同 #migrateLegacyMemories），免得同 id 跨世界互相写脏。
+    const rows = this.#db.prepare('SELECT id, world_id, data FROM characters').all() as { id: string; world_id: string; data: string }[];
     for (const row of rows) {
       const c = JSON.parse(row.data) as Character;
       if (!Array.isArray(c.chatHistory) || c.chatHistory.length === 0) continue;
@@ -1732,7 +1832,7 @@ export class WorldStore {
         }
       }
       c.chatHistory = []; // 清空，避免重复迁移（幂等）
-      this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?').run(JSON.stringify(c), c.id);
+      this.#db.prepare('UPDATE characters SET data = ? WHERE id = ? AND world_id = ?').run(JSON.stringify(c), row.id, row.world_id);
     }
   }
 
