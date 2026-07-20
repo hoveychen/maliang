@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { assetUrl, fmtTs, useApi } from '../api.ts';
 import { MEMORY_KIND_LABELS, type CharacterDetail, type MemoryItem } from '../types.ts';
-import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, ClipPreviews, Fallback, PageHead, ShortId, SizeBadge, Sprite } from '../components.tsx';
+import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, ClipPreviews, Fallback, PageHead, RawClipVideos, ShortId, SizeBadge, Sprite } from '../components.tsx';
 
 function groupByKind(items: MemoryItem[]): [string, MemoryItem[]][] {
   const by = new Map<string, MemoryItem[]>();
@@ -89,6 +89,15 @@ export function CharacterDetailPage() {
                 : '—'}</dd>
             </dl>
           </div>
+
+          {data.spriteAnim.clipVideos && Object.keys(data.spriteAnim.clipVideos).length > 0 && (
+            <>
+              <h2 className="sect">Seedance 原始视频（绿幕原片）</h2>
+              <div className="panel">
+                <RawClipVideos clipVideos={data.spriteAnim.clipVideos} />
+              </div>
+            </>
+          )}
 
           <h2 className="sect">记忆（{data.memories.length}）· 按玩家分开</h2>
           {data.memories.length === 0 ? <div className="empty">还没有记忆</div> : groupByPlayer(data.memories, (m) => m.aboutPlayer).map(([pid, mems]) => (

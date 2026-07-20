@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { fmtTs, useApi } from '../api.ts';
 import { MEMORY_KIND_LABELS, type PlayerDetail } from '../types.ts';
-import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, Sprite } from '../components.tsx';
+import { AnchorBadge, AnimGenerateButton, AnimStatusBadge, Fallback, PageHead, RawClipVideos, Sprite } from '../components.tsx';
 
 export function PlayerDetailPage() {
   const { id = '' } = useParams();
@@ -40,6 +40,15 @@ export function PlayerDetailPage() {
                 : '—'}</dd>
             </dl>
           </div>
+
+          {data.spriteAnim.clipVideos && Object.keys(data.spriteAnim.clipVideos).length > 0 && (
+            <>
+              <h2 className="sect">Seedance 原始视频（绿幕原片）</h2>
+              <div className="panel">
+                <RawClipVideos clipVideos={data.spriteAnim.clipVideos} />
+              </div>
+            </>
+          )}
 
           <h2 className="sect">创建形象档案（onboarding）</h2>
           {!data.onboarding ? <div className="empty">没有 onboarding 档案（老档案或还没走完新版创建流程）</div> : (

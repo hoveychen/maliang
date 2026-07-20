@@ -116,6 +116,31 @@ export function ClipPreviews(props: { src: string; meta: SpriteAnimMeta; size?: 
   );
 }
 
+/**
+ * Seedance 原始视频：把生成时入库的绿幕原片（idle/moving/talking 各一段 mp4）内嵌 <video> 播放，
+ * 并附「原片 mp4」链接在新标签打开/下载。绿底方便一眼看出是抠图前的绿幕原片。
+ */
+export function RawClipVideos(props: { clipVideos?: Partial<Record<ClipName, string>>; size?: number }) {
+  const cv = props.clipVideos;
+  if (!cv) return null;
+  const size = props.size ?? 200;
+  const segs = (['idle', 'moving', 'talking'] as ClipName[]).filter((n) => cv[n]);
+  if (segs.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+      {segs.map((n) => (
+        <figure key={n} style={{ margin: 0, textAlign: 'center' }}>
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption -- 绿幕原片无字幕轨 */}
+          <video src={assetUrl(cv[n]!)} controls loop muted playsInline width={size} style={{ borderRadius: 6, background: '#00b140' }} />
+          <figcaption className="mono" style={{ fontSize: 12, marginTop: 2 }}>
+            {CLIP_LABELS[n]} · <a href={assetUrl(cv[n]!)} target="_blank" rel="noreferrer">原片 mp4</a>
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+}
+
 /** 立绘放大预览遮罩：左静态大图；/sprite-anim/:hash 就绪则右侧播 idle 动画。ESC/点遮罩关闭。 */
 function SpriteLightbox(props: { hash: string; alt: string; onClose: () => void }) {
   const [anim, setAnim] = useState<SpriteAnimRecord | null>(null);
