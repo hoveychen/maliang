@@ -294,6 +294,8 @@ export interface SpriteAnimRecord {
   status: string;
   animAsset?: string;
   meta?: SpriteAnimMeta;
+  /** Seedance 生成的原始绿幕 mp4：ClipName → 原片 asset hash（存了原片可纯本地重抽帧，见服务端 idle_animation.ts）。 */
+  clipVideos?: Partial<Record<ClipName, string>>;
 }
 
 export interface CharacterDetail {
