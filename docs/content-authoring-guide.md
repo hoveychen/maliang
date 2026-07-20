@@ -61,20 +61,39 @@ template（唯一权威母版，内容直接 seed 进来）──(cloneWorldInst
 
 ## 4. 加一整册故事（story book）
 
-一册 = 代码常量 + 每幕手作剧本。改这些：
+**设计目标：加一册 = 只 append 注册表 + 新增该册自包含文件，不改任何公共单册逻辑。**
+多个作者可各写各的册，零公共代码冲突。一册 = 代码常量 + 每幕手作剧本 + 预烧音包（+ 可选贴纸）。
+
+**Append 到注册表（这几处是刻意的扩展点，只增不改既有行）：**
 
 1. **定义册**：在 `server/src/story_books.ts` 写一个 `StoryBook` 常量（`id/title/sceneId/gateCastId/cast/chapters`，
    参考 `THREE_PIGS`，`story_books.ts:85`），**注册进 `STORY_BOOKS`**（`story_books.ts:177`）。角色 id 由
    `storyCharacterId(bookId, castId)` = `story_<bookId>_<castId>` 生成（`story_books.ts:183`），稳定、跨世界同 id。
-2. **写每幕剧本**：在 `server/src/screenplays/` 加手作剧本 `.ts`，**注册进 `SCREENPLAYS`**（`server/src/screenplays.ts:9`）。
-   `StoryChapter.screenplay` 的名字要对得上，否则 `buildStoryStageOpts` 取不到会抛（`server/src/stage_debut.ts:86`）。
-   SDK 命令面见 `server/src/screenplays/stage_sdk.d.ts`。
-3. **贴纸/盖章款**（可选）：`stampStyle` / `sticker` 见 §5。
-4. **种入**：`POST /admin/worlds/<world>/seed-story/<bookId>`（`server/src/server.ts:1149`）。同样**种进 `template`**。
-   `seedStoryCharacters`（`server/src/story_seed.ts:24`）构造带 `storyRole:{bookId,castId,resident:false}` 的
-   `Character`，拆写后 storyRole→def.storyArchetype、resident→实例行。
+2. **写每幕剧本**：在 `server/src/screenplays/` 加手作剧本 `.ts`（文件名用 `story_<x>_*.ts` 自包含命名），
+   **注册进 `SCREENPLAYS`**（`server/src/screenplays.ts:9`）。`StoryChapter.screenplay` 的名字要对得上，
+   否则 `buildStoryStageOpts` 取不到会抛（`server/src/stage_debut.ts:86`）。SDK 命令面见 `stage_sdk.d.ts`。
 
-编排/开演由 `story_director.ts`（章回状态机，gate 角色搭话触发）+ `stage_debut.ts` 数据驱动，**加册无需改它们**。
+**新增该册自包含文件（不碰任何既有文件的既有内容）：**
+
+3. **预烧音包**：把该册台词烧进 `assets/voice/<storyVoiceDir(bookId)>/`，即 `assets/voice/story_<bookId>/`
+   （目录名约定由 `storyVoiceDir()` 单一来源给出，`story_books.ts`）。目录里放 `lines.json` +
+   每行同名 `<line.id>.wav`；`line.id` 守 `<bookId>_<幕>_<序>` 约定（如 `tortoise_hare_0_1`）。
+   **客户端零改**：`scripts/story_voice.gd` 开机扫 `res://assets/voice/story_*` 全部册目录、合并进同一台词索引，
+   新册目录自动被吃到、命中即播预烧 WAV（miss 才回落运行期 TTS）。
+4. **贴纸/盖章款**（可选）：`stampStyle`（`STAMP_STYLES` 之一）在册常量里写；纪念 `sticker` 要在服务端
+   `server/src/items.ts` 的 `BUILTIN_ITEMS` 里 **append** 该册自己的 `ItemDef`（见 §5，`souvenir:true`）。
+
+**种入**：`POST /admin/worlds/<world>/seed-story/<bookId>`（`server/src/server.ts:1149`）。同样**种进 `template`**。
+`seedStoryCharacters`（`server/src/story_seed.ts:24`）构造带 `storyRole:{bookId,castId,resident:false}` 的
+`Character`，拆写后 storyRole→def.storyArchetype、resident→实例行。
+
+**测试自动覆盖，无需改测试**：`server/test/story_content.test.ts` 遍历 `STORY_BOOKS` 每一册校验形状自洽 /
+剧本注册 / 台词↔`lines.json` 一一对应 / seed 幂等——你的新册注册进 `STORY_BOOKS` 那刻起就被自动测到。
+
+**不用改的公共逻辑（数据驱动，加册零改）**：编排/开演 `story_director.ts`（章回状态机，gate 角色搭话触发）+
+`stage_debut.ts` 选角 + `story_seed.ts` 种入 + `story_voice.gd` 音包扫描 + `story_content.test.ts` 测试，
+**加册都不碰**。唯一的可选例外：若该册需要一个客户端命名地点（`visit` 任务 POI / 仙子提示），才往
+`scripts/world.gd` 的 POI 列表 append 一条（参考 `poi_story_pigs`，`world.gd:348`）——这是数据 append，非逻辑改动。
 册设计细节见 [`m2-story-director-design.md`](m2-story-director-design.md)。
 
 ## 5. 加玩法 / 主题 / 贴纸 / 造物

@@ -5,10 +5,10 @@ extends Node
 ## 各角色音色在烧制时已定）；miss 由调用方回落 clientTts 现场合成——风险面收敛为这一条路径。
 ## 骨架照 FairyVoice：线程化预载 + 退出排空（防 mid-load 退出崩溃）+ headless 时长兜底。
 
-const LINES_PATH := "res://assets/voice/story_three_pigs/lines.json"
-const VOICE_DIR := "res://assets/voice/story_three_pigs"
+## 预烧音包根目录：其下每一册占一个 `story_<册 id>` 子目录（约定同服务端 storyVoiceDir）。
+const VOICE_ROOT := "res://assets/voice"
 
-var _by_text: Dictionary = {}   ## 台词文本 -> wav 路径
+var _by_text: Dictionary = {}   ## 台词文本 -> wav 路径（跨册合并到同一索引）
 var _play_until := 0.0          ## headless dummy 音频 playing 永真，按时长兜底判说完
 var _t := 0.0
 var _player: AudioStreamPlayer
@@ -17,14 +17,33 @@ var _cache: Dictionary = {}     ## wav 路径 -> AudioStream（重播复用）
 func _ready() -> void:
 	_player = AudioStreamPlayer.new()
 	add_child(_player)
-	var f := FileAccess.open(LINES_PATH, FileAccess.READ)
+	# 遍历所有册目录，各自 lines.json 合并进同一 _by_text——加一册零改此文件。
+	for voice_dir in _story_voice_dirs():
+		_index_pack(voice_dir)
+
+## 扫 res://assets/voice/ 下所有 `story_*` 册目录（DirAccess 列子目录；导出包里目录树在 PCK 中保留，
+## 参照 menu.gd album_paths 的 DirAccess-over-PCK 先例）。
+func _story_voice_dirs() -> Array[String]:
+	var out: Array[String] = []
+	var d := DirAccess.open(VOICE_ROOT)
+	if d == null:
+		return out
+	for sub in d.get_directories():
+		if sub.begins_with("story_"):
+			out.append("%s/%s" % [VOICE_ROOT, sub])
+	out.sort()
+	return out
+
+## 把一册的 lines.json 索引进 _by_text 并发起线程化预载（跨册合并；miss 由调用方回落 clientTts）。
+func _index_pack(voice_dir: String) -> void:
+	var f := FileAccess.open("%s/lines.json" % voice_dir, FileAccess.READ)
 	if f == null:
-		return # 音包缺失＝全部 miss 回落 clientTts，不拦演出
+		return # 该册音包缺失＝其台词全 miss 回落，不拦演出
 	var data: Variant = JSON.parse_string(f.get_as_text())
 	if typeof(data) != TYPE_DICTIONARY:
 		return
 	for l in data.get("lines", []):
-		var path := "%s/%s.wav" % [VOICE_DIR, String(l["id"])]
+		var path := "%s/%s.wav" % [voice_dir, String(l["id"])]
 		_by_text[String(l["text"])] = path
 		ResourceLoader.load_threaded_request(path)
 
