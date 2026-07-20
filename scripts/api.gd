@@ -316,7 +316,9 @@ func fetch_sprite_anim(sprite_hash: String) -> Dictionary:
 func fetch_clip_ogv(sprite_hash: String, clip_name: String) -> VideoStream:
 	if sprite_hash.is_empty() or clip_name.is_empty():
 		return null
-	var key := "clipogv_%s_%s.ogv" % [sprite_hash, clip_name]
+	# v2:服务端改成按角色横向包围盒裁绿边(390×496 而非 864×496,解码省~55%)。
+	# bump 键前缀让存量设备弃掉旧的未裁缓存、重拉裁过的。裁的是宽 → 客户端几何自适应、无需改。
+	var key := "clipogv2_%s_%s.ogv" % [sprite_hash, clip_name]
 	var path := _cache_path(key)
 	if not FileAccess.file_exists(path):
 		var http := HTTPRequest.new()
