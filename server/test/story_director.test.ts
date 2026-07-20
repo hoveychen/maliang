@@ -89,8 +89,9 @@ test('全迁移路径：三幕走完整册完结，settledNow 恰好在尾声', 
   r = await d.trigger(W, P, 'test_pigs');
   assert.equal(r.status, 'performed');
   assert.equal((r as { chapter: number }).chapter, 1);
+  // 幕1 是最后一个互动幕：收场推进到幕2（无互动尾声）→ 带 autoPlayNextChapter 让 server 自动接演
   adv = d.completeInteraction(W, P, 'test_pigs');
-  assert.deepEqual(adv, { bookId: 'test_pigs', chapter: 1, reward: true, advanced: true, settledNow: false });
+  assert.deepEqual(adv, { bookId: 'test_pigs', chapter: 1, reward: true, advanced: true, settledNow: false, autoPlayNextChapter: 2 });
 
   // 幕2 尾声：无互动，演完直接完结入住
   r = await d.trigger(W, P, 'test_pigs');
@@ -101,6 +102,42 @@ test('全迁移路径：三幕走完整册完结，settledNow 恰好在尾声', 
   assert.equal(bp.settled, true);
   assert.equal(bp.chapter, 3);
   assert.equal(bp.state, 'idle');
+});
+
+// ── 尾声自动接演信号（M2 尾声 UX 修复）────────────────────────────────────
+
+test('最后一个互动幕收场后，若下一幕是无互动尾声，advance 带 autoPlayNextChapter', async () => {
+  const store = freshStore();
+  const { d } = director(store);
+  // 走到最后一个互动幕（幕1 build）并完成
+  await d.trigger(W, P, 'test_pigs');
+  d.completeInteraction(W, P, 'test_pigs'); // 幕0 visit
+  await d.trigger(W, P, 'test_pigs');
+  const adv = d.completeInteraction(W, P, 'test_pigs'); // 幕1 build
+  // 游标推到幕2（无互动尾声）——必须给 server 一个「自动接演幕2」的信号
+  assert.equal(adv?.autoPlayNextChapter, 2, '拼完砖房应自动衔接尾声，不必再搭话');
+  assert.equal(store.getStoryProgress(W, P).books['test_pigs'].chapter, 2);
+});
+
+test('推进到的下一幕仍是互动幕时，不带 autoPlayNextChapter（只有无互动尾声才自动接）', async () => {
+  const store = freshStore();
+  const { d } = director(store);
+  await d.trigger(W, P, 'test_pigs');
+  const adv = d.completeInteraction(W, P, 'test_pigs'); // 幕0 完成→推到幕1(仍是互动 build)
+  assert.equal(adv?.autoPlayNextChapter, undefined, '下一幕还要玩家互动，不能自动跳过');
+});
+
+test('尾声本身收场（settledNow）不再带 autoPlayNextChapter（防越过末尾）', async () => {
+  const store = freshStore();
+  const { d } = director(store);
+  await d.trigger(W, P, 'test_pigs');
+  d.completeInteraction(W, P, 'test_pigs');
+  await d.trigger(W, P, 'test_pigs');
+  d.completeInteraction(W, P, 'test_pigs');
+  const r = await d.trigger(W, P, 'test_pigs'); // 尾声（无互动）演完直接完结
+  const advance = (r as { advance?: { autoPlayNextChapter?: number; settledNow: boolean } }).advance;
+  assert.equal(advance?.settledNow, true);
+  assert.equal(advance?.autoPlayNextChapter, undefined);
 });
 
 // ── abort 回幕首 ──────────────────────────────────────────────────────────

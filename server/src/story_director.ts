@@ -49,6 +49,12 @@ export interface StoryAdvanceOutcome {
   advanced: boolean;
   /** 本次收场让整册完结了（入住时刻，恰好一次）。 */
   settledNow: boolean;
+  /**
+   * 推进到的下一幕是「无互动幕」（谢幕尾声）时带上它的幕号——server 据此自动接演，
+   * 不必让孩子走回 gate 角色再搭话（M2 尾声 UX：零玩法的谢幕不该要手动跑一趟）。
+   * 只在 advanced 且未 settled 且下一幕无 interaction 时置；否则不带此字段。
+   */
+  autoPlayNextChapter?: number;
 }
 
 export class StoryDirector {
@@ -170,7 +176,20 @@ export class StoryDirector {
     delete bp.activeChapter;
     sp.books[book.id] = bp;
     this.#store.setStoryProgress(worldId, playerId, sp);
-    return { bookId: book.id, chapter, reward, advanced, settledNow };
+    // 推进到的下一幕若是无互动幕（谢幕尾声），带上它的幕号让 server 自动接演——
+    // 零玩法的谢幕不该要孩子走回 gate 角色再搭话（M2 尾声 UX）。整册已 settled 则没有下一幕。
+    const autoPlayNextChapter =
+      advanced && !settledNow && bp.chapter < book.chapters.length && !book.chapters[bp.chapter].interaction
+        ? bp.chapter
+        : undefined;
+    return {
+      bookId: book.id,
+      chapter,
+      reward,
+      advanced,
+      settledNow,
+      ...(autoPlayNextChapter !== undefined ? { autoPlayNextChapter } : {}),
+    };
   }
 }
 
