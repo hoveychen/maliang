@@ -2016,7 +2016,7 @@ async function offerStoryTask(
  * 问 StoryDirector 发不发奖（rewarded[] 判重，重看不重复发）→ 盖章 + 纪念贴纸 → 整册完结入住
  * → task_complete（客户端盖章庆祝零改；带 sticker/bag 时客户端顺手刷背包）→ 委托人道谢 + 重发漏话。
  */
-async function settleStoryInteraction(
+export async function settleStoryInteraction(
   socket: { send: (data: string) => void },
   worldId: string,
   playerId: string,
@@ -2059,6 +2059,21 @@ async function settleStoryInteraction(
     void pushLineTts(socket, adapters, store, task.storyThanks, voice, clientTts);
   }
   pushWishes(socket, store, worldId, playerId, sceneId, session);
+
+  // 尾声自动接演（M2 尾声 UX 修复）：最后一个互动幕收场后，下一幕是零玩法的谢幕——
+  // 直接接演，不必让孩子走回 gate 角色再搭话、还得说对触发词。演出收场（settledNow）时入住。
+  // task_complete/盖章/道谢已在上面发过，此处 stage_begin 广播接在其后。不 await：演出要几秒。
+  if (adv?.autoPlayNextChapter !== undefined && stories) {
+    void stories
+      .trigger(worldId, playerId, book.id)
+      .then((outcome) => {
+        if (outcome.status === 'performed' && outcome.outcome === 'completed' && outcome.advance?.settledNow) {
+          settleStoryResidency(worldId, book, store, adapters.llm);
+          pushWishes(socket, store, worldId, playerId, sceneId, session);
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 async function pushLineTts(

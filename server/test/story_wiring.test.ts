@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { WorldStore } from '../src/persistence.ts';
 import { RateLimiter } from '../src/ratelimit.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
-import { handleWsMessage, newVoiceSession, projectCharacterFor, startStoryAsync } from '../src/server.ts';
+import { handleWsMessage, newVoiceSession, projectCharacterFor, settleStoryInteraction, startStoryAsync } from '../src/server.ts';
 import { respondToTranscript } from '../src/voice.ts';
 import { pickTaskCandidate } from '../src/tasks.ts';
 import { STORY_BOOKS, storyCharacterId, type StoryBook } from '../src/story_books.ts';
@@ -13,7 +13,7 @@ import { StoryDirector } from '../src/story_director.ts';
 import { StageDirector } from '../src/stage_session.ts';
 import { buildStoryStageOpts, DebutError } from '../src/stage_debut.ts';
 import { WorldHub } from '../src/world_hub.ts';
-import { ANON_PLAYER, type Character } from '../src/types.ts';
+import { ANON_PLAYER, type ActiveTask, type Character } from '../src/types.ts';
 
 const W = 'w1';
 
@@ -225,6 +225,64 @@ test('startStoryAsync：互动幕没做完只提醒，不重演', () =>
     await new Promise((r) => setImmediate(r));
     assert.equal(triggered, 1, '没重演');
     assert.match(String(sent[0]!['text']), /没做完/);
+  }));
+
+// ── 尾声自动接演（M2 尾声 UX 修复：拼完砖房不必再搭话就直接看谢幕+入住）──────
+
+test('settleStoryInteraction：最后一个互动幕完成后自动接演无互动尾声→整册完结入住', () =>
+  withBook(async (book) => {
+    // 两幕册：幕0 build 互动、幕1 尾声无互动
+    book.chapters = [
+      { screenplay: 'three_act_play', interaction: { kind: 'build', blueprintId: 'house', npcCastId: 'pig_big', ask: '帮我盖砖房', thanks: '盖好啦' }, stampStyle: 'heart' },
+      { screenplay: 'three_act_play' }, // 尾声：无互动
+    ];
+    const store = freshStore();
+    seedChar(store, 'gate1', '猪大哥', { storyRole: { bookId: book.id, castId: 'pig_big', resident: false } });
+    const calls: number[] = [];
+    const stories = new StoryDirector(store, async ({ chapter }) => { calls.push(chapter); return { status: 'done' }; }, STORY_BOOKS);
+    // 进度置为「幕0 build 互动中」——玩家刚把砖房拼好，落成点要来结算
+    store.setStoryProgress(W, 'kid1', { books: { [book.id]: { chapter: 0, state: 'interacting', rewarded: [], settled: false, activeChapter: 0 } } });
+
+    const task: ActiveTask = {
+      id: 't1', type: 'wish', npcId: 'gate1', npcName: '猪大哥', stampStyle: 'heart',
+      storyBookId: book.id, storyChapter: 0, storyThanks: '房子盖好啦！',
+    };
+    const { sent, socket } = collectSocket();
+    const session = newVoiceSession();
+    session.playerId = 'kid1';
+    session.clientTts = true;
+    await settleStoryInteraction(socket, W, 'kid1', task, createMockAdapters(), store, stories, true, 'village', session);
+    await new Promise((r) => setImmediate(r)); // 自动接演的 trigger 不被 await：等尾声收场落状态
+
+    assert.ok(sent.some((m) => m['type'] === 'task_complete'), '拼房本身要先结算发盖章');
+    assert.deepEqual(calls, [1], '自动接演了尾声幕（幕1），无需玩家再搭话');
+    const bp = store.getStoryProgress(W, 'kid1').books[book.id]!;
+    assert.equal(bp.settled, true, '尾声演完整册完结（入住）');
+    assert.equal(bp.chapter, 2);
+  }));
+
+test('settleStoryInteraction：非最后互动幕完成后不自动接演（下一幕仍要玩家玩）', () =>
+  withBook(async (book) => {
+    // 三幕册：幕0 build、幕1 build（仍互动）、幕2 尾声
+    book.chapters = [
+      { screenplay: 'three_act_play', interaction: { kind: 'build', blueprintId: 'house', npcCastId: 'pig_big', ask: 'a', thanks: 't' }, stampStyle: 'heart' },
+      { screenplay: 'three_act_play', interaction: { kind: 'build', blueprintId: 'house', npcCastId: 'pig_big', ask: 'a', thanks: 't' }, stampStyle: 'medal' },
+      { screenplay: 'three_act_play' },
+    ];
+    const store = freshStore();
+    seedChar(store, 'gate1', '猪大哥', { storyRole: { bookId: book.id, castId: 'pig_big', resident: false } });
+    const calls: number[] = [];
+    const stories = new StoryDirector(store, async ({ chapter }) => { calls.push(chapter); return { status: 'done' }; }, STORY_BOOKS);
+    store.setStoryProgress(W, 'kid1', { books: { [book.id]: { chapter: 0, state: 'interacting', rewarded: [], settled: false, activeChapter: 0 } } });
+    const task: ActiveTask = { id: 't1', type: 'wish', npcId: 'gate1', npcName: '猪大哥', stampStyle: 'heart', storyBookId: book.id, storyChapter: 0 };
+    const { socket } = collectSocket();
+    const session = newVoiceSession();
+    session.playerId = 'kid1';
+    session.clientTts = true;
+    await settleStoryInteraction(socket, W, 'kid1', task, createMockAdapters(), store, stories, true, 'village', session);
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(calls, [], '幕1还要玩家自己拼，不能自动跳过');
+    assert.equal(store.getStoryProgress(W, 'kid1').books[book.id]!.settled, false);
   }));
 
 // ── 选角层 buildStoryStageOpts ───────────────────────────────────────────
