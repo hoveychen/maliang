@@ -145,10 +145,23 @@ func fetch_item_icons() -> Dictionary:
 
 ## 拉取指定世界状态（含角色）。失败返回空字典。
 func get_world(id: String) -> Dictionary:
+	return await _fetch_world_json("/worlds/" + id)
+
+## 每人一世界（世界模板架构 v2 §5）：按 playerId 解析/建 w_<playerId>，服务端从 template 复制放置。
+## 与 get_world 同形（失败/离线返回空字典 → 走占位路径）；playerId 走查询串（uri_encode 防特殊字符）。
+func get_my_world(player_id: String) -> Dictionary:
+	return await _fetch_world_json(my_world_path(player_id))
+
+## 纯函数：拼「拿我的世界」请求路径（供单测断言端点+查询串+编码，不起真网）。
+static func my_world_path(player_id: String) -> String:
+	return "/worlds/mine?playerId=" + player_id.uri_encode()
+
+## get_world / get_my_world 共用的 HTTP 取世界 JSON。失败/非 200 返回空字典。
+func _fetch_world_json(path: String) -> Dictionary:
 	var http := HTTPRequest.new()
 	http.timeout = GET_WORLD_TIMEOUT_SEC # 超时 → request_completed 带 res[1]!=200 → 返回 {} 走离线（见常量注释）
 	add_child(http)
-	var err := http.request(base + "/worlds/" + id)
+	var err := http.request(base + path)
 	if err != OK:
 		http.queue_free()
 		return {}
