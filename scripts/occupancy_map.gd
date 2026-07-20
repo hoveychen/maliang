@@ -10,8 +10,10 @@ extends RefCounted
 ## 尺寸离散化约定：角色边长 1..4 tile @0.5 步进（半格 2..8）；
 ## 物件边长 1..16 tile @1 步进（半格 2..32）。
 
-const CELLS := WorldGrid.GRID_TILES * 2       ## 150
-const CELL_SIZE := WorldGrid.TILE_SIZE * 0.5  ## 1m
+## 半格边长 = GRID_TILES × 2（75→150 / 100→200）。随场景网格运行时变（曾是编译期 const）；
+## 由 sync_grid()/_ensure() 维护。外部（Pathfinder/ItemCatalog）直读此静态变量，故名字保留 CELLS。
+static var CELLS := WorldGrid.GRID_TILES * 2
+const CELL_SIZE := WorldGrid.TILE_SIZE * 0.5  ## 1m（TILE_SIZE 恒定）
 const BIT_DYNAMIC := 1  ## 运行时摆放登记（occupy_rect/free_rect 只动这一位）
 const BIT_STATIC := 2   ## 地形矩阵派生（load_static 整层替换）
 
@@ -19,9 +21,23 @@ static var _occ := PackedByteArray()
 static var _chars := {}       ## cell_idx → 角色 id（String）
 static var _char_rects := {}  ## 角色 id → [origin: Vector2i, w: int, h: int]（登记回执，迁移/释放用）
 
-static func _ensure() -> void:
-	if _occ.is_empty():
+## 把 CELLS 与占用图重同步到当前 WorldGrid.GRID_TILES。换到不同尺寸场景后，旧的
+## 角色/静态登记都是按旧 CELLS 索引的，全失效必须清空（场景加载序列随后重派生静态层、重登记角色）。
+## 幂等：网格没变（且已分配）时零成本。ItemCatalog.apply_static_occupancy 读 CELLS 前必先调它。
+static func sync_grid() -> void:
+	var want := WorldGrid.GRID_TILES * 2
+	if CELLS != want:
+		CELLS = want
+		_occ = PackedByteArray()
+		_chars = {}
+		_char_rects = {}
+	if _occ.size() != CELLS * CELLS:
+		_occ = PackedByteArray()
 		_occ.resize(CELLS * CELLS)
+
+static func _ensure() -> void:
+	if _occ.is_empty() or CELLS != WorldGrid.GRID_TILES * 2:
+		sync_grid()
 
 ## 清空全图（世界重建/测试用）。
 static func clear() -> void:
