@@ -483,6 +483,32 @@ export interface CharacterDef {
   storyArchetype?: { bookId: string; castId: string };
 }
 
+/**
+ * 角色【实例层】放置记录（世界模板架构 v2 §1）：一份轻量的「这个世界里放了 defId 的角色，
+ * 站在这、什么可变状态」记录。存进 characters 表的 data 列，按 defId 引用共享定义。
+ * getCharacter = 读本记录 + 合并 defId 的共享定义 → 还原完整 Character（对上层透明，读 API 不变）。
+ * P2 cloneWorldInstances 复制的就是这层（只复制放置引用 + 状态，定义永不复制）。
+ * 边界（关键）：def 字段（name/性格/音色/长相/能力/故事原型）绝不进这里；这里只有每世界可变状态。
+ * resident 落在这里（每世界一份），绝不进 def——否则一个孩子入住会污染所有世界。
+ */
+export interface CharacterInstanceRecord {
+  id: string;
+  worldId: string;
+  /** 指向 character_defs 的共享身份。作者角色/玩家造物默认 = 自身 id；模板克隆的实例共享同一 defId。 */
+  defId: string;
+  position: TilePos;
+  sceneId?: string;
+  state: string;
+  behaviorScript: BehaviorScript;
+  memory: string[];
+  chatHistory: ChatTurn[];
+  relationships: Record<string, RelationshipState>;
+  attachments?: Array<{ slot: 'headTop' | 'handL' | 'handR'; itemId: string }>;
+  taskChain?: TaskChain;
+  /** 故事角色的入住态（每世界可变）；合并时与 def.storyArchetype 重组回 storyRole。非故事角色 undefined。 */
+  resident?: boolean;
+}
+
 /** 造角色编排的阶段，顺序固定，用于进度推送。 */
 export type GenStage = 'spec' | 'moderate_text' | 'image' | 'cutout' | 'persist';
 

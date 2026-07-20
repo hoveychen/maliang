@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, CharacterDef, DeviceSnapshot, Familiarity, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, StoryProgress, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, CharacterDef, CharacterInstanceRecord, DeviceSnapshot, Familiarity, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, StoryProgress, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { coerceRelationship, deriveFamiliarity } from './social.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
@@ -81,10 +81,11 @@ function coerceStoryProgress(raw: unknown): StoryProgress {
 /**
  * 从完整 Character 抽出【定义层】字段（世界模板架构 v2 §1）。纯函数，P1b 迁移与 saveCharacter
  * 拆分都用它。resident 不进 def（是每世界实例状态）；storyRole 的 bookId/castId 收进 storyArchetype。
+ * defId 缺省 = c.id（作者角色/玩家造物自有定义）；模板克隆场景传入共享 defId 以指向同一份定义。
  */
-export function characterDefFromCharacter(c: Character): CharacterDef {
+export function characterDefFromCharacter(c: Character, defId: string = c.id): CharacterDef {
   return {
-    defId: c.id,
+    defId,
     isFairy: c.isFairy,
     name: c.name,
     personality: c.personality,
@@ -93,6 +94,62 @@ export function characterDefFromCharacter(c: Character): CharacterDef {
     appearance: c.appearance,
     abilities: c.abilities,
     ...(c.storyRole ? { storyArchetype: { bookId: c.storyRole.bookId, castId: c.storyRole.castId } } : {}),
+  };
+}
+
+/**
+ * 从完整 Character 抽出【实例层】放置记录（世界模板架构 v2 §1）。纯函数，saveCharacter 拆写用。
+ * 只带每世界可变状态 + defId 引用；def 字段（name/性格/音色/长相/能力/故事原型）绝不进来。
+ * resident 从 storyRole.resident 落进实例（每世界一份）；无 storyRole 的普通村民不带 resident。
+ * defId 缺省 = c.id；克隆/共享场景传入目标 defId。
+ */
+export function characterInstanceFromCharacter(c: Character, defId: string = c.id): CharacterInstanceRecord {
+  return {
+    id: c.id,
+    worldId: c.worldId,
+    defId,
+    position: c.position,
+    ...(c.sceneId !== undefined ? { sceneId: c.sceneId } : {}),
+    state: c.state,
+    behaviorScript: c.behaviorScript,
+    memory: c.memory,
+    chatHistory: c.chatHistory,
+    relationships: c.relationships,
+    ...(c.attachments !== undefined ? { attachments: c.attachments } : {}),
+    ...(c.taskChain !== undefined ? { taskChain: c.taskChain } : {}),
+    ...(c.storyRole ? { resident: c.storyRole.resident } : {}),
+  };
+}
+
+/**
+ * 合并【共享定义】+【实例放置】→ 完整 Character（getCharacter/listCharacters 读时用）。纯函数。
+ * def 提供身份（name/性格/音色/长相/能力）；实例提供每世界可变状态（位置/场景/关系/记忆/入住…）。
+ * storyRole 由 def.storyArchetype + inst.resident 重组——resident 是每世界的，只此世界翻动。
+ * 这条合并方向（def 供身份、实例供状态）就是「改共享定义→全世界引用者当场生效」的地基。
+ */
+export function characterFromDefInstance(def: CharacterDef, inst: CharacterInstanceRecord): Character {
+  return {
+    id: inst.id,
+    worldId: inst.worldId,
+    isFairy: def.isFairy,
+    name: def.name,
+    personality: def.personality,
+    voiceId: def.voiceId,
+    ...(def.greetingStyle !== undefined ? { greetingStyle: def.greetingStyle } : {}),
+    appearance: def.appearance,
+    abilities: def.abilities,
+    memory: inst.memory ?? [],
+    chatHistory: inst.chatHistory ?? [],
+    state: inst.state,
+    behaviorScript: inst.behaviorScript,
+    position: inst.position,
+    ...(inst.sceneId !== undefined ? { sceneId: inst.sceneId } : {}),
+    relationships: inst.relationships ?? {},
+    ...(inst.attachments !== undefined ? { attachments: inst.attachments } : {}),
+    ...(inst.taskChain !== undefined ? { taskChain: inst.taskChain } : {}),
+    ...(def.storyArchetype
+      ? { storyRole: { bookId: def.storyArchetype.bookId, castId: def.storyArchetype.castId, resident: inst.resident ?? false } }
+      : {}),
   };
 }
 
@@ -252,6 +309,10 @@ export class WorldStore {
     this.#initSchema();
     if (this.#dir !== null) {
       this.#migrateFromJson();
+      // 拆定义/实例必须最先跑：其后每个角色迁移都按【拆分后】的形态操作——身份字段（isFairy/name/
+      // abilities）走定义层（fairy 迁移读 character_defs），可变态（memory/chatHistory/sceneId）走实例行。
+      // 放在最前，既能吃下老库的全量 blob（首开），也能吃下已拆分的库（重开/新格式），两条路都幂等。
+      this.#migrateCharactersToDefsInstances();
       this.#migrateLegacyMemories();
       this.#migrateLegacyChatHistory();
       this.#migrateLegacyPlayerPositions();
@@ -287,21 +348,13 @@ export class WorldStore {
    */
   #migrateFairyAbilities(): void {
     const REQUIRED = ['create_character', 'create_prop', 'create_sticker', 'play_game', 'guide_to', 'guide_stop'];
-    const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
-    const upd = this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?');
-    for (const r of rows) {
-      let c: Character;
-      try {
-        c = JSON.parse(r.data) as Character;
-      } catch {
-        continue;
-      }
-      if (!c.isFairy) continue;
-      const abilities = Array.isArray(c.abilities) ? c.abilities : [];
+    // 能力是【定义层】字段（世界模板架构 v2）：拆分后仙子的 abilities 落在 character_defs，改这里。
+    for (const def of this.listCharacterDefs()) {
+      if (!def.isFairy) continue;
+      const abilities = Array.isArray(def.abilities) ? def.abilities : [];
       const missing = REQUIRED.filter((a) => !abilities.includes(a));
       if (missing.length === 0) continue;
-      c.abilities = [...abilities, ...missing];
-      upd.run(JSON.stringify(c), r.id);
+      this.upsertCharacterDef({ ...def, abilities: [...abilities, ...missing] });
     }
   }
 
@@ -315,27 +368,49 @@ export class WorldStore {
    * 刻意**不动** spriteAsset——立绘替换走 POST /worlds/:id/fairy-sprite（P2），迁移只管文字人设。
    */
   #migrateFairyPersona(): void {
-    const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
-    const upd = this.#db.prepare('UPDATE characters SET data = ? WHERE id = ?');
-    for (const r of rows) {
-      let c: Character;
-      try {
-        c = JSON.parse(r.data) as Character;
-      } catch {
-        continue;
-      }
-      if (!c.isFairy) continue;
+    // name/personality/voiceId/abilities 都是【定义层】字段（世界模板架构 v2）：拆分后改 character_defs。
+    for (const def of this.listCharacterDefs()) {
+      if (!def.isFairy) continue;
       // voiceId 也要迁移：它驱动【动态对话 replyText】的实时 TTS，老库存的是旧音色（Xiaoyi）。
       // 不迁移的话，存量世界里预制台词是新音色（客户端 WAV 已重烧）、实时对话却还是旧音色，当场分裂。
-      if (c.name === FAIRY_NAME && c.personality === FAIRY_PERSONALITY && c.voiceId === FAIRY_VOICE) continue;
-      c.name = FAIRY_NAME;
-      c.personality = FAIRY_PERSONALITY;
-      c.voiceId = FAIRY_VOICE;
-      // 顺手清掉历史残留：她拿到 move_to/deliver_message 也兑现不了（effectiveAbilities 恒剔除）。
-      c.abilities = (Array.isArray(c.abilities) ? c.abilities : []).filter(
-        (a) => !LOCOMOTION_ABILITIES.includes(a),
-      );
-      upd.run(JSON.stringify(c), r.id);
+      if (def.name === FAIRY_NAME && def.personality === FAIRY_PERSONALITY && def.voiceId === FAIRY_VOICE) continue;
+      this.upsertCharacterDef({
+        ...def,
+        name: FAIRY_NAME,
+        personality: FAIRY_PERSONALITY,
+        voiceId: FAIRY_VOICE,
+        // 顺手清掉历史残留：她拿到 move_to/deliver_message 也兑现不了（effectiveAbilities 恒剔除）。
+        abilities: (Array.isArray(def.abilities) ? def.abilities : []).filter((a) => !LOCOMOTION_ABILITIES.includes(a)),
+      });
+    }
+  }
+
+  /**
+   * 存量 characters 行（旧全量 blob）→ 拆成【共享定义】+【实例放置】（世界模板架构 v2 §8 P1）。
+   * 幂等：已是实例（data 含 defId）的行跳过；只搬旧全量 blob。作者角色/玩家造物 defId = 自身 id。
+   * 必须【最先】跑（#open 里排第一个角色迁移）：其后 fairy 迁移改定义层、记忆/对话/场景迁移改实例层，
+   * 都依赖此步已把行拆开。事务原子：定义与实例同生，避免拆到一半崩出裸实例。
+   */
+  #migrateCharactersToDefsInstances(): void {
+    const rows = this.#db.prepare('SELECT id, world_id, data FROM characters').all() as { id: string; world_id: string; data: string }[];
+    this.#db.exec('BEGIN');
+    try {
+      for (const r of rows) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(r.data);
+        } catch {
+          continue;
+        }
+        if (parsed && typeof parsed === 'object' && typeof (parsed as { defId?: unknown }).defId === 'string') continue; // 已拆
+        const c = parsed as Character;
+        this.upsertCharacterDef(characterDefFromCharacter(c)); // defId = c.id
+        this.#writeInstanceRow(characterInstanceFromCharacter(c));
+      }
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
     }
   }
 
@@ -803,6 +878,8 @@ export class WorldStore {
    * 唯一调用方：admin DELETE /admin/worlds/:id，清理无主的空壳世界（脏数据）。
    * 按 world_id 分区的表全清；memories/chat_turns 按该世界的角色 id 级联（这两表不带 world_id）；
    * locations 是纯内存态，一并清。players/creation_icons/item_icons 等全局表与世界无关，不动。
+   * character_defs 是全局共享定义（世界模板架构 v2）——别的世界可能引用同一 defId，故删世界只清
+   * 实例放置行、绝不删共享定义（玩家造物的私有定义留成孤儿是可接受的小泄漏，GC 归后续）。
    */
   deleteWorld(id: string): boolean {
     if (!this.#worldExists(id)) return false;
@@ -832,14 +909,66 @@ export class WorldStore {
     this.saveCharacter(character);
   }
 
-  /** 角色状态变更后持久化（如 chatHistory/behaviorScript 更新）。整对象 UPSERT 一行。 */
+  /**
+   * 角色状态变更后持久化（世界模板架构 v2 §5：拆写）。一次事务里 upsert 共享定义 + 写实例放置行：
+   * 共享定义（name/性格/音色/长相/能力/故事原型）进 character_defs，改这里全世界引用者当场生效；
+   * 实例放置（位置/场景/状态/关系/记忆/入住）进 characters 表，只此世界一份。对上层 API 不变。
+   *
+   * defId 归属：**沿用已存在实例行的 defId**（模板克隆放进来的实例引用共享 defId，不能被一次
+   * setCharacterTile 悄悄改指回自身 id 而脱离共享），无既有行才落 = 自身 id（作者角色/玩家造物自有定义）。
+   */
   saveCharacter(character: Character): void {
+    const prevDefId = this.#existingInstanceDefId(character.id, character.worldId);
+    const defId = prevDefId ?? character.id;
+    const def = characterDefFromCharacter(character, defId);
+    const inst = characterInstanceFromCharacter(character, defId);
+    this.#db.exec('BEGIN');
+    try {
+      this.upsertCharacterDef(def);
+      this.#writeInstanceRow(inst);
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  /** 直接放置一个引用共享定义的实例（世界模板架构 v2 §4.2 克隆原子；不碰定义层）。 */
+  putCharacterInstance(inst: CharacterInstanceRecord): void {
+    this.#writeInstanceRow(inst);
+  }
+
+  /** 读某实例行现有的 defId（不存在或旧全量 blob 无 defId → undefined）。 */
+  #existingInstanceDefId(id: string, worldId: string): string | undefined {
+    const row = this.#db.prepare('SELECT data FROM characters WHERE id = ? AND world_id = ?').get(id, worldId) as
+      | { data: string }
+      | undefined;
+    if (!row) return undefined;
+    const parsed = JSON.parse(row.data) as { defId?: unknown };
+    return typeof parsed.defId === 'string' ? parsed.defId : undefined;
+  }
+
+  /** 写一行实例放置记录（characters.data 存实例 JSON，按 defId 引用共享定义）。 */
+  #writeInstanceRow(inst: CharacterInstanceRecord): void {
     this.#db
       .prepare(
         'INSERT INTO characters (id, world_id, data) VALUES (?, ?, ?) ' +
           'ON CONFLICT(id) DO UPDATE SET world_id = excluded.world_id, data = excluded.data',
       )
-      .run(character.id, character.worldId, JSON.stringify(character));
+      .run(inst.id, inst.worldId, JSON.stringify(inst));
+  }
+
+  /**
+   * 把一行 characters.data 还原成完整 Character（世界模板架构 v2）：有 defId 且能查到共享定义 →
+   * 合并；否则视为旧全量 blob（迁移前的存量行）原样返回。合并/回退都不抛，坏定义只降级不崩。
+   */
+  #hydrateCharacter(parsed: unknown): Character {
+    if (parsed && typeof parsed === 'object' && typeof (parsed as { defId?: unknown }).defId === 'string') {
+      const inst = parsed as CharacterInstanceRecord;
+      const def = this.getCharacterDef(inst.defId);
+      if (def) return characterFromDefInstance(def, inst);
+    }
+    return parsed as Character; // 旧全量 blob（无 defId）或定义丢失兜底
   }
 
   // ── 角色定义层（character_defs，世界模板架构 v2 §1）──────────────────────────
@@ -1340,7 +1469,7 @@ export class WorldStore {
    */
   listCharacters(worldId: string, sceneId?: string): Character[] {
     const rows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(worldId) as { data: string }[];
-    const all = rows.map((r) => JSON.parse(r.data) as Character);
+    const all = rows.map((r) => this.#hydrateCharacter(JSON.parse(r.data)));
     if (sceneId === undefined) return all;
     return all.filter((c) => c.isFairy || (c.sceneId ?? DEFAULT_SCENE) === sceneId);
   }
@@ -1349,7 +1478,7 @@ export class WorldStore {
     const row = this.#db
       .prepare('SELECT data FROM characters WHERE id = ? AND world_id = ?')
       .get(characterId, worldId) as { data: string } | undefined;
-    return row ? (JSON.parse(row.data) as Character) : undefined;
+    return row ? this.#hydrateCharacter(JSON.parse(row.data)) : undefined;
   }
 
   /**
@@ -1504,7 +1633,7 @@ export class WorldStore {
     }
     const rows = this.#db.prepare('SELECT id, data FROM characters').all() as { id: string; data: string }[];
     for (const r of rows) {
-      const c = JSON.parse(r.data) as Character;
+      const c = this.#hydrateCharacter(JSON.parse(r.data)); // 立绘在定义层：合并后才看得到 appearance/name
       const hash = c.appearance?.spriteAsset;
       if (hash && !this.hasAsset(hash)) {
         dead.push({ kind: 'character', id: c.id, name: c.name, hash });
@@ -1528,9 +1657,9 @@ export class WorldStore {
           | { data: string }
           | undefined;
         if (row) {
-          const c = JSON.parse(row.data) as Character;
+          const c = this.#hydrateCharacter(JSON.parse(row.data)); // appearance 在定义层，合并后再改
           c.appearance = { ...c.appearance, spriteAsset: '' };
-          this.saveCharacter(c);
+          this.saveCharacter(c); // 拆写会把清空后的 appearance upsert 回共享定义
         }
       }
     }
