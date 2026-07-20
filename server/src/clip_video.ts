@@ -9,9 +9,10 @@
 // memory video-as-animation-tablet-decode-limit），人群仍走便宜的静态图集。
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { PNG } from 'pngjs';
 import type { ClipName, VideoBlob } from './adapters/types.ts';
 import type { WorldStore } from './persistence.ts';
 
@@ -45,15 +46,92 @@ export async function mp4ToTheoraOgv(mp4: VideoBlob): Promise<VideoBlob> {
     const inPath = join(dir, 'in.mp4');
     const outPath = join(dir, 'out.ogv');
     await writeFile(inPath, Buffer.from(mp4.bytes));
+    // 焦点视频 LOD 优化:绿幕原片是 16:9、角色窄窄居中、约六成宽是绿边(实测舞舞兔占宽 39%)。
+    // 白白软解被抠掉的绿最费 CPU（解码∝像素）。转码前按角色横向包围盒只裁宽（保全高），
+    // 解码像素砍掉一半多。只裁宽 → 客户端几何(VIDEO_FILL 是高度占比)不变、运行时按真宽自适应，
+    // 无需改客户端、新旧 ogv 混用都正确渲染。
+    const cropX = await detectHorizontalContentCrop(inPath, dir);
+    const vf: string[] = cropX ? ['-vf', `crop=${cropX.w}:ih:${cropX.x}:0`] : [];
     await execFileP('ffmpeg', [
       '-y', '-loglevel', 'error',
       '-i', inPath,
+      ...vf,
       '-c:v', 'libtheora', '-q:v', '9', '-an',
       outPath,
     ]);
     return { bytes: new Uint8Array(await readFile(outPath)), mime: 'video/ogg' };
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** 绿主导判定（与客户端 chroma_video.gdshader 同口径）：g 明显大于 r、b。 */
+function isGreenPixel(r: number, g: number, b: number): boolean {
+  return g > r + 25 && g > b + 25;
+}
+
+/** 一帧 RGBA 像素（供裁剪检测的纯函数用，与 pngjs 的 {width,height,data} 兼容）。 */
+export interface RgbaFrame {
+  width: number;
+  height: number;
+  data: Uint8Array | Buffer;
+}
+
+/**
+ * 纯函数：从若干 RGBA 帧算角色**横向**内容裁剪 {x,w}（列扫描非绿主导像素的 minX~maxX 并集，
+ * 加边距、偶数对齐、按帧宽钳制）。省不到 ~12% 宽 / 全绿 / 无帧 → null（不值得裁）。可单测。
+ */
+export function computeHorizontalCrop(frames: RgbaFrame[]): { x: number; w: number } | null {
+  let minX = Infinity;
+  let maxX = -1;
+  let frameW = 0;
+  for (const f of frames) {
+    frameW = f.width;
+    for (let y = 0; y < f.height; y++) {
+      const row = y * f.width * 4;
+      for (let x = 0; x < f.width; x++) {
+        const p = row + x * 4;
+        if (!isGreenPixel(f.data[p]!, f.data[p + 1]!, f.data[p + 2]!)) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+    }
+  }
+  if (maxX < 0 || frameW === 0) return null; // 全绿/空 → 不裁
+  const pad = Math.round(frameW * 0.02); // 2% 边距，防贴边削到轮廓
+  let x0 = Math.max(0, Math.floor(minX) - pad);
+  const x1 = Math.min(frameW - 1, Math.ceil(maxX) + pad);
+  let w = x1 - x0 + 1;
+  if (w >= frameW * 0.88) return null; // 省不到 ~12% 宽 → 不值得裁
+  // 偶数对齐（libtheora 编码要求宽/x 为偶数）
+  if (x0 % 2 === 1) x0 -= 1;
+  if ((x0 + w) % 2 === 1) w += (x0 + w < frameW) ? 1 : -1;
+  if (x0 + w > frameW) w = frameW - x0;
+  if (w % 2 === 1) w -= 1;
+  return w > 0 ? { x: x0, w } : null;
+}
+
+/**
+ * 检测绿幕视频里角色横向内容裁剪：ffmpeg 采样若干帧 → pngjs 解码 → computeHorizontalCrop。
+ * 只裁宽不裁高（高度占比不变，客户端几何无需改）。检测失败 → null（不裁，整帧转码，不阻断）。
+ */
+async function detectHorizontalContentCrop(inPath: string, dir: string): Promise<{ x: number; w: number } | null> {
+  try {
+    await execFileP('ffmpeg', [
+      '-y', '-loglevel', 'error',
+      '-i', inPath,
+      '-vf', 'fps=3', // 采样 ~每 1/3 秒一帧
+      '-frames:v', '12',
+      join(dir, 'crop_%03d.png'),
+    ], { maxBuffer: 1 << 24 }).catch(() => {});
+    const files = (await readdir(dir)).filter((f) => f.startsWith('crop_') && f.endsWith('.png')).sort();
+    if (files.length === 0) return null;
+    const frames: RgbaFrame[] = [];
+    for (const f of files) frames.push(PNG.sync.read(Buffer.from(await readFile(join(dir, f)))));
+    return computeHorizontalCrop(frames);
+  } catch {
+    return null; // 检测失败 → 不裁，整帧转码（不阻断）
   }
 }
 
