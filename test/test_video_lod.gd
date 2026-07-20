@@ -150,6 +150,19 @@ func _init() -> void:
 	pc4.stop_video_lod()
 	pc4.queue_free()
 
+	# ── ⑨ 两路共存（玩家+NPC 对话时都上视频）：各自独立 start/stop 互不影响 ──────────
+	var h1 := PaperCharacter.new(); get_root().add_child(h1); h1.play_anim(a["tex"], a["meta"], 6.0)
+	var h2 := PaperCharacter.new(); get_root().add_child(h2); h2.play_anim(a["tex"], a["meta"], 6.0)
+	h1.start_video_lod(_load_ogv(), null, 6.0)
+	h2.start_video_lod(_load_ogv(), null, 6.0)
+	_ok("两个角色可同时进视频档（2 路）", h1.is_video_lod() and h2.is_video_lod())
+	_ok("各自独立 VideoStreamPlayer", _find_vsp(h1) != null and _find_vsp(h2) != null and _find_vsp(h1) != _find_vsp(h2))
+	h1.stop_video_lod()
+	_ok("撤一个不影响另一个", not h1.is_video_lod() and h2.is_video_lod())
+	h2.stop_video_lod()
+	_ok("两个都撤后全退出", not h1.is_video_lod() and not h2.is_video_lod())
+	h1.queue_free(); h2.queue_free()
+
 	if _fails == 0:
 		print("video_lod tests PASS")
 	else:

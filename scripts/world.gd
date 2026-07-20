@@ -199,9 +199,10 @@ var _os_name := OS.get_name()       ## 平台名（headless 测试可覆盖成 "
 # 形成连环录。空结果不再当一轮正常结束，而是闭麦退避一段（连续空则指数退避，见 InteractionFsm）。
 var _empty_streak := 0              ## 连续空识别次数（拿到有效转写即清零）
 var _cooldown_t := 0.0              ## 退避剩余秒数（>0 即闭麦，派生为 COOLDOWN 态）
-## 焦点视频 LOD（docs/video-hero-lod-design.md）：进对话的焦点角色叠一路真视频，离开撤回。
-## 记住当前视频英雄，_exit_interaction / 切换对象时撤下。空=当前无视频档角色（任意时刻 ≤1）。
-var _video_hero: PaperCharacter = null
+## 焦点视频 LOD（docs/video-hero-lod-design.md）：进对话时把焦点角色 + 玩家自己都叠真视频（面对面
+## 站位同样显眼），离开撤下。记住当前所有视频英雄，_exit_interaction / 切换对象时全撤。
+## 对话时至多 2 路（对方 + 玩家；spike 实测 1-2 路 OK），探索时 0 路。
+var _video_heroes: Array[PaperCharacter] = []
 # 「说完再走」（缺陷 ④）：leave 指令先挂起，等回应说完再动身 + 关对话。
 # { npc, script, seen, arm, deadline }；空 = 没有挂起的离开。
 var _pending_leave: Dictionary = {}
@@ -914,6 +915,7 @@ func _apply_player_sprite_to(node: PaperCharacter, asset: String, anchors := {},
 		node.set_anchors(anchors) # 锚点与贴图解耦：先灌（离线/图未到也生效），贴纸后到自动重摆
 	if asset.is_empty() or not is_instance_valid(node):
 		return
+	node.sprite_hash = asset # 焦点视频 LOD：玩家 avatar 进对话时据此拉 ogv 升视频
 	var tex := await api.fetch_texture(asset)
 	if tex == null or not is_instance_valid(node):
 		return
@@ -3553,30 +3555,39 @@ func _enter_interaction(npc: PaperCharacter) -> void:
 		_greet_on_enter(d) # 对方先开口打招呼（播放期间 should_capture 自动闭麦，说完再放开）
 	_sticker_pick = ""
 	_refresh_sticker_view() # 背包有贴纸就亮贴纸盘（character-anchors P4）
-	_start_video_hero(npc) # 焦点视频 LOD：拉 ogv 把这个角色升成 24fps 真视频（fire-and-forget）
+	_begin_video_heroes(npc) # 焦点视频 LOD：把对方 + 玩家自己都升成 24fps 真视频（fire-and-forget）
 
-## 焦点视频 LOD：向服务端拉该角色 idle/talking 两段 ogv，成功则把它从图集升成真视频。
-## fire-and-forget（_enter_interaction 不 await）。拉取期间玩家可能已离开/换了对象——每次 await
-## 后核对它仍是当前焦点（_locked）才继续，否则弃掉。无 clip/离线/404 → 静默留图集，绝不阻断对话。
-func _start_video_hero(npc: PaperCharacter) -> void:
-	_stop_video_hero() # 切换对话对象/重入：先撤上一个，保证任意时刻 ≤1 路解码
-	if npc == null or npc.sprite_hash.is_empty() or not online:
+## 焦点视频 LOD：进对话时给对方 NPC 和玩家自己的 avatar 都叠真视频（对话时两人面对面同样显眼）。
+## 每个都 fire-and-forget 拉 ogv，互不阻塞；离开/换对象时 _stop_video_heroes 全撤。
+func _begin_video_heroes(npc: PaperCharacter) -> void:
+	_stop_video_heroes() # 切换对话对象/重入：先撤上一批，保证不叠路数
+	_start_video_on(npc, npc)
+	if not player.is_empty() and is_instance_valid(player["node"]):
+		_start_video_on(player["node"] as PaperCharacter, npc) # 玩家也升；焦点仍是 npc（race 令牌）
+
+## 给单个角色拉 ogv 升视频。fire-and-forget（不 await）。拉取期间玩家可能已离开/换了对象——
+## 每次 await 后核对当前焦点仍是 focus_npc（_locked）才继续,否则弃掉。
+## 无 clip/离线/404 → 静默留图集，绝不阻断对话。
+func _start_video_on(node: PaperCharacter, focus_npc: PaperCharacter) -> void:
+	if node == null or node.sprite_hash.is_empty() or not online:
 		return
-	var target_h := npc.visible_height() # 用图集档身高当目标，切成视频观感不跳
-	var idle: VideoStream = await api.fetch_clip_ogv(npc.sprite_hash, "idle")
-	if idle == null or not is_instance_valid(npc) or _locked != npc:
+	var target_h := node.visible_height() # 用图集档身高当目标，切成视频观感不跳
+	var idle: VideoStream = await api.fetch_clip_ogv(node.sprite_hash, "idle")
+	if idle == null or not is_instance_valid(node) or _locked != focus_npc:
 		return # 无 idle 段 / 拉取期间已离开或换了对象
-	var talking: VideoStream = await api.fetch_clip_ogv(npc.sprite_hash, "talking")
-	if not is_instance_valid(npc) or _locked != npc:
+	var talking: VideoStream = await api.fetch_clip_ogv(node.sprite_hash, "talking")
+	if not is_instance_valid(node) or _locked != focus_npc:
 		return
-	npc.start_video_lod(idle, talking, target_h)
-	_video_hero = npc
+	node.start_video_lod(idle, talking, target_h)
+	if not _video_heroes.has(node):
+		_video_heroes.append(node)
 
-## 撤回当前视频英雄（换回图集）。幂等；节点已释放（离场）时安全跳过。
-func _stop_video_hero() -> void:
-	if _video_hero != null and is_instance_valid(_video_hero):
-		_video_hero.stop_video_lod()
-	_video_hero = null
+## 撤回所有视频英雄（换回图集）。幂等；节点已释放（离场）时安全跳过。
+func _stop_video_heroes() -> void:
+	for n in _video_heroes:
+		if n != null and is_instance_valid(n):
+			n.stop_video_lod()
+	_video_heroes.clear()
 
 ## 进「玩家喊话」态：站桩构图面对对方副本。对方端无感知（无会话锁）——他继续玩他的；
 ## 走远/离场/换场景由 _step_remote_actors 的维持判定自动退出。P3 在此态叠表情盘，P5 叠开放麦喊话。
@@ -4018,7 +4029,7 @@ func _exit_interaction() -> void:
 		if online:
 			backend.send_creation_cancel()
 	_vc.close() # 关麦（录音中则先静默取消，不留半开会话）
-	_stop_video_hero() # 焦点视频 LOD：撤回真视频、换回图集（无残留解码）
+	_stop_video_heroes() # 焦点视频 LOD：撤回真视频、换回图集（无残留解码）
 	selected = null
 	_sync_guide_button() # 退出对话：引路继续，按钮跟着回来
 	if _sticker_view != null:
