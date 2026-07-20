@@ -64,18 +64,11 @@ static func build_poi_json() -> Array:
 		})
 	return out
 
-## 村庄侧传送点：西南小树林边缘（18,52）的平坦草地，走进半径就穿到森林的林间空地（20,18）。
-## radius 单位是世界坐标（TILE_SIZE=2.0），3.0 ≈ 1.5 格：玩家还没踩到中心就已触发。
-## 与 export_forest.gd 的 build_portal_json() 必须互指（test_portal.gd 对拍两边）。
-## village 是入口场景（menu→default 出生），也是连通图枢纽：forest 那对保留原样（live 场景，
-## 别丢），另加通往 medieval（历史簇）与 modern_city（室内簇）的两对双向 portal。
-## 新落点选北/东边缘干地，与对向场景 build_portal_json() 互指（scene-portal-graph）。
+## 村庄传送点：暂无。原先通往 forest/medieval/modern_city 的三对 portal 随那些场景退役
+## 一并移除（scene-retire）——village 现为独立单场景。新场景上线时在此加回对应 portal，
+## 并与对向场景的 build_portal_json() 互指（scene-portal-graph）。
 static func build_portal_json() -> Array:
-	return [
-		{ "tile": [18, 52], "radius": 3.0, "toScene": "forest", "toTile": [20, 18] },
-		{ "tile": [37, 12], "radius": 3.0, "toScene": "medieval", "toTile": [12, 12] },
-		{ "tile": [65, 40], "radius": 3.0, "toScene": "modern_city", "toTile": [12, 12] },
-	]
+	return []
 
 ## 构建 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。
 ## 前置副作用：把 TerrainMap 复位成本地村庄地貌（组装规则要读它判水/高度）。

@@ -109,26 +109,12 @@ UNIT_TESTS=(
   test_terrain_rebuild
   test_terrain_layers
   test_terrain_deco
-  test_terrain_seafloor
-  test_terrain_icesnow
-  test_terrain_jurassic
-  test_terrain_medieval
-  test_terrain_roman
-  test_terrain_ancient_china
-  test_terrain_modern_city
-  test_terrain_toy_room
-  test_terrain_kitchen
-  test_terrain_hospital
-  test_terrain_future_robot
   test_sticker_edges
   test_sticker_asset_render
   test_character_anchors
   test_self_stickers
   test_fairy_anchors
-  test_forest_scene
-  test_forest_reach
   test_enter_scene_client
-  test_portal
   test_poi_serve
   test_position_restore
   test_webp_load
@@ -179,7 +165,6 @@ run_test test_visual_fairy         --fixed-fps 10 --quit-after 100
 run_test test_visual_click_move    --fixed-fps 10 --quit-after 140
 run_test test_sfx_mic_guard        --fixed-fps 10 --quit-after 60
 run_test test_fairy_guide          --fixed-fps 10 --quit-after 115
-run_test test_fairy_guide_portal   --fixed-fps 10 --quit-after 70
 run_test test_fairy_guide_hint     --fixed-fps 10 --quit-after 95
 run_test test_visual_fairy_poi     --fixed-fps 10 --quit-after 130
 run_test test_visual_fairy_poi_hold --fixed-fps 10 --quit-after 90
@@ -223,8 +208,6 @@ run_test test_benchmark_greedy     --fixed-fps 10 --quit-after 60
 run_test test_harness_wire         --fixed-fps 30 --quit-after 120
 run_test test_device_profile_boot
 run_test test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
-run_test test_visual_scene_switch   --fixed-fps 10 --quit-after 60
-run_test test_visual_portal         --fixed-fps 10 --quit-after 90
 run_test test_home_portal           --fixed-fps 10 --quit-after 30
 run_test test_home_walk             --fixed-fps 10 --quit-after 40
 run_test test_home_input_lock       --fixed-fps 10 --quit-after 40

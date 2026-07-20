@@ -3,13 +3,11 @@ extends SceneTree
 ## chunk_manager 的散布规则逐 tile 等价——这是「散布搬进矩阵、上线世界与今天
 ## 一致」的验收标准。P4 删除 chunk_manager 的规则副本后，本测试的对拍段随之退役，
 ## 落位不变量（锚点/无冲突/确定性）保留。
-## - 森林：无手工锚点 → 散布判定与物品层严格双射（kind 与变体都对上）
 ## - 村庄：除锚点 footprint 覆盖的 tile 外严格双射；被覆盖处只允许「该长而没长」
+## （森林等主题场景已退役 scene-retire，只余村庄一景组装。）
 ## 运行: godot --headless --path . --script res://test/test_scene_compose.gd
 
 const COMPOSE := preload("res://tools/scene_compose.gd")
-const FOREST := preload("res://tools/export_forest.gd")
-const HEADER := 11
 
 const KIND_IDS := {
 	COMPOSE.DECO_TREE: ["tree_puff_a", "tree_puff_b", "tree_puff_c"],
@@ -42,21 +40,6 @@ func _init() -> void:
 	var v2nd = COMPOSE.compose("village")
 	fails += _check("village 组装确定性", v["item_ref"] == v2nd["item_ref"] and v["item_arg"] == v2nd["item_arg"]
 		and v["palette"] == v2nd["palette"], true)
-
-	# ── 森林 ────────────────────────────────────────────────────────────────
-	var forest_bytes: PackedByteArray = FOREST.build_terrain_bytes() # 副作用后已 reset
-	var fv1 := forest_bytes.slice(0, HEADER + 3 * n * n)
-	fv1[4] = TerrainMap.MLTR_VERSION_1
-	TerrainMap.reset()
-	var fr: Dictionary = TerrainMap.load_from_bytes(fv1) # 只灌地貌，规则读它
-	fails += _check("森林地貌可载入", fr["ok"], true)
-	var f = COMPOSE.compose("forest")
-	fails += _run_scene("forest", f, n)
-	var fcounts := _count_ids(f, n)
-	fails += _check("forest 无村庄建筑", fcounts.get("well", 0) + fcounts.get("windmill", 0)
-		+ fcounts.get("house_0", 0) + fcounts.get("walking_hut", 0), 0)
-	var trees: int = fcounts.get("tree_puff_a", 0) + fcounts.get("tree_puff_b", 0) + fcounts.get("tree_puff_c", 0)
-	fails += _check("forest 郁闭林冠（树 > 1500）", trees > 1500, true)
 
 	TerrainMap.reset()
 	print("test_scene_compose: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
