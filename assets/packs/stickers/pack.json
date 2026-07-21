@@ -65,6 +65,10 @@
     "story_basket": {
       "category": "sticker",
       "path": "res://assets/stickers/story_basket.webp"
+    },
+    "story_cheer_flag": {
+      "category": "sticker",
+      "path": "res://assets/stickers/story_cheer_flag.webp"
     }
   }
 }

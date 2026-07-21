@@ -231,6 +231,8 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   { ...sticker('story_brick', '砖房纪念贴纸'), souvenir: true },
   // ── 剧情纪念贴纸（第一季册 2《小红帽》）──
   { ...sticker('story_basket', '点心篮纪念贴纸'), souvenir: true },
+  // ── 剧情纪念贴纸（第一季册 4《龟兔赛跑》）──
+  { ...sticker('story_cheer_flag', '加油小旗纪念贴纸'), souvenir: true },
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {
