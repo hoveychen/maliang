@@ -231,10 +231,67 @@ export const LITTLE_RED_HOOD: StoryBook = {
   ],
 };
 
+// ── 第四册《龟兔赛跑》（village_forest 合并大场景，1 幕 + 尾声）──────────────────
+// 第一季册 4（docs/season-1-outline.md §4）。管理种子（先做哪个 / 用什么节奏）+ 二选一。
+// 场景复用现有 village_forest（100 格）东缘直跑道分区（x∈[87,89] z∈[8,92]，terrain_map
+// _paint_village_forest 已画骨架、scene_compose _deco_kind_village_forest 已排除路面/缓冲两侧）。
+// gate = 兔子，在村庄核心广场旁搭话触发；幕 1 演出「村口约赛跑·兔子夸口」，互动是 task:visit 跑道
+// ——点点飞前面 guide_to 引路，孩子走到东缘跑道给龟兔加油（poi_race，s1-race P4 加）。尾声在跑道演出
+// 真正的比赛：点点问「给谁加油」孩子点乌龟/兔子（stage.once tap），老板拍板殊途同归——点谁都是
+// 兔子睡过头、乌龟稳步先到、大家做朋友（零挫败，管理种子靠「看见稳步的好」隐性传递）；结尾复述、
+// 整册完结龟兔入住。加油小旗贴纸 story_cheer_flag 在 P3，跑道 POI + 布景 prop 包在 P4。
+
+export const TORTOISE_HARE: StoryBook = {
+  id: 'tortoise_hare',
+  title: '龟兔赛跑',
+  sceneId: 'village_forest',
+  gateCastId: 'hare',
+  cast: [
+    {
+      castId: 'tortoise',
+      name: '乌龟',
+      personality: '慢性子、稳稳当当的乌龟，从不着急，相信一步一步就能走到终点；心地好，输赢都笑呵呵。',
+      voiceId: 'zh-TW-YunJheNeural',
+      visualDescription:
+        'a steady friendly tortoise with a round green shell, short sturdy legs, calm gentle smile, wearing a tiny red sport headband, standing upright like a person',
+      // 村庄核心广场旁（近端 z<38），gate 好找、搭话即触发；与兔子并排「村口约赛跑」。
+      position: { tileX: 24, tileY: 19 },
+      greetingStyle: 'gentle',
+    },
+    {
+      castId: 'hare',
+      name: '兔子',
+      personality: '风风火火爱夸口的兔子，跑得飞快、最爱抢先，比赛时忍不住偷懒睡个觉；其实心不坏，输了也大方认输、和好如初。',
+      voiceId: 'zh-CN-YunxiNeural',
+      visualDescription:
+        'a speedy white rabbit with long floppy ears, bright confident grin, wearing a blue racing vest with a number, one paw on hip boasting, standing upright like a person',
+      position: { tileX: 22, tileY: 18 },
+      greetingStyle: 'playful',
+    },
+  ],
+  chapters: [
+    {
+      screenplay: 'story_th_1',
+      interaction: {
+        kind: 'task',
+        type: 'visit',
+        npcCastId: 'hare',
+        locationName: '跑道',
+        ask: '走呀走呀，我们去东边的跑道比赛！你陪我一起过去给我们加油好不好？点点会飞在前面带路。',
+        thanks: '你也来到跑道啦！有你加油，这场比赛一定特别好玩！',
+      },
+      stampStyle: 'medal',
+      sticker: 'story_cheer_flag',
+    },
+    { screenplay: 'story_th_end' }, // 尾声：跑道上真正的比赛（二选一殊途同归）+ 复述 + 整册完结入住
+  ],
+};
+
 /** 全部册注册表（bookId → 册）。 */
 export const STORY_BOOKS: Record<string, StoryBook> = {
   [THREE_PIGS.id]: THREE_PIGS,
   [LITTLE_RED_HOOD.id]: LITTLE_RED_HOOD,
+  [TORTOISE_HARE.id]: TORTOISE_HARE,
 };
 
 /**
