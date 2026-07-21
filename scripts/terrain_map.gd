@@ -529,6 +529,26 @@ static func _paint_village_forest() -> void:
 			_depths[i] = 1
 	_paint_ellipse_depth(34.5, 9.5, 3.2, 2.4, 2)
 
+	# ==== 地势：开阔森林连绵缓丘（同 _paint() 主峰的同心台地手法，环宽 2~3 tile/级 →
+	#      相邻高差 ≤1，穿林小径穿过丘身也逐级可爬）。关键区刻意留平——丘的外环止步于其外，
+	#      靠自然 h1→h0 过渡衔接，不强行压平（压平会在边界造 >1 陡崖）：
+	#      村核(x<40,z<40 的广场/农舍/风车/池塘)、大道(z16~18)、跑道(x≥86)、七矮人操场(x22~38,z82~93)。====
+	# 外婆家小山：小红帽「翻过小山去外婆家」，外婆家(66,60)垫 2 级，穿林小径末段爬上去。
+	for lvl in range(1, 3):
+		_paint_ellipse_height(66.0, 60.0, 8.0 - 3.0 * float(lvl), 8.0 - 3.0 * float(lvl), lvl)
+	# 森丘 A：村庄与外婆家之间的北中林，3 级。
+	for lvl in range(1, 4):
+		_paint_ellipse_height(52.0, 48.0, 11.0 - 2.0 * float(lvl), 10.0 - 2.0 * float(lvl), lvl)
+	# 森丘 B：小径与跑道之间的东林，3 级；外环止于 x≈84，不碰跑道(x≥86)。
+	for lvl in range(1, 4):
+		_paint_ellipse_height(76.0, 54.0, 10.0 - 2.0 * float(lvl), 10.0 - 2.0 * float(lvl), lvl)
+	# 西森缓丘 C：2 级。
+	for lvl in range(1, 3):
+		_paint_ellipse_height(14.0, 64.0, 8.0 - 3.0 * float(lvl), 9.0 - 3.0 * float(lvl), lvl)
+	# 南森缓丘 D：小径下方、七矮人操场以北(止于 z≈76 不碰操场 z≥82)，2 级。
+	for lvl in range(1, 3):
+		_paint_ellipse_height(48.0, 72.0, 7.0 - 3.0 * float(lvl), 7.0 - 3.0 * float(lvl), lvl)
+
 ## 第一季册 5《绿野仙踪》独立场景（75 格，docs/season-1-outline.md §4）。
 ## 只画「形状本身讲故事」的地貌骨架——一条从入口蜿蜒到翡翠城的黄砖路（远方之旅），
 ## 加入口小广场（portal 落脚）、玉米地空地（稻草人）、翡翠城广场（铁皮人）。

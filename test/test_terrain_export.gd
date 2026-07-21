@@ -105,6 +105,25 @@ func _init() -> void:
 			if TerrainMap.tile_item_id(Vector2i(x, y)) == "windmill":
 				vf_mills += 1
 	fails += _check("village_forest 村庄核心恰一座大风车", vf_mills, 1)
+	# vf 地势：关键区留平 + 外婆家小山到位 + 全场相邻非水高差 ≤1（无陷阱、小径可爬）
+	fails += _check("vf 广场水井(20,16)留平 h0", TerrainMap.tile_height(Vector2i(20, 16)), 0)
+	fails += _check("vf 大道(60,17)留平 h0", TerrainMap.tile_height(Vector2i(60, 17)), 0)
+	fails += _check("vf 跑道(88,50)留平 h0", TerrainMap.tile_height(Vector2i(88, 50)), 0)
+	fails += _check("vf 七矮人餐桌(30,84)留平 h0", TerrainMap.tile_height(Vector2i(30, 84)), 0)
+	fails += _check("vf 外婆家(66,60)在小山顶 h2", TerrainMap.tile_height(Vector2i(66, 60)), 2)
+	var vf_cliff := 0
+	for y in range(100):
+		for x in range(100):
+			if TerrainMap.tile_type(Vector2i(x, y)) == TerrainMap.T_WATER:
+				continue
+			var vh := TerrainMap.tile_height(Vector2i(x, y))
+			if x + 1 < 100 and TerrainMap.tile_type(Vector2i(x + 1, y)) != TerrainMap.T_WATER:
+				if absi(vh - TerrainMap.tile_height(Vector2i(x + 1, y))) > 1:
+					vf_cliff += 1
+			if y + 1 < 100 and TerrainMap.tile_type(Vector2i(x, y + 1)) != TerrainMap.T_WATER:
+				if absi(vh - TerrainMap.tile_height(Vector2i(x, y + 1))) > 1:
+					vf_cliff += 1
+	fails += _check("vf 全场相邻高差 ≤1（无陡崖，穿林小径逐级可爬）", vf_cliff, 0)
 
 	# ── oz（绿野仙踪，75 格）：翡翠城高台 + 路中缓丘。刻意平的两处仍平，
 	#    高台顶到位，且全场相邻非水 tile 高差 ≤1（无陡崖空气墙 → 黄砖路逐级可爬）──
