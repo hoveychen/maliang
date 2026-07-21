@@ -100,6 +100,10 @@ static func describe_entity(kind: String, id: String, label: String, viewport: S
 ## 世界被遮罩/舞台占用时，交互类动作 enabled=false, reason_disabled="blocked_by_overlay"/"stage_active"。
 static func build_actions(facts: Dictionary) -> Array:
 	var out: Array = []
+	# 世界级全局动作(说话/确认/手机)只在世界里才有意义——menu/onboarding/标题页不该冒出来
+	# (老板在 menu 面板看到 say/confirm/phone 6 个动作即此 bug)。in_world 由 _gather_facts 按宿主是否 world 判。
+	if not bool(facts.get("in_world", false)):
+		return out
 	var blocked := bool(facts.get("play_blocked", false))
 	var staged := bool(facts.get("stage_active", false))
 	var block_reason := "blocked_by_overlay" if blocked else ("stage_active" if staged else "")
