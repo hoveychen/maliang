@@ -677,6 +677,7 @@ func _snapshot() -> Dictionary:
 		var stg: Variant = w.get("_stage_active")
 		snap["stage_active"] = bool(stg) if stg != null else false
 		# intro/loading 与回家过场的输入门（与 _act_gate 同源）——统一门的可观察位。
+		snap["bootstrapping"] = _truthy(w.get("_bootstrapping"))
 		snap["bench_freeze"] = _truthy(w.get("_bench_freeze"))
 		snap["homing"] = _truthy(w.get("_homing"))
 		var _g := _act_gate()
@@ -1385,6 +1386,8 @@ func _act_gate() -> Dictionary:
 	var w := _host()
 	if w == null:
 		return {"gated": false, "reason": ""}
+	if _truthy(w.get("_bootstrapping")):
+		return {"gated": true, "reason": "loading_world"}   # 「连接精灵世界…」首屏加载页(Loading 盖住,world 未 ready)
 	if _truthy(w.get("_bench_freeze")):
 		return {"gated": true, "reason": "loading_intro"}
 	if _truthy(w.get("_homing")):
