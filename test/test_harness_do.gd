@@ -19,6 +19,12 @@ class TouchCollector extends Object:
 class StubChar3D extends Node3D:
 	var char_name := "猪小弟"
 
+## stub fsm inputs：_fsm_inputs().speaking() —— 真 utterance 播放位来源（§3.3）。
+class StubInputs extends RefCounted:
+	var sp := false
+	func speaking() -> bool:
+		return sp
+
 ## stub 宿主 world：提供 _collect_entities / _snapshot / _gather_facts 读的字段 + talk handler 记录。
 class StubWorld extends Node:
 	var npcs: Array = []
@@ -37,8 +43,11 @@ class StubWorld extends Node:
 	var _play_blocked := false
 	var _stage_active := false
 	var talk_npc_calls: Array = []
+	var _speaking := false
 	func _fsm_state() -> InteractionFsm.State:
 		return InteractionFsm.State.LISTENING
+	func _fsm_inputs() -> StubInputs:
+		var i := StubInputs.new(); i.sp = _speaking; return i
 	func harness_talk_npc(who := "") -> bool:
 		talk_npc_calls.append(who)
 		return true
@@ -144,6 +153,37 @@ func _run_once() -> void:
 	stub.selected = npc
 	server._step_act_wait(0.1)
 	fails += _check("selected 后落定清空", server._act_wait.is_empty(), true)
+
+	print("[strict click：多命中不静默点首个，报 ambiguous（对齐 Playwright §3.2）]")
+	var btn_dup := Button.new()
+	btn_dup.text = "确认"                       # 与前面的 btn 同文字 → 2 命中
+	btn_dup.position = Vector2(500, 50); btn_dup.size = Vector2(80, 40)
+	get_root().add_child(btn_dup)
+	var amb: Dictionary = server._do_click_ui("", "确认")
+	fails += _check("多命中 ok=false", amb.get("ok"), false)
+	fails += _check("多命中 matches>=2", int(amb.get("matches", 0)) >= 2, true)
+	fails += _check("错误含 ambiguous", String(amb.get("error", "")).contains("ambiguous"), true)
+	# 单命中仍正常（唯一文字）
+	var uniq: Dictionary = server._do_click_ui("", "三角屋顶")  # 只有 icard 的 tooltip 匹配? 不——tooltip 非 text
+	# icard.text 为空,fuzzy 用 e.text；icard 的 describe text 回退到 tooltip「三角屋顶」→ 唯一命中
+	fails += _check("单命中放行(ok 或 not-visible 皆非 ambiguous)", String(uniq.get("error", "")).contains("ambiguous"), false)
+
+	print("[settle 超时诊断：带 settle_reason 说明为什么没落定（对齐 Playwright §3.5）]")
+	var base2 := {"ok": true, "op": "do", "action": "talk:npc:ghost"}
+	stub.selected = null
+	server._act_wait = {"predicate": "talk", "base": base2, "elapsed": 9.0, "deadline": 8.0}
+	server._step_act_wait(0.1)                  # elapsed→9.1 ≥ 8.0 → 超时
+	fails += _check("超时 settled=false", base2.get("settled"), false)
+	fails += _check("超时带 settle_reason", base2.has("settle_reason"), true)
+	fails += _check("settle_reason 谓词=talk", (base2.get("settle_reason") as Dictionary).get("predicate"), "talk")
+	fails += _check("settle_reason 有 note", (base2.get("settle_reason") as Dictionary).has("note"), true)
+	fails += _check("settle_reason 记 waited_sec", (base2.get("settle_reason") as Dictionary).has("waited_sec"), true)
+
+	print("[真 speaking 位：快照反映 _fsm_inputs().speaking()（对齐 Playwright §3.3）]")
+	stub._speaking = true
+	fails += _check("说话中 speaking=true", server._snapshot().get("speaking"), true)
+	stub._speaking = false
+	fails += _check("说完 speaking=false", server._snapshot().get("speaking"), false)
 
 	if fails == 0:
 		print("[PASS] test_harness_do")

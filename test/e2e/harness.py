@@ -175,7 +175,10 @@ class Harness:
     def talk_npc(self):
         return self.send({"op": "talk_npc"})
 
-    # ── 触屏/手势（手势完成才回包：读超时按手势时长放宽）──
+    # ── 触屏/手势（LEGACY 盲坐标层，对齐 Playwright §3.1）──
+    # ⚠️ 盲坐标 tap/drag/swipe/long_press/pinch 全部【跳过 actionability】(不查可见/遮挡/enabled)，
+    #    打不中会被当点地面把玩家支使走。**新脚本走 access→actions→do()**：按 id 寻址、真输入执行、
+    #    落定才回包。这些保留只为极少数没有可寻址元素的场景（纯坐标手势）与 back-compat。
     def tap(self, x, y):
         return self.send({"op": "tap", "x": x, "y": y})
 
@@ -197,6 +200,8 @@ class Harness:
 
     # ── 语义动作 ──
     def click_ui(self, text=None, path=None):
+        """LEGACY（§3.1/§3.2）：BaseButton 命中走 pressed.emit() 会【穿透遮罩】（假绿灯老坑），
+        且 text 多命中现在报 ambiguous（strict）。**新脚本用 do('press:btn:<path>')**（真触屏、遮罩正确吞）。"""
         cmd = {"op": "click_ui"}
         if text:
             cmd["text"] = text
@@ -214,6 +219,8 @@ class Harness:
         return self.send({"op": "pickup", "tileX": tile_x, "tileY": tile_y, "edgeSide": edge_side})
 
     def teleport(self, tile_x=None, tile_y=None, near=False):
+        """⚠️ DEBUG-ONLY 瞬移（§3.6）：**会污染 e2e 有效性**——瞬移作弊替代真走路，本该验证「孩子真的走到了」
+        却跳过寻路/引路。仅供摄影找机位/测试 setup。常规导航用 do('walk:poi:…')/do('enter_portal:…')（真走）。"""
         cmd = {"op": "teleport", "near": near}
         if tile_x is not None:
             cmd.update({"tileX": tile_x, "tileY": tile_y})
@@ -360,13 +367,21 @@ class Harness:
             time.sleep(1.0)
         return last
 
+    def wait_speaking_done(self, timeout=40.0, poll=0.5):
+        """等对方 utterance 真正播完（对齐 Playwright §3.3）：键真实 `speaking` 位（角色 TTS/仙子语音的
+        播放态），而非 banner 连续 N 秒不变的墙钟猜。老构建无 speaking 位时回退 wait_banner_stable。"""
+        first = self._state_soft()
+        if "speaking" not in first:
+            return self.wait_banner_stable(timeout=timeout)  # 老服务端：无真位，回退墙钟
+        return self.wait_until(lambda s: not s.get("speaking"), "对方说完(speaking=false)", timeout, poll)
+
     def say_when_open(self, text, tries=8):
-        """门禁开着才真喂（对方说完）。关着就等 banner 稳再试。返回是否喂进去。"""
+        """门禁开着才真喂（对方说完）。关着就等对方说完再试。返回是否喂进去。"""
         for _ in range(tries):
             r = self.say(text)
             if r.get("fed"):
                 return True
-            self.wait_banner_stable(secs=3.0, timeout=12.0)
+            self.wait_speaking_done(timeout=12.0)  # 真 speaking 位（无位则内部回退墙钟）
         return False
 
 

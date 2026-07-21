@@ -117,6 +117,8 @@ def main():
     p = sub.add_parser("wait-banner")
     p.add_argument("--secs", type=float, default=4.0)
     p.add_argument("--timeout", type=float, default=40.0, dest="wtimeout")
+    p = sub.add_parser("wait-speaking")  # 等对方说完(真 speaking 位,替 wait-banner 墙钟)
+    p.add_argument("--timeout", type=float, default=40.0, dest="wtimeout")
 
     args = ap.parse_args()
     h = Harness(args.host, args.port, timeout=args.timeout)
@@ -193,6 +195,9 @@ def main():
         if c == "wait-banner":
             b = h.wait_banner_stable(secs=args.secs, timeout=args.wtimeout)
             return out({"ok": True, "banner_text": b})
+        if c == "wait-speaking":
+            s = h.wait_speaking_done(timeout=args.wtimeout)
+            return out({"ok": True, "speaking": (s or {}).get("speaking", False)})
         if c == "talk-npc":
             msg = {"op": "talk_npc"}
             if args.name:

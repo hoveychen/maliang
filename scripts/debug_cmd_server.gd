@@ -602,6 +602,13 @@ func _snapshot() -> Dictionary:
 			var fs: int = int(w.call("_fsm_state"))
 			snap["fsm_state"] = InteractionFsm.name_of(fs)
 			snap["mic_open"] = InteractionFsm.mic_open(fs)
+		# 真 utterance 播放位（对齐 Playwright §3.3）：来自 _fsm_inputs().speaking()——角色 TTS(_tts_player.playing
+		# /_tts_pending) 或仙子预制语音(fairy_voice.is_playing()) 的真实播放态。驱动方等「对方说完」应键此位
+		# （wait_speaking_done），而非拿 banner 连续 N 秒不变的墙钟猜（慢 TTS 假阳、暂停假阴）。
+		if w.has_method("_fsm_inputs"):
+			var inp: Variant = w.call("_fsm_inputs")
+			if inp != null and inp is Object and (inp as Object).has_method("speaking"):
+				snap["speaking"] = bool(inp.call("speaking"))
 		# 玩家空间基准（逻辑坐标 + tile）：AI 决策移动/靠近全靠它。
 		var player: Variant = w.get("player")
 		if typeof(player) == TYPE_DICTIONARY and typeof((player as Dictionary).get("logical")) == TYPE_VECTOR2:
@@ -780,6 +787,14 @@ func _do_click_ui(path: String, text: String) -> Dictionary:
 		if hits.is_empty():
 			return {"ok": false, "error": "no clickable with text: %s" % text}
 		matches = hits.size()
+		# strict 模式（对齐 Playwright，vs-playwright §3.2）：多命中不静默点第一个，报 ambiguous 逼调用方
+		# 用 path 消歧——否则 UI 一变就悄悄点错元素造假绿灯（Selenium 老坑）。
+		if matches > 1:
+			var cands := PackedStringArray()
+			for h in hits:
+				cands.append("%s[%s]" % [String((h as Dictionary).get("path", "")), String((h as Dictionary).get("text", ""))])
+			return {"ok": false, "op": "click_ui", "error": "ambiguous: %d 个元素命中文字「%s」，请改用 --path 消歧" % [matches, text],
+				"matches": matches, "candidates": cands}
 		target = tree.root.get_node_or_null(
 			NodePath(String((hits[0] as Dictionary)["path"]))) as Control
 		if target == null:
@@ -1192,29 +1207,51 @@ func _do_do(action_id: String, args: Dictionary) -> Dictionary:
 func _step_act_wait(delta: float) -> void:
 	_act_wait["elapsed"] = float(_act_wait["elapsed"]) + delta
 	var w := _host()
+	var pred := String(_act_wait["predicate"])
 	var done := false
-	match String(_act_wait["predicate"]):
+	# detail：谓词当下的读数——超时时随回包报出「为什么没落定」（对齐 Playwright 的 actionability 诊断，§3.5）。
+	var detail := {"predicate": pred}
+	match pred:
 		"talk":
 			done = w != null and w.get("selected") != null
+			detail["selected"] = String(w.get("selected").get("char_name")) if done else ""
+			detail["note"] = "已进对话" if done else "还没进对话（selected 仍空——走过去没到/没点中）"
 		"scene":
 			var sid := String(w.get("_scene_id")) if w != null and w.get("_scene_id") != null else ""
 			done = sid != String(_act_wait["start_scene"])
+			detail["scene_id"] = sid
+			detail["start_scene"] = String(_act_wait["start_scene"])
+			detail["note"] = "已换场景" if done else "场景没变（没走进传送门半径/传送未触发）"
 		"arrive":
-			done = _player_arrived(_act_wait["target_pos"] as Vector2)
+			var tgt := _act_wait["target_pos"] as Vector2
+			done = _player_arrived(tgt)
+			var pl: Variant = w.get("player") if w != null else null
+			if typeof(pl) == TYPE_DICTIONARY and (pl as Dictionary).has("logical"):
+				var d := WorldGrid.shortest_delta((pl as Dictionary)["logical"] as Vector2, tgt).length()
+				detail["dist_to_target"] = snappedf(d, 0.1)
+			detail["note"] = "已到达" if done else "还没走到（寻路被挡/路太远/被打断）"
 		"phone":
 			done = not _phone_settling()
+			detail["note"] = "手机动画已停" if done else "手机开合/翻页动画还在播"
 		"creation":
 			var in_creation := bool(w.get("_in_creation")) if w != null and w.get("_in_creation") != null else false
 			done = _creation_q_text() != String(_act_wait["start_q"]) \
 				or _bag_size() > int(_act_wait["start_bag"]) or not in_creation
+			detail["note"] = "造物已推进" if done else "造物没推进（问句/背包未变、仍在造物态——卡没点中或服务端未回）"
 		"gesture_then":
 			if not _gesture.is_empty():
 				return  # 长按手势还在跑（silent，不自回包）
 			done = true  # 手势发出即算落定（拾取服务端结果异步，本地只确认手势完成）
+			detail["note"] = "长按手势已发出"
 	if not done and float(_act_wait["elapsed"]) < float(_act_wait["deadline"]):
 		return
 	var base: Dictionary = _act_wait["base"]
 	base["settled"] = done
+	if not done:
+		# 超时未落定：带上诊断，别只回一个孤零零的 settled=false。
+		detail["waited_sec"] = snappedf(float(_act_wait["elapsed"]), 0.1)
+		detail["deadline_sec"] = float(_act_wait["deadline"])
+		base["settle_reason"] = detail
 	_act_wait = {}
 	_reply(_do_reply_payload(base))
 
