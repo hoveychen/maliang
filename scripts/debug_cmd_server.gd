@@ -22,6 +22,7 @@ extends Node
 
 const PORT := 8577                 ## 与 [vad] logcat / perf_sweep 同级的 debug-only 口子
 const MIC_RATE := 16000            ## 合成 PCM 采样率（对齐 VoiceCapture.MIC_RATE / MicRecorder 出的 16k）
+const PICK_RADIUS_PX := 80.0       ## 实体投影屏幕矩形半边距（对齐 world.gd 的 _pick_npc 命中半径）
 
 var _world: Node = null            ## 宿主 world（懒查 _vc / 状态字段，避开 _ready 里的建节点顺序）
 var _server: TCPServer = null
@@ -137,6 +138,13 @@ static func parse_command(line: String) -> Dictionary:
 		"ui":
 			# UI 可点元素枚举（AI 感知）：texts=true 时连可见 Label 文本一起导出（读屏用）。
 			return {"ok": true, "op": "ui", "texts": bool(dict.get("texts", false))}
+		"access":
+			# 无障碍模型（harness 重写 P1）：统一 2D 控件 + 3D 实体为带 id/actions 的元素列表。
+			# texts=true 附带可读 Label（同 ui）。执行由 do op 负责（P2）。
+			return {"ok": true, "op": "access", "texts": bool(dict.get("texts", false))}
+		"actions":
+			# 当前状态下所有可用动作的扁平列表（含 element-targeted 与全局），供驱动方按 id 挑选。
+			return {"ok": true, "op": "actions"}
 		"click_ui":
 			# 语义点击：按节点 path 或可见文字找控件（Button 直发 pressed；SubViewport 内也可达）。
 			var cpath := String(dict.get("path", ""))
@@ -300,6 +308,10 @@ func _execute(cmd: Dictionary) -> Dictionary:
 			return _snapshot()
 		"ui":
 			return _do_ui(bool(cmd.get("texts", false)))
+		"access":
+			return _do_access(bool(cmd.get("texts", false)))
+		"actions":
+			return _do_actions()
 		"click_ui":
 			return _do_click_ui(String(cmd["path"]), String(cmd["text"]))
 		"phone":
@@ -776,6 +788,226 @@ func _do_click_ui(path: String, text: String) -> Dictionary:
 			target.gui_input.emit(ev)
 	res["method"] = "gui_input"
 	return res
+
+# ── 无障碍模型（harness 重写 P1）─────────────────────────────────────────────
+## 快照修订号：每次 access/actions 递增，供 SDK 侧检测基线是否重建（重连后 rev 回退 → 关 delta）。
+var _rev := 0
+func _bump_rev() -> int:
+	_rev += 1
+	return _rev
+
+## 廉价状态指纹：整份快照的 hash（scalar 为主）。SDK 用来判两次观察间状态有没有变。
+func _state_hash() -> int:
+	return hash(_snapshot())
+
+## logical 坐标 → {x,y} tile（供元素 world 字段）；非 Vector2 返 null。
+func _tile_of(logical: Variant) -> Variant:
+	if typeof(logical) == TYPE_VECTOR2:
+		var t := WorldGrid.to_tile(logical as Vector2)
+		return {"x": t.x, "y": t.y}
+	return null
+
+## 3D 世界点 → 屏幕投影（与 _pick_npc 同一套 unproject 判定，不重造矩阵数学）。
+## 返回 {on_screen, center}：相机背后 / 出视口 → on_screen=false。
+func _project_entity(camera: Camera3D, world_pos: Vector3, y_off: float) -> Dictionary:
+	if camera == null:
+		return {"on_screen": false, "center": Vector2.ZERO}
+	var wp := world_pos + Vector3(0.0, y_off, 0.0)
+	if camera.is_position_behind(wp):
+		return {"on_screen": false, "center": Vector2.ZERO}
+	var sp := camera.unproject_position(wp)
+	var vp := camera.get_viewport()
+	var on := vp != null and vp.get_visible_rect().has_point(sp)
+	return {"on_screen": on, "center": sp}
+
+## 2D 控件条目（_collect_ui 产物）→ 同构元素记录（button/tap_area 挂 press 动作）。
+func _control_to_element(e: Dictionary) -> Dictionary:
+	var kind := String(e.get("kind", ""))
+	var path := String(e.get("path", ""))
+	var vp := String(e.get("viewport", "root"))
+	var label := String(e.get("text", ""))
+	var rect: Variant = e.get("rect")
+	var acts := []
+	if kind == "button" or kind == "tap_area":
+		var disabled := bool(e.get("disabled", false))
+		acts.append(HarnessAccess.action("press", "btn:" + path, label,
+			not disabled, "disabled" if disabled else "", true, vp, rect))
+	return HarnessAccess.describe_entity(kind, "ui:" + path, label, vp, true, rect, null, acts)
+
+## 遍历 3D 实体（npcs/仙子/远端玩家/玩家/POI/portal/动态道具）→ 元素记录 append 进 out。
+## 碰实时树/相机（不可纯）：投影经 _project_entity，动作可用性按世界门禁（遮罩/舞台）判定。
+func _collect_entities(out: Array) -> void:
+	var w := _host()
+	if w == null:
+		return
+	var camera: Camera3D = w.get("camera") as Camera3D
+	var blocked_overlay := bool(w.get("_play_blocked")) if w.get("_play_blocked") != null else false
+	var staged := bool(w.get("_stage_active")) if w.get("_stage_active") != null else false
+	var blocked := blocked_overlay or staged
+	var block_reason := "blocked_by_overlay" if blocked_overlay else ("stage_active" if staged else "")
+
+	# NPC + 仙子（同一 npcs 数组，is_fairy 区分）。tap 头顶（+1.6）投影，同 _pick_npc。
+	var npcs: Variant = w.get("npcs")
+	if typeof(npcs) == TYPE_ARRAY:
+		for n in (npcs as Array):
+			var nd := n as Dictionary
+			var node: Variant = nd.get("node")
+			if not is_instance_valid(node):
+				continue
+			var is_fairy := bool(nd.get("is_fairy", false))
+			var kind := "fairy" if is_fairy else "npc"
+			var eid := HarnessAccess.entity_id(kind, String(nd.get("id", "")))
+			var proj := _project_entity(camera, (node as Node3D).global_position, 1.6)
+			var on := bool(proj["on_screen"])
+			var rect: Variant = HarnessAccess.screen_rect(proj["center"] as Vector2, PICK_RADIUS_PX) if on else null
+			var cn: Variant = (node as Object).get("char_name")
+			var nm := String(cn) if cn != null else String(nd.get("id", ""))
+			var acts := [HarnessAccess.action("talk", eid, "去找%s说话" % nm,
+				not blocked, block_reason, on, "root", rect)]
+			out.append(HarnessAccess.describe_entity(kind, eid, nm, "root", on, rect,
+				{"tile": _tile_of(nd.get("logical"))}, acts))
+
+	# 远端玩家副本：tap → 靠近喊话。
+	var remotes: Variant = w.get("_remote_actors")
+	if typeof(remotes) == TYPE_DICTIONARY:
+		for rid in (remotes as Dictionary):
+			var ra := (remotes as Dictionary)[rid] as Dictionary
+			var rnode: Variant = ra.get("node")
+			if not is_instance_valid(rnode):
+				continue
+			var eid2 := HarnessAccess.entity_id("remote", String(rid))
+			var proj2 := _project_entity(camera, (rnode as Node3D).global_position, 1.6)
+			var on2 := bool(proj2["on_screen"])
+			var rect2: Variant = HarnessAccess.screen_rect(proj2["center"] as Vector2, PICK_RADIUS_PX) if on2 else null
+			var acts2 := [HarnessAccess.action("talk", eid2, "去找小朋友喊话",
+				not blocked, block_reason, on2, "root", rect2)]
+			out.append(HarnessAccess.describe_entity("remote", eid2, String(rid), "root", on2, rect2,
+				{"tile": _tile_of(ra.get("logical"))}, acts2))
+
+	# 玩家自己：tap 自己 = 找点点说话。
+	var player: Variant = w.get("player")
+	if typeof(player) == TYPE_DICTIONARY and is_instance_valid((player as Dictionary).get("node")):
+		var pnode := (player as Dictionary)["node"] as Node3D
+		var pproj := _project_entity(camera, pnode.global_position, 1.6)
+		var pon := bool(pproj["on_screen"])
+		var prect: Variant = HarnessAccess.screen_rect(pproj["center"] as Vector2, PICK_RADIUS_PX) if pon else null
+		var pacts := [HarnessAccess.action("talk", "player", "找点点说话",
+			not blocked, block_reason, pon, "root", prect)]
+		out.append(HarnessAccess.describe_entity("player", "player", "我", "root", pon, prect,
+			{"tile": _tile_of((player as Dictionary).get("logical"))}, pacts))
+
+	# POI（区域，无节点）：走过去（walk）。不需 screen_rect——靠走近触发 _check_poi。
+	var pois: Variant = w.get("pois")
+	if typeof(pois) == TYPE_ARRAY:
+		for p in (pois as Array):
+			var pd := p as Dictionary
+			var trig := String(pd.get("trigger", ""))
+			var eid3 := HarnessAccess.entity_id("poi", trig)
+			var nm3 := String(pd.get("name", trig))
+			var t3: Variant = pd.get("tile")
+			var tile3: Variant = {"x": (t3 as Vector2i).x, "y": (t3 as Vector2i).y} if typeof(t3) == TYPE_VECTOR2I else null
+			var acts3 := [HarnessAccess.action("walk", eid3, "走到%s" % nm3,
+				not blocked, block_reason, false, "root", null)]
+			out.append(HarnessAccess.describe_entity("poi", eid3, nm3, "root", false, null,
+				{"tile": tile3}, acts3))
+
+	# Portal：走进半径触发跨场景。
+	var portals: Variant = w.get("_portals")
+	if typeof(portals) == TYPE_ARRAY:
+		for pt in (portals as Array):
+			var ptd := pt as Dictionary
+			var to_scene := String(ptd.get("to_scene", ""))
+			var ptile: Variant = ptd.get("tile")
+			if typeof(ptile) != TYPE_VECTOR2I:
+				continue
+			var raw4 := "%s@%s" % [to_scene, HarnessAccess.tile_key(ptile as Vector2i)]
+			var eid4 := HarnessAccess.entity_id("portal", raw4)
+			var acts4 := [HarnessAccess.action("enter_portal", eid4, "去%s" % to_scene,
+				not blocked, block_reason, false, "root", null)]
+			out.append(HarnessAccess.describe_entity("portal", eid4, to_scene, "root", false, null,
+				{"tile": {"x": (ptile as Vector2i).x, "y": (ptile as Vector2i).y}}, acts4))
+
+	# 动态道具（造物）：长按拾取（+0.7 投影，同 _placeholder_screen_pos）。
+	var cm: Variant = w.get("chunk_manager")
+	if cm != null and is_instance_valid(cm):
+		var dyn: Variant = (cm as Object).get("_dynamic_props")
+		if typeof(dyn) == TYPE_ARRAY:
+			for dp in (dyn as Array):
+				var dpd := dp as Dictionary
+				var dnode: Variant = dpd.get("node")
+				var dtile: Variant = dpd.get("tile")
+				if typeof(dtile) != TYPE_VECTOR2I:
+					continue
+				var eid5 := HarnessAccess.entity_id("prop", HarnessAccess.tile_key(dtile as Vector2i))
+				var don := false
+				var drect: Variant = null
+				if is_instance_valid(dnode):
+					var dproj := _project_entity(camera, (dnode as Node3D).global_position, 0.7)
+					don = bool(dproj["on_screen"])
+					drect = HarnessAccess.screen_rect(dproj["center"] as Vector2, PICK_RADIUS_PX) if don else null
+				var acts5 := [HarnessAccess.action("pickup", eid5, "捡起 %s" % String(dpd.get("id", "")),
+					not blocked, block_reason, don, "root", drect)]
+				out.append(HarnessAccess.describe_entity("prop", eid5, String(dpd.get("id", "")), "root", don, drect,
+					{"tile": {"x": (dtile as Vector2i).x, "y": (dtile as Vector2i).y}}, acts5))
+
+## access：统一元素列表（3D 实体 + 2D 控件），每个带稳定 id + element-targeted 动作。
+func _do_access(with_texts: bool) -> Dictionary:
+	var tree := get_tree()
+	if tree == null or tree.root == null:
+		return {"ok": false, "error": "no scene tree"}
+	var out := []
+	_collect_entities(out)
+	var ui_els := []
+	_collect_ui(tree.root, "root", with_texts, ui_els)
+	for e in ui_els:
+		out.append(_control_to_element(e as Dictionary))
+	return {"ok": true, "op": "access", "elements": out, "rev": _bump_rev(), "state_hash": _state_hash()}
+
+## actions：当前可用动作扁平列表（全局 + 各元素 element-targeted，按 action_id 去重）。
+func _do_actions() -> Dictionary:
+	var out := HarnessAccess.build_actions(_gather_facts())
+	var els := []
+	_collect_entities(els)
+	var tree := get_tree()
+	if tree != null and tree.root != null:
+		var ui_els := []
+		_collect_ui(tree.root, "root", false, ui_els)
+		for e in ui_els:
+			els.append(_control_to_element(e as Dictionary))
+	var seen := {}
+	for el in els:
+		for a in (el as Dictionary).get("actions", []):
+			var aid := String((a as Dictionary).get("action_id", ""))
+			if aid.is_empty() or seen.has(aid):
+				continue
+			seen[aid] = true
+			out.append(a)
+	return {"ok": true, "op": "actions", "actions": out, "rev": _bump_rev(), "state_hash": _state_hash()}
+
+## build_actions 用的扁平状态事实（供无障碍动作可用性判定）。
+func _gather_facts() -> Dictionary:
+	var f := {}
+	var w := _host()
+	var vc := _vc()
+	if w != null:
+		if w.has_method("_fsm_state"):
+			f["mic_open"] = InteractionFsm.mic_open(int(w.call("_fsm_state")))
+		f["in_creation"] = bool(w.get("_in_creation")) if w.get("_in_creation") != null else false
+		var opts: Variant = w.get("_creation_options")
+		var fo := []
+		if typeof(opts) == TYPE_ARRAY:
+			for o in (opts as Array):
+				if typeof(o) == TYPE_DICTIONARY:
+					fo.append({"id": String((o as Dictionary).get("id", "")),
+						"label": String((o as Dictionary).get("label", ""))})
+		f["creation_options"] = fo
+		var pcam: Variant = w.get("_phone_cam")
+		f["phone_open"] = bool(pcam) if pcam != null else false
+		f["play_blocked"] = bool(w.get("_play_blocked")) if w.get("_play_blocked") != null else false
+		f["stage_active"] = bool(w.get("_stage_active")) if w.get("_stage_active") != null else false
+	if vc != null:
+		f["vc_confirming"] = vc.is_confirming()
+	return f
 
 ## phone：手机开/关/开 app——透传宿主 harness_phone（world 才有；别处如实报错）。
 func _do_phone(action: String, app_id: String) -> Dictionary:
