@@ -105,6 +105,32 @@ func _init() -> void:
 			if TerrainMap.tile_item_id(Vector2i(x, y)) == "windmill":
 				vf_mills += 1
 	fails += _check("village_forest 村庄核心恰一座大风车", vf_mills, 1)
+
+	# ── oz（绿野仙踪，75 格）：翡翠城高台 + 路中缓丘。刻意平的两处仍平，
+	#    高台顶到位，且全场相邻非水 tile 高差 ≤1（无陡崖空气墙 → 黄砖路逐级可爬）──
+	WorldGrid.configure(75)
+	TerrainMap.reset()
+	var oz: Dictionary = TerrainMap.load_from_bytes(EX.build_terrain_bytes("oz"))
+	fails += _check("oz 载入 ok", oz["ok"], true)
+	fails += _check("oz 入口广场(14,14)留平 h0", TerrainMap.tile_height(Vector2i(14, 14)), 0)
+	fails += _check("oz 玉米地(36,34)留平 h0", TerrainMap.tile_height(Vector2i(36, 34)), 0)
+	fails += _check("oz 翡翠城堡(58,50)在高台顶 h3", TerrainMap.tile_height(Vector2i(58, 50)), 3)
+	fails += _check("oz 铁皮人(56,54)在高台顶 h3", TerrainMap.tile_height(Vector2i(56, 54)), 3)
+	fails += _check("oz 路中缓丘顶(44,42) h2", TerrainMap.tile_height(Vector2i(44, 42)), 2)
+	# 全场可爬性：任意 4-相邻的非水 tile 高差必须 ≤1（step_allowed 上限），oz 无意为之的陡崖
+	var oz_cliff := 0
+	for y in range(75):
+		for x in range(75):
+			var h0 := TerrainMap.tile_height(Vector2i(x, y))
+			if TerrainMap.tile_type(Vector2i(x, y)) == TerrainMap.T_WATER:
+				continue
+			if x + 1 < 75 and TerrainMap.tile_type(Vector2i(x + 1, y)) != TerrainMap.T_WATER:
+				if absi(h0 - TerrainMap.tile_height(Vector2i(x + 1, y))) > 1:
+					oz_cliff += 1
+			if y + 1 < 75 and TerrainMap.tile_type(Vector2i(x, y + 1)) != TerrainMap.T_WATER:
+				if absi(h0 - TerrainMap.tile_height(Vector2i(x, y + 1))) > 1:
+					oz_cliff += 1
+	fails += _check("oz 全场相邻高差 ≤1（无陡崖空气墙，黄砖路逐级可爬）", oz_cliff, 0)
 	WorldGrid.configure(n) # 复位回默认，免影响后续
 
 	TerrainMap.reset()
