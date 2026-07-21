@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildServer } from '../src/server.ts';
-import { WorldStore } from '../src/persistence.ts';
+import { WorldStore, TEMPLATE_WORLD_ID } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import { emptyTerrain, encodeTerrain, REQUIRED_GRID, T_WATER, type Terrain } from '../src/terrain.ts';
 import { DEFAULT_SCENE } from '../src/types.ts';
@@ -203,15 +203,26 @@ test('rowToScene：老场景（未写 homes）读回为空数组，不为 undefi
   assert.deepEqual(s.getScene('w1', DEFAULT_SCENE)?.homes, []);
 });
 
-test('cloneWorldInstances：scene.homes 随模板克隆到新世界', () => {
+test('P2 base+overlay：克隆后 homes 读时取自 template base；作者改 template 存量世界即刻反映', () => {
   const s = new WorldStore();
-  s.createWorld('tpl');
-  s.upsertScene({
-    worldId: 'tpl', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h', gridTiles: REQUIRED_GRID, terrainVersion: 1,
-    pois: [], portals: [], homes: [{ tile: [10, 12], characterId: 'bear' }],
-  });
-  s.cloneWorldInstances('tpl', 'kid');
+  s.createWorld(TEMPLATE_WORLD_ID);
+  const author = (homes: { tile: [number, number]; characterId: string }[]) =>
+    s.upsertScene({
+      worldId: TEMPLATE_WORLD_ID, sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h', gridTiles: REQUIRED_GRID, terrainVersion: 1,
+      pois: [], portals: [], homes,
+    });
+  author([{ tile: [10, 12], characterId: 'bear' }]);
+  s.cloneWorldInstances(TEMPLATE_WORLD_ID, 'kid');
+  // 克隆后玩家世界读到 base 的 homes（世界行本身不各存副本，读走 template base）
   assert.deepEqual(s.getScene('kid', DEFAULT_SCENE)?.homes, [{ tile: [10, 12], characterId: 'bear' }]);
+
+  // 核心收益：作者改 template 的 homes → 不重新克隆/POST kid → getScene(kid) 即刻反映新值
+  author([{ tile: [10, 12], characterId: 'bear' }, { tile: [30, 30], characterId: 'wolf' }]);
+  assert.deepEqual(
+    s.getScene('kid', DEFAULT_SCENE)?.homes,
+    [{ tile: [10, 12], characterId: 'bear' }, { tile: [30, 30], characterId: 'wolf' }],
+    'base+overlay 传播：template homes 一改，存量世界读时自动重算',
+  );
 });
 
 test('POST /admin/scenes：homes 入库并原样落 scene', async (t) => {

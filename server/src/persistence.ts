@@ -8,7 +8,8 @@ import { coerceRelationship, deriveFamiliarity } from './social.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
 import { creationItemDef, getBuiltinItem } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
-import { decodeTerrain, encodeTerrain } from './terrain.ts';
+import { decodeTerrain, encodeTerrain, type Terrain } from './terrain.ts';
+import { composeTerrain, diffTerrain, deserializeOverlay, serializeOverlay } from './terrain_overlay.ts';
 import type { ClipName, ImageBlob } from './adapters/types.ts';
 import type { SpriteSheetMeta } from './sprite_sheet.ts';
 import { sanitizeLevels, type DeviceSample, type Levels } from './device_profile.ts';
@@ -269,10 +270,27 @@ interface SceneRow {
   portals: string;
   homes: string;
   terrain_version: number;
+  /** base+overlay P3：孩子编辑计数（对外 terrainVersion = baseTerrainVersion + 此值，overlay 世界）。 */
+  overlay_edit_count: number;
+  /** 1=该场景是 overlay 模式（terrain_overlay 非 NULL）；0=全量 blob 老式。避免把 overlay JSON 拉进元数据。 */
+  has_overlay: number;
 }
 
-/** getScene/listScenes 的列清单：刻意不含 terrain blob（50KB，别随场景元数据白拉）。 */
-const SCENE_COLS = 'world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, homes, terrain_version';
+/** template 该场景的 base 元数据（作者字段 + 地形 base 版本）。overlay 世界的这些字段读时取自它。 */
+interface SceneBaseMeta {
+  pois: string;
+  portals: string;
+  homes: string;
+  terrain_version: number;
+}
+
+/**
+ * getScene/listScenes 的列清单：刻意不含 terrain blob 与 terrain_overlay JSON（都可能大，别随场景元数据白拉）。
+ * 只取 overlay_edit_count（小 int）与 has_overlay 标志（terrain_overlay 是否非空）供 P3 版本合成。
+ */
+const SCENE_COLS =
+  'world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, homes, terrain_version, ' +
+  'overlay_edit_count, (terrain_overlay IS NOT NULL) AS has_overlay';
 
 export interface World {
   id: string;
@@ -352,7 +370,9 @@ export class WorldStore {
       this.#loadAssets();
       this.#loadSpriteAnims();
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
+      this.#migrateScenesDropAuthoredFields(); // base+overlay P2：清存量世界冗余的 pois/portals/homes 拷贝（读走 template base）
       this.#migratePropsToItems(); // 依赖场景矩阵已就位（placed 物件要写进矩阵）
+      this.#migrateScenesToOverlay(); // base+overlay P3：存量世界全量 blob → overlay（在 props 迁移之后，overlay 才含 placed 物件）
     }
   }
 
@@ -718,6 +738,10 @@ export class WorldStore {
         homes         TEXT NOT NULL DEFAULT '[]',
         terrain       BLOB,
         terrain_version INTEGER NOT NULL DEFAULT 0,
+        -- base+overlay P3：玩家世界只存相对 template base 的 tile-diff overlay(JSON,NULL=全量 blob 老式)；
+        -- overlay_edit_count 单调计孩子编辑次数,对外 terrainVersion = baseTerrainVersion + overlay_edit_count。
+        terrain_overlay TEXT,
+        overlay_edit_count INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (world_id, scene_id)
       );
     `);
@@ -726,6 +750,8 @@ export class WorldStore {
       'ALTER TABLE scenes ADD COLUMN terrain BLOB',
       "ALTER TABLE scenes ADD COLUMN terrain_version INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE scenes ADD COLUMN homes TEXT NOT NULL DEFAULT '[]'",
+      'ALTER TABLE scenes ADD COLUMN terrain_overlay TEXT',
+      'ALTER TABLE scenes ADD COLUMN overlay_edit_count INTEGER NOT NULL DEFAULT 0',
     ]) {
       try {
         this.#db.exec(ddl);
@@ -1129,15 +1155,24 @@ export class WorldStore {
         )
       : new Set<string>();
     const insert = this.#db.prepare(
-      'INSERT INTO scenes (world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, homes, terrain, terrain_version) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+      'INSERT INTO scenes (world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, homes, terrain, terrain_version, terrain_overlay, overlay_edit_count) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
         'ON CONFLICT(world_id, scene_id) DO UPDATE SET name = excluded.name, terrain_asset = excluded.terrain_asset, ' +
         'grid_tiles = excluded.grid_tiles, pois = excluded.pois, portals = excluded.portals, homes = excluded.homes, ' +
-        'terrain = excluded.terrain, terrain_version = excluded.terrain_version',
+        'terrain = excluded.terrain, terrain_version = excluded.terrain_version, ' +
+        'terrain_overlay = excluded.terrain_overlay, overlay_edit_count = excluded.overlay_edit_count',
     );
+    // base+overlay P2：非模板世界不再各存作者字段(pois/portals/homes)——读时从 template base 合成。
+    // P3：克隆到玩家/沙箱世界即 overlay 模式（空 overlay，读走 template base 地形）；terrain blob 仍拷一份
+    // 作惰性兜底（读走合成，不再从它取）。模板 dst（不会发生）保持全量 blob 老式（terrain_overlay=NULL）。
+    const toOverlay = dstWorldId !== TEMPLATE_WORLD_ID;
     for (const r of rows) {
       if (existing.has(r.scene_id)) continue; // additive：孩子已有的场景一律不覆盖
-      insert.run(dstWorldId, r.scene_id, r.name, r.terrain_asset, r.grid_tiles, r.pois, r.portals, r.homes, r.terrain, r.terrain_version);
+      const pois = toOverlay ? '[]' : r.pois;
+      const portals = toOverlay ? '[]' : r.portals;
+      const homes = toOverlay ? '[]' : r.homes;
+      const overlay = toOverlay ? serializeOverlay({ gridW: r.grid_tiles, gridH: r.grid_tiles, tiles: [] }) : null;
+      insert.run(dstWorldId, r.scene_id, r.name, r.terrain_asset, r.grid_tiles, pois, portals, homes, r.terrain, r.terrain_version, overlay, 0);
     }
   }
 
@@ -1524,30 +1559,62 @@ export class WorldStore {
       );
   }
 
-  #rowToScene(r: SceneRow): Scene {
+  /**
+   * SceneRow → Scene。作者字段(pois/portals/homes)可由 base 覆盖：base+overlay P2 里这三字段读时
+   * 一律取自 template base，世界行不再各存副本（见 #authoredBase / getScene / listScenes）。
+   * base 缺省=用 row 自己的值（template 世界本身即 base，或模板无此场景的兼容/边界回退）。
+   */
+  #rowToScene(r: SceneRow, base?: SceneBaseMeta): Scene {
+    const authored = base ?? r;
+    // base+overlay P3：overlay 世界对外 terrainVersion = base 场景的 terrain_version + 本世界孩子编辑计数。
+    // base 改（作者改地形）或孩子编辑都会让它变 → 客户端据此判缓存/重拉。老式全量 blob 世界仍用自己的版本。
+    const terrainVersion = base !== undefined && r.has_overlay ? base.terrain_version + r.overlay_edit_count : r.terrain_version;
     return {
       worldId: r.world_id,
       sceneId: r.scene_id,
       name: r.name,
       terrainAsset: r.terrain_asset,
       gridTiles: r.grid_tiles,
-      pois: JSON.parse(r.pois) as ScenePoi[],
-      portals: JSON.parse(r.portals) as ScenePortal[],
-      homes: JSON.parse(r.homes ?? '[]') as SceneHome[],
-      terrainVersion: r.terrain_version,
+      pois: JSON.parse(authored.pois) as ScenePoi[],
+      portals: JSON.parse(authored.portals) as ScenePortal[],
+      homes: JSON.parse(authored.homes ?? '[]') as SceneHome[],
+      terrainVersion,
     };
+  }
+
+  /**
+   * template 该场景的 base 元数据：作者字段(pois/portals/homes) + 地形 base 版本(terrain_version)。
+   * base+overlay 里这些都读自 template——作者改 template，存量世界下次读自动反映（传播天然成立，
+   * 无需逐个 POST，也不被重 seed 冲掉）。返回 undefined = 模板无此场景 → 调用方回退世界自己行。
+   */
+  #baseSceneMeta(sceneId: string): SceneBaseMeta | undefined {
+    return this.#db
+      .prepare('SELECT pois, portals, homes, terrain_version FROM scenes WHERE world_id = ? AND scene_id = ?')
+      .get(TEMPLATE_WORLD_ID, sceneId) as SceneBaseMeta | undefined;
   }
 
   getScene(worldId: string, sceneId: string): Scene | undefined {
     const row = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? AND scene_id = ?`).get(worldId, sceneId) as
       | SceneRow
       | undefined;
-    return row ? this.#rowToScene(row) : undefined;
+    if (!row) return undefined;
+    // template 世界本身即 base，用自己的行；其余世界作者字段 + 地形版本取自 template base。
+    const base = worldId === TEMPLATE_WORLD_ID ? undefined : this.#baseSceneMeta(sceneId);
+    return this.#rowToScene(row, base);
   }
 
   listScenes(worldId: string): Scene[] {
     const rows = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? ORDER BY scene_id`).all(worldId) as unknown as SceneRow[];
-    return rows.map((r) => this.#rowToScene(r));
+    if (worldId === TEMPLATE_WORLD_ID) return rows.map((r) => this.#rowToScene(r));
+    // 批量取 template base 元数据建映射（按 scene_id），避免逐场景 N+1 查询；缺失场景 base=undefined 回退自身行。
+    const bases = new Map(
+      (
+        this.#db.prepare('SELECT scene_id, pois, portals, homes, terrain_version FROM scenes WHERE world_id = ?').all(TEMPLATE_WORLD_ID) as unknown as (SceneBaseMeta & {
+          scene_id: string;
+        })[]
+      ).map((b) => [b.scene_id, b] as const),
+    );
+    return rows.map((r) => this.#rowToScene(r, bases.get(r.scene_id)));
   }
 
   /**
@@ -1571,21 +1638,127 @@ export class WorldStore {
     }
   }
 
-  /** 场景地形矩阵（v2 blob）与版本。场景未入库/无地形 → undefined。 */
-  getSceneTerrain(worldId: string, sceneId: string): { bytes: Uint8Array; version: number } | undefined {
+  /**
+   * base+overlay P2 迁移：存量世界的 pois/portals/homes 是快照拷贝——读路径已改为一律取自 template
+   * base（见 getScene/listScenes/#authoredBase），故非模板世界这三字段是冗余数据，清空。
+   * 【只清 template 也有的同名场景】：模板缺的场景（世界独有/边界）读路径回退世界自己行，保留不清——
+   * 迁移因此可证【无损】。幂等（已是 '[]' 再清无副作用）。事务由调用方外层保证（构造期串行）。
+   */
+  #migrateScenesDropAuthoredFields(): void {
+    this.#db
+      .prepare(
+        "UPDATE scenes SET pois = '[]', portals = '[]', homes = '[]' " +
+          'WHERE world_id != ? AND scene_id IN (SELECT scene_id FROM scenes WHERE world_id = ?)',
+      )
+      .run(TEMPLATE_WORLD_ID, TEMPLATE_WORLD_ID);
+  }
+
+  /**
+   * base+overlay P3 迁移：把存量玩家世界【全量 blob】的场景转成 overlay 模式——overlay = diff(世界 blob, base blob)，
+   * terrain_overlay 落库、overlay_edit_count 置 0（对外版本随即变为 baseVersion+0，客户端下次进世界按新版本重拉一次）。
+   * 【只转 template 也有 base 地形的同名场景】：模板缺该场景 base 的（世界独有/边界）保持全量 blob 老式，读路径回退——无损。
+   * terrain blob 保留不删（overlay 世界读走合成，blob 成惰性兜底，且天然不与 #migrateSceneTerrainBlobs 打架）。
+   * 幂等（terrain_overlay 已非 NULL 的场景不在候选里）。事务由调用方外层保证（构造期串行）。
+   */
+  #migrateScenesToOverlay(): void {
+    const rows = this.#db
+      .prepare(
+        'SELECT world_id, scene_id, terrain AS wterrain FROM scenes ' +
+          'WHERE world_id != ? AND terrain_overlay IS NULL AND terrain IS NOT NULL ' +
+          'AND scene_id IN (SELECT scene_id FROM scenes WHERE world_id = ? AND terrain IS NOT NULL)',
+      )
+      .all(TEMPLATE_WORLD_ID, TEMPLATE_WORLD_ID) as { world_id: string; scene_id: string; wterrain: Uint8Array }[];
+    const upd = this.#db.prepare(
+      'UPDATE scenes SET terrain_overlay = ?, overlay_edit_count = 0 WHERE world_id = ? AND scene_id = ?',
+    );
+    for (const r of rows) {
+      const base = this.#baseTerrain(r.scene_id);
+      if (!base) continue; // base 缺/坏：保持全量 blob 老式
+      try {
+        const world = decodeTerrain(new Uint8Array(r.wterrain));
+        if (world.gridW !== base.terrain.gridW || world.gridH !== base.terrain.gridH) continue; // 尺寸不合：不硬转
+        upd.run(serializeOverlay(diffTerrain(world, base.terrain)), r.world_id, r.scene_id);
+      } catch {
+        /* 坏世界 blob：保持全量，别让一个坏场景拦启动 */
+      }
+    }
+  }
+
+  /** template 该场景的 base 地形（解码）与 base 版本，供 overlay 合成。缺/坏 → undefined。 */
+  #baseTerrain(sceneId: string): { terrain: Terrain; version: number } | undefined {
     const row = this.#db
       .prepare('SELECT terrain, terrain_version FROM scenes WHERE world_id = ? AND scene_id = ?')
-      .get(worldId, sceneId) as { terrain: Uint8Array | null; terrain_version: number } | undefined;
+      .get(TEMPLATE_WORLD_ID, sceneId) as { terrain: Uint8Array | null; terrain_version: number } | undefined;
     if (!row || row.terrain === null) return undefined;
+    try {
+      return { terrain: decodeTerrain(new Uint8Array(row.terrain)), version: row.terrain_version };
+    } catch {
+      return undefined; // 坏 base：调用方回退世界自己 blob
+    }
+  }
+
+  /**
+   * 场景地形矩阵（v2 blob）与版本。base+overlay P3：overlay 世界（terrain_overlay 非 NULL）现算
+   * composeTerrain(base, overlay)——作者改 base 的非孩子 tile 自动流入、孩子碰过的 tile 恒胜；
+   * 对外 version = baseTerrainVersion + overlay_edit_count（base 改或孩子编辑都会让它变 → 客户端判缓存）。
+   * template / 老式全量 blob 世界仍直接返回自己那份。场景未入库/无地形 → undefined。
+   */
+  getSceneTerrain(worldId: string, sceneId: string): { bytes: Uint8Array; version: number } | undefined {
+    const row = this.#db
+      .prepare('SELECT terrain, terrain_version, terrain_overlay, overlay_edit_count FROM scenes WHERE world_id = ? AND scene_id = ?')
+      .get(worldId, sceneId) as
+      | { terrain: Uint8Array | null; terrain_version: number; terrain_overlay: string | null; overlay_edit_count: number }
+      | undefined;
+    if (!row) return undefined;
+    if (worldId !== TEMPLATE_WORLD_ID && row.terrain_overlay !== null) {
+      const base = this.#baseTerrain(sceneId);
+      if (base) {
+        try {
+          const composed = encodeTerrain(composeTerrain(base.terrain, deserializeOverlay(row.terrain_overlay)));
+          return { bytes: composed, version: base.version + row.overlay_edit_count };
+        } catch {
+          // 坏 overlay：退回世界自己 blob（若有），别让读路径崩
+        }
+      }
+      // base 缺/坏（不该发生）：落到下方全量 blob 兜底
+    }
+    if (row.terrain === null) return undefined;
     return { bytes: new Uint8Array(row.terrain), version: row.terrain_version };
   }
 
-  /** 写入场景地形矩阵与版本（唯一写入口是 terrain_edit.ts / /admin/scenes）。 */
+  /** 写入场景地形矩阵与版本（全量 blob 写入口：/admin/scenes 与 P3 前的老式世界）。 */
   setSceneTerrain(worldId: string, sceneId: string, bytes: Uint8Array, version: number): void {
     const r = this.#db
       .prepare('UPDATE scenes SET terrain = ?, terrain_version = ? WHERE world_id = ? AND scene_id = ?')
       .run(bytes, version, worldId, sceneId);
     if (r.changes === 0) throw new Error(`scene not found: ${worldId}/${sceneId}`);
+  }
+
+  /**
+   * 孩子地形编辑落库（base+overlay P3 写入口，供 terrain_edit.editSceneTerrain）。`terrain` 是应用编辑后的
+   * 【完整合成地形】。overlay 世界：重新 diff(terrain, base) 出 overlay 存下、overlay_edit_count+1，返回对外
+   * 版本 baseVersion + 新计数（= 客户端本地版本 +1，terrain_patch 严格对齐）。老式全量 blob 世界：整块 blob +
+   * terrain_version+1。场景不存在抛错。
+   */
+  commitSceneTerrain(worldId: string, sceneId: string, terrain: Terrain): number {
+    const row = this.#db
+      .prepare('SELECT terrain_overlay, overlay_edit_count, terrain_version FROM scenes WHERE world_id = ? AND scene_id = ?')
+      .get(worldId, sceneId) as
+      | { terrain_overlay: string | null; overlay_edit_count: number; terrain_version: number }
+      | undefined;
+    if (!row) throw new Error(`scene not found: ${worldId}/${sceneId}`);
+    const base = worldId !== TEMPLATE_WORLD_ID && row.terrain_overlay !== null ? this.#baseTerrain(sceneId) : undefined;
+    if (base) {
+      const overlay = serializeOverlay(diffTerrain(terrain, base.terrain));
+      const count = row.overlay_edit_count + 1;
+      this.#db
+        .prepare('UPDATE scenes SET terrain_overlay = ?, overlay_edit_count = ? WHERE world_id = ? AND scene_id = ?')
+        .run(overlay, count, worldId, sceneId);
+      return base.version + count;
+    }
+    const version = row.terrain_version + 1;
+    this.setSceneTerrain(worldId, sceneId, encodeTerrain(terrain), version);
+    return version;
   }
 
   // ── 奖赏系统：小红花钱包 + 进行中委托（均按 (worldId, playerId) 维度）────────────────

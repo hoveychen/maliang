@@ -6,7 +6,7 @@
  */
 
 import {
-  decodeTerrain, encodeTerrain, yawToArg, MAX_PALETTE,
+  decodeTerrain, yawToArg, MAX_PALETTE,
   T_WATER, VALID_TILE_TYPES, type Terrain,
 } from './terrain.ts';
 import { validateTerrainItems, type ItemResolver } from './items.ts';
@@ -165,12 +165,12 @@ export function editSceneTerrain(
 ): { version: number; applied: AppliedEdit[]; paletteAppend: { index: number; itemId: string }[]; items: ItemDef[] } {
   const rec = store.getSceneTerrain(worldId, sceneId);
   if (!rec) throw new TerrainEditError(`scene ${worldId}/${sceneId} 无地形矩阵`);
-  const terrain = decodeTerrain(rec.bytes);
+  const terrain = decodeTerrain(rec.bytes); // 合成地形（overlay 世界=base+overlay；老式=世界自己 blob）
   const resolve = store.itemResolver(worldId);
   const { applied, paletteAppend } = applyTileEdits(terrain, edits, resolve);
 
-  const version = rec.version + 1;
-  store.setSceneTerrain(worldId, sceneId, encodeTerrain(terrain), version);
+  // base+overlay P3：落库由 store 决定 overlay（重 diff 出 tile-diff）还是老式全量 blob；返回对外新版本。
+  const version = store.commitSceneTerrain(worldId, sceneId, terrain);
 
   // 新引用实体的定义随 patch 带上（客户端可能没见过该造物）
   const items = paletteAppend.map((p) => resolve(p.itemId)!).filter(Boolean);
