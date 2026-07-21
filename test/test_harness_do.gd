@@ -43,6 +43,10 @@ class StubWorld extends Node:
 	var _play_blocked := false
 	var _stage_active := false
 	var talk_npc_calls: Array = []
+	var talk_fairy_calls := 0
+	func harness_talk_fairy() -> bool:
+		talk_fairy_calls += 1
+		return true
 	var _speaking := false
 	func _fsm_state() -> InteractionFsm.State:
 		return InteractionFsm.State.LISTENING
@@ -91,7 +95,10 @@ func _run_once() -> void:
 	var stub := StubWorld.new()
 	var npc := StubChar3D.new()
 	get_root().add_child(npc)
-	stub.npcs = [{"node": npc, "id": "pig", "is_fairy": false, "logical": Vector2(5, 5)}]
+	var fairy_node := StubChar3D.new()
+	get_root().add_child(fairy_node)
+	stub.npcs = [{"node": npc, "id": "pig", "is_fairy": false, "logical": Vector2(5, 5)},
+		{"node": fairy_node, "id": "dot", "is_fairy": true, "logical": Vector2(1, 1)}]
 	get_root().add_child(stub)
 	var server := DebugCmdServer.make(stub)
 	get_root().add_child(server)          # 进树才有 get_tree()（_collect_ui 遍历用）
@@ -153,6 +160,17 @@ func _run_once() -> void:
 	stub.selected = npc
 	server._step_act_wait(0.1)
 	fails += _check("selected 后落定清空", server._act_wait.is_empty(), true)
+
+	print("[talk:fairy 改点自己（dogfood 实证：直点仙子精灵打不中）；无相机→回退 handler]")
+	var fairy_id := _find_action_id(els, "talk:fairy:")
+	fails += _check("fairy talk 动作存在", fairy_id.is_empty(), false)
+	stub.selected = null
+	server._act_wait = {}
+	var fr: Dictionary = server._do_do(fairy_id, {})
+	fails += _check("fairy talk 延迟回包", fr.get("__deferred"), true)
+	# 本单测无相机 → _player_screen_rect() 返 null → 回退 handler harness_talk_fairy（带相机时改 tap 玩家矩形）
+	fails += _check("无相机 fairy talk 回退 handler harness_talk_fairy", stub.talk_fairy_calls, 1)
+	server._act_wait = {}
 
 	print("[strict click：多命中不静默点首个，报 ambiguous（对齐 Playwright §3.2）]")
 	var btn_dup := Button.new()

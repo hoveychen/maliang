@@ -887,6 +887,20 @@ func _project_entity(camera: Camera3D, world_pos: Vector3, y_off: float) -> Dict
 	var on := vp != null and vp.get_visible_rect().has_point(sp)
 	return {"on_screen": on, "center": sp}
 
+## 玩家自身的屏幕投影矩形（找点点=点自己：玩家居中、命中区大，比直点仙子精灵可靠）。无相机/离屏返 null。
+func _player_screen_rect() -> Variant:
+	var w := _host()
+	if w == null:
+		return null
+	var camera: Camera3D = w.get("camera") as Camera3D
+	var player: Variant = w.get("player")
+	if typeof(player) != TYPE_DICTIONARY or not is_instance_valid((player as Dictionary).get("node")):
+		return null
+	var proj := _project_entity(camera, ((player as Dictionary)["node"] as Node3D).global_position, 1.6)
+	if not bool(proj["on_screen"]):
+		return null
+	return HarnessAccess.screen_rect(proj["center"] as Vector2, PICK_RADIUS_PX)
+
 ## 2D 控件条目（_collect_ui 产物）→ 同构元素记录（button/tap_area 挂 press 动作）。
 func _control_to_element(e: Dictionary) -> Dictionary:
 	var kind := String(e.get("kind", ""))
@@ -1183,9 +1197,18 @@ func _do_do(action_id: String, args: Dictionary) -> Dictionary:
 			return {"__deferred": true}
 		"talk":
 			var on := bool(element.get("on_screen", false))
-			if on and typeof(rect) == TYPE_DICTIONARY:
-				var c2 := _rect_center(rect as Dictionary)
-				_do_tap(c2.x, c2.y)   # 真 tap 头顶 → _tap_pick → _approach_npc → 真走
+			var tap_rect: Variant = rect
+			# 找点点(fairy)= 点自己:仙子精灵太小/悬浮/跟玩家重叠,直点其投影打不中;handler(_approach_npc 仙子)
+			# 又因仙子跟随永不到位。玩家居中大命中区,tap 自己经 _tap_pick 稳进点点对话（活体 dogfood 实证）。
+			if String(element.get("kind", "")) == "fairy":
+				var pr: Variant = _player_screen_rect()
+				if pr != null:
+					tap_rect = pr
+					on = true
+					base["execution_reason"] = "tap_self_for_fairy"
+			if on and typeof(tap_rect) == TYPE_DICTIONARY:
+				var c2 := _rect_center(tap_rect as Dictionary)
+				_do_tap(c2.x, c2.y)   # 真 tap → _tap_pick → _approach_npc/点点 → 真走/进对话
 			else:
 				var w2 := _host()
 				var ek := String(element.get("kind", ""))
