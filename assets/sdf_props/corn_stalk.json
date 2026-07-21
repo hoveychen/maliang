@@ -1,0 +1,26 @@
+{
+  "name": "corn_stalk",
+  "palette": ["#6faa42", "#4e7d34", "#f2c14e", "#a7c957", "#f4ead4"],
+  "blend": 0.09,
+  "outline": 0.035,
+  "color_k": 0.07,
+  "parts": [
+    {"shape": "capsule", "pos": [0, 0.78, 0], "r": 0.07, "len": 1.5, "color": 0},
+    {"shape": "sphere", "pos": [0, 0.52, 0], "r": 0.085, "color": 0, "blend": 0.12},
+    {"shape": "sphere", "pos": [0, 1.02, 0], "r": 0.075, "color": 0, "blend": 0.12},
+    {"shape": "cone", "pos": [0.28, 0.98, 0.02], "r1": 0.14, "r2": 0.015, "h": 0.78, "rot": [0, 0, -58], "color": 1, "blend": 0.05},
+    {"shape": "cone", "pos": [-0.27, 1.06, -0.02], "r1": 0.13, "r2": 0.015, "h": 0.72, "rot": [0, 0, 56], "color": 1, "blend": 0.05},
+    {"shape": "cone", "pos": [0.04, 1.12, 0.24], "r1": 0.12, "r2": 0.015, "h": 0.66, "rot": [58, 0, 6], "color": 1, "blend": 0.05},
+    {"shape": "cone", "pos": [-0.06, 0.72, -0.24], "r1": 0.12, "r2": 0.015, "h": 0.62, "rot": [-56, 0, -6], "color": 1, "blend": 0.05},
+    {"shape": "cone", "pos": [0.17, 0.5, 0.14], "r1": 0.16, "r2": 0.05, "h": 0.5, "rot": [10, 0, 16], "color": 3, "blend": 0.08},
+    {"shape": "capsule", "pos": [0.17, 0.62, 0.16], "r": 0.11, "len": 0.44, "rot": [10, 0, 16], "color": 2, "blend": 0.06},
+    {"shape": "sphere", "pos": [0.21, 0.86, 0.19], "r": 0.055, "color": 4, "blend": 0.05},
+    {"shape": "capsule", "pos": [0.24, 0.93, 0.19], "r": 0.02, "len": 0.16, "rot": [20, 0, 30], "color": 4, "blend": 0.04},
+    {"shape": "capsule", "pos": [0.16, 0.94, 0.22], "r": 0.02, "len": 0.16, "rot": [30, 0, -10], "color": 4, "blend": 0.04},
+    {"shape": "cone", "pos": [0, 1.62, 0], "r1": 0.05, "r2": 0.006, "h": 0.34, "color": 4, "blend": 0.05},
+    {"shape": "cone", "pos": [0.1, 1.6, 0.02], "r1": 0.035, "r2": 0.006, "h": 0.28, "rot": [0, 0, -22], "color": 4, "blend": 0.05},
+    {"shape": "cone", "pos": [-0.09, 1.6, -0.02], "r1": 0.035, "r2": 0.006, "h": 0.28, "rot": [0, 0, 22], "color": 4, "blend": 0.05}
+  ],
+  "locomotion": {"type": "none"},
+  "ropes": []
+}
