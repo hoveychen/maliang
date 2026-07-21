@@ -475,10 +475,14 @@ func _spawn_static_sdf(parent: Node3D, def: Dictionary, rref: String, pos: Vecto
 			var mesh := load(baked_path) as Mesh
 			if mesh != null:
 				var mi := SdfStaticBaker.instance(mesh)
+				mi.set_meta("baked_sdf", true)  # 标记：预烘焙的 SDF 物件（test_matrix_skin 据此计入 SDF 节点而非建筑）
 				mi.position = pos
 				mi.rotation_degrees = Vector3(0.0, yaw, 0.0)
 				mi.visible = _props_shown
 				parent.add_child(mi)
+				# 脚下暗斑与运行时 bake_and_swap._swap 同款（半径公式一致），预烘焙路径也补上免得掉影。
+				var ab := mesh.get_aabb()
+				BlobShadow.attach(mi, clampf(maxf(ab.size.x, ab.size.z) * 0.4, 0.4, 2.2), true)
 				return
 	var prop: SdfProp
 	if rref == "sdf_inline":
