@@ -87,6 +87,8 @@ func _init() -> void:
 				mmi_instances += (c as MultiMeshInstance3D).multimesh.instance_count
 			elif c is SdfProp:
 				sdf_nodes += 1
+			elif c is MeshInstance3D and c.has_meta("baked_sdf"):
+				sdf_nodes += 1 # 预烘焙的静态 SDF 物件（chunk_manager 优先加载 baked/.res 时走这条，非建筑）
 			else:
 				kaykit_nodes += 1
 	fails += _check("合批实例总数 == 矩阵散布物数（排除装饰/贴纸）", mmi_instances, batch_n)

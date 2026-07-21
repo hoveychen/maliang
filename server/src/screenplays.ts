@@ -17,6 +17,8 @@ export const SCREENPLAYS = [
   'story_pigs_end',
   'story_hood_1',
   'story_hood_end',
+  'story_snow_count',
+  'story_snow_end',
   'story_oz_1',
   'story_oz_2',
   'story_oz_end',

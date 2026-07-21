@@ -62,6 +62,14 @@ export interface StoryChapter {
   stampStyle?: string;
   /** 本幕纪念贴纸（内置贴纸 id，addToBag 发放）；缺省＝只盖章。 */
   sticker?: string;
+  /**
+   * 互动演出章（数数游戏等，docs/s1-snow-white-design.md §5）：**无 interaction** 但演出本体即互动，
+   * 演赢（screenplay 跑到 stage.end，StageRunResult.status==='done'）就发盖章 + 贴纸——奖励走
+   * 服务端 emitPerformReward（区别于 task/build 互动幕的 settleStoryInteraction）。带此字段的幕必须
+   * 也带 stampStyle（+可选 sticker）；npcCastId＝庆祝/道谢的册内角色，thanks＝道谢句。
+   * 尾声（最后一幕）绝不带此字段（story_content.test 强制尾声无盖章）。
+   */
+  performReward?: { npcCastId: string; thanks: string };
 }
 
 export interface StoryBook {
@@ -231,6 +239,118 @@ export const LITTLE_RED_HOOD: StoryBook = {
   ],
 };
 
+// ── 第三册《白雪公主》（village_forest 合并大场景，1 幕互动数数游戏 + 尾声）────────────
+// 第一季册 3（docs/s1-snow-white-design.md）。数学（数到 7）。白雪与七矮人同处森林深处操场，
+// 孩子走进森林在操场找到白雪、搭话触发；幕 0 是【互动演出数数游戏】story_snow_count
+// （点矮人数 1→7 + 再点每人盛一碗一一对应）——无 task 互动，演赢走 performReward 发盖章 story_snow
+// （emitPerformReward，见 server §5）。尾声 story_snow_end 讲给小矮人听（复述），整册完结
+// 白雪 + 七矮人入住森林深处（跑腿大户）。
+// ⚠️ 白雪 gate 必须与七矮人【同处操场】（不放村广场）：数数游戏纯 tap，需白雪+七矮人同屏，
+// 而演出相机 overview 框住全体 actor 中心并缩放适配（world.gd compute_overview_cam）——gate 若远在
+// 村广场，overview 会横跨 60 格把矮人缩成芝麻、点不到（P6 harness 坐实的 blocker，老板 2026-07-21 拍板同处）。
+// 七矮人 x∈[25,35] y∈[84,89] 中心≈(30,86)；白雪站簇北侧前方 (30,82) 面向矮人，孩子从村庄往南走到操场。
+
+export const SNOW_WHITE: StoryBook = {
+  id: 'snow_white',
+  title: '白雪公主',
+  sceneId: 'village_forest',
+  gateCastId: 'snow',
+  cast: [
+    {
+      castId: 'snow',
+      name: '白雪公主',
+      personality: '善良爱照顾人的白雪公主，走进森林后把七个小矮人的家当自己家来收拾，说话轻柔又暖。',
+      voiceId: 'zh-TW-HsiaoYuNeural',
+      visualDescription:
+        'a fair-skinned girl with a short black bob and a red hairband, wearing a blue-and-yellow dress, gentle warm smile, standing upright like a person',
+      // 森林深处操场·七矮人簇北侧前方，面向矮人；与七矮人同处，孩子走进森林即遇见、搭话触发。
+      // （不放村广场：数数游戏纯 tap 需同屏，见册头 ⚠️ 与 docs/s1-snow-white-design.md §2。）
+      position: { tileX: 30, tileY: 82 },
+      greetingStyle: 'warm',
+    },
+    {
+      castId: 'doc',
+      name: '博士',
+      personality: '七个小矮人里最有主意的博士，爱数数、戴副小眼镜，说话一本正经又爱操心。',
+      voiceId: 'zh-CN-YunyangNeural',
+      visualDescription:
+        'a tiny old dwarf with round glasses, a long white beard, a brown pointed hat and a small vest, kindly know-it-all look, standing upright like a person',
+      position: { tileX: 30, tileY: 86 },
+      greetingStyle: 'gentle',
+    },
+    {
+      castId: 'happy',
+      name: '乐乐',
+      personality: '咧嘴大笑、蹦蹦跳跳的乐乐，见谁都嘻嘻笑，最爱热闹。',
+      voiceId: 'zh-CN-YunxiNeural',
+      visualDescription:
+        'a chubby cheerful dwarf with a big grin, rosy cheeks, a green pointed hat and a short brown beard, bouncing happily, standing upright like a person',
+      position: { tileX: 27, tileY: 84 },
+      greetingStyle: 'warm',
+    },
+    {
+      castId: 'sleepy',
+      name: '困困',
+      personality: '慢半拍、老打哈欠的困困，说着话就想睡，暖乎乎的。',
+      voiceId: 'zh-TW-YunJheNeural',
+      visualDescription:
+        'a drowsy dwarf with half-closed sleepy eyes, a blue nightcap, a small yellow beard, yawning gently, standing upright like a person',
+      position: { tileX: 33, tileY: 84 },
+      greetingStyle: 'shy',
+    },
+    {
+      castId: 'bashful',
+      name: '羞羞',
+      personality: '害羞爱躲手指后面的羞羞，说话轻声细语，脸红红的。',
+      voiceId: 'zh-TW-HsiaoChenNeural',
+      visualDescription:
+        'a shy blushing dwarf peeking over his hands, a purple pointed hat and a tiny beard, bashful sweet look, standing upright like a person',
+      position: { tileX: 25, tileY: 87 },
+      greetingStyle: 'shy',
+    },
+    {
+      castId: 'sneezy',
+      name: '喷喷',
+      personality: '老想打喷嚏、鼻子红红的喷喷，一说话就“阿嚏”，逗趣可爱。',
+      voiceId: 'zh-CN-liaoning-XiaobeiNeural',
+      visualDescription:
+        'a dwarf with a big red nose holding a handkerchief, an orange pointed hat, a sneezy funny face, standing upright like a person',
+      position: { tileX: 35, tileY: 87 },
+      greetingStyle: 'playful',
+    },
+    {
+      castId: 'grumpy',
+      name: '气气',
+      personality: '嘴上凶心里软的气气，老皱着眉催人快点，其实最讲义气。',
+      voiceId: 'zh-CN-YunjianNeural',
+      visualDescription:
+        'a grumpy dwarf with furrowed brows and crossed arms, a red pointed hat and a big grey beard, secretly softhearted, standing upright like a person',
+      position: { tileX: 28, tileY: 89 },
+      greetingStyle: 'playful',
+    },
+    {
+      castId: 'dizzy',
+      name: '迷糊',
+      personality: '糊里糊涂、老站错队的迷糊，傻乎乎地笑，可爱又让人操心。',
+      voiceId: 'zh-CN-shaanxi-XiaoniNeural',
+      visualDescription:
+        'a goofy dwarf with a wobbly stance and an oversized floppy hat, a silly happy smile and no beard, standing upright like a person',
+      position: { tileX: 32, tileY: 89 },
+      greetingStyle: 'playful',
+    },
+  ],
+  chapters: [
+    {
+      screenplay: 'story_snow_count',
+      // 互动演出数数游戏：无 task 互动，演赢（stage.end）→ performReward 发盖章 story_snow（§5）。
+      stampStyle: 'medal',
+      sticker: 'story_snow',
+      performReward: { npcCastId: 'snow', thanks: '谢谢你帮我把小矮人都数清楚啦，你真棒！' },
+    },
+    { screenplay: 'story_snow_end' }, // 尾声谢幕：讲给小矮人听（复述）+ 整册完结入住
+  ],
+};
+
 // ── 第五册《绿野仙踪》（独立场景 oz·奥兹黄砖路，2 幕 + 尾声）────────────────────
 // 第一季册 5（docs/season-1-outline.md §4/§6）。英语暴露（桃乐丝天生说英文）+「同一个词用在很多地方」复用种子。
 // 老板 2026-07-21 拍板：**另置独立场景**（不进 village_forest 合并图，见 s1-merged-scene-layout §0）——
@@ -375,6 +495,7 @@ export const TORTOISE_HARE: StoryBook = {
 export const STORY_BOOKS: Record<string, StoryBook> = {
   [THREE_PIGS.id]: THREE_PIGS,
   [LITTLE_RED_HOOD.id]: LITTLE_RED_HOOD,
+  [SNOW_WHITE.id]: SNOW_WHITE,
   [WIZARD_OF_OZ.id]: WIZARD_OF_OZ,
   [TORTOISE_HARE.id]: TORTOISE_HARE,
 };

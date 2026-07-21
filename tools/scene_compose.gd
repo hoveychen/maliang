@@ -54,6 +54,18 @@ const LANDMARKS_VF := [
 	{ "item": "house_2", "tile": Vector2i(10, 24), "yaw": 90.0, "search": 2 },
 	{ "item": "house_3", "tile": Vector2i(31, 22), "yaw": 270.0, "search": 2 },
 	{ "item": "house_2", "tile": Vector2i(66, 60), "yaw": 0.0, "search": 2 },  # 外婆家小屋（占位，P4 填实篱笆/门）
+	# ── 七矮人操场·卧室+餐桌布景（s1-snow-white P7，森林深处空地 poi_forest_deep 30,86 附近）──
+	# 布局：中央偏北一张餐桌（白雪 gate 30,82 前方）；七张单人床沿西/东/南三面围成小卧室，
+	# 空出中间给数数游戏的矮人站位（矮人降生 x25-35/y84-89，见 story_books.ts SNOW_WHITE cast）。
+	# 全为 3×3 blocking，锚点两两不重叠（已逐格核）；search:1 容许被散布挤时就近让一格。
+	{ "item": "toy_table",       "tile": Vector2i(30, 84), "yaw": 0.0,   "search": 1 },  # 矮人餐桌（碗摆桌旁）
+	{ "item": "toy_bed_single",  "tile": Vector2i(23, 84), "yaw": 90.0,  "search": 1 },  # 西墙床 1
+	{ "item": "toy_bed_single",  "tile": Vector2i(23, 88), "yaw": 90.0,  "search": 1 },  # 西墙床 2
+	{ "item": "toy_bed_single",  "tile": Vector2i(37, 86), "yaw": 270.0, "search": 1 },  # 东墙床
+	{ "item": "toy_bed_single",  "tile": Vector2i(24, 91), "yaw": 180.0, "search": 1 },  # 南墙床 1
+	{ "item": "toy_bed_single",  "tile": Vector2i(28, 91), "yaw": 180.0, "search": 1 },  # 南墙床 2
+	{ "item": "toy_bed_single",  "tile": Vector2i(32, 91), "yaw": 180.0, "search": 1 },  # 南墙床 3
+	{ "item": "toy_bed_single",  "tile": Vector2i(36, 91), "yaw": 180.0, "search": 1 },  # 南墙床 4
 ]
 
 ## village_forest 的 SDF 可动物件：村北林口一块路牌，指向森林；东缘跑道的赛跑小旗
@@ -70,6 +82,15 @@ const SDF_PROPS_VF := [
 	# 沿途加油旗（东侧草带）
 	{ "item": "race_flag", "tile": Vector2i(90, 38), "yaw": 250.0, "search": 2 },
 	{ "item": "race_flag", "tile": Vector2i(90, 56), "yaw": 250.0, "search": 2 },
+	# ── 七矮人的碗（s1-snow-white P7）：一矮人一碗，摆在各自降生位前方一格（呼应数数游戏『一人一碗』）──
+	# 碗 1×1 不挡路（pathOk），不占矮人站位、不落 3×3 床/桌 footprint（已逐格核）。
+	{ "item": "dwarf_bowl", "tile": Vector2i(30, 87), "yaw": 0.0, "search": 1 },  # 博士 doc(30,86) 前
+	{ "item": "dwarf_bowl", "tile": Vector2i(27, 85), "yaw": 0.0, "search": 1 },  # 乐乐 happy(27,84) 前
+	{ "item": "dwarf_bowl", "tile": Vector2i(33, 85), "yaw": 0.0, "search": 1 },  # 困困 sleepy(33,84) 前
+	{ "item": "dwarf_bowl", "tile": Vector2i(25, 86), "yaw": 0.0, "search": 1 },  # 羞羞 bashful(25,87) 前
+	{ "item": "dwarf_bowl", "tile": Vector2i(35, 86), "yaw": 0.0, "search": 1 },  # 喷嚏 sneezy(35,87) 前
+	{ "item": "dwarf_bowl", "tile": Vector2i(28, 88), "yaw": 0.0, "search": 1 },  # 老顽固 grumpy(28,89) 前
+	{ "item": "dwarf_bowl", "tile": Vector2i(32, 88), "yaw": 0.0, "search": 1 },  # 迷糊 goofy(32,89) 前
 ]
 
 ## 第一季册 5《绿野仙踪》独立场景（oz，75 格）的手工地标：翡翠城 = 黄砖路尽头的翡翠城堡
@@ -93,6 +114,8 @@ const ITEM_SPAN := {
 	"house_0": 3, "house_1": 3, "house_2": 3, "house_3": 3,
 	"walking_hut": 3, "hop_mailbox": 3,
 	"emerald_castle": 3,
+	# 七矮人操场布景（s1-snow-white P7）：床/桌 3×3 与 server items.ts toy_bed_single/toy_table 同步。
+	"toy_bed_single": 3, "toy_table": 3,
 }
 const ITEM_PATH_OK := { "well": true }
 

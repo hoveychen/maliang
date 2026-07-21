@@ -66,6 +66,10 @@
       "category": "sticker",
       "path": "res://assets/stickers/story_basket.webp"
     },
+    "story_snow": {
+      "category": "sticker",
+      "path": "res://assets/stickers/story_snow.webp"
+    },
     "story_ruby": {
       "category": "sticker",
       "path": "res://assets/stickers/story_ruby.webp"

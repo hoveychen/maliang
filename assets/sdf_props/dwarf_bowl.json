@@ -1,0 +1,18 @@
+{
+  "name": "dwarf_bowl",
+  "_comment": "七矮人的木碗（s1-snow-white P7 布景）。数数游戏『一人一碗』的静态道具。shape 语义两坑：cone 是 IQ round-cone（两球凸包）做不出平面，r2 大会顶出半球穹顶；torus 默认竖立（孔轴沿 Z），水平碗唇必须 rot:[90,0,0]。构成：圈足+矮碗身（穹顶收在唇孔内）+砖红水平 torus 碗唇+单个大米白球当饭堆（多球簇/浅埋小球的凹缝会被 outline 画成黑格线，只能用深埋高 blend 的 3 小球做堆饭波浪轮廓）。壁 #8a5c28 与唇 #8e2413 是拉开色相后的终值——shader 会整体提亮，两者再接近就糊成一团。",
+  "palette": ["#8a5c28", "#8e2413", "#fdf8ec"],
+  "blend": 0.03,
+  "outline": 0.03,
+  "color_k": 0.035,
+  "parts": [
+    {"shape": "cone", "pos": [0, 0.08, 0], "r1": 0.09, "r2": 0.11, "h": 0.06, "color": 0, "blend": 0.03},
+    {"shape": "cone", "pos": [0, 0.17, 0], "r1": 0.13, "r2": 0.22, "h": 0.14, "color": 0, "blend": 0.03},
+    {"shape": "torus", "pos": [0, 0.32, 0], "R": 0.24, "r": 0.045, "arc": 180, "rot": [90, 0, 0], "color": 1, "blend": 0.025},
+    {"shape": "sphere", "pos": [0, 0.3, 0], "r": 0.17, "color": 2, "blend": 0.03},
+    {"shape": "sphere", "pos": [0.11, 0.41, 0], "r": 0.055, "color": 2, "blend": 0.13},
+    {"shape": "sphere", "pos": [-0.11, 0.4, 0.02], "r": 0.055, "color": 2, "blend": 0.13},
+    {"shape": "sphere", "pos": [0, 0.445, -0.03], "r": 0.06, "color": 2, "blend": 0.13}
+  ],
+  "locomotion": {"type": "none"}
+}

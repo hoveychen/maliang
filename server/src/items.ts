@@ -51,6 +51,9 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   // 绿野仙踪（s1-oz）专属布景 prop
   builtin('corn_stalk', '玉米秆', 'sdf_res:corn_stalk', 1, true),
   builtin('emerald_castle', '翡翠城堡', 'sdf_res:emerald_castle', 3, true), // 黄砖路尽头的地标（span 3 同 house）
+  // 七矮人的木碗（s1-snow-white P7 布景）：数数游戏『一人一碗』的静态道具，摆在餐桌旁；
+  // 纯装饰不挡路（blocking:false pathOk:true），别糊住操场也别挡引路。
+  { ...builtin('dwarf_bowl', '小矮人的碗', 'sdf_res:dwarf_bowl', 1, false), pathOk: true },
 
   // ── 未来机器人主题（world-themes P2 打样；全 CC0：Quaternius 机器人 + Kenney Space Kit）──
   // 机器人（Quaternius，assets/scifi/robots/*.glb）
@@ -237,6 +240,8 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   { ...sticker('story_brick', '砖房纪念贴纸'), souvenir: true },
   // ── 剧情纪念贴纸（第一季册 2《小红帽》）──
   { ...sticker('story_basket', '点心篮纪念贴纸'), souvenir: true },
+  // ── 剧情纪念贴纸（第一季册 3《白雪公主》）──
+  { ...sticker('story_snow', '小矮人的碗纪念贴纸'), souvenir: true },
   // ── 剧情纪念贴纸（第一季册 5《绿野仙踪》）──
   { ...sticker('story_ruby', '红宝石鞋纪念贴纸'), souvenir: true },
   { ...sticker('story_emerald', '翡翠城纪念贴纸'), souvenir: true },

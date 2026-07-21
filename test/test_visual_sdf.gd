@@ -59,7 +59,11 @@ func _collect() -> void:
 		_animated[p.name] = false
 
 func _structural() -> void:
-	_check("七只 SDF 物件全部落进世界", _props.size(), 7)
+	# 静态 SDF 物件（蜡笔/纸条等）现由 chunk_manager 直接加载预烘焙 mesh（meta baked_sdf），
+	# 不再生成 live SdfProp——落位数 = live SdfProp + 预烘焙 mesh，仍应齐 7 只（渲染层没吞没漏）。
+	var baked := root.find_children("*", "MeshInstance3D", true, false).filter(
+		func(m): return m.has_meta("baked_sdf"))
+	_check("七只 SDF 物件全部落进世界（含预烘焙静态件）", _props.size() + baked.size(), 7)
 	for p: SdfProp in _props:
 		_check("%s 单 surface 网格" % p.name, p.mesh.get_surface_count(), 1)
 		var mat := p.material_override as ShaderMaterial

@@ -466,20 +466,23 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 ## 静态 SDF 物件（矩阵物品层）：spec 来自打包 json（sdf_res:<name>）或实体行内联
 ## （sdf_inline，语音造物）。wander 来自实体定义；不登记占地（矩阵派生）。
 func _spawn_static_sdf(parent: Node3D, def: Dictionary, rref: String, pos: Vector3, yaw: float, seed_v: int) -> void:
-	# 预烘焙优先：builtin 静态 prop 在资产期已烘成 baked/<id>.res（禁 runtime 惰烘——见
-	# tools/bake_sdf_deco.gd）。命中即直接上零成本静态实例，跳过 live SdfProp + 每次区块重铺的
-	# bake_and_swap。缺 .res（会动的 prop / 孩子语音造物 sdf_inline / 未预烘）才回落下方 live 路径。
-	if rref.begins_with("sdf_res:"):
+	# 预烘焙优先（老板定策：静态 SDF 布景不在 runtime 里烘）：sdf_res 物件若构建期已烘出
+	# assets/sdf_props/baked/<name>.res，直接实例化那份静态 mesh（与运行时 bake_and_swap 同款
+	# 共享材质），彻底跳过 raymarch + 运行时烘焙。只对无 wander 的静止物件走这条（会游走的仍走 live）。
+	if rref.begins_with("sdf_res:") and float(def.get("wander", 0.0)) == 0.0:
 		var baked_path := "res://assets/sdf_props/baked/%s.res" % rref.get_slice(":", 1)
 		if ResourceLoader.exists(baked_path):
-			var mesh := load(baked_path) as ArrayMesh
+			var mesh := load(baked_path) as Mesh
 			if mesh != null:
 				var mi := SdfStaticBaker.instance(mesh)
+				mi.set_meta("baked_sdf", true)  # 标记：预烘焙的 SDF 物件（test_matrix_skin 据此计入 SDF 节点而非建筑）
 				mi.position = pos
 				mi.rotation_degrees = Vector3(0.0, yaw, 0.0)
+				mi.visible = _props_shown
 				parent.add_child(mi)
-				var aabb := mesh.get_aabb()
-				BlobShadow.attach(mi, clampf(maxf(aabb.size.x, aabb.size.z) * 0.4, 0.4, 2.2), true)
+				# 脚下暗斑与运行时 bake_and_swap._swap 同款（半径公式一致），预烘焙路径也补上免得掉影。
+				var ab := mesh.get_aabb()
+				BlobShadow.attach(mi, clampf(maxf(ab.size.x, ab.size.z) * 0.4, 0.4, 2.2), true)
 				return
 	var prop: SdfProp
 	if rref == "sdf_inline":
