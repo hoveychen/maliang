@@ -1398,6 +1398,10 @@ func _act_gate() -> Dictionary:
 		return {"gated": true, "reason": "blocked_by_overlay"}
 	if _truthy(w.get("_stage_active")):
 		return {"gated": true, "reason": "stage_active"}
+	if _truthy(w.get("_placing")):
+		return {"gated": true, "reason": "placement_mode"}   # 摆放模式:tap 落位/确认,世界 talk/walk 被拦
+	if _truthy(w.get("_dress_self")):
+		return {"gated": true, "reason": "dress_mode"}        # 自贴装扮态:贴纸盘对着自己,世界交互被拦
 	return {"gated": false, "reason": ""}
 
 ## build_actions 用的扁平状态事实（供无障碍动作可用性判定）。

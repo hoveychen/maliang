@@ -396,6 +396,7 @@ func _card_button(icon_tex: Texture2D, bg: Color, label: String, cb: Callable) -
 		b.icon = icon_tex
 		b.expand_icon = true
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.tooltip_text = label  # 无障碍名:图标卡不显字,harness access 靠 tooltip 回退取 label
 	elif not label.is_empty():
 		b.text = label
 		b.add_theme_font_size_override("font_size", 40)

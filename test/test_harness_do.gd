@@ -40,6 +40,8 @@ class StubWorld extends Node:
 	var _in_creation := false
 	var _creation_options: Array = []
 	var _phone_cam := false
+	var _placing := false
+	var _dress_self := false
 	var _bootstrapping := false
 	var _bench_freeze := false
 	var _play_blocked := false
@@ -237,6 +239,13 @@ func _run_once() -> void:
 	fails += _check("bootstrapping → gated", server._act_gate()["gated"], true)
 	fails += _check("bootstrapping → reason loading_world", server._act_gate()["reason"], "loading_world")
 	stub._bootstrapping = false
+	# 摆放/自贴装扮态(与 _unhandled_input 早返回全对齐)
+	stub._placing = true
+	fails += _check("placing → reason placement_mode", server._act_gate()["reason"], "placement_mode")
+	stub._placing = false
+	stub._dress_self = true
+	fails += _check("dress_self → reason dress_mode", server._act_gate()["reason"], "dress_mode")
+	stub._dress_self = false
 
 	print("[真 speaking 位：快照反映 _fsm_inputs().speaking()（对齐 Playwright §3.3）]")
 	stub._speaking = true
