@@ -4974,14 +4974,18 @@ func _bootstrap_apply(fetched: Dictionary) -> void:
 		_boot_sub = float(i + 1) / float(total) if total > 0 else 1.0
 	_boot_status = "布置世界…"
 	# 摆着的造物在场景矩阵物品层里（随地形一并就位），背包由 world_state 下发
-	# 玩家搬到点点旁边降生，相机跟着玩家过去
+	# 新玩家默认落村庄核心出生角（_new_player_spawn_anchor）；返程玩家随后由 _restore_player_pos
+	# 用服务端存档 tile 覆盖。点点飞到玩家旁边（镜像离线 _spawn_fairy），别把玩家钉到点点的种子位。
 	var fairy := _find_fairy()
-	if not fairy.is_empty():
+	if not player.is_empty():
+		var spot := _find_free_spot(_new_player_spawn_anchor(fairy.get("logical", Vector2.ZERO)), PLAYER_SPAN)
+		player["logical"] = spot
+		OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
+		focus_logical = spot
+		if not fairy.is_empty():
+			fairy["logical"] = WorldGrid.wrap_pos(spot + Vector2(2.6, 1.8))
+	elif not fairy.is_empty():
 		focus_logical = fairy["logical"]
-		if not player.is_empty():
-			var spot := _find_free_spot(WorldGrid.wrap_pos(fairy["logical"] + Vector2(5.0, 3.0)), PLAYER_SPAN)
-			player["logical"] = spot
-			OccupancyMap.char_register(PLAYER_ID, spot, PLAYER_SPAN)
 	_finish_bootstrap()
 
 ## intro 编排器（intro 模式下驱动 fetch/apply 与建造演出；现状路径为 null）。
@@ -5281,6 +5285,14 @@ func _find_fairy() -> Dictionary:
 		if n.get("is_fairy", false):
 			return n
 	return {}
+
+## 新玩家默认出生锚点（供 _find_free_spot 就近找空位）。纯函数，供单测。
+## 曾经锚在点点身旁（fairy_logical + 偏移），但点点的服务端种子位在 village_forest 是村北森林带
+## （z>40），新玩家因此跟着生进树林被围住（s1-hood-polish P1）。改锚村庄核心出生角 HOME_TILE——
+## _paint_village_forest 保证原点角有明路进广场、绝不被围死。故意不再读 fairy_logical。
+## 返程玩家的存档位随后由 _restore_player_pos 覆盖，不经此函数。
+func _new_player_spawn_anchor(_fairy_logical: Vector2) -> Vector2:
+	return WorldGrid.from_tile_center(HOME_TILE)
 
 ## 角色主键：后端 id，无则名字兜底（与 _spawn_server_character 的登记键一致）。
 func _char_id(c: Dictionary) -> String:
