@@ -183,9 +183,14 @@ func _init() -> void:
 	agent.on_timer_done("h2")
 	fails += _eq("unwatch 后 timer 不上行", _count_kind("timer"), timers_before)
 
-	# prompt 占位：回执带空 text
-	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 200, "op": "prompt", "args": { "hint": "该你了" }, "actorId": "p1" })
-	fails += _eq("prompt 回执带 result", (_ack_for(200).get("result", {}) as Dictionary).has("text"), true)
+	# prompt 完成型（P3 尾声复述）：交给宿主开麦，宿主收尾前不回执；done 带 text 后才 ack
+	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 200, "op": "prompt", "args": { "hint": "讲给外婆听" }, "actorId": "p1" })
+	fails += _eq("prompt 触宿主开麦", host.count("prompt"), 1)
+	fails += _eq("prompt 把 hint 传给宿主", String(host.last("prompt").get("hint", "")), "讲给外婆听")
+	fails += _eq("prompt 未完成不回执", _ack_for(200).is_empty(), true)
+	host.last_prompt_done.call(true, { "text": "小红帽送点心给外婆" })
+	fails += _eq("prompt done 后回执", _ack_for(200).is_empty(), false)
+	fails += _eq("prompt 回执带小朋友的话", String((_ack_for(200).get("result", {}) as Dictionary).get("text", "")), "小红帽送点心给外婆")
 
 	# 未知命令：回执带 error
 	agent.on_stage_cmd({ "stageId": "s1", "cmdId": 201, "op": "teleport", "args": {} })

@@ -181,6 +181,12 @@ var _naming_item := ""             ## 非空 = 起名子模式：麦与 capture 
 var _naming_prev_confirm := false  ## 起名强制 confirm_mode，结束后恢复玩家原「说完先听一遍」设置
 var _naming_timer: Timer           ## 起名静默超时：点点问完孩子没吭声/害羞 → 静默放弃（起名可选，§3.3）
 const NAMING_TIMEOUT := 12.0       ## 起名等待上限（秒）：正在说/确认则续一轮，否则放弃
+# ── 舞台提词（stage.prompt，P3 尾声复述）：剧本走到 prompt 处停下开麦，让小朋友说一段（讲给外婆听），
+# 说完/超时/离线跳过后带转写回 ack。零挫败不打分（铁律#1）：害羞/没吭声/无端侧 ASR 一律静默放行。
+var _story_prompt_done := Callable()  ## 非空 = 提词子模式：麦与 capture 回调都归提词，不走对话
+var _story_prompt_text := ""          ## 本轮累积转写（多句拼接，正在说续轮；仅供回填，尾声不打分）
+var _story_prompt_timer: Timer        ## 提词静默超时：孩子没吭声/害羞 → 放行接演谢幕
+const STORY_PROMPT_TIMEOUT := 12.0    ## 提词等待上限（秒）：正在说则续一轮，否则收尾放行
 var _pending_reuse := {}           ## 待点的复用提示 {itemId,itemName}（服务端 npc_wishes 下发）；播一次即清
 ## A4 心愿清单（M1，docs/kids-thinking-little-boss.md）：npc_wishes 推导的只读视图，
 ## 每项 {characterId, ability, source}。硬上限 3 张卡——多了幼儿被信息淹没（§3.2）。
@@ -521,6 +527,9 @@ func _voice_should_capture() -> bool:
 	# B3 起名子模式：端侧就绪即开麦，但点点问句（name_ask）播放期间先静音——
 	# 无 AEC 的麦会把她的问句录回去被听成开口。她说完才放行（同 greeting 静音口径）。
 	if not _naming_item.is_empty():
+		return _vc.is_ready() and not (fairy_voice != null and fairy_voice.is_playing())
+	# P3 舞台提词子模式（尾声复述）：端侧就绪即开麦；点点/旁白问句播放期间先静音（无 AEC 防自听）。
+	if not _story_prompt_done.is_null():
 		return _vc.is_ready() and not (fairy_voice != null and fairy_voice.is_playing())
 	var x := _fsm_inputs()
 	if not _talk_pid.is_empty() and not _vc.is_ready():
@@ -4138,6 +4147,11 @@ func _setup_backend() -> void:
 	_naming_timer.one_shot = true
 	_naming_timer.timeout.connect(_on_naming_timeout)
 	add_child(_naming_timer)
+	# P3 舞台提词静默超时：尾声「讲给外婆听」孩子没吭声就放行接演谢幕（复述是邀请不是关卡）。
+	_story_prompt_timer = Timer.new()
+	_story_prompt_timer.one_shot = true
+	_story_prompt_timer.timeout.connect(_on_story_prompt_timeout)
+	add_child(_story_prompt_timer)
 
 func _on_think_timeout() -> void:
 	if thinking_label.visible:
@@ -6309,6 +6323,10 @@ func _on_capture_committed() -> void:
 		if confirm_bar != null:
 			confirm_bar.hide_bar()
 		return
+	# P3 舞台提词子模式（尾声复述）：孩子说完一句——不亮思考态/不投蛋/不走对话，
+	# 文本由 _on_capture_local_final 累积；收尾交给 _on_story_prompt_timeout（正在说续轮）。
+	if not _story_prompt_done.is_null():
+		return
 	if confirm_bar != null:
 		confirm_bar.hide_bar() # 采纳了（或本就没开确认模式）：收条
 	# 喊话没有服务端回复要等：不亮「思考中」、不开解卡定时器（端侧 ASR final 秒回）
@@ -6330,6 +6348,13 @@ func _on_capture_local_final(text: String) -> void:
 	# B3 起名子模式：这句话就是造物的名字——打包录音 + 文本发服务端落库，不走对话。
 	if not _naming_item.is_empty():
 		_finish_naming(text)
+		return
+	# P3 舞台提词子模式（尾声复述）：累积这句转写，继续开着麦（正在说会续轮），
+	# 收尾由 _on_story_prompt_timeout 决定（孩子安静下来才放行接演谢幕）。空转写忽略、不打扰。
+	if not _story_prompt_done.is_null():
+		var pt := text.strip_edges()
+		if not pt.is_empty():
+			_story_prompt_text = pt if _story_prompt_text.is_empty() else _story_prompt_text + " " + pt
 		return
 	_vt_asr_done = Time.get_ticks_msec() # 端侧识别出文本
 	var t := text.strip_edges()
@@ -6408,6 +6433,56 @@ func _on_naming_timeout() -> void:
 		_naming_timer.start(NAMING_TIMEOUT)
 		return
 	_end_naming()
+
+# ── 舞台提词（stage.prompt，P3 尾声复述）────────────────────────────────────────
+# 剧本 `await stage.prompt(actor, hint)` 走到这里：停下开麦，让小朋友说一段（讲给外婆听）。
+# 说完/超时/离线跳过后带转写回 ack，剧本才继续（谢幕「讲得真好听」）。零挫败不打分（铁律#1）：
+# 无端侧 ASR / 害羞 / 没吭声一律静默放行，不卡剧情。done 签名同其它完成型：func(ok, {text})。
+
+## 舞台提词入口（StageAgent 的 "prompt" 命令）：开麦等孩子复述，done 在收尾时带转写回 ack。
+func stage_prompt(_actor_id: String, hint: String, done: Callable) -> void:
+	# 起不了麦（离线 / 无端侧 ASR）：零挫败——即刻带空转写放行，剧情不卡。
+	if not online or _vc == null or not _vc.is_ready():
+		done.call(true, { "text": "" })
+		return
+	# 已在提词（理论上剧本串行，兜底）：把旧的收掉再开新的，别叠两路麦。
+	if not _story_prompt_done.is_null():
+		_abort_story_prompt()
+	_story_prompt_done = done
+	_story_prompt_text = ""
+	if not hint.strip_edges().is_empty():
+		banner.text = hint
+		banner.visible = true
+	_vc.open() # 开麦；实际开录由 _voice_should_capture 提词分支放行（点点问句播完才放）
+	_story_prompt_timer.start(STORY_PROMPT_TIMEOUT)
+
+## 提词静默超时：正在说就再续一轮（别打断复述），否则收尾放行接演谢幕（害羞/没吭声）。
+func _on_story_prompt_timeout() -> void:
+	if _vc != null and _vc.is_recording():
+		_story_prompt_timer.start(STORY_PROMPT_TIMEOUT)
+		return
+	_finish_story_prompt(_story_prompt_text)
+
+## 收尾提词：清状态 + 关麦 + 停超时，然后带转写回 ack（剧本继续谢幕）。幂等。
+func _finish_story_prompt(text: String) -> void:
+	if _story_prompt_done.is_null():
+		return
+	var done := _story_prompt_done
+	_abort_story_prompt() # 清 _story_prompt_done / 关麦 / 停超时 / 收 banner
+	done.call(true, { "text": text })
+
+## 中止提词：只清本地状态（关麦/停超时/收 banner），不回 ack。演出中途收场（abort）时清扫用。幂等。
+func _abort_story_prompt() -> void:
+	if _story_prompt_done.is_null():
+		return
+	_story_prompt_done = Callable()
+	_story_prompt_text = ""
+	if _story_prompt_timer != null:
+		_story_prompt_timer.stop()
+	banner.visible = false
+	# 提词的麦是独立开的：不在近身/喊话态就关掉，别把裸麦留着。
+	if _vc != null and selected == null and _talk_pid.is_empty():
+		_vc.close()
 
 ## B3 起名回填广播：就地更新背包里那件的 nameVoiceAsset/nameText（下次开背包就画小喇叭角标）。
 func _on_item_updated(data: Dictionary) -> void:
@@ -7788,6 +7863,7 @@ func _stage_mark_actors(on: bool) -> void:
 ## 收场（正常结束/异常终止）：解锁输入，停掉一切舞台驱动的执行器与念白，横幅圆场。
 func stage_finish(result: Dictionary, aborted: bool, reason: String) -> void:
 	_stage_active = false
+	_abort_story_prompt() # 演出收场：中途还挂着的提词麦收掉（正常结束时提词已 await 完、这里幂等空转）
 	_stage_mark_actors(false) # 摘光环必须赶在 _stage_actor_ids 清空之前——清了就找不到人了
 	_stage_player_actor_id = ""
 	_stage_actor_ids.clear()

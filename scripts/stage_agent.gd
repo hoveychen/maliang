@@ -9,7 +9,7 @@ extends RefCounted
 ##   - 完成型 narrate/say/move_to/do_action/prop_spawn：host 演完调 done 回调才 ack。
 ##   - 设置型（follow/flee/stop/banner/hud/prop_place/prop_remove/camera）：即刻 ack，脚本不卡。
 ##   - watch/unwatch（cmdId=-1）：布置/撤销规则探测器，无 ack。
-##   - prompt：P5 仍占位即刻 ack（开麦提词留 screenplay-gen plan 接）。
+##   - prompt：完成型——宿主开麦让小朋友说一段（尾声复述），说完/超时/离线跳过后带 { text } ack。
 ##
 ## 规则事件（tap/timer）：客户端本地探测（点角色 / 倒计时归零）→ send_event(kind,subId) 上行，
 ## 服务端注回脚本对应订阅回调。near 由服务端对复制位置求值（不下发客户端探测器），客户端对 near 不做本地探测。
@@ -111,8 +111,9 @@ func on_stage_cmd(data: Dictionary) -> void:
 				return
 			_host.stage_action(actor_id, String(args.get("action", "wave")), _done(cmd_id))
 		"prompt":
-			# 开麦提词回填小朋友的话留 screenplay-gen plan 接；此处占位即刻 ack 空串，脚本不卡。
-			_ack(cmd_id, { "text": "" })
+			# 尾声复述等：交给宿主开麦，让小朋友说一段（讲给外婆听）。说完/超时/离线跳过后由宿主
+			# 带 { text } 回 done → ack（完成型，宿主收尾前不回执，脚本停在 await 处等孩子说）。
+			_host.stage_prompt(actor_id, String(args.get("hint", "")), _done(cmd_id))
 		"follow":
 			# 设置型：即刻 ack 保持脚本不卡；非 host 不真跑跟随（NPC 位置由 host 复制）。
 			if not _skip_npc_sim(actor_id):

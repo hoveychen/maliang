@@ -9,6 +9,7 @@ var last_say_done := Callable()
 var last_narrate_done := Callable()
 var last_prop_done := Callable()
 var last_ball_done := Callable()
+var last_prompt_done := Callable()
 
 func stage_begin(actors: Array) -> void:
 	calls.append({ "m": "begin", "actors": actors })
@@ -31,6 +32,10 @@ func stage_say(actor_id: String, text: String, action: String, voice_id: String,
 func stage_narrate(text: String, done: Callable) -> void:
 	calls.append({ "m": "narrate", "text": text })
 	last_narrate_done = done
+
+func stage_prompt(actor_id: String, hint: String, done: Callable) -> void:
+	calls.append({ "m": "prompt", "actor": actor_id, "hint": hint })
+	last_prompt_done = done
 
 func stage_follow(actor_id: String, target_id: String) -> void:
 	calls.append({ "m": "follow", "actor": actor_id, "target": target_id })
