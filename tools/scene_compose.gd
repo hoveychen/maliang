@@ -49,6 +49,7 @@ const SDF_PROPS := [
 ## ⚠️ 三只小猪的房子/POI 迁入（B 全量合并）在 s1-hood P3-P4 再补，本表先只放村庄骨架 + 外婆家占位屋。
 const LANDMARKS_VF := [
 	{ "item": "well", "tile": Vector2i(20, 16), "yaw": 0.0, "search": 0 },   # 广场水井
+	{ "item": "windmill", "tile": Vector2i(40, 18), "yaw": 180.0, "search": 3 },  # 大风车：水井广场东侧开阔地，村庄核心地标（扇叶匀速转，见 PropSpinner）
 	{ "item": "house_0", "tile": Vector2i(11, 10), "yaw": 90.0, "search": 2 },
 	{ "item": "house_1", "tile": Vector2i(29, 11), "yaw": 180.0, "search": 2 },
 	{ "item": "house_2", "tile": Vector2i(10, 24), "yaw": 90.0, "search": 2 },

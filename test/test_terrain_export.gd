@@ -93,6 +93,20 @@ func _init() -> void:
 	# ── 确定性：连续两次导出必须逐字节相同 ──────────────────────────────
 	fails += _check("两次导出字节一致（组装是纯函数）", buf == EX.build_terrain_bytes(), true)
 
+	# ── village_forest（100 格合并大场景）：村庄核心加了大风车（水井广场东侧，
+	#    锚点 (40,18) 若被占由 search 螺旋就近落位）——恰一座，供孩子日常场景看它转 ──
+	WorldGrid.configure(100)
+	TerrainMap.reset()
+	var vf: Dictionary = TerrainMap.load_from_bytes(EX.build_terrain_bytes("village_forest"))
+	fails += _check("village_forest 载入 ok", vf["ok"], true)
+	var vf_mills := 0
+	for y in range(100):
+		for x in range(100):
+			if TerrainMap.tile_item_id(Vector2i(x, y)) == "windmill":
+				vf_mills += 1
+	fails += _check("village_forest 村庄核心恰一座大风车", vf_mills, 1)
+	WorldGrid.configure(n) # 复位回默认，免影响后续
+
 	TerrainMap.reset()
 	print("test_terrain_export: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
