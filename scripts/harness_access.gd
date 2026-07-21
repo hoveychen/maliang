@@ -52,7 +52,7 @@ static func execution_for(kind: String, on_screen: bool, viewport: String) -> Di
 			if on_screen:
 				return {"execution": "long_press", "execution_reason": "on_screen"}
 			return {"execution": "handler", "execution_reason": "off_screen_fallback"}
-		"talk", "pick_option":
+		"talk":
 			if on_screen:
 				return {"execution": "tap", "execution_reason": "on_screen"}
 			return {"execution": "handler", "execution_reason": "off_screen_fallback"}
@@ -119,19 +119,9 @@ static func build_actions(facts: Dictionary) -> Array:
 		out.append(action("confirm", cid, String(c[1]), enabled,
 			"" if enabled else "not_confirming", false, "root"))
 
-	# 引导式造物点卡：in_creation 且有卡时，每张卡一条 pick_option。
-	if bool(facts.get("in_creation", false)):
-		var opts: Variant = facts.get("creation_options", [])
-		if typeof(opts) == TYPE_ARRAY:
-			for o in (opts as Array):
-				if typeof(o) != TYPE_DICTIONARY:
-					continue
-				var oid := String((o as Dictionary).get("id", ""))
-				if oid.is_empty():
-					continue
-				var enabled2 := world_gate
-				out.append(action("pick_option", oid, String((o as Dictionary).get("label", oid)),
-					enabled2, "" if enabled2 else block_reason, false, "root"))
+	# 引导式造物点卡【不再造 pick_option 业务后门】：那 4 张卡本就是真 Button，通用 Control 遍历
+	# 已把它们采成带 label(见 world._build_creation_cards 的 tooltip_text)的 press:btn——驱动方直接
+	# do press:btn:<卡path> 真 tap，与"真输入/杀后门"初衷一致。in_creation/creation_options 仍在 state 里可观察。
 
 	# 手机：便捷全局动作（手机屏 SubViewport，走 handler）。
 	var phone_open := bool(facts.get("phone_open", false))

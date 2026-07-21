@@ -89,7 +89,7 @@ func _run_once() -> void:
 	var g5 := HarnessAccess.build_actions({"vc_confirming": false})
 	fails += _check("非确认态 采纳禁用", _find(g5, "confirm:confirm_accept")["enabled"], false)
 	var g6 := HarnessAccess.build_actions({"in_creation": true, "creation_options": [{"id": "opt_a", "label": "A"}]})
-	fails += _check("造物态出 pick_option", _find(g6, "pick_option:opt_a")["enabled"], true)
+	fails += _check("造物态【不再】造 pick_option 业务后门(改走通用 press:btn 真 tap)", _find(g6, "pick_option:opt_a").is_empty(), true)
 	var g7 := HarnessAccess.build_actions({"phone_open": false})
 	fails += _check("手机关→有打开动作", _find(g7, "phone:open").is_empty(), false)
 	var g8 := HarnessAccess.build_actions({"phone_open": true})
