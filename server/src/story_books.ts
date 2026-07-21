@@ -62,6 +62,14 @@ export interface StoryChapter {
   stampStyle?: string;
   /** 本幕纪念贴纸（内置贴纸 id，addToBag 发放）；缺省＝只盖章。 */
   sticker?: string;
+  /**
+   * 互动演出章（数数游戏等，docs/s1-snow-white-design.md §5）：**无 interaction** 但演出本体即互动，
+   * 演赢（screenplay 跑到 stage.end，StageRunResult.status==='done'）就发盖章 + 贴纸——奖励走
+   * 服务端 emitPerformReward（区别于 task/build 互动幕的 settleStoryInteraction）。带此字段的幕必须
+   * 也带 stampStyle（+可选 sticker）；npcCastId＝庆祝/道谢的册内角色，thanks＝道谢句。
+   * 尾声（最后一幕）绝不带此字段（story_content.test 强制尾声无盖章）。
+   */
+  performReward?: { npcCastId: string; thanks: string };
 }
 
 export interface StoryBook {

@@ -101,8 +101,8 @@ import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts'
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
 import { buildDebut, buildStoryStageOpts, DebutError } from './stage_debut.ts';
-import { StoryDirector } from './story_director.ts';
-import { STORY_BOOKS, isUnsettledStoryRole, type StoryBook } from './story_books.ts';
+import { StoryDirector, type StoryAdvanceOutcome } from './story_director.ts';
+import { STORY_BOOKS, isUnsettledStoryRole, storyCharacterId, type StoryBook } from './story_books.ts';
 import { planGuide } from './guide.ts';
 import { seedStoryCharacters, settleStoryResidency } from './story_seed.ts';
 import { buildStageOptsFromDraft } from './screenplay_gen.ts';
@@ -2108,14 +2108,82 @@ export async function startStoryAsync(
       if (outcome.outcome === 'interacting') {
         // 演出收场 → 把本幕互动物化成委托递给孩子（幕定义话术由委托人音色念出）
         await offerStoryTask(socket, session, worldId, book, outcome.chapter, adapters, store);
-      } else if (outcome.outcome === 'completed' && outcome.advance?.settledNow) {
-        // 尾声演完整册完结：小猪们入住（翻 resident + fire-and-forget 专属委托链），
-        // 供给面开闸——立即重发漏话，入住的惊喜（小猪开始念叨心愿）当场可见。
-        settleStoryResidency(worldId, book, store, adapters.llm);
-        pushWishes(socket, store, worldId, session.playerId, session.currentScene, session);
+      } else if (outcome.outcome === 'completed') {
+        // 无互动幕演完（尾声谢幕 / 互动演出章如数数游戏）：发奖 + 入住 + 自动接演都归 emitPerformReward。
+        // 尾声无 performReward → 只按 settledNow 入住（＝旧行为）；互动演出章 reward 到期 → 发盖章+贴纸。
+        await emitPerformReward(socket, worldId, session.playerId, book, outcome, adapters, store, stories, session.clientTts, session.currentScene, session);
       }
     })
     .catch(() => {});
+}
+
+/**
+ * 互动演出章发奖（docs/s1-snow-white-design.md §5）：无 interaction 的幕演赢（completed）时的发奖路，
+ * 区别于 settleStoryInteraction（task/build 互动幕的发奖路，保持不动）。复用 story_director 已算好的
+ * advance（reward/推进/settledNow/autoPlayNextChapter），只把服务端该发的报文补齐：
+ *  - reward 且本幕带 performReward+stampStyle → store.addStamp + 合成最小 task 发 task_complete
+ *    （客户端 _on_task_complete 只读 npcId/stampStyle/task，缺字段优雅降级）+ 委托人音色道谢；
+ *  - settledNow → 整册完结入住（＝旧 completed 分支行为）；
+ *  - autoPlayNextChapter → 自动接演下一幕并递归发奖（覆盖「数数游戏幕 → 尾声」链，孩子不必走回 gate）。
+ * 尾声（无 performReward）经此只走 settledNow 入住，与改动前一致。
+ */
+export async function emitPerformReward(
+  socket: { send: (data: string) => void },
+  worldId: string,
+  playerId: string,
+  book: StoryBook,
+  outcome: { chapter: number; advance?: StoryAdvanceOutcome },
+  adapters: ServiceAdapters,
+  store: WorldStore,
+  stories: StoryDirector | undefined,
+  clientTts: boolean,
+  sceneId: string,
+  session?: VoiceSession,
+): Promise<void> {
+  const ch = book.chapters[outcome.chapter];
+  const adv = outcome.advance;
+  if (!ch || !adv) return;
+  if (adv.reward && ch.performReward && ch.stampStyle) {
+    const settle = store.addStamp(worldId, playerId);
+    const npc = store.getCharacter(worldId, storyCharacterId(book.id, ch.performReward.npcCastId));
+    const task: ActiveTask = {
+      id: randomUUID(),
+      type: 'visit', // 合成态：客户端 _on_task_complete 不按 type 分流，仅取 npcId/stampStyle 做庆祝
+      npcId: npc?.id ?? '',
+      npcName: npc?.name ?? '',
+      stampStyle: ch.stampStyle,
+      storyBookId: book.id,
+      storyChapter: outcome.chapter,
+      storyThanks: ch.performReward.thanks,
+    };
+    let sticker: string | undefined;
+    if (ch.sticker && getBuiltinItem(ch.sticker)) {
+      store.bagAdd(worldId, playerId, ch.sticker);
+      sticker = ch.sticker;
+    }
+    socket.send(JSON.stringify({
+      type: 'task_complete',
+      task,
+      stampStyle: task.stampStyle,
+      flowerGained: settle.flowerGained,
+      wallet: settle.wallet,
+      ...(sticker ? { sticker, bag: store.getBag(worldId, playerId) } : {}),
+    }));
+    void pushPraiseTts(socket, adapters, store, worldId, task, settle, clientTts);
+  }
+  if (adv.settledNow) settleStoryResidency(worldId, book, store, adapters.llm);
+  // 发了奖 / 入住了才重发漏话（钱包/供给面变了才需要）；纯重看不发，保持旧 completed 分支的安静。
+  if (adv.reward || adv.settledNow) pushWishes(socket, store, worldId, playerId, sceneId, session);
+  if (adv.autoPlayNextChapter !== undefined && stories) {
+    void stories
+      .trigger(worldId, playerId, book.id)
+      .then((next) => {
+        if (next.status === 'performed' && next.outcome === 'completed') {
+          void emitPerformReward(socket, worldId, playerId, book, next, adapters, store, stories, clientTts, sceneId, session);
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 /** 把某幕互动物化成委托并下发（task_offer 报文 + 委托人音色念请求话术）。返回是否递出去了（物化不了＝false，重触发可再试）。 */
