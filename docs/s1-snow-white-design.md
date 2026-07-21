@@ -36,10 +36,17 @@
   矮人同处。（代价：放弃"村广场同小猪/小红帽入口语汇"；但"白雪逃进森林来到小矮人小屋"就地遇见，反而更贴故事。）
 - **七矮人操场**：森林深处那块林中空地（现有 `poi_forest_deep` 名"森林深处"，tile `(30,86)` 附近）。
   地形骨架（草地空地）P2 阶段已画好留空（`terrain_map._paint_village_forest` 注释："外婆家/七矮人两处
-  林间空地 = 草地留空"）。本册往这块空地填：**七张小床布景**（scene_compose）+ 七个矮人降生站位。
-- **新增 POI `poi_seven_dwarfs` 名"七矮人小屋"**（`assets/terrain/village_forest.pois.json` append）：
-  tile ≈ `(30,86)`，radius 16，别名 `["小矮人家","矮人小屋","七个小矮人"]`。给点点提示 + 未来 B 计划的
-  `visit`/引路落点用；本册 A 的数数游戏在这块操场就地开演，不强依赖引路。
+  林间空地 = 草地留空"）。**P7 布景**（`tools/scene_compose.gd` `LANDMARKS_VF`/`SDF_PROPS_VF`）往这块空地填：
+  **一张矮人餐桌 `toy_table`@(30,84)**（白雪 gate 30,82 前方）+ **七张单人床 `toy_bed_single`** 沿西/东/南
+  三面围成小卧室（西 (23,84)(23,88)、东 (37,86)、南 (24,91)(28,91)(32,91)(36,91)），空出中间给矮人站位；
+  + **七个 `dwarf_bowl` 木碗**各摆在一个矮人降生位前一格（呼应数数游戏"一人一碗"）。床/桌 3×3 blocking、
+  碗 1×1 pathOk，锚点两两不重叠（逐格核，`validateTerrainItems` 通过）。`dwarf_bowl` = 新建 SDF prop
+  （`assets/sdf_props/dwarf_bowl.json`，flared 碗壁 + torus 唇 + 扁平米饭盘；四轮迭代取像"碗"的一版，观感精修留真机）。
+- **~~新增 POI `poi_seven_dwarfs`~~（P7 决定不新增，折进现有 `poi_forest_deep`）**：现有
+  `poi_forest_deep` 已锚在**同一 tile `(30,86)` radius 16**、别名含"森林深处/大森林/林子深处"。
+  再叠一个同 tile 的 POI 只会让点点引路/地点名解析二选一起歧义（两个 trigger 命中同一格）。故本册
+  A 的数数游戏就地在这块操场开演、不强依赖引路，`poi_forest_deep` 足够覆盖；未来 B 计划若要"去小矮人家"
+  的专属引路名，再给 `poi_forest_deep` 补别名，而非新建重叠 POI。
 - **七矮人降生站位**：操场空地里排开，便于孩子逐个点 + 逐个走到（一一对应）。约 `(26..34, 83..89)` 带内。
 
 ## 3. Cast（白雪 + 七矮人，八个真角色）

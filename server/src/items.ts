@@ -48,6 +48,9 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   // 龟兔赛跑跑道布景（s1-race P4）：红黄三角小旗，起点/终点旗门 + 两侧加油旗；
   // 纯装饰不挡路（blocking:false pathOk:true），别糊住跑道与引路。
   { ...builtin('race_flag', '赛跑小旗', 'sdf_res:race_flag', 1, false), pathOk: true },
+  // 七矮人的木碗（s1-snow-white P7 布景）：数数游戏『一人一碗』的静态道具，摆在餐桌旁；
+  // 纯装饰不挡路（blocking:false pathOk:true），别糊住操场也别挡引路。
+  { ...builtin('dwarf_bowl', '小矮人的碗', 'sdf_res:dwarf_bowl', 1, false), pathOk: true },
 
   // ── 未来机器人主题（world-themes P2 打样；全 CC0：Quaternius 机器人 + Kenney Space Kit）──
   // 机器人（Quaternius，assets/scifi/robots/*.glb）
