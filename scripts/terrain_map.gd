@@ -545,6 +545,18 @@ static func _paint_oz() -> void:
 	# ---- 翡翠城广场（黄砖路尽头，铁皮人 56,54 与「城」所在）----
 	_paint_rect_type(54, 52, 62, 60, T_YELLOW_BRICK)
 
+	# ==== 地势（同 village 主峰的同心台地手法；黄砖路末段逐级爬上城，远远就望得见翡翠城）====
+	# 翡翠城高台：心 (58,55) 垫 3 级台地。顶级平台覆盖城堡(58,50)+铁皮人(56,54)+广场(54~62,52~60)，
+	# 城「立在高处」。环宽 2 tile/级 → 相邻 tile 高差 ≤1，四面皆可逐级爬（不留陡崖空气墙）。
+	# 黄砖路 (52,50)→(58,56) 段自 lvl1 逐环进 lvl3，每步 ≤1 级，孩子走得上去。
+	for lvl in range(1, 4):
+		_paint_ellipse_height(58.0, 55.0, 11.0 - 2.0 * float(lvl), 12.5 - 2.0 * float(lvl), lvl)
+	# 路中缓丘：心 (44,42)（黄砖路岔口，稻草人玉米地东侧）垫 2 级小丘，让路有一次上下起伏。
+	# 环宽 3 tile/级 → 坡更缓；路自西南爬上丘顶(44,42)再下到东北，两侧各 ≤1 级/步。
+	for lvl in range(1, 3):
+		_paint_ellipse_height(44.0, 42.0, 8.0 - 3.0 * float(lvl), 8.0 - 3.0 * float(lvl), lvl)
+	# 入口小广场(10~18,10~18,含 portal 落点 14,14)与玉米地(36,34)刻意留平——两处离两丘均 >半径，天然 h0。
+
 ## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂类型（含端点）。
 static func _paint_rect_type(x0: int, z0: int, x1: int, z1: int, t: int) -> void:
 	for z in range(z0, z1 + 1):
