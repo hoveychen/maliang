@@ -152,6 +152,14 @@ run_test() {
   fi
 }
 
+# 主场景已改 village_forest（s1-hood-activate P2）。少数视觉/地形回测锚定退役 village 的地貌特征
+# （8 级演示山 @ (37,6)、池塘 @ chunk(0,0)、风车、village scene_compose 的 7 只 SDF、village stub 村民）——
+# 这些验的是渲染/引导管线本身，用 village 当稳定 fixture。经 MALIANG_BOOT_SCENE=village 把它们 pin 回
+# village 单独跑；其余测试默认 boot village_forest，天然覆盖「新主场景进得去不崩」。
+run_test_village() {
+  MALIANG_BOOT_SCENE=village run_test "$@"
+}
+
 for t in "${UNIT_TESTS[@]}"; do
   run_test "$t"
 done
@@ -159,7 +167,7 @@ done
 run_test test_scene_unload         --fixed-fps 10 --quit-after 40
 run_test test_boot_scene_filter    --fixed-fps 10 --quit-after 40
 run_test test_stage_camera        --fixed-fps 10 --quit-after 110
-run_test test_stage_staging       --fixed-fps 10 --quit-after 130
+run_test_village test_stage_staging       --fixed-fps 10 --quit-after 130
 run_test test_stage_ball          --fixed-fps 10 --quit-after 90
 run_test test_visual_menu          --fixed-fps 10 --quit-after 60
 run_test test_visual_loading       --fixed-fps 10 --quit-after 90
@@ -170,19 +178,19 @@ run_test test_fairy_guide          --fixed-fps 10 --quit-after 115
 run_test test_fairy_guide_hint     --fixed-fps 10 --quit-after 95
 run_test test_visual_fairy_poi     --fixed-fps 10 --quit-after 130
 run_test test_visual_fairy_poi_hold --fixed-fps 10 --quit-after 90
-run_test test_visual_camera_height --fixed-fps 10 --quit-after 80
+run_test_village test_visual_camera_height --fixed-fps 10 --quit-after 80
 run_test test_visual_sky           --fixed-fps 10 --quit-after 40
 run_test test_visual_paper         --fixed-fps 10 --quit-after 110
 run_test test_visual_hold_move     --fixed-fps 10 --quit-after 90
-run_test test_visual_sdf           --fixed-fps 10 --quit-after 140
-run_test test_visual_water         --fixed-fps 10 --quit-after 60
+run_test_village test_visual_sdf           --fixed-fps 10 --quit-after 140
+run_test_village test_visual_water         --fixed-fps 10 --quit-after 60
 run_test test_visual_camera_gesture --fixed-fps 10 --quit-after 160
 run_test test_visual_dialog_stage  --fixed-fps 10 --quit-after 60
 run_test test_visual_dialog_stage_blocked --fixed-fps 10 --quit-after 30
 run_test test_visual_dialog_anim   --fixed-fps 10 --quit-after 40
 run_test test_npc_idle_anim        --fixed-fps 10 --quit-after 80
 run_test test_villager_assets      --fixed-fps 10 --quit-after 40
-run_test test_bootstrap_split      --fixed-fps 10 --quit-after 60
+run_test_village test_bootstrap_split      --fixed-fps 10 --quit-after 60
 run_test test_intro_director       --fixed-fps 10 --quit-after 600
 run_test test_intro_tutorial       --fixed-fps 10 --quit-after 1200
 run_test test_intro_skip           --fixed-fps 10 --quit-after 60
@@ -195,7 +203,7 @@ run_test test_visual_interactions  --fixed-fps 10 --quit-after 420
 run_test test_paper_actions        --fixed-fps 10 --quit-after 60
 run_test test_visual_rewards       --fixed-fps 10 --quit-after 260
 run_test test_task_hint_ask        --fixed-fps 10 --quit-after 60
-run_test test_visual_props         --fixed-fps 10 --quit-after 120
+run_test_village test_visual_props         --fixed-fps 10 --quit-after 120
 run_test test_placement            --fixed-fps 10 --quit-after 40
 run_test test_item_voice           --fixed-fps 10 --quit-after 60
 run_test test_casting_placeholder  --fixed-fps 10 --quit-after 120
@@ -209,7 +217,7 @@ run_test test_graphics_toggles     --fixed-fps 10 --quit-after 40
 run_test test_benchmark_greedy     --fixed-fps 10 --quit-after 60
 run_test test_harness_wire         --fixed-fps 30 --quit-after 120
 run_test test_device_profile_boot
-run_test test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
+run_test_village test_visual_landmark_rebuild --fixed-fps 10 --quit-after 60
 run_test test_home_portal           --fixed-fps 10 --quit-after 30
 run_test test_home_walk             --fixed-fps 10 --quit-after 40
 run_test test_home_input_lock       --fixed-fps 10 --quit-after 40

@@ -76,16 +76,19 @@ export interface StoryBook {
   chapters: StoryChapter[];
 }
 
-// ── 首册《三只小猪》（village，3 幕＋尾声，docs/m2-story-director-design.md §5）──
+// ── 首册《三只小猪》（village_forest 合并大场景，3 幕＋尾声，docs/m2-story-director-design.md §5）──
 // 叙事编排：幕 3 演出是「狼逼近、砖房没盖完、向小朋友求助」→ build 互动盖砖房，
 // 「狼吹不倒+滑稽跑掉」放尾声当互动的回报——保住 build 的因果顺序（帮了忙才守得住）。
 // 幕 1 的 visit 不带 locationName：物化时按场景现有地点现选（「稻草被吹到那边去了」），
 // 村庄没有「草房废墟」POI，话术写成地点无关。
+// s1-hood-activate P1：B 全量合并——从退役单场景 village(75 格) 迁进主场景 village_forest(100 格)。
+// 坐标重锚进村庄核心近端带（z<40，中央广场 x∈[16,24] z∈[12,20]，见 terrain_map._paint_village_forest）：
+// 小猪群聚广场好找、狼在广场西巷自己一角。
 
 export const THREE_PIGS: StoryBook = {
   id: 'three_pigs',
   title: '三只小猪',
-  sceneId: 'village',
+  sceneId: 'village_forest',
   gateCastId: 'pig_big',
   cast: [
     {
@@ -95,7 +98,7 @@ export const THREE_PIGS: StoryBook = {
       voiceId: 'zh-CN-YunyangNeural',
       visualDescription:
         'a sturdy big brother pig with round pink body, wearing blue denim overalls and a tiny straw hat, holding nothing, kind steady smile, standing upright like a person',
-      position: { tileX: 30, tileY: 46 },
+      position: { tileX: 20, tileY: 15 },
       greetingStyle: 'gentle',
     },
     {
@@ -105,7 +108,7 @@ export const THREE_PIGS: StoryBook = {
       voiceId: 'zh-CN-YunxiNeural',
       visualDescription:
         'an energetic middle brother pig with round pink body, wearing a green t-shirt, cheerful wide grin, ears perked up, standing upright like a person',
-      position: { tileX: 33, tileY: 45 },
+      position: { tileX: 18, tileY: 17 },
       greetingStyle: 'warm',
     },
     {
@@ -115,7 +118,7 @@ export const THREE_PIGS: StoryBook = {
       voiceId: 'zh-TW-HsiaoChenNeural',
       visualDescription:
         'a small baby brother pig with chubby round pink body, wearing a yellow bib with a flower pattern, big sparkly innocent eyes, shy sweet smile, standing upright like a person',
-      position: { tileX: 28, tileY: 48 },
+      position: { tileX: 22, tileY: 13 },
       greetingStyle: 'shy',
     },
     {
@@ -125,8 +128,8 @@ export const THREE_PIGS: StoryBook = {
       voiceId: 'zh-CN-YunjianNeural',
       visualDescription:
         'a goofy chubby grey wolf with soft fluffy fur, puffed round cheeks like blowing air, crossed silly eyes, tiny stubby tail, clumsy harmless cartoon look, not scary at all, standing upright like a person',
-      // 村边一角自己的小窝（小猪群西侧、同属南部可行走带）：故事后翻 resident 成可搭话村民，孩子好找他玩。
-      position: { tileX: 20, tileY: 50 },
+      // 广场西巷一角自己的小窝（小猪群西侧，x∈[8,15] z∈[15,17] 可行走带）：故事后翻 resident 成可搭话村民，孩子好找他玩。
+      position: { tileX: 11, tileY: 16 },
       greetingStyle: 'playful',
     },
   ],

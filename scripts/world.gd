@@ -427,6 +427,14 @@ func _ready() -> void:
 	# 物品实体目录 + 打包默认矩阵：区块首铺/NPC 落位之前就位——离线也有完整世界
 	# （树/建筑/占用全来自矩阵；在线时服务端矩阵与打包一致则 changed=false 零重铺）。
 	ItemCatalog.ensure_builtin()
+	# 回测钩子：MALIANG_BOOT_SCENE 覆盖初始主场景（默认 village_forest）。视觉/地形回测锚定的是
+	# 退役 village 的地貌特征（8 级山/池塘/风车/7 SDF），用它把这些测试 pin 回 village 单独验渲染管线。
+	var boot_scene := OS.get_environment("MALIANG_BOOT_SCENE")
+	if not boot_scene.is_empty():
+		_scene_id = boot_scene
+	# 先把本地 _paint 兜底场景对齐到当前主场景（_scene_id）：打包 .mltr 命中时被字节覆盖，
+	# 但 .mltr 缺失的极端兜底会据 _paint_scene 画秃世界——不对齐则 village_forest 世界会画成 village。
+	TerrainMap.reset_scene(_scene_id)
 	_load_packaged_terrain()
 	ItemCatalog.apply_static_occupancy()
 	_setup_camera()
@@ -4155,11 +4163,13 @@ func _on_failed(reason: String) -> void:
 ## 在线引导：GET /worlds/default → 连 WS → 按世界状态生成角色（含点点）。离线则保留占位 NPC。
 ## _bootstrapping 全程置位，无论在线/离线都在收尾清零——world_ready 就绪判定据此知道引导已结束。
 ## 当前场景 id（模型 B：world 含多 scene）。进世界时按初始场景置初值，走 portal（enter_scene）时更新。
-var _scene_id := "village"
+## s1-hood-activate P2：B 全量合并——主场景改为 village_forest（100 格村庄+森林合并大场景，
+## docs/s1-merged-scene-layout.md）。经 world_info 上报给服务端 session.currentScene，无需改服务端 DEFAULT_SCENE。
+var _scene_id := "village_forest"
 
-## 「家」= 初始世界（初始场景 village）的原点 tile(0,0)。手机「回家」app 的目的地：
-## scene_compose 保证原点 8 tile 内保持开阔空地（出生林间空地），落这里绝不会被围死。
-const HOME_SCENE := "village"
+## 「家」= 初始世界（初始主场景 village_forest）的原点 tile(0,0)。手机「回家」app 的目的地：
+## _paint_village_forest 保证原点角是村庄近端出生角、有明路进广场，落这里绝不会被围死。
+const HOME_SCENE := "village_forest"
 const HOME_TILE := Vector2i.ZERO
 
 ## 当前场景的传送点（服务端 scenes[].portals / scene_entered 的 scene.portals 下发）。

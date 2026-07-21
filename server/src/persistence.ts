@@ -1081,10 +1081,59 @@ export class WorldStore {
         const defId = typeof inst.defId === 'string' ? inst.defId : inst.id;
         this.#writeInstanceRow({ ...inst, worldId: dstWorldId, defId });
       }
+      // 场景层也随克隆传过去（新世界是空的，无覆盖顾虑）。见 #cloneScenes 说明。
+      this.#cloneScenes(srcWorldId, dstWorldId, false);
       this.#db.exec('COMMIT');
     } catch (e) {
       this.#db.exec('ROLLBACK');
       throw e;
+    }
+  }
+
+  /**
+   * 克隆场景层（世界模板架构 v2 · s1-hood-activate P1）：把 src 世界的场景整行复制进 dst
+   * （含地形 blob / POI / portal，只换 world_id）。additiveOnly=true 时只补 dst 还没有的场景，
+   * 绝不覆盖已存在的场景（保住孩子对自己世界的地形编辑，与角色 additive 迁移同口径）；
+   * false 供全新世界克隆（dst 本就空）。
+   *
+   * 历史：scenes 原本不随克隆/迁移传播（只 characters 有）——那时主场景靠客户端打包 .mltr +
+   * 内置 POIS 常量兜底，服务端不需要 scenes 行。《小红帽》起首个 hard-依赖服务端 scenes.pois 的
+   * 册：guide_to poi_grandma 走 planGuide → listScenes(worldId).pois 取目标 tile，客户端上报的
+   * #locations 名单没有 tile、planGuide 也不读它。故场景（含 poi_grandma）必须传到玩家世界，
+   * 否则新玩家世界里点点引路直接 return null（「好呀跟我来」却没人动，正是要防的病）。
+   */
+  #cloneScenes(srcWorldId: string, dstWorldId: string, additiveOnly: boolean): void {
+    const rows = this.#db
+      .prepare(
+        'SELECT scene_id, name, terrain_asset, grid_tiles, pois, portals, terrain, terrain_version FROM scenes WHERE world_id = ?',
+      )
+      .all(srcWorldId) as {
+      scene_id: string;
+      name: string;
+      terrain_asset: string;
+      grid_tiles: number;
+      pois: string;
+      portals: string;
+      terrain: Uint8Array | null;
+      terrain_version: number;
+    }[];
+    const existing = additiveOnly
+      ? new Set(
+          (this.#db.prepare('SELECT scene_id FROM scenes WHERE world_id = ?').all(dstWorldId) as { scene_id: string }[]).map(
+            (r) => r.scene_id,
+          ),
+        )
+      : new Set<string>();
+    const insert = this.#db.prepare(
+      'INSERT INTO scenes (world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, terrain, terrain_version) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+        'ON CONFLICT(world_id, scene_id) DO UPDATE SET name = excluded.name, terrain_asset = excluded.terrain_asset, ' +
+        'grid_tiles = excluded.grid_tiles, pois = excluded.pois, portals = excluded.portals, ' +
+        'terrain = excluded.terrain, terrain_version = excluded.terrain_version',
+    );
+    for (const r of rows) {
+      if (existing.has(r.scene_id)) continue; // additive：孩子已有的场景一律不覆盖
+      insert.run(dstWorldId, r.scene_id, r.name, r.terrain_asset, r.grid_tiles, r.pois, r.portals, r.terrain, r.terrain_version);
     }
   }
 
@@ -1194,6 +1243,9 @@ export class WorldStore {
         const defId = typeof inst.defId === 'string' ? inst.defId : inst.id;
         this.#writeInstanceRow({ ...inst, worldId, defId });
       }
+      // 场景层同样 additive 补入（模板新登记的 village_forest 等）：只加模板有、本世界还没有的场景，
+      // 绝不覆盖孩子已编辑过的场景地形。存量世界经 bump-version 触发本迁移即拿到新主场景 + POI。
+      this.#cloneScenes(TEMPLATE_WORLD_ID, worldId, true);
       this.#db.prepare('UPDATE worlds SET template_version = ? WHERE id = ?').run(templateVersion, worldId);
       this.#db.exec('COMMIT');
     } catch (e) {

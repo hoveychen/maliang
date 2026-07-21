@@ -14,7 +14,7 @@ import { BUILTIN_ITEMS, validateTerrainItems, resolveBuiltin, buildStaticOccupan
 
 const ASSETS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'terrain');
 
-for (const scene of ['village', 'forest'] as const) {
+for (const scene of ['village', 'forest', 'village_forest'] as const) {
   test(`${scene}.mltr：v2 解码 + 物品语义校验通过`, () => {
     const buf = new Uint8Array(readFileSync(join(ASSETS, `${scene}.mltr`)));
     const t = decodeTerrain(buf);
