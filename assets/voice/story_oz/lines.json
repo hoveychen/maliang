@@ -1,0 +1,146 @@
+{
+  "voice": "zh-CN-YunxiaNeural",
+  "lines": [
+    {
+      "id": "oz_0_1",
+      "role": "narrate",
+      "text": "一阵好大的风，把一个小姑娘吹到了这条金黄色的砖头路上。"
+    },
+    {
+      "id": "oz_0_2",
+      "role": "桃乐丝",
+      "voice": "en-US-AnaNeural",
+      "text": "Hello! I am Dorothy. Where am I?"
+    },
+    {
+      "id": "oz_0_3",
+      "role": "narrate",
+      "text": "她说的是英文哦。点点悄悄告诉你：她说「你好呀，我叫桃乐丝，我在哪儿呀」。"
+    },
+    {
+      "id": "oz_0_4",
+      "role": "桃乐丝",
+      "voice": "en-US-AnaNeural",
+      "text": "I want to go home. Can you help me?"
+    },
+    {
+      "id": "oz_0_5",
+      "role": "narrate",
+      "text": "桃乐丝想回家啦。她说「我想回家，你可以帮帮我吗」。"
+    },
+    {
+      "id": "oz_0_6",
+      "role": "narrate",
+      "text": "顺着黄砖路往前看，玉米地里站着一个稻草人，正朝这边笑呢。"
+    },
+    {
+      "id": "oz_0_7",
+      "role": "桃乐丝",
+      "voice": "en-US-AnaNeural",
+      "text": "Look! A friend! Let us say hello!"
+    },
+    {
+      "id": "oz_0_8",
+      "role": "narrate",
+      "text": "桃乐丝说「看！一个朋友！我们去打个招呼吧」。你帮她把这句英文的问候带给稻草人好不好？"
+    },
+    {
+      "id": "oz_1_1",
+      "role": "narrate",
+      "text": "稻草人听懂了你带来的 Hello，高兴得直转圈，要和桃乐丝一起去找回家的路。"
+    },
+    {
+      "id": "oz_1_2",
+      "role": "稻草人",
+      "voice": "zh-CN-YunxiNeural",
+      "text": "我要是有个聪明的脑袋，就能帮上更多忙啦！"
+    },
+    {
+      "id": "oz_1_3",
+      "role": "桃乐丝",
+      "voice": "en-US-AnaNeural",
+      "text": "You are already very clever, my friend!"
+    },
+    {
+      "id": "oz_1_4",
+      "role": "narrate",
+      "text": "桃乐丝说「你已经很聪明啦，我的朋友」。"
+    },
+    {
+      "id": "oz_1_5",
+      "role": "narrate",
+      "text": "走着走着，路边站着一个生了锈的铁皮人，动都动不了。"
+    },
+    {
+      "id": "oz_1_6",
+      "role": "铁皮人",
+      "voice": "zh-CN-YunyangNeural",
+      "text": "我在这儿好久啦……谁能帮我上点油，我就能给你们指路。"
+    },
+    {
+      "id": "oz_1_7",
+      "role": "narrate",
+      "text": "大家帮铁皮人上了油，他咔哒咔哒动了起来，指出了通往翡翠城的路。"
+    },
+    {
+      "id": "oz_1_8",
+      "role": "桃乐丝",
+      "voice": "en-US-AnaNeural",
+      "text": "Thank you! You are so kind!"
+    },
+    {
+      "id": "oz_1_9",
+      "role": "narrate",
+      "text": "桃乐丝想谢谢铁皮人。她说「谢谢你，你真好」。你帮她把这句 Thank you 带给铁皮人好不好？"
+    },
+    {
+      "id": "oz_2_1",
+      "role": "narrate",
+      "text": "顺着黄砖路一直走，一座亮晶晶的绿色城堡出现在眼前——翡翠城到啦！"
+    },
+    {
+      "id": "oz_2_2",
+      "role": "桃乐丝",
+      "voice": "en-US-AnaNeural",
+      "text": "We did it! Thank you, my friends!"
+    },
+    {
+      "id": "oz_2_3",
+      "role": "narrate",
+      "text": "桃乐丝好开心。她说「我们做到啦！谢谢你们，我的朋友们」。"
+    },
+    {
+      "id": "oz_2_4",
+      "role": "稻草人",
+      "voice": "zh-CN-YunxiNeural",
+      "text": "跟着你，我好像真的变聪明啦！"
+    },
+    {
+      "id": "oz_2_5",
+      "role": "铁皮人",
+      "voice": "zh-CN-YunyangNeural",
+      "text": "我的心里暖乎乎的，这大概就是有一颗心的感觉吧。"
+    },
+    {
+      "id": "oz_2_6",
+      "role": "narrate",
+      "text": "点点悄悄飞到你的耳边，轻轻地问。"
+    },
+    {
+      "id": "oz_2_7",
+      "role": "narrate",
+      "text": "小朋友，你愿意把桃乐丝一路交朋友、说英文的故事，讲给大家听一听吗？"
+    },
+    {
+      "id": "oz_2_8",
+      "role": "桃乐丝",
+      "voice": "en-US-AnaNeural",
+      "text": "You are my best friend! Bye bye!"
+    },
+    {
+      "id": "oz_2_9",
+      "role": "narrate",
+      "text": "桃乐丝说「你是我最好的朋友，再见啦」。从今天起，桃乐丝、稻草人和铁皮人就住在这条黄砖路上，随时欢迎你来玩。"
+    }
+  ]
+}

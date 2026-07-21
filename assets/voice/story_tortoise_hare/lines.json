@@ -1,0 +1,114 @@
+{
+  "voice": "zh-CN-YunxiaNeural",
+  "lines": [
+    {
+      "id": "tortoise_hare_0_1",
+      "role": "narrate",
+      "text": "村口热闹起来啦！乌龟和兔子要比一比，看谁先跑到终点。"
+    },
+    {
+      "id": "tortoise_hare_0_2",
+      "role": "兔子",
+      "voice": "zh-CN-YunxiNeural",
+      "text": "哼，就凭乌龟那小短腿？我兔子一眨眼就冲到终点啦！"
+    },
+    {
+      "id": "tortoise_hare_0_3",
+      "role": "乌龟",
+      "voice": "zh-TW-YunJheNeural",
+      "text": "我跑得慢，可是我会一步一步，稳稳地走到终点。"
+    },
+    {
+      "id": "tortoise_hare_0_4",
+      "role": "narrate",
+      "text": "他们约好在东边的跑道上比赛。走，我们一起去跑道给他们加油吧！"
+    },
+    {
+      "id": "tortoise_hare_1_1",
+      "role": "narrate",
+      "text": "你和点点一起来到了跑道边，乌龟和兔子已经站在起跑线上啦。"
+    },
+    {
+      "id": "tortoise_hare_1_2",
+      "role": "narrate",
+      "text": "小朋友，你想给谁加油呢？点一点乌龟，或者点一点兔子吧！"
+    },
+    {
+      "id": "tortoise_hare_1_3",
+      "role": "兔子",
+      "voice": "zh-CN-YunxiNeural",
+      "text": "好嘞！有你给我加油，看我一下子就冲到终点！"
+    },
+    {
+      "id": "tortoise_hare_1_4",
+      "role": "乌龟",
+      "voice": "zh-TW-YunJheNeural",
+      "text": "谢谢你给我加油，我会一步一步稳稳地走。"
+    },
+    {
+      "id": "tortoise_hare_1_5",
+      "role": "narrate",
+      "text": "那我们就一起给他们俩加油吧——加油！加油！"
+    },
+    {
+      "id": "tortoise_hare_1_6",
+      "role": "narrate",
+      "text": "比赛开始啦！兔子嗖地冲了出去，一下子就跑得老远。"
+    },
+    {
+      "id": "tortoise_hare_1_7",
+      "role": "兔子",
+      "voice": "zh-CN-YunxiNeural",
+      "text": "乌龟还在后面慢吞吞呢，我先在树荫下睡一小会儿～"
+    },
+    {
+      "id": "tortoise_hare_1_16",
+      "role": "narrate",
+      "text": "乌龟呢，一步，一步，稳稳地往前走，一点也不着急。"
+    },
+    {
+      "id": "tortoise_hare_1_8",
+      "role": "乌龟",
+      "voice": "zh-TW-YunJheNeural",
+      "text": "慢慢来，一步一步，也能走到终点。"
+    },
+    {
+      "id": "tortoise_hare_1_9",
+      "role": "narrate",
+      "text": "等兔子睡醒，揉揉眼睛一看——乌龟已经稳稳地到终点啦！"
+    },
+    {
+      "id": "tortoise_hare_1_10",
+      "role": "兔子",
+      "voice": "zh-CN-YunxiNeural",
+      "text": "哎呀我睡过头啦！乌龟你真厉害，一步一步竟然先到了！"
+    },
+    {
+      "id": "tortoise_hare_1_11",
+      "role": "乌龟",
+      "voice": "zh-TW-YunJheNeural",
+      "text": "没关系呀，一起跑得开心最重要，下次我们再一起玩！"
+    },
+    {
+      "id": "tortoise_hare_1_12",
+      "role": "narrate",
+      "text": "点点悄悄飞到你的耳边，轻轻地问。"
+    },
+    {
+      "id": "tortoise_hare_1_13",
+      "role": "narrate",
+      "text": "小朋友，你愿意把龟兔赛跑的故事，讲给乌龟和兔子听一听吗？"
+    },
+    {
+      "id": "tortoise_hare_1_14",
+      "role": "乌龟",
+      "voice": "zh-TW-YunJheNeural",
+      "text": "讲得真好听！谢谢你今天来给我们加油。"
+    },
+    {
+      "id": "tortoise_hare_1_15",
+      "role": "narrate",
+      "text": "从今天起，乌龟和兔子就住在村子里啦，随时欢迎你来一起玩、一起跑。"
+    }
+  ]
+}

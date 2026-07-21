@@ -13,7 +13,7 @@ const COMPOSE := preload("res://tools/scene_compose.gd")
 const HEADER_BYTES := 11
 
 ## 各场景网格边长（tile 数）——须与 server/src/terrain.ts PRESET_GRIDS 一致。
-const SCENE_GRIDS := { "village": 75, "village_forest": 100 }
+const SCENE_GRIDS := { "village": 75, "village_forest": 100, "oz": 75 }
 
 func _init() -> void:
 	var scene_id := _arg("--scene", "village")
@@ -65,12 +65,22 @@ const POIS_VF := [
 	{ "tile": [34, 9], "radius": 18.0, "trigger": "poi_pond", "name": "池塘", "aliases": ["湖", "水边", "河边"] },
 	{ "tile": [66, 63], "radius": 14.0, "trigger": "poi_grandma", "name": "外婆家", "aliases": ["外婆", "奶奶家", "小屋"] },
 	{ "tile": [30, 86], "radius": 16.0, "trigger": "poi_forest_deep", "name": "森林深处", "aliases": ["深林", "大森林", "林子深处"] },
+	{ "tile": [88, 17], "radius": 16.0, "trigger": "poi_race", "name": "跑道", "aliases": ["终点", "起跑线", "赛跑", "跑道边", "比赛", "跑步"] },
+]
+
+## 第一季册 5《绿野仙踪》独立场景（oz）的 POI：玉米地（稻草人）+ 翡翠城（铁皮人）。
+## 互动是 task:deliver（对象是角色不是地点），POI 只供点点引路提示 / 「去翡翠城」地点名解析。
+const POIS_OZ := [
+	{ "tile": [36, 34], "radius": 14.0, "trigger": "poi_cornfield", "name": "玉米地", "aliases": ["稻草人", "玉米田"] },
+	{ "tile": [58, 56], "radius": 14.0, "trigger": "poi_emerald", "name": "翡翠城", "aliases": ["绿城", "城堡", "铁皮人家"] },
 ]
 
 ## POI 载荷 → POST /admin/scenes 的 pois（tile 已是 [x,y]）。
 static func build_poi_json(scene_id: String) -> Array:
 	if scene_id == "village_forest":
 		return POIS_VF.duplicate(true)
+	if scene_id == "oz":
+		return POIS_OZ.duplicate(true)
 	return build_poi_json_village()
 
 ## world.gd 的 POIS 常量 → POST /admin/scenes 的 pois 载荷（tile 由 Vector2i 摊平成 [x,y]）。
@@ -88,9 +98,15 @@ static func build_poi_json_village() -> Array:
 		})
 	return out
 
-## 传送点：village 与 village_forest 均暂无。B 全量合并（世界主场景不切场景）不设 portal；
-## 将来若有跨场景需求在此加回，并与对向场景 build_portal_json() 互指（scene-portal-graph）。
-static func build_portal_json(_scene_id: String) -> Array:
+## 传送点（scene-portal-graph 双向必须互指，test_portal 对拍两端）。
+## 第一季册 5《绿野仙踪》复活休眠的多场景基建：主场景 village_forest 的森林深处开一座通往 oz 的门，
+## 孩子往森林深处走 → 传送到「远方」奥兹黄砖路入口；oz 入口小广场旁一座门原路返回村庄。
+## 落点都选目标场景可走 tile、且与对向 portal tile 错开 >radius（防落地即弹回；arm/disarm 见 world.gd _step_portal）。
+static func build_portal_json(scene_id: String) -> Array:
+	if scene_id == "village_forest":
+		return [{ "tile": [30, 78], "radius": 3.0, "toScene": "oz", "toTile": [14, 14] }]
+	if scene_id == "oz":
+		return [{ "tile": [16, 20], "radius": 3.0, "toScene": "village_forest", "toTile": [26, 80] }]
 	return []
 
 ## 构建指定场景的 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。

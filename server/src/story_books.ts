@@ -346,11 +346,153 @@ export const SNOW_WHITE: StoryBook = {
   ],
 };
 
+// ── 第五册《绿野仙踪》（独立场景 oz·奥兹黄砖路，2 幕 + 尾声）────────────────────
+// 第一季册 5（docs/season-1-outline.md §4/§6）。英语暴露（桃乐丝天生说英文）+「同一个词用在很多地方」复用种子。
+// 老板 2026-07-21 拍板：**另置独立场景**（不进 village_forest 合并图，见 s1-merged-scene-layout §0）——
+// 复活休眠的多场景/portal 基建，村庄核心（village_forest）加一座通往 oz 的传送门，孩子走进去就到「远方」。
+// gate=桃乐丝：她被大风从很远的地方吹来、只会说英文，在黄砖路上找回家的路，搭话即触发。
+// 互动两幕都是 task:deliver——帮桃乐丝把一句最简单的英文问候（'Hello!' / 'Thank you!'）带给路那头的新朋友；
+// 孩子说中文也算完成（英语纪律：暴露优先、输出不强求、绝无跟读打分，outline §4/§138）。点点在旁用中文轻声翻译。
+// 尾声在翡翠城演出，点点请孩子把桃乐丝的故事讲给大家听（复述，stage.prompt），
+// 整册完结桃乐丝 + 稻草人 + 铁皮人**三人都入住**（老板 2026-07-21 定：稻草人/铁皮人都留下当常驻）。
+// 台词避开英文撇号（story_content.test 的 spokenLines 用单引号+[^']+ 抠台词，'I am' 不写 'I'm'）。
+
+export const WIZARD_OF_OZ: StoryBook = {
+  id: 'oz',
+  title: '绿野仙踪',
+  sceneId: 'oz',
+  gateCastId: 'dorothy',
+  cast: [
+    {
+      castId: 'dorothy',
+      name: '桃乐丝',
+      personality: '被一阵大风从很远的地方吹到这里的小姑娘，只会说英文，有点想家但很勇敢，一心想找到回家的路；对什么都好奇，遇到新朋友就热情打招呼。',
+      voiceId: 'en-US-AnaNeural',
+      visualDescription:
+        'a brave little girl with brown braided pigtails, wearing a blue gingham pinafore dress over a white blouse, holding a small woven basket, shiny red shoes, bright curious eyes and a warm smile, standing upright like a person',
+      // 黄砖路入口（portal 落点近端），gate 角色好找、搭话即触发。terrain _paint_oz 对齐（P3）。
+      position: { tileX: 16, tileY: 16 },
+      greetingStyle: 'warm',
+    },
+    {
+      castId: 'scarecrow',
+      name: '稻草人',
+      personality: '玉米地里憨厚爱笑的稻草人，一直想要一个聪明的脑袋好帮上忙；其实点子最多、最热心，遇到难题总第一个举手。',
+      voiceId: 'zh-CN-YunxiNeural',
+      visualDescription:
+        'a friendly straw scarecrow with a round burlap-sack head and a stitched smile, wearing a patched plaid shirt stuffed with straw, floppy pointed hat, straw poking from the sleeves, cheerful and harmless, standing upright like a person',
+      // 黄砖路中段玉米地空地（P3 _paint_oz 玉米地锚点）。
+      position: { tileX: 36, tileY: 34 },
+      greetingStyle: 'playful',
+    },
+    {
+      castId: 'tinman',
+      name: '铁皮人',
+      personality: '黄砖路边有点生锈、说话一本正经的铁皮人，最想要一颗温暖的心；嘴上硬邦邦，其实最容易感动、最会照顾人。',
+      voiceId: 'zh-CN-YunyangNeural',
+      visualDescription:
+        'a shiny tin man made of riveted silver metal with a small funnel hat, a red heart painted on his chest, round gentle eyes and a soft smile, a tiny oil can at his side, friendly and not scary, standing upright like a person',
+      // 黄砖路尽头翡翠城广场近端（P3 _paint_oz 翡翠城锚点）。
+      position: { tileX: 56, tileY: 54 },
+      greetingStyle: 'gentle',
+    },
+  ],
+  chapters: [
+    {
+      screenplay: 'story_oz_1',
+      interaction: {
+        kind: 'task',
+        type: 'deliver',
+        npcCastId: 'dorothy',
+        targetCastId: 'scarecrow',
+        message: 'Hello!',
+        ask: '我在找回家的路，看见玉米地里的稻草人啦！你帮我把一句英文的问候带给他好不好——就说：Hello！（你好）',
+        thanks: '稻草人听到 Hello 啦，他好开心！谢谢你帮我交上了第一个新朋友。',
+      },
+      stampStyle: 'star',
+      sticker: 'story_ruby',
+    },
+    {
+      screenplay: 'story_oz_2',
+      interaction: {
+        kind: 'task',
+        type: 'deliver',
+        npcCastId: 'dorothy',
+        targetCastId: 'tinman',
+        message: 'Thank you!',
+        ask: '生了锈的铁皮人帮我们指了路，我想谢谢他……你帮我把这句英文带给他好吗——就说：Thank you！（谢谢你）',
+        thanks: '铁皮人听到 Thank you，心里暖暖的！有你在，说英文一点都不难。',
+      },
+      stampStyle: 'medal',
+      sticker: 'story_emerald',
+    },
+    { screenplay: 'story_oz_end' }, // 尾声谢幕：讲给大家听（复述）+ 桃乐丝/稻草人/铁皮人三人入住
+  ],
+};
+
+// ── 第四册《龟兔赛跑》（village_forest 合并大场景，1 幕 + 尾声）──────────────────
+// 第一季册 4（docs/season-1-outline.md §4）。管理种子（先做哪个 / 用什么节奏）+ 二选一。
+// 场景复用现有 village_forest（100 格）东缘直跑道分区（x∈[87,89] z∈[8,92]，terrain_map
+// _paint_village_forest 已画骨架、scene_compose _deco_kind_village_forest 已排除路面/缓冲两侧）。
+// gate = 兔子，在村庄核心广场旁搭话触发；幕 1 演出「村口约赛跑·兔子夸口」，互动是 task:visit 跑道
+// ——点点飞前面 guide_to 引路，孩子走到东缘跑道给龟兔加油（poi_race，s1-race P4 加）。尾声在跑道演出
+// 真正的比赛：点点问「给谁加油」孩子点乌龟/兔子（stage.once tap），老板拍板殊途同归——点谁都是
+// 兔子睡过头、乌龟稳步先到、大家做朋友（零挫败，管理种子靠「看见稳步的好」隐性传递）；结尾复述、
+// 整册完结龟兔入住。加油小旗贴纸 story_cheer_flag 在 P3，跑道 POI + 布景 prop 包在 P4。
+
+export const TORTOISE_HARE: StoryBook = {
+  id: 'tortoise_hare',
+  title: '龟兔赛跑',
+  sceneId: 'village_forest',
+  gateCastId: 'hare',
+  cast: [
+    {
+      castId: 'tortoise',
+      name: '乌龟',
+      personality: '慢性子、稳稳当当的乌龟，从不着急，相信一步一步就能走到终点；心地好，输赢都笑呵呵。',
+      voiceId: 'zh-TW-YunJheNeural',
+      visualDescription:
+        'a steady friendly tortoise with a round green shell, short sturdy legs, calm gentle smile, wearing a tiny red sport headband, standing upright like a person',
+      // 村庄核心广场旁（近端 z<38），gate 好找、搭话即触发；与兔子并排「村口约赛跑」。
+      position: { tileX: 24, tileY: 19 },
+      greetingStyle: 'gentle',
+    },
+    {
+      castId: 'hare',
+      name: '兔子',
+      personality: '风风火火爱夸口的兔子，跑得飞快、最爱抢先，比赛时忍不住偷懒睡个觉；其实心不坏，输了也大方认输、和好如初。',
+      voiceId: 'zh-CN-YunxiNeural',
+      visualDescription:
+        'a speedy white rabbit with long floppy ears, bright confident grin, wearing a blue racing vest with a number, one paw on hip boasting, standing upright like a person',
+      position: { tileX: 22, tileY: 18 },
+      greetingStyle: 'playful',
+    },
+  ],
+  chapters: [
+    {
+      screenplay: 'story_th_1',
+      interaction: {
+        kind: 'task',
+        type: 'visit',
+        npcCastId: 'hare',
+        locationName: '跑道',
+        ask: '走呀走呀，我们去东边的跑道比赛！你陪我一起过去给我们加油好不好？点点会飞在前面带路。',
+        thanks: '你也来到跑道啦！有你加油，这场比赛一定特别好玩！',
+      },
+      stampStyle: 'medal',
+      sticker: 'story_cheer_flag',
+    },
+    { screenplay: 'story_th_end' }, // 尾声：跑道上真正的比赛（二选一殊途同归）+ 复述 + 整册完结入住
+  ],
+};
+
 /** 全部册注册表（bookId → 册）。 */
 export const STORY_BOOKS: Record<string, StoryBook> = {
   [THREE_PIGS.id]: THREE_PIGS,
   [LITTLE_RED_HOOD.id]: LITTLE_RED_HOOD,
   [SNOW_WHITE.id]: SNOW_WHITE,
+  [WIZARD_OF_OZ.id]: WIZARD_OF_OZ,
+  [TORTOISE_HARE.id]: TORTOISE_HARE,
 };
 
 /**

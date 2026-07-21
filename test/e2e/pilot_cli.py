@@ -6,6 +6,10 @@
 
 用法（--port 缺省 8578=桌面；真机先 adb forward 后 --port 8577）：
   pilot_cli.py observe                     # 快照+UI 元素+截图(可截时)三合一
+  pilot_cli.py access --texts              # 无障碍元素列表(3D 实体+2D 控件,各带 id+可用动作)
+  pilot_cli.py actions                     # 当前可用动作扁平表(按 id 挑一条给 do)
+  pilot_cli.py do talk:npc:pig_boss        # 执行动作(真输入优先);回包带 delta+新 actions
+  pilot_cli.py do say --arg text="点点你好"  # 带参动作
   pilot_cli.py state / ui --texts / shot --out /tmp/s.jpg
   pilot_cli.py say "点点，帮我造一个火箭"
   pilot_cli.py tap 491 638 / drag x1 y1 x2 y2 --ms 400 / long-press x y / pinch x y --scale 0.5
@@ -46,6 +50,13 @@ def main():
     sub.add_parser("state")
     p = sub.add_parser("ui")
     p.add_argument("--texts", action="store_true")
+    p = sub.add_parser("access")   # 无障碍元素列表（3D 实体 + 2D 控件，各带 id + 动作）
+    p.add_argument("--texts", action="store_true")
+    sub.add_parser("actions")      # 当前可用动作扁平列表（按 id 挑一条给 do）
+    p = sub.add_parser("do")       # 执行一个动作 id（真输入优先）
+    p.add_argument("action")
+    p.add_argument("--arg", action="append", default=[], metavar="K=V",
+                   help="动作参数 k=v（可多次，如 say 的 --arg text=你好）")
     p = sub.add_parser("shot")
     p.add_argument("--out", default="")
     p.add_argument("--max-dim", type=int, default=960)
@@ -122,6 +133,17 @@ def main():
             return out(h.state())
         if c == "ui":
             return out(h.ui(texts=args.texts))
+        if c == "access":
+            return out(h.access(texts=args.texts))
+        if c == "actions":
+            return out(h.actions())
+        if c == "do":
+            kv = {}
+            for item in args.arg:
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    kv[k] = v
+            return out(h.do(args.action, **kv))
         if c == "shot":
             path = h.screenshot(path=args.out or None, max_dim=args.max_dim)
             return out({"ok": True, "shot": path})

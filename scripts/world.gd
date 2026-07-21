@@ -1904,9 +1904,20 @@ func harness_photo(args: Dictionary) -> Dictionary:
 	return {"hud": _hud_layer.visible if _hud_layer != null else true,
 		"photo_cam": not photo_cam.is_empty()}
 
+## harness（AI 驱动 do op，harness 重写 P2）：让玩家【真的走】到某 tile 附近（真寻路，不瞬移）。
+## enter_portal（走进传送门半径）/ walk（走到 POI）动作的底座——与点空地走路同一条 _move_player_to。
+## 驱动方随后轮询 player_tile / scene_id 落地。⚠️ 这才是常规导航；harness_teleport 是瞬移，仅调试拍摄用。
+func harness_walk_to(tile: Vector2i) -> bool:
+	if player.is_empty():
+		return false
+	_move_player_to(WorldGrid.from_tile_center(tile))
+	return true
+
 ## 摄影传送（photo 拍摄找机位）：把玩家（和跟随的仙子）就地搬到目标 tile 附近空位。
 ## near_npc=true 时改搬到第一个真实非仙子村民身旁（村庄合影机位——相机永远聚焦玩家，
 ## 玩家不在村民堆里就拍不到村子）。与 _go_home 的就地解卡分支同款调用序列。
+## ⚠️ debug-only 瞬移：do op 的常规导航走 harness_walk_to（真走路）；这条只给摄影/调试找机位，
+## 不该出现在无障碍动作列表里（execution:"handler:debug"）。
 func harness_teleport(tile: Vector2i, near_npc: bool) -> bool:
 	if player.is_empty():
 		return false
@@ -2263,6 +2274,10 @@ var _my_voice_id := ""             ## 自己的稳定音色（world_state 下发
 ## 表情盘八格（❤=送爱心；flip/squish/paper_plane 是纸片动作精选）。加格子注意
 ## 卡片宽×格数+间距别超 1280 设计宽（_build_talk_view 的尺寸参数配套调）。
 const EMOTE_PANEL_ACTIONS := ["wave", "jump", "spin", "nod", "heart", "flip", "squish", "paper_plane"]
+## 表情动作的中文名——纯给无障碍名(tooltip_text)用：图标卡不显字(幼儿不识字),但 harness 通用 access
+## 靠 tooltip 回退拿到 label 才能按名点卡,家长长按也能看名。孩子看到的仍只是图标。
+const EMOTE_LABELS := {"wave": "挥手", "jump": "蹦跳", "spin": "转圈", "nod": "点头",
+	"heart": "爱心", "flip": "翻跟头", "squish": "挤一挤", "paper_plane": "纸飞机"}
 const EMOTE_CD_MS := 8000
 
 ## 自动回礼判定（纯函数，headless 可测）：对我做的动作 + 不在冷却期才回。
@@ -3674,6 +3689,7 @@ func _build_talk_view(host: CanvasLayer) -> void:
 		UiAssets.style_card_button(card, 24.0) # 奶油圆角卡片，与造角色选项卡同调
 		card.icon = UiAssets.emotion_tex(action)
 		card.expand_icon = true
+		card.tooltip_text = String(EMOTE_LABELS.get(action, action)) # 无障碍名(见 EMOTE_LABELS)
 		card.pressed.connect(_on_talk_emote_card.bind(String(action)))
 		row.add_child(card)
 
@@ -3768,6 +3784,7 @@ func _refresh_sticker_view() -> void:
 			UiAssets.style_card_button(card, 20.0)
 			card.icon = _sticker_tex(String(item_id))
 			card.expand_icon = true
+			card.tooltip_text = String(item_id) # 无障碍名：贴纸无客户端中文名，用稳定 item_id（harness 本就按 id 寻址）
 			card.pressed.connect(func() -> void:
 				_sticker_pick = String(item_id)
 				game_audio.play_sfx("bell")
@@ -7057,9 +7074,14 @@ func _build_creation_cards(options: Array) -> void:
 		var oid := String((opt as Dictionary).get("id", ""))
 		if oid.is_empty():
 			continue
+		var label := String((opt as Dictionary).get("label", oid))
 		var card := Button.new()
 		card.custom_minimum_size = Vector2(220.0, 168.0) # 3 岁友好大点击区
-		card.text = String((opt as Dictionary).get("label", oid))
+		card.text = label
+		# 无障碍名：图标卡下面会把 text 清空（幼儿不识字），但保留 tooltip_text 作可读标签——
+		# harness 的通用 access(describe_control 回退 tooltip_text)据此把每张卡采成带 label 的 press:btn，
+		# 不再需要 pick_option 业务后门；家长长按也能看名。
+		card.tooltip_text = label
 		UiAssets.style_card_button(card, 24.0) # 奶油圆角卡片（die-cut 贴纸风，与图标同调）
 		card.add_theme_font_size_override("font_size", 40)
 		var icon_asset := String((opt as Dictionary).get("iconAsset", ""))

@@ -19,10 +19,41 @@ description: 用 AI 当玩家驱动马良小世界——替代真人完成点击
 
 ⚠️ 8577 常被 adb/iproxy 转发占走，桌面实例一律 8578；8579 是 headless 回测专用，别占。
 
+## ★ 推荐主路径：access → actions → do（无障碍/真输入模型）
+
+新模型把游戏里**一切可交互物统一成稳定 ID + 可用动作**，动作**默认走真输入**（tap 元素投影屏幕矩形 /
+真走路 / 真长按），无真路径才回退 handler，并回报实际路径。不带业务理解也能摸索——**先 `actions` 看有哪些
+可做，挑一条 `do`**：
+
+```
+pilot_cli.py access [--texts]   # 元素列表：3D 实体(npc/fairy/remote/player/poi/portal/prop)+2D 控件，
+                                #   各带 id / kind / on_screen / screen_rect / world.tile / 该元素的 actions
+pilot_cli.py actions            # 当前可用动作扁平表：{action_id,kind,target_id,label,enabled,reason_disabled,
+                                #   execution(tap|walk|long_press|gui|voice|handler),screen_rect,args_schema}
+pilot_cli.py do <action_id> [--arg k=v]   # 执行；回包带 execution(实际路径)/settled/delta(相对上次 state)/新 actions
+```
+
+**action_id 形如**：`talk:npc:pig_boss`、`press:btn:/root/…/确认`、`enter_portal:village_forest@24,24`、
+`walk:poi:poi_pond`、`pickup:prop:30,46`、`press:btn:/root/…/@Button@`(造物卡也是 press——按 label 选)、`say`、`confirm:confirm_accept`、`phone:open`。
+
+**关键语义**：
+- `do` 对**异步动作**（走路/进场/造物/手机）**等落定才回包**（`settled:true`），回包里 `delta` 是相对上一份
+  `state` 的增量——一次往返就知道"做了什么、现在能做什么"，不用每步单独查。
+- `execution` 报**实际走的路**：`tap`=真触屏投影矩形（元素 `on_screen` 时）、`walk`=真寻路、`long_press`=真长按、
+  `handler`=元素在屏外/SubViewport 无真路径时的回退。off-screen 是常态（世界会滚），回退不是 bug。
+- 元素 `enabled:false` + `reason_disabled`（`off_screen`/`mic_closed`/`blocked_by_overlay`…）先看这个再 `do`。
+- **teleport 已降级为纯调试瞬移**，不在 `actions` 里——导航一律 `do walk:…`/`do enter_portal:…` 真走。
+
+旧命令（`tap`/`click`/`talk-npc`/`phone`/`pick`…）仍在、仍可用（尤其盲坐标/手机 SubViewport），但**新脚本优先走
+`actions`→`do`**：它把"看到→走过去→点中"走全，能暴露旧后门跳过的盲区（命中测试、遮挡、遮罩吞点击）。
+
+**Claude 原生工具（MCP）**：`server/tools/harness-mcp` 暴露 `observe/access/actions/do/say/wait_until/screenshot`
+工具，连客户端 TCP 口。注册见该目录 README（`claude mcp add …`）；不用 CLI 也能驱。
+
 ## 1. 循环纪律（感知→决策→动作→核对）
 
 1. **每步动作后都要核对落地**：读 `state` 里对应字段（发了 `scene` 就等 `scene_id` 变、开了手机就看 `phone_open`），不要发完就当成功。
-2. **能语义就不要盲坐标**：`click --text/--path`（按钮直发 pressed）、`talk-fairy`/`talk-npc`（进对话）、`phone open/app/close`、`pick <optionId>`（造物点卡）。盲 `tap` 打不中会被当点地面把玩家支使走。
+2. **能语义就不要盲坐标**：优先 `actions`→`do <id>`（见上「推荐主路径」）。旧法：`click --text/--path`（⚠️ 旧 `click` 对按钮直发 `pressed` 信号会**绕过命中测试**，遮罩盖住也能"点动"——真孩子却点不动；要验真可点性用 `do press:btn:…`，它发真触屏、会被遮罩正确吞掉）、`talk-fairy`/`talk-npc`（进对话）、`phone open/app/close`、`pick <optionId>`（造物点卡）。盲 `tap` 打不中会被当点地面把玩家支使走。
 3. **SubViewport（手机屏）内元素盲坐标永远到不了**：`ui` 回包里 `viewport != "root"` 的元素只能 `click --path` 或 `phone` 命令。
 4. **说话有门禁**：`say` 回 `fed:false/gate_closed` = 对方在说话或没开麦。先 `wait-banner`（TTS 放完）再重说；反复 say 会堆积 ASR 队列。看 `state.fsm_state`/`mic_open` 判断当下能不能说。
 5. **`say` 之前必须先 `inject`**（换 ScriptedAsr），且必须**进世界后**才 inject（menu/标题页会报 no active VoiceCapture）。onboarding 页也有 VC，可以 inject。
@@ -42,7 +73,7 @@ description: 用 AI 当玩家驱动马良小世界——替代真人完成点击
 
 **对话**：`talk-fairy`（或 `talk-npc`）→ 等对方招呼放完（`wait-banner`）→ `inject`（一次即可）→ `say "..."` 确认 `fed:true` → 轮询 `banner_text` 看回复。
 
-**造物（guided-creation 多轮）**：对点点 `say "点点，帮我造一个火箭"` → `wait --key in_creation --truthy` → 循环：`state` 看 `creation_options` **有卡就 `pick <id>`**（category=recipient 时选 self），**无卡（开放问句）就 `say` 肯定应答**；`creation_question` ∈ {施法中…, 拼上啦…, 拼好啦！} 是过渡字幕不是新问句。直到 `bag_size` 增长或 `naming_item` 置位。
+**造物（guided-creation 多轮）**：对点点 `say "点点，帮我造一个火箭"` → `wait --key in_creation --truthy` → 循环：`state` 看 `creation_options` 拿选项 label，**有卡就 `do press:btn:<卡path>` 真 tap 那张卡**（4 张卡是真 Button，`actions` 里以 `press` 出现、label==选项 label；图标卡也挂了 tooltip=label，故按 label 选卡；category=recipient 时选「自己」那张。**不再用 pick_option 后门**），**无卡（开放问句）就 `say` 肯定应答**；press 是同步输入、卡触发的推进是服务端异步，故 press 后 `wait --key creation_question`（`wait_delta`）等问句翻页；`creation_question` ∈ {施法中…, 拼上啦…, 拼好啦！} 是过渡字幕不是新问句。直到 `bag_size` 增长或 `naming_item` 置位。
 **起名**：`naming_item` 非空后 `say "<名字>"` → 进确认模式（`vc_confirming`）→ `accept`。
 
 **手机**：`phone open` → `phone app items|stickers|flowers|settings` → 屏内元素用 `ui` 枚举（viewport=PhoneScreen）+ `click --path`；翻页用 `swipe`。收起 `phone close`。`phone` 命令是 **action-based** 的：发起后会**阻塞到手机开/关/翻页动画真正落定**（回包带 `settled:true`）才返回，所以 `phone app` 后**直接 `shot` 即可，不用 `sleep`**——命令没返回=动画还没停。别再 `phone open` 完立刻 `phone app`+`sleep` 硬等：那样只是碰运气，且早期版本会把搬移动画掐断导致手机停在半路（时左时右）。
@@ -51,9 +82,17 @@ description: 用 AI 当玩家驱动马良小世界——替代真人完成点击
 
 **整链回归（不要手搓重写）**：造物起名全流程 `naming_e2e.py`、语音三链 `voice_regression.py`、相册拍摄 `menu_photo_shoot.py`。
 
+**可重复 monkey 脚本（摸索出交互→写下来跑回归）**：写一个暴露 `def run(h): ...` 的 `.py`（真 Python、带条件/循环/
+断言，用 `h.access()/h.actions()/h.do()/h.wait_until()/h.wait_world()/h.wait_scene()/h.wait_delta()` 等原语），
+用 runner 统一跑：`python3 test/e2e/pilot_runner.py --script <你的脚本.py> [--port 8578] [--trace DIR]`。
+范式见 `test/e2e/pilot_example.py`（进世界→找点点→造物→起名，全程 wait 原语等落定，不卡 sleep）。
+
 ## 4. 轨迹与报告
 
-长任务/巡检一律带 `--trace <dir>`：每条命令+应答追加 `trace.jsonl`、截图落同目录，事后可回放审计。QA 巡检（自主玩+异常报告）用 `python3 test/e2e/qa_patrol.py --minutes N`（见 P7）。
+长任务/巡检一律带 `--trace <dir>`：每条命令+应答追加 `trace.jsonl`、截图落同目录，事后可回放审计。
+**回放回归**：`python3 test/e2e/trace_replay.py --trace DIR/trace.jsonl [--port 8578]` 把录制的命令重发一遍、
+逐条比对 `ok`（命令忠实，退出码=不匹配数）——"上次这么点一遍是通的，这次还通吗"。
+QA 巡检（自主玩+异常报告）用 `python3 test/e2e/qa_patrol.py --minutes N`（见 P7）。
 
 ## 5. 已知坑
 
