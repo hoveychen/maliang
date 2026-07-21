@@ -40,6 +40,10 @@ var _gesture: Dictionary = {}
 ## phone 命令等落定：发起动作后挂这里，每帧查 paper_phone.is_settling()，落定/超时才回包。
 ## action-based——不靠调用方卡 sleep，改了开合/翻页动画时长也不 flake。
 var _phone_wait: Dictionary = {}
+## do op 落定等待（harness 重写 P2）：真输入发起后，异步动作（走路/进场/造物/手机/长按拾取）
+## 逐帧查完成谓词、落定或超时才回包统一 do reply。绝不吊死单连接——每类动作带独立 deadline。
+## {predicate, action, execution, deadline, elapsed, start_scene?, target_pos?, base?}
+var _act_wait: Dictionary = {}
 
 static func make(world: Node) -> DebugCmdServer:
 	var s := DebugCmdServer.new()
@@ -145,6 +149,16 @@ static func parse_command(line: String) -> Dictionary:
 		"actions":
 			# 当前状态下所有可用动作的扁平列表（含 element-targeted 与全局），供驱动方按 id 挑选。
 			return {"ok": true, "op": "actions"}
+		"do":
+			# 执行一个动作 id（harness 重写 P2）：默认走真输入（tap 投影矩形/真走路/真长按），
+			# 无真路径回退 handler。异步动作（走路/进场/造物）延迟回包到落定（_act_wait）。
+			var aid := String(dict.get("action", ""))
+			if aid.is_empty():
+				return {"ok": false, "error": "do needs action"}
+			var d := {"ok": true, "op": "do", "action": aid}
+			if dict.has("args") and typeof(dict["args"]) == TYPE_DICTIONARY:
+				d["args"] = dict["args"]
+			return d
 		"click_ui":
 			# 语义点击：按节点 path 或可见文字找控件（Button 直发 pressed；SubViewport 内也可达）。
 			var cpath := String(dict.get("path", ""))
@@ -230,6 +244,8 @@ func _process(delta: float) -> void:
 		_step_gesture(delta)
 	if not _phone_wait.is_empty():
 		_step_phone_wait(delta)
+	if not _act_wait.is_empty():
+		_step_act_wait(delta)
 	if _server == null:
 		return
 	# 只保一个活连接：新连接进来时顶掉旧的（e2e 脚本一次一个客户端）。
@@ -252,8 +268,8 @@ func _process(delta: float) -> void:
 		if int(chunk[0]) == OK:
 			var bytes: PackedByteArray = chunk[1]
 			_rx += bytes.get_string_from_utf8()
-	# 手势在飞：后续命令留在 _rx，做完（回包后）下一帧再执行——保证一问一答顺序。
-	if not _gesture.is_empty():
+	# 手势/phone/do 落定在飞：后续命令留在 _rx，做完（回包后）下一帧再执行——保证一问一答顺序。
+	if not _gesture.is_empty() or not _phone_wait.is_empty() or not _act_wait.is_empty():
 		return
 	# 逐行取出完整命令执行。
 	while true:
@@ -263,8 +279,8 @@ func _process(delta: float) -> void:
 		var line := _rx.substr(0, nl)
 		_rx = _rx.substr(nl + 1)
 		_handle_line(line)
-		if not _gesture.is_empty():
-			break # 这条命令开了手势：停止取行，等它完成
+		if not _gesture.is_empty() or not _phone_wait.is_empty() or not _act_wait.is_empty():
+			break # 这条命令开了异步等待：停止取行，等它落定回包
 
 func _handle_line(line: String) -> void:
 	var cmd := parse_command(line)
@@ -285,6 +301,12 @@ func _handle_line(line: String) -> void:
 			_reply(pr)
 			return
 		_phone_wait = {"result": pr, "elapsed": 0.0}
+		return
+	# do op：真输入执行。同步动作直接回包；异步动作挂 _act_wait 落定后回包（返回带 __deferred）。
+	if String(cmd.get("op", "")) == "do":
+		var dr := _do_do(String(cmd["action"]), cmd.get("args", {}) as Dictionary)
+		if not bool(dr.get("__deferred", false)):
+			_reply(dr)
 		return
 	_reply(_execute(cmd))
 
@@ -472,8 +494,11 @@ func _step_gesture(delta: float) -> void:
 				_send_touch(0, p0, false)
 				_send_touch(1, p1, false)
 	if k >= 1.0:
+		var silent := bool(g.get("silent", false))
 		_gesture = {}
-		_reply({"ok": true, "op": String(g["op"]), "done": true, "ms": int(g["ms"])})
+		# silent 手势（do op 长按拾取驱动）：不自回包，交 _act_wait 统一回。
+		if not silent:
+			_reply({"ok": true, "op": String(g["op"]), "done": true, "ms": int(g["ms"])})
 
 ## phone 命令落定推进：每帧查手机是否还在播开/关/翻页动画，落定或超时（3s 兜底）才回包。
 ## 判据是「动画有没有播完」而非固定时长——改了 MOVE_DUR/FLIP_DUR 也不用改这里。
@@ -950,39 +975,257 @@ func _collect_entities(out: Array) -> void:
 				out.append(HarnessAccess.describe_entity("prop", eid5, String(dpd.get("id", "")), "root", don, drect,
 					{"tile": {"x": (dtile as Vector2i).x, "y": (dtile as Vector2i).y}}, acts5))
 
-## access：统一元素列表（3D 实体 + 2D 控件），每个带稳定 id + element-targeted 动作。
-func _do_access(with_texts: bool) -> Dictionary:
-	var tree := get_tree()
-	if tree == null or tree.root == null:
-		return {"ok": false, "error": "no scene tree"}
+## 统一元素列表（3D 实体 + 2D 控件），每个带稳定 id + element-targeted 动作。access/actions/do 共用。
+func _collect_all_elements(with_texts: bool) -> Array:
 	var out := []
 	_collect_entities(out)
-	var ui_els := []
-	_collect_ui(tree.root, "root", with_texts, ui_els)
-	for e in ui_els:
-		out.append(_control_to_element(e as Dictionary))
-	return {"ok": true, "op": "access", "elements": out, "rev": _bump_rev(), "state_hash": _state_hash()}
-
-## actions：当前可用动作扁平列表（全局 + 各元素 element-targeted，按 action_id 去重）。
-func _do_actions() -> Dictionary:
-	var out := HarnessAccess.build_actions(_gather_facts())
-	var els := []
-	_collect_entities(els)
 	var tree := get_tree()
 	if tree != null and tree.root != null:
 		var ui_els := []
-		_collect_ui(tree.root, "root", false, ui_els)
+		_collect_ui(tree.root, "root", with_texts, ui_els)
 		for e in ui_els:
-			els.append(_control_to_element(e as Dictionary))
+			out.append(_control_to_element(e as Dictionary))
+	return out
+
+## 当前可用动作扁平列表（全局 build_actions + 各元素 element-targeted，按 action_id 去重）。不 bump rev。
+func _current_actions() -> Array:
+	var out := HarnessAccess.build_actions(_gather_facts())
 	var seen := {}
-	for el in els:
+	for a in out:
+		seen[String((a as Dictionary).get("action_id", ""))] = true
+	for el in _collect_all_elements(false):
 		for a in (el as Dictionary).get("actions", []):
 			var aid := String((a as Dictionary).get("action_id", ""))
 			if aid.is_empty() or seen.has(aid):
 				continue
 			seen[aid] = true
 			out.append(a)
-	return {"ok": true, "op": "actions", "actions": out, "rev": _bump_rev(), "state_hash": _state_hash()}
+	return out
+
+## access：统一元素列表回包。
+func _do_access(with_texts: bool) -> Dictionary:
+	var tree := get_tree()
+	if tree == null or tree.root == null:
+		return {"ok": false, "error": "no scene tree"}
+	return {"ok": true, "op": "access", "elements": _collect_all_elements(with_texts),
+		"rev": _bump_rev(), "state_hash": _state_hash()}
+
+## actions：当前可用动作扁平列表回包。
+func _do_actions() -> Dictionary:
+	return {"ok": true, "op": "actions", "actions": _current_actions(),
+		"rev": _bump_rev(), "state_hash": _state_hash()}
+
+# ── do op：真输入执行（harness 重写 P2）──────────────────────────────────────────
+## action_id 拆 kind:target（首个冒号切分；target 本身可含冒号，如 press:btn:/root/…）。
+func _split_action(aid: String) -> Dictionary:
+	var i := aid.find(":")
+	if i < 0:
+		return {"kind": aid, "target": ""}
+	return {"kind": aid.substr(0, i), "target": aid.substr(i + 1)}
+
+## 按 action_id 找回对应动作描述符 + 所属元素（全局动作 element={}）。用同一 builder 决定的执行路径。
+func _find_action(action_id: String) -> Dictionary:
+	for a in HarnessAccess.build_actions(_gather_facts()):
+		if String((a as Dictionary).get("action_id", "")) == action_id:
+			return {"found": true, "action": a, "element": {}}
+	for el in _collect_all_elements(false):
+		for a in (el as Dictionary).get("actions", []):
+			if String((a as Dictionary).get("action_id", "")) == action_id:
+				return {"found": true, "action": a, "element": el}
+	return {"found": false}
+
+func _rect_center(rect: Dictionary) -> Vector2:
+	return Vector2(float(rect["x"]) + float(rect["w"]) * 0.5, float(rect["y"]) + float(rect["h"]) * 0.5)
+
+func _btn_path(target_id: String) -> String:
+	return target_id.substr(4) if target_id.begins_with("btn:") else target_id
+
+func _element_tile(element: Dictionary) -> Variant:
+	var world: Variant = element.get("world")
+	if typeof(world) != TYPE_DICTIONARY:
+		return null
+	var t: Variant = (world as Dictionary).get("tile")
+	if typeof(t) == TYPE_DICTIONARY:
+		return Vector2i(int((t as Dictionary).get("x", 0)), int((t as Dictionary).get("y", 0)))
+	return null
+
+func _creation_q_text() -> String:
+	var w := _host()
+	if w == null:
+		return ""
+	var cq := w.get("_creation_q") as Label
+	return cq.text if cq != null else ""
+
+func _bag_size() -> int:
+	var w := _host()
+	if w == null:
+		return -1
+	var bag: Variant = w.get("bag")
+	return (bag as Dictionary).size() if typeof(bag) == TYPE_DICTIONARY else -1
+
+func _phone_settling() -> bool:
+	var w := _host()
+	if w == null:
+		return false
+	var pp: Variant = w.get("paper_phone")
+	return pp != null and pp is Object and is_instance_valid(pp) \
+		and (pp as Object).has_method("is_settling") and bool(pp.call("is_settling"))
+
+## 玩家是否走到目标附近（环面最短距离 < 3 世界单位）。无 player 字段 → 视为已到（不吊死）。
+func _player_arrived(target: Vector2) -> bool:
+	var w := _host()
+	if w == null:
+		return true
+	var p: Variant = w.get("player")
+	if typeof(p) != TYPE_DICTIONARY or not (p as Dictionary).has("logical"):
+		return true
+	return WorldGrid.shortest_delta((p as Dictionary)["logical"] as Vector2, target).length() < 3.0
+
+## do 回包统一负载：合入 rev + 全量 state + 后置 actions。
+func _do_reply_payload(base: Dictionary) -> Dictionary:
+	base["rev"] = _bump_rev()
+	base["state"] = _snapshot()
+	base["actions"] = _current_actions()
+	return base
+
+## do：执行一个动作 id。真输入优先（tap 投影矩形/真走路/真长按），无真路径回退 handler。
+## 同步动作直接回负载；异步动作挂 _act_wait、返回 {__deferred:true}，落定后由 _step_act_wait 回包。
+func _do_do(action_id: String, args: Dictionary) -> Dictionary:
+	var fa := _find_action(action_id)
+	if not bool(fa.get("found", false)):
+		return {"ok": false, "op": "do", "action": action_id, "error": "unknown or unavailable action"}
+	var act: Dictionary = fa["action"]
+	if not bool(act.get("enabled", true)):
+		return {"ok": false, "op": "do", "action": action_id,
+			"error": "action disabled: %s" % String(act.get("reason_disabled", ""))}
+	var element: Dictionary = fa.get("element", {})
+	var kind := String(act.get("kind", ""))
+	var rect: Variant = act.get("screen_rect")
+	var base := {"ok": true, "op": "do", "action": action_id,
+		"execution": String(act.get("execution", "")), "execution_reason": String(act.get("execution_reason", ""))}
+
+	match kind:
+		"say":
+			var text := String(args.get("text", ""))
+			if text.is_empty():
+				return {"ok": false, "op": "do", "action": action_id, "error": "say needs args.text"}
+			base["fed"] = bool(_do_say(text).get("fed", false))
+			base["settled"] = true
+			return _do_reply_payload(base)
+		"press":
+			if base["execution"] == "tap" and typeof(rect) == TYPE_DICTIONARY:
+				var c := _rect_center(rect as Dictionary)
+				_do_tap(c.x, c.y)   # 真触屏（会被遮罩正确吞掉——不再 pressed.emit 穿透）
+			else:
+				var cr := _do_click_ui(_btn_path(String(act.get("target_id", ""))), "")  # SubViewport gui feed
+				if not bool(cr.get("ok", true)):
+					base["ok"] = false
+					base["error"] = String(cr.get("error", ""))
+			base["settled"] = true
+			return _do_reply_payload(base)
+		"confirm":
+			var m := {"confirm_accept": "accept", "confirm_replay": "replay", "confirm_retry": "retry"}
+			_do_confirm_key(String(m.get(String(act.get("target_id", "")), "accept")))
+			base["settled"] = true
+			return _do_reply_payload(base)
+		"phone":
+			var pa := String(act.get("target_id", ""))
+			var app_id := ""
+			if pa.begins_with("app:"):
+				app_id = pa.substr(4)
+				pa = "app"
+			var w := _host()
+			if w != null and w.has_method("harness_phone"):
+				w.call("harness_phone", pa, app_id)
+			_act_wait = {"predicate": "phone", "base": base, "elapsed": 0.0, "deadline": 3.0}
+			return {"__deferred": true}
+		"talk":
+			var on := bool(element.get("on_screen", false))
+			if on and typeof(rect) == TYPE_DICTIONARY:
+				var c2 := _rect_center(rect as Dictionary)
+				_do_tap(c2.x, c2.y)   # 真 tap 头顶 → _tap_pick → _approach_npc → 真走
+			else:
+				var w2 := _host()
+				var ek := String(element.get("kind", ""))
+				if ek == "fairy" and w2 != null and w2.has_method("harness_talk_fairy"):
+					w2.call("harness_talk_fairy")
+				elif w2 != null and w2.has_method("harness_talk_npc"):
+					w2.call("harness_talk_npc", String(element.get("label", "")))
+				base["execution"] = "handler"
+				base["execution_reason"] = "off_screen_fallback"
+			_act_wait = {"predicate": "talk", "base": base, "elapsed": 0.0, "deadline": 8.0}
+			return {"__deferred": true}
+		"enter_portal", "walk":
+			var tile: Variant = _element_tile(element)
+			if tile == null:
+				return {"ok": false, "op": "do", "action": action_id, "error": "no tile on element"}
+			var w3 := _host()
+			var start_scene := String(w3.get("_scene_id")) if w3 != null and w3.get("_scene_id") != null else ""
+			if w3 != null and w3.has_method("harness_walk_to"):
+				w3.call("harness_walk_to", tile as Vector2i)
+			if kind == "enter_portal":
+				_act_wait = {"predicate": "scene", "base": base, "elapsed": 0.0, "deadline": 12.0, "start_scene": start_scene}
+			else:
+				_act_wait = {"predicate": "arrive", "base": base, "elapsed": 0.0, "deadline": 10.0,
+					"target_pos": WorldGrid.from_tile_center(tile as Vector2i)}
+			return {"__deferred": true}
+		"pickup":
+			var w4 := _host()
+			if bool(element.get("on_screen", false)) and typeof(rect) == TYPE_DICTIONARY:
+				var c3 := _rect_center(rect as Dictionary)
+				start_gesture({"kind": "long_press", "op": "do_pickup", "from": c3, "ms": 800})  # 真长按
+				_gesture["silent"] = true  # 手势完成不自回包，交 _act_wait 统一回
+				_act_wait = {"predicate": "gesture_then", "base": base, "elapsed": 0.0, "deadline": 4.0}
+				return {"__deferred": true}
+			var tile2: Variant = _element_tile(element)
+			if tile2 != null and w4 != null and w4.has_method("harness_pickup"):
+				w4.call("harness_pickup", (tile2 as Vector2i).x, (tile2 as Vector2i).y, -1)
+			base["execution"] = "handler"
+			base["execution_reason"] = "off_screen_fallback"
+			base["settled"] = true
+			return _do_reply_payload(base)
+		"pick_option":
+			# 造物卡也会作为根视口 Button 出现在 press:btn:* 里（可真 tap）；这里的 pick_option 走
+			# harness_pick_option handler，先保证造物链路对（P2）。落定看 creation_question/背包变化。
+			var w5 := _host()
+			if w5 != null and w5.has_method("harness_pick_option"):
+				w5.call("harness_pick_option", String(act.get("target_id", "")))
+			base["execution"] = "handler"
+			base["execution_reason"] = "creation_card"
+			_act_wait = {"predicate": "creation", "base": base, "elapsed": 0.0, "deadline": 6.0,
+				"start_q": _creation_q_text(), "start_bag": _bag_size()}
+			return {"__deferred": true}
+	return {"ok": false, "op": "do", "action": action_id, "error": "unhandled kind: %s" % kind}
+
+## do 落定推进：逐帧查完成谓词，落定或超时（deadline）后统一回包。settled=false 表示超时未落定。
+func _step_act_wait(delta: float) -> void:
+	_act_wait["elapsed"] = float(_act_wait["elapsed"]) + delta
+	var w := _host()
+	var done := false
+	match String(_act_wait["predicate"]):
+		"talk":
+			done = w != null and w.get("selected") != null
+		"scene":
+			var sid := String(w.get("_scene_id")) if w != null and w.get("_scene_id") != null else ""
+			done = sid != String(_act_wait["start_scene"])
+		"arrive":
+			done = _player_arrived(_act_wait["target_pos"] as Vector2)
+		"phone":
+			done = not _phone_settling()
+		"creation":
+			var in_creation := bool(w.get("_in_creation")) if w != null and w.get("_in_creation") != null else false
+			done = _creation_q_text() != String(_act_wait["start_q"]) \
+				or _bag_size() > int(_act_wait["start_bag"]) or not in_creation
+		"gesture_then":
+			if not _gesture.is_empty():
+				return  # 长按手势还在跑（silent，不自回包）
+			done = true  # 手势发出即算落定（拾取服务端结果异步，本地只确认手势完成）
+	if not done and float(_act_wait["elapsed"]) < float(_act_wait["deadline"]):
+		return
+	var base: Dictionary = _act_wait["base"]
+	base["settled"] = done
+	_act_wait = {}
+	_reply(_do_reply_payload(base))
 
 ## build_actions 用的扁平状态事实（供无障碍动作可用性判定）。
 func _gather_facts() -> Dictionary:

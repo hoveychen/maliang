@@ -70,6 +70,7 @@ UNIT_TESTS=(
   test_scripted_asr
   test_debug_cmd_server
   test_harness_access
+  test_harness_do
   test_confirm_bar
   test_game_audio
   test_sdf_static_baker
