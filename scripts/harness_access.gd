@@ -104,10 +104,10 @@ static func build_actions(facts: Dictionary) -> Array:
 	# (老板在 menu 面板看到 say/confirm/phone 6 个动作即此 bug)。in_world 由 _gather_facts 按宿主是否 world 判。
 	if not bool(facts.get("in_world", false)):
 		return out
-	var blocked := bool(facts.get("play_blocked", false))
-	var staged := bool(facts.get("stage_active", false))
-	var block_reason := "blocked_by_overlay" if blocked else ("stage_active" if staged else "")
-	var world_gate := not (blocked or staged)
+	# 统一输入门（act_gated/gate_reason 由 _act_gate 汇总 intro/loading/回家/换场景/冷却/演出——一处判全部阻塞态）。
+	var gated := bool(facts.get("act_gated", false))
+	var block_reason := String(facts.get("gate_reason", ""))
+	var world_gate := not gated
 
 	# say：需开麦 + 世界未被遮。
 	var mic := bool(facts.get("mic_open", false))

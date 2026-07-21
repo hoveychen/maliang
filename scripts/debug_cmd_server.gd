@@ -676,6 +676,12 @@ func _snapshot() -> Dictionary:
 		snap["play_blocked"] = bool(blocked) if blocked != null else false
 		var stg: Variant = w.get("_stage_active")
 		snap["stage_active"] = bool(stg) if stg != null else false
+		# intro/loading 与回家过场的输入门（与 _act_gate 同源）——统一门的可观察位。
+		snap["bench_freeze"] = _truthy(w.get("_bench_freeze"))
+		snap["homing"] = _truthy(w.get("_homing"))
+		var _g := _act_gate()
+		snap["act_gated"] = _g["gated"]
+		snap["gate_reason"] = _g["reason"]
 		var rfn: Variant = w.get("_refine_active")
 		snap["refine_active"] = bool(rfn) if rfn != null else false
 		var rmx: Variant = w.get("_remixing")
@@ -922,10 +928,9 @@ func _collect_entities(out: Array) -> void:
 	if w == null:
 		return
 	var camera: Camera3D = w.get("camera") as Camera3D
-	var blocked_overlay := bool(w.get("_play_blocked")) if w.get("_play_blocked") != null else false
-	var staged := bool(w.get("_stage_active")) if w.get("_stage_active") != null else false
-	var blocked := blocked_overlay or staged
-	var block_reason := "blocked_by_overlay" if blocked_overlay else ("stage_active" if staged else "")
+	var gate := _act_gate()
+	var blocked := bool(gate["gated"])
+	var block_reason := String(gate["reason"])
 
 	# NPC + 仙子（同一 npcs 数组，is_fairy 区分）。tap 头顶（+1.6）投影，同 _pick_npc。
 	var npcs: Variant = w.get("npcs")
@@ -1373,6 +1378,25 @@ func _do_wait(conds: Array, timeout: float) -> Dictionary:
 		"elapsed": 0.0, "deadline": maxf(0.5, timeout)}
 	return {"__deferred": true}
 
+## 统一的「玩家此刻能否做世界交互」门——与 world._unhandled_input 的早返回门同源，一处判全部阻塞态：
+## intro/loading(_bench_freeze) / 回家过场(_homing) / 换场景(_transitioning) / 冷却遮罩(_play_blocked) / 演出(_stage_active)。
+## 任一为真都吞输入；动作模型据此把交互动作标 disabled+reason，而非假装可点（老板逐页发现的 menu/loading 等都源于漏判）。
+func _act_gate() -> Dictionary:
+	var w := _host()
+	if w == null:
+		return {"gated": false, "reason": ""}
+	if _truthy(w.get("_bench_freeze")):
+		return {"gated": true, "reason": "loading_intro"}
+	if _truthy(w.get("_homing")):
+		return {"gated": true, "reason": "homing"}
+	if _truthy(w.get("_transitioning")):
+		return {"gated": true, "reason": "scene_transition"}
+	if _truthy(w.get("_play_blocked")):
+		return {"gated": true, "reason": "blocked_by_overlay"}
+	if _truthy(w.get("_stage_active")):
+		return {"gated": true, "reason": "stage_active"}
+	return {"gated": false, "reason": ""}
+
 ## build_actions 用的扁平状态事实（供无障碍动作可用性判定）。
 func _gather_facts() -> Dictionary:
 	var f := {}
@@ -1395,8 +1419,9 @@ func _gather_facts() -> Dictionary:
 		f["creation_options"] = fo
 		var pcam: Variant = w.get("_phone_cam")
 		f["phone_open"] = bool(pcam) if pcam != null else false
-		f["play_blocked"] = bool(w.get("_play_blocked")) if w.get("_play_blocked") != null else false
-		f["stage_active"] = bool(w.get("_stage_active")) if w.get("_stage_active") != null else false
+		var gate := _act_gate()
+		f["act_gated"] = gate["gated"]
+		f["gate_reason"] = gate["reason"]
 	if vc != null:
 		f["vc_confirming"] = vc.is_confirming()
 	return f
