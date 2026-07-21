@@ -150,6 +150,42 @@ test('普通村民（无 storyRole）说「讲故事」也不触发', async () =
   assert.equal(r.storyRequest, undefined);
 });
 
+// ── gate 搭话即开演（P2：零挫败，不指望孩子说对触发词）─────────────────────
+
+test('gate 角色随便搭句话（非「讲故事」）也自动开演——不指望说对触发词', () =>
+  withBook(async (book) => {
+    const store = freshStore();
+    seedChar(store, 'gate1', '猪大哥', { storyRole: { bookId: book.id, castId: 'pig_big', resident: false } });
+    // 普通问候：mock routeIntent 归 chat（无讲故事关键词）。但 gate 角色 + 册没看完 → 确定性强制开演。
+    const r = await respondToTranscript(W, 'gate1', 'kid1', '你好呀猪大哥', createMockAdapters(), store);
+    assert.equal(r.storyRequest, book.id, 'gate 角色搭话即触发故事');
+  }));
+
+test('gate 角色：整册已看完(settled)后搭话不再强开（留给闲聊 / 显式说再讲一遍）', () =>
+  withBook(async (book) => {
+    const store = freshStore();
+    seedChar(store, 'gate1', '猪大哥', { storyRole: { bookId: book.id, castId: 'pig_big', resident: false } });
+    store.setStoryProgress(W, 'kid1', { books: { [book.id]: { chapter: 1, state: 'idle', rewarded: [0], settled: true } } });
+    const r = await respondToTranscript(W, 'gate1', 'kid1', '你好呀猪大哥', createMockAdapters(), store);
+    assert.equal(r.storyRequest, undefined, 'settled 后普通问候不再强开');
+  }));
+
+test('gate 角色：互动幕进行中(interacting)搭话不打扰（让孩子安心去做互动）', () =>
+  withBook(async (book) => {
+    const store = freshStore();
+    seedChar(store, 'gate1', '猪大哥', { storyRole: { bookId: book.id, castId: 'pig_big', resident: false } });
+    store.setStoryProgress(W, 'kid1', { books: { [book.id]: { chapter: 0, state: 'interacting', rewarded: [], settled: false, activeChapter: 0 } } });
+    const r = await respondToTranscript(W, 'gate1', 'kid1', '你好呀猪大哥', createMockAdapters(), store);
+    assert.equal(r.storyRequest, undefined, 'interacting 中不强开，让孩子去做互动');
+  }));
+
+test('普通村民（无 storyRole）随便搭话不会被强开成故事', async () => {
+  const store = freshStore();
+  seedChar(store, 'npc1', '小兔');
+  const r = await respondToTranscript(W, 'npc1', 'kid1', '你好呀', createMockAdapters(), store);
+  assert.equal(r.storyRequest, undefined);
+});
+
 // ── startStoryAsync：应下→开演；busy/互动中只说兜底句 ────────────────────
 
 function collectSocket() {
