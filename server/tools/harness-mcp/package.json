@@ -1,0 +1,12 @@
+{
+  "name": "maliang-harness-mcp",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "MCP server bridging Claude to the maliang game client's debug TCP command port (game-pilot harness). Zero deps — hand-rolled JSON-RPC over stdio + node:net.",
+  "scripts": {
+    "start": "node src/mcp.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p ."
+  }
+}

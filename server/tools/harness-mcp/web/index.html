@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>game-pilot 控制面板</title>
+<style>
+  :root { --bg:#14110d; --panel:#1e1a14; --line:#332b20; --ink:#efe7d8; --dim:#a99a80; --accent:#d98c3a; --ok:#6fae5a; --bad:#c8583f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:12px; padding:8px 12px; border-bottom:1px solid var(--line); background:var(--panel); }
+  header b { color:var(--accent); }
+  header .sp { flex:1; }
+  button { font:inherit; color:var(--ink); background:#2a2318; border:1px solid var(--line); border-radius:6px; padding:4px 10px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  #wrap { display:flex; height:calc(100vh - 42px); }
+  #left { flex:1; padding:12px; overflow:auto; border-right:1px solid var(--line); }
+  #right { width:420px; padding:12px; overflow:auto; }
+  h3 { margin:0 0 8px; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; }
+  #stage { position:relative; display:inline-block; max-width:100%; border:1px solid var(--line); }
+  #stage img { display:block; max-width:100%; height:auto; }
+  .box { position:absolute; border:1.5px solid var(--accent); border-radius:3px; background:rgba(217,140,58,.10); pointer-events:none; }
+  .box.sub { border-color:#7a6cff; background:rgba(122,108,255,.10); }  /* SubViewport：真 tap 到不了 */
+  .box span { position:absolute; top:-15px; left:-1px; font-size:10px; color:var(--accent); background:var(--bg); padding:0 2px; white-space:nowrap; }
+  .act { display:flex; align-items:center; gap:8px; padding:5px 6px; border:1px solid var(--line); border-radius:6px; margin-bottom:5px; }
+  .act .meta { flex:1; min-width:0; }
+  .act .label { color:var(--ink); }
+  .act .id { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .act .exec { font-size:10px; padding:1px 5px; border-radius:8px; border:1px solid var(--line); color:var(--dim); }
+  .act.disabled { opacity:.45; }
+  #reply { white-space:pre-wrap; font-size:11px; color:var(--dim); background:#0f0d09; border:1px solid var(--line); border-radius:6px; padding:8px; max-height:220px; overflow:auto; margin-top:8px; }
+  .pill { font-size:11px; padding:1px 7px; border-radius:9px; border:1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <b>game-pilot</b>
+  <button id="refresh">刷新</button>
+  <label><input type="checkbox" id="auto" /> 自动(2s)</label>
+  <span id="status" class="pill">—</span>
+  <span class="sp"></span>
+  <span id="hint" style="color:var(--dim)">左=可观察视窗(叠加=元素矩形)　右=可用动作(点即 do)</span>
+</header>
+<div id="wrap">
+  <div id="left">
+    <h3>视窗 + 无障碍元素叠加</h3>
+    <div id="stage"><img id="shot" alt="screenshot" /><div id="overlay"></div></div>
+  </div>
+  <div id="right">
+    <h3>可用动作 <span id="acount" class="pill">0</span></h3>
+    <div id="actions"></div>
+    <h3 style="margin-top:12px">上一次 do 回包</h3>
+    <div id="reply">（点右侧动作或左侧元素上的动作触发 do）</div>
+  </div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+let lastElements = [];
+
+async function jget(u) { const r = await fetch(u); return r.json(); }
+
+function refreshShot() {
+  const img = $("#shot");
+  img.onload = layoutOverlay;
+  img.src = "/api/shot.jpg?t=" + Date.now();
+}
+
+function layoutOverlay() {
+  const img = $("#shot"), ov = $("#overlay");
+  ov.innerHTML = "";
+  if (!img.naturalWidth) return;
+  const sx = img.clientWidth / img.naturalWidth, sy = img.clientHeight / img.naturalHeight;
+  for (const el of lastElements) {
+    const r = el.screen_rect;
+    if (!el.on_screen || !r) continue;
+    const b = document.createElement("div");
+    b.className = "box" + (el.viewport && el.viewport !== "root" ? " sub" : "");
+    b.style.left = (r.x * sx) + "px"; b.style.top = (r.y * sy) + "px";
+    b.style.width = (r.w * sx) + "px"; b.style.height = (r.h * sy) + "px";
+    const tag = document.createElement("span"); tag.textContent = el.kind + ":" + (el.label || el.id);
+    b.appendChild(tag); ov.appendChild(b);
+  }
+}
+
+function renderActions(actions) {
+  $("#acount").textContent = actions.length;
+  const box = $("#actions"); box.innerHTML = "";
+  for (const a of actions) {
+    const row = document.createElement("div");
+    row.className = "act" + (a.enabled ? "" : " disabled");
+    const meta = document.createElement("div"); meta.className = "meta";
+    const l = document.createElement("div"); l.className = "label"; l.textContent = a.label || a.action_id;
+    const id = document.createElement("div"); id.className = "id";
+    id.textContent = a.action_id + (a.enabled ? "" : "  ✕ " + (a.reason_disabled || ""));
+    meta.appendChild(l); meta.appendChild(id);
+    const ex = document.createElement("span"); ex.className = "exec"; ex.textContent = a.execution || "";
+    const btn = document.createElement("button"); btn.textContent = "do";
+    btn.disabled = !a.enabled;
+    btn.onclick = () => doAction(a.action_id, a.args_schema);
+    row.appendChild(meta); row.appendChild(ex); row.appendChild(btn);
+    box.appendChild(row);
+  }
+}
+
+async function doAction(action_id, argsSchema) {
+  let args = undefined;
+  if (argsSchema && Object.keys(argsSchema).length) {
+    const vals = {};
+    for (const k of Object.keys(argsSchema)) {
+      const v = prompt("动作 " + action_id + " 需要参数 " + k + " (" + argsSchema[k] + ")", "");
+      if (v === null) return; vals[k] = v;
+    }
+    args = vals;
+  }
+  $("#reply").textContent = "执行中: " + action_id + " …";
+  const r = await fetch("/api/do", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: action_id, args }) }).then((x) => x.json());
+  const d = r.delta || {};
+  $("#reply").textContent =
+    "action: " + r.action + "\nexecution: " + r.execution + "  settled: " + r.settled +
+    "\ndelta.changed: " + JSON.stringify(d.changed || {}) +
+    "\ndelta.added: " + JSON.stringify(d.added || {}) +
+    "\ndelta.removed: " + JSON.stringify(d.removed || {});
+  await observe();
+}
+
+async function observe() {
+  try {
+    const o = await jget("/api/observe");
+    if (!o.ok) { $("#status").textContent = "err"; return; }
+    lastElements = o.elements || [];
+    renderActions(o.actions || []);
+    const s = o.state || {};
+    $("#status").textContent = (s.scene_id || "—") + " / " + (s.fsm_state || "?");
+    refreshShot();
+  } catch (e) { $("#status").textContent = "连不上"; }
+}
+
+$("#refresh").onclick = observe;
+let timer = null;
+$("#auto").onchange = (e) => {
+  if (e.target.checked) timer = setInterval(observe, 2000);
+  else { clearInterval(timer); timer = null; }
+};
+window.addEventListener("resize", layoutOverlay);
+observe();
+</script>
+</body>
+</html>

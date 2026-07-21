@@ -1904,9 +1904,20 @@ func harness_photo(args: Dictionary) -> Dictionary:
 	return {"hud": _hud_layer.visible if _hud_layer != null else true,
 		"photo_cam": not photo_cam.is_empty()}
 
+## harness（AI 驱动 do op，harness 重写 P2）：让玩家【真的走】到某 tile 附近（真寻路，不瞬移）。
+## enter_portal（走进传送门半径）/ walk（走到 POI）动作的底座——与点空地走路同一条 _move_player_to。
+## 驱动方随后轮询 player_tile / scene_id 落地。⚠️ 这才是常规导航；harness_teleport 是瞬移，仅调试拍摄用。
+func harness_walk_to(tile: Vector2i) -> bool:
+	if player.is_empty():
+		return false
+	_move_player_to(WorldGrid.from_tile_center(tile))
+	return true
+
 ## 摄影传送（photo 拍摄找机位）：把玩家（和跟随的仙子）就地搬到目标 tile 附近空位。
 ## near_npc=true 时改搬到第一个真实非仙子村民身旁（村庄合影机位——相机永远聚焦玩家，
 ## 玩家不在村民堆里就拍不到村子）。与 _go_home 的就地解卡分支同款调用序列。
+## ⚠️ debug-only 瞬移：do op 的常规导航走 harness_walk_to（真走路）；这条只给摄影/调试找机位，
+## 不该出现在无障碍动作列表里（execution:"handler:debug"）。
 func harness_teleport(tile: Vector2i, near_npc: bool) -> bool:
 	if player.is_empty():
 		return false

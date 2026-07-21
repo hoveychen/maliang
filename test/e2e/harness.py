@@ -47,6 +47,23 @@ def _brief(s):
     return {k: s.get(k) for k in keys if k in s}
 
 
+def diff_state(prev, cur):
+    """两份状态快照的增量（纯函数，harness 重写 P3）：{changed:{k:[旧,新]}, added:{k:值}, removed:{k:旧}}。
+    key-absence 有别于 value-change：cur 有 prev 无 → added；prev 有 cur 无 → removed。"""
+    prev = prev or {}
+    cur = cur or {}
+    changed, added, removed = {}, {}, {}
+    for k, v in cur.items():
+        if k not in prev:
+            added[k] = v
+        elif prev[k] != v:
+            changed[k] = [prev[k], v]
+    for k, v in prev.items():
+        if k not in cur:
+            removed[k] = v
+    return {"changed": changed, "added": added, "removed": removed}
+
+
 class Harness:
     """TCP 命令口客户端：一行一条 JSON 命令，读回一行 JSON 应答。"""
 
@@ -57,6 +74,7 @@ class Harness:
         self.trace_dir = None
         self._trace_fp = None
         self._shot_n = 0
+        self._last_state = None   # delta 基线：state()/do() 更新（harness 重写 P3）
 
     # ── 连接 ──
     def connect(self, retries=25, delay=1.0):
@@ -210,9 +228,33 @@ class Harness:
     def reset_budget(self):
         return self.send({"op": "reset_budget"})
 
+    # ── 无障碍模型 + 真输入执行（harness 重写 P2/P3）──
+    def access(self, texts=False):
+        """统一元素列表（3D 实体 + 2D 控件），每个带稳定 id + element-targeted 动作。"""
+        return self.send({"op": "access", "texts": texts})
+
+    def actions(self):
+        """当前可用动作扁平列表（按 id 挑一条给 do 执行）。"""
+        return self.send({"op": "actions"})
+
+    def do(self, action_id, **args):
+        """执行一个动作 id（真输入优先）。异步动作在对端落定后才回包——读超时按落定放宽。
+        回包附加 delta（相对上一份 state 的增量）；同时含 execution/settled/state/actions/rev。"""
+        cmd = {"op": "do", "action": action_id}
+        if args:
+            cmd["args"] = args
+        r = self.send(cmd, timeout=self.timeout + 15.0)
+        st = r.get("state")
+        if isinstance(st, dict):
+            r["delta"] = diff_state(self._last_state, st) if self._last_state is not None else None
+            self._last_state = st
+        return r
+
     # ── 感知 ──
     def state(self):
-        return self.send({"op": "state"})
+        s = self.send({"op": "state"})
+        self._last_state = s   # 刷新 delta 基线
+        return s
 
     def ui(self, texts=False):
         return self.send({"op": "ui", "texts": texts})
@@ -241,17 +283,22 @@ class Harness:
                 out["shot_error"] = str(e)
         return out
 
-    # ── 等待谓词 ──
+    # ── 等待原语（harness 重写 P3：统一到 wait_until 之上）──
     def _state_soft(self):
-        """轮询版 state：单次超时/瞬断（换场景黑幕、对端忙）不炸循环，返回 {}。"""
+        """轮询版 state：单次超时/瞬断（换场景黑幕、对端忙）不炸循环，返回 {}。
+        失败时顺手 best-effort 重连——换场景会顶掉单连接，重连让后续轮询能恢复。"""
         try:
             return self.state()
         except (OSError, HarnessError, json.JSONDecodeError):
+            try:
+                self.reconnect(retries=2, delay=0.5)
+            except (OSError, HarnessError):
+                pass
             return {}
 
-    def wait_state(self, pred, desc, timeout=45.0, poll=1.0):
-        """轮询 state 直到 pred(snapshot) 为真；超时抛错。返回命中的快照。
-        轮询中的单次通讯失败不中断等待（换场景/黑幕期对端可能不应答）。"""
+    def wait_until(self, pred, desc="", timeout=45.0, poll=1.0, soft=False):
+        """轮询 state 直到 pred(snapshot) 为真。返回命中快照；超时 soft=True 返 None、否则抛错。
+        轮询中的单次通讯失败不中断等待（换场景/黑幕期对端可能不应答，_state_soft 已含重连）。"""
         deadline = time.time() + timeout
         last = None
         while time.time() < deadline:
@@ -261,7 +308,44 @@ class Harness:
                 if pred(s):
                     return s
             time.sleep(poll)
+        if soft:
+            return None
         raise HarnessError(f"等待超时: {desc}；最后一次快照={_brief(last)}")
+
+    def wait_state(self, pred, desc, timeout=45.0, poll=1.0):
+        """wait_until 的兼容别名（超时抛错）。"""
+        return self.wait_until(pred, desc, timeout, poll, soft=False)
+
+    def wait_world(self, timeout=120.0, need_vc=True, poll=2.0):
+        """等世界就绪：ws_open + npc≥8 (+ vc_ready)。桌面无端侧 ASR 时 need_vc=False。"""
+        return self.wait_until(
+            lambda s: (s.get("npc_count") or 0) >= 8 and s.get("ws_open")
+            and (s.get("vc_ready") or not need_vc),
+            "世界就绪(ws+8村民%s)" % ("+vc" if need_vc else ""), timeout, poll)
+
+    def wait_scene(self, scene_id, timeout=60.0, poll=1.0):
+        """等进入某场景且过场结束（scene_id==目标 且 not transitioning）。"""
+        return self.wait_until(lambda s: s.get("scene_id") == scene_id and not s.get("transitioning"),
+                               f"进入场景 {scene_id}", timeout, poll)
+
+    def wait_delta(self, key, timeout=30.0, poll=0.5):
+        """等某状态字段相对当前值发生变化（造物问句翻页/背包增长等）。"""
+        base = self._state_soft().get(key)
+        return self.wait_until(lambda s: s.get(key) != base, f"{key} 变化", timeout, poll)
+
+    def wait_action_available(self, action_id, enabled=True, timeout=30.0, poll=1.0):
+        """轮询 actions() 直到某 action_id 出现（enabled=True 时还须可用）。返回该动作描述符。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                acts = self.actions().get("actions", [])
+            except (OSError, HarnessError, json.JSONDecodeError):
+                acts = []
+            for a in acts:
+                if a.get("action_id") == action_id and (a.get("enabled") or not enabled):
+                    return a
+            time.sleep(poll)
+        raise HarnessError(f"动作未就绪: {action_id}")
 
     def wait_banner_stable(self, secs=4.0, timeout=40.0):
         """等 banner 连续 secs 秒不变（=对方 TTS 放完）再返回其值。"""
