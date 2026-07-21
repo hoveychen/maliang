@@ -40,6 +40,7 @@ class StubWorld extends Node:
 	var _in_creation := false
 	var _creation_options: Array = []
 	var _phone_cam := false
+	var _bootstrapping := false
 	var _bench_freeze := false
 	var _play_blocked := false
 	var _stage_active := false
@@ -231,6 +232,11 @@ func _run_once() -> void:
 		fails += _check("bench_freeze 下 npc talk disabled", ta.get("enabled"), false)
 		fails += _check("bench_freeze npc talk reason", ta.get("reason_disabled"), "loading_intro")
 	stub._bench_freeze = false
+	# 首屏加载(_bootstrapping,「连接精灵世界…」)同样 gated
+	stub._bootstrapping = true
+	fails += _check("bootstrapping → gated", server._act_gate()["gated"], true)
+	fails += _check("bootstrapping → reason loading_world", server._act_gate()["reason"], "loading_world")
+	stub._bootstrapping = false
 
 	print("[真 speaking 位：快照反映 _fsm_inputs().speaking()（对齐 Playwright §3.3）]")
 	stub._speaking = true
