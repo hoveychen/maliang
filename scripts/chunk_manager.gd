@@ -1108,7 +1108,42 @@ func _spawn(parent: Node3D, scene: PackedScene, pos: Vector3, scale_f: float, ya
 		mi.extra_cull_margin = CULL_MARGIN
 		# 建筑不投实时阴影：CHARACTER_SHADOWS 实验聚焦「只角色投影」，建筑靠自身明暗立体
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_activate_prop_animation(inst)
+	_spawn_fan_spinner(inst)
 	return inst
+
+## node 类 glb 自带的骨骼/关键帧动画不会自播（Godot 导入默认不置 AnimationPlayer.autoplay）——
+## 历史上恐龙/机器人/鱼等摆件都揣着现成动画却僵在第 0 帧。此处兜底：实例化后若树内有
+## AnimationPlayer 且带 clip，就把首个 clip 设循环并 play()。无 AnimationPlayer 的静态建筑
+## （KayKit 六边形集：风车/树/井）此函数是空操作，零开销；风车的转动走 _spawn_fan_spinner（P2）。
+func _activate_prop_animation(inst: Node3D) -> void:
+	for ap in inst.find_children("*", "AnimationPlayer", true, false):
+		var anim: AnimationPlayer = ap
+		var names := anim.get_animation_list()
+		if names.is_empty():
+			continue
+		# 跳过 Godot 导入内建的 "RESET" 姿态轨（非真动画），取第一个真 clip
+		var clip := ""
+		for nm in names:
+			if String(nm) != "RESET":
+				clip = String(nm)
+				break
+		if clip.is_empty():
+			continue
+		var a := anim.get_animation(clip)
+		if a != null:
+			a.loop_mode = Animation.LOOP_LINEAR
+		anim.play(clip)
+
+## 风车扇叶匀速转（models-play-animation P2）：KayKit 六边形集的风车 glb 不带动画轨，
+## 但把扇叶做成独立命名子节点（building_windmill_top_fan_*）。给每个这样的子节点挂一个
+## PropSpinner 程序化绕盘面法线自转。非风车 glb（名里无 _top_fan_）此函数是空操作。
+func _spawn_fan_spinner(inst: Node3D) -> void:
+	for mi in inst.find_children("*", "MeshInstance3D", true, false):
+		if not String(mi.name).contains("_top_fan_"):
+			continue
+		var spinner := PropSpinner.new()
+		mi.add_child(spinner)
 
 ## SDF 语音物件摆放：占地判定 + 螺旋找位，实例化 SdfProp 并启用锚点游走。
 ## 材质自带 world-bend 项（sdf_field.gdshaderinc），不走 BendMat.wrap_scene。

@@ -109,6 +109,7 @@ UNIT_TESTS=(
   test_terrain_v2
   test_terrain_v3_crosscheck
   test_matrix_skin
+  test_prop_animation
   test_terrain_patch
   test_terrain_rebuild
   test_grid_presets
