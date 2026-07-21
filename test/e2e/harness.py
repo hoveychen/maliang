@@ -360,13 +360,21 @@ class Harness:
             time.sleep(1.0)
         return last
 
+    def wait_speaking_done(self, timeout=40.0, poll=0.5):
+        """等对方 utterance 真正播完（对齐 Playwright §3.3）：键真实 `speaking` 位（角色 TTS/仙子语音的
+        播放态），而非 banner 连续 N 秒不变的墙钟猜。老构建无 speaking 位时回退 wait_banner_stable。"""
+        first = self._state_soft()
+        if "speaking" not in first:
+            return self.wait_banner_stable(timeout=timeout)  # 老服务端：无真位，回退墙钟
+        return self.wait_until(lambda s: not s.get("speaking"), "对方说完(speaking=false)", timeout, poll)
+
     def say_when_open(self, text, tries=8):
-        """门禁开着才真喂（对方说完）。关着就等 banner 稳再试。返回是否喂进去。"""
+        """门禁开着才真喂（对方说完）。关着就等对方说完再试。返回是否喂进去。"""
         for _ in range(tries):
             r = self.say(text)
             if r.get("fed"):
                 return True
-            self.wait_banner_stable(secs=3.0, timeout=12.0)
+            self.wait_speaking_done(timeout=12.0)  # 真 speaking 位（无位则内部回退墙钟）
         return False
 
 

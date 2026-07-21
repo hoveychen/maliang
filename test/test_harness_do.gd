@@ -19,6 +19,12 @@ class TouchCollector extends Object:
 class StubChar3D extends Node3D:
 	var char_name := "猪小弟"
 
+## stub fsm inputs：_fsm_inputs().speaking() —— 真 utterance 播放位来源（§3.3）。
+class StubInputs extends RefCounted:
+	var sp := false
+	func speaking() -> bool:
+		return sp
+
 ## stub 宿主 world：提供 _collect_entities / _snapshot / _gather_facts 读的字段 + talk handler 记录。
 class StubWorld extends Node:
 	var npcs: Array = []
@@ -37,8 +43,11 @@ class StubWorld extends Node:
 	var _play_blocked := false
 	var _stage_active := false
 	var talk_npc_calls: Array = []
+	var _speaking := false
 	func _fsm_state() -> InteractionFsm.State:
 		return InteractionFsm.State.LISTENING
+	func _fsm_inputs() -> StubInputs:
+		var i := StubInputs.new(); i.sp = _speaking; return i
 	func harness_talk_npc(who := "") -> bool:
 		talk_npc_calls.append(who)
 		return true
@@ -169,6 +178,12 @@ func _run_once() -> void:
 	fails += _check("settle_reason 谓词=talk", (base2.get("settle_reason") as Dictionary).get("predicate"), "talk")
 	fails += _check("settle_reason 有 note", (base2.get("settle_reason") as Dictionary).has("note"), true)
 	fails += _check("settle_reason 记 waited_sec", (base2.get("settle_reason") as Dictionary).has("waited_sec"), true)
+
+	print("[真 speaking 位：快照反映 _fsm_inputs().speaking()（对齐 Playwright §3.3）]")
+	stub._speaking = true
+	fails += _check("说话中 speaking=true", server._snapshot().get("speaking"), true)
+	stub._speaking = false
+	fails += _check("说完 speaking=false", server._snapshot().get("speaking"), false)
 
 	if fails == 0:
 		print("[PASS] test_harness_do")

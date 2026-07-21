@@ -602,6 +602,13 @@ func _snapshot() -> Dictionary:
 			var fs: int = int(w.call("_fsm_state"))
 			snap["fsm_state"] = InteractionFsm.name_of(fs)
 			snap["mic_open"] = InteractionFsm.mic_open(fs)
+		# 真 utterance 播放位（对齐 Playwright §3.3）：来自 _fsm_inputs().speaking()——角色 TTS(_tts_player.playing
+		# /_tts_pending) 或仙子预制语音(fairy_voice.is_playing()) 的真实播放态。驱动方等「对方说完」应键此位
+		# （wait_speaking_done），而非拿 banner 连续 N 秒不变的墙钟猜（慢 TTS 假阳、暂停假阴）。
+		if w.has_method("_fsm_inputs"):
+			var inp: Variant = w.call("_fsm_inputs")
+			if inp != null and inp is Object and (inp as Object).has_method("speaking"):
+				snap["speaking"] = bool(inp.call("speaking"))
 		# 玩家空间基准（逻辑坐标 + tile）：AI 决策移动/靠近全靠它。
 		var player: Variant = w.get("player")
 		if typeof(player) == TYPE_DICTIONARY and typeof((player as Dictionary).get("logical")) == TYPE_VECTOR2:
