@@ -451,6 +451,21 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     };
   });
 
+  // 管理端点：删一个角色在本世界的【实例放置】（roster），**保留 character_defs 共享定义**
+  // （老板：退役场景旧村民「删引用不删实体表」，defId 可复用）。仙子拒删（删点点会毁世界）。
+  // 必须配 MALIANG_ADMIN_TOKEN。
+  app.delete<{ Params: { id: string; cid: string } }>('/admin/worlds/:id/characters/:cid', async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const char = store.getCharacter(req.params.id, req.params.cid);
+    if (!char) return reply.code(404).send({ error: 'character not found' });
+    if (char.isFairy) return reply.code(400).send({ error: 'refuse to delete the fairy' });
+    const ok = store.deleteCharacter(req.params.id, req.params.cid);
+    return { ok, id: char.id, name: char.name };
+  });
+
   // 管理端点：把小红花数直接设为指定值（缺省 INITIAL_FLOWERS）。补花用，不改经济规则。
   // 钱包按 (worldId, playerId) 分：
   //   body.playerId 给了 → 只补那个孩子（即便他还没建钱包，也会就地建出来）。

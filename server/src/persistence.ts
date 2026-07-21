@@ -1015,6 +1015,28 @@ export class WorldStore {
   }
 
   /**
+   * 删一个角色在某世界的【实例放置】（characters 行 + 其 memories/chat_turns），
+   * **保留 character_defs 共享定义**——定义是全局的、别的世界或以后可能复用
+   * （老板 2026-07-21：退役场景的旧村民「删引用不删实体表」）。与 deleteWorld 的
+   * 逐角色清理同口径。memories/chat_turns 按 character_id 清（这两表无 world_id，
+   * 同 deleteWorld；实践中角色 id 是 UUID 唯一，不跨世界误删）。不存在返回 false，事务原子。
+   */
+  deleteCharacter(worldId: string, characterId: string): boolean {
+    if (!this.getCharacter(worldId, characterId)) return false;
+    this.#db.exec('BEGIN');
+    try {
+      this.#db.prepare('DELETE FROM memories WHERE owner_character_id = ?').run(characterId);
+      this.#db.prepare('DELETE FROM chat_turns WHERE character_id = ?').run(characterId);
+      this.#db.prepare('DELETE FROM characters WHERE world_id = ? AND id = ?').run(worldId, characterId);
+      this.#db.exec('COMMIT');
+    } catch (e) {
+      this.#db.exec('ROLLBACK');
+      throw e;
+    }
+    return true;
+  }
+
+  /**
    * 角色状态变更后持久化（世界模板架构 v2 §5：拆写）。一次事务里 upsert 共享定义 + 写实例放置行：
    * 共享定义（name/性格/音色/长相/能力/故事原型）进 character_defs，改这里全世界引用者当场生效；
    * 实例放置（位置/场景/状态/关系/记忆/入住）进 characters 表，只此世界一份。对上层 API 不变。
