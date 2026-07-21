@@ -383,6 +383,29 @@ static func parse_server_pois(list: Variant) -> Array:
 		})
 	return out
 
+## 「谁的家」建筑住户表（interaction-feedback B 档，服务端 scene.homes 下发）：
+## → { Vector2i(tile): String(characterId) } 运行期映射，供点不可进建筑时 O(1) 查住户
+## （P3 点点飞过去解释「这是 X 的家呀~」）。非法条目跳过；空/全非法 → 空字典（无住户就走通用解释）。
+static func parse_server_homes(list: Variant) -> Dictionary:
+	var out: Dictionary = {}
+	if typeof(list) != TYPE_ARRAY:
+		return out
+	for e in (list as Array):
+		if typeof(e) != TYPE_DICTIONARY:
+			continue
+		var d: Dictionary = e
+		var t: Variant = d.get("tile", null)
+		if typeof(t) != TYPE_ARRAY or (t as Array).size() != 2:
+			continue
+		var cid := String(d.get("characterId", ""))
+		if cid.is_empty():
+			continue
+		out[Vector2i(int((t as Array)[0]), int((t as Array)[1]))] = cid
+	return out
+
+## 当前场景的「谁的家」映射（tile → characterId），由 _apply_scene 从 scene.homes 填充。
+var _homes: Dictionary = {}
+
 const POI_FLY_CAP := 9.0          ## 提醒飞行离玩家的最远距离（保持在视野内）
 ## 引路参数（fairy-guide）。领飞距离比 POI 提醒远一些——要有「在前面带路」的感觉，但仍封顶在视野内：
 ## 她飞没影了，小朋友就不知道该往哪走，引路也就白引了。
@@ -4773,6 +4796,10 @@ func _apply_scene(scene: Dictionary) -> void:
 	# 没有 portal 的场景就是没有出口，_portals 置空即可（离线/老服务端下发不了 portals）。
 	_portals = parse_server_portals(scene.get("portals", []))
 	_spawn_portal_markers()
+
+	# 「谁的家」住户表（interaction-feedback B 档）：点不可进建筑时供 P3 查住户。
+	# 换场景就是换一批建筑，故每次 _apply_scene 整表替换（无则空，走通用解释）。
+	_homes = parse_server_homes(scene.get("homes", []))
 
 	# 地形拉取：有版本号走矩阵端点（(world,scene,version) 缓存，terrain_patch 对齐依据）；
 	# 老服务端（version 0）回落内容寻址 asset 路径。

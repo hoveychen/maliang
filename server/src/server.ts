@@ -87,7 +87,7 @@ import { editSceneTerrain, TerrainEditError, type TileEditInput } from './terrai
 import { BENCH_VERSION, aggregateLevels, normalizeGpu, sanitizeSample } from './device_profile.ts';
 import { RateLimiter } from './ratelimit.ts';
 import { registerDebugApi } from './debug_api.ts';
-import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, MAX_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type CharacterView, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
+import { newCreationState, isValidTile, ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, MAX_FLOWERS, WORLD_CENTER_TILE, type ActiveTask, type AnchorPoint, type AvatarAttrs, type AvatarGuideState, type Character, type CharacterAnchors, type CharacterView, type ChatTurn, type CreationGoal, type CreationState, type DeviceSnapshot, type GuideAvatarResult, type ItemDef, type Player, type PlayerOnboardingProfile, type RecipientRef, type Scene, type SceneHome, type ScenePoi, type ScenePortal, type TilePos, type VoiceResponse, type Wallet } from './types.ts';
 import { deriveSocialType, familiarityFor } from './social.ts';
 import { CREATION_OPTIONS, findOption, iconPrompt, sizeToScale, scaleToSize, recipientDefaultSize, recipientPhrase, type CreatureSize } from './creation_options.ts';
 import { avatarDescForbidden, stripAvatarOptionIds, AVATAR_EARLY_DONE, AVATAR_ICON_CATEGORIES, AVATAR_OPTIONS, avatarIconPrompt, composeAvatarDesc, deterministicGuideAvatar, findAvatarOption } from './avatar_options.ts';
@@ -521,6 +521,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       terrainBase64?: string;
       pois?: ScenePoi[];
       portals?: ScenePortal[];
+      homes?: SceneHome[];
     } | null;
   }>('/admin/scenes', { bodyLimit: 4 * 1024 * 1024 }, async (req, reply) => {
     const token = process.env.MALIANG_ADMIN_TOKEN;
@@ -561,6 +562,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       gridTiles: terrain.gridW,
       pois: req.body?.pois ?? [],
       portals: req.body?.portals ?? [],
+      homes: req.body?.homes ?? [],
       terrainVersion: (prev?.terrainVersion ?? 0) + 1,
     };
     store.upsertScene(scene);

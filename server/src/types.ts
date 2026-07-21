@@ -289,6 +289,16 @@ export interface ScenePortal {
 }
 
 /**
+ * 一栋「谁的家」建筑（interaction-feedback B 档）：不可进的布景建筑挂上住户身份，
+ * 孩子点它时点点飞过去解释「这是 X 的家呀~」，把死胡同变成一次符合「只问不答」的互动。
+ * tile 是建筑占地的任一格（客户端按 tile 命中查 owner，故多格建筑填代表格即可）。
+ */
+export interface SceneHome {
+  tile: [number, number];
+  characterId: string;
+}
+
+/**
  * 场景 = 世界里的一片区域（一张地图）。见 docs/multi-scene-design.md 模型 B。
  * terrainAsset 是地形二进制在内容寻址资产库里的 hash，同时充当版本号：
  * 地形变了 hash 就变，客户端据此判缓存，天然不存在版本协商问题。
@@ -301,6 +311,8 @@ export interface Scene {
   gridTiles: number;
   pois: ScenePoi[];
   portals: ScenePortal[];
+  /** 「谁的家」建筑住户表（interaction-feedback B 档）；缺省=老场景天然为空，消费方一律 `?? []`。 */
+  homes?: SceneHome[];
   /**
    * 地形矩阵版本（单调递增，tile 编辑每次 +1）。客户端缓存键与 terrain_patch
    * 对齐依据：patch 必须恰是本地版本 +1，否则全量重拉。0 = 尚未有矩阵 blob。
