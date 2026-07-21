@@ -45,6 +45,10 @@ static func map_voice(voice_id: String) -> String:
 	# 服务端音色目录（voice_catalog.ts）直接下发 edge 原生音色名：直通不映射
 	if voice_id.begins_with("zh-"):
 		return voice_id
+	# 英文音色（en-US-AnaNeural 等，《绿野仙踪》桃乐丝说英文）：edge 原生名，直通微软合成，
+	# 别落回中文池——否则桃乐丝运行期闲聊会变成中文嗓（预烧 WAV 走命中播包不受影响，这里管 miss 回退）。
+	if voice_id.begins_with("en-"):
+		return voice_id
 	if _VOICE_MAP.has(voice_id):
 		return _VOICE_MAP[voice_id]
 	if voice_id.begins_with("zf_"):

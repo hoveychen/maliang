@@ -31,6 +31,9 @@ export const VOICE_CATALOG: VoiceInfo[] = [
   { id: 'zh-TW-HsiaoChenNeural', gender: '女', desc: '软糯甜美的台湾腔女声，温温柔柔', tags: ['甜美角色', '慢性子'] },
   { id: 'zh-TW-HsiaoYuNeural', gender: '女', desc: '清亮悦耳的台湾腔女声，乖巧文静', tags: ['文静女孩', '小淑女'] },
   { id: 'zh-TW-YunJheNeural', gender: '男', desc: '斯文温和的台湾腔男声，书卷气', tags: ['书生', '文静角色', '慢性子'] },
+  // 英文音色（第一季册5《绿野仙踪》桃乐丝：从远方来、天生说英文）。main:false——不参与随机分配，
+  // 只让「说英文的远方角色」显式点用；客户端 edge_tts.gd map_voice 对 en- 前缀直通微软合成。
+  { id: 'en-US-AnaNeural', gender: '女', desc: '微软英文小女孩童声，天真软萌', tags: ['说英文的远方朋友', '小姑娘'] },
 ];
 
 /**
