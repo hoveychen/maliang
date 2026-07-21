@@ -112,6 +112,22 @@ func _run_once() -> void:
 		fails += _check("首事件是按下", collector.touches[0]["pressed"], true)
 		fails += _check("次事件是抬起", collector.touches[1]["pressed"], false)
 
+	print("[图标卡：text 空但 tooltip_text 作无障碍名，通用 access 采得到 label]")
+	# 造物 build-part 卡是图标卡(text=\"\")——世界给它 tooltip_text=label,describe_control 回退 tooltip,
+	# 于是 press:btn 元素带 label,驱动方按名选卡,不需 pick_option 后门。
+	var icard := Button.new()
+	icard.text = ""                    # 图标卡不显字(幼儿不识字)
+	icard.tooltip_text = "三角屋顶"     # 但保留无障碍名
+	icard.position = Vector2(300, 200); icard.size = Vector2(120, 120)
+	get_root().add_child(icard)
+	var els2 := server._collect_all_elements(false)
+	var icard_path := String(icard.get_path())
+	var found_label := ""
+	for el in els2:
+		if String((el as Dictionary).get("id", "")) == "ui:" + icard_path:
+			found_label = String((el as Dictionary).get("label", ""))
+	fails += _check("图标卡 label 回退到 tooltip_text", found_label, "三角屋顶")
+
 	print("[talk：off-screen 回退 handler + _act_wait 延迟落定]")
 	var talk_id := _find_action_id(els, "talk:npc:")
 	fails += _check("talk 动作存在", talk_id.is_empty(), false)

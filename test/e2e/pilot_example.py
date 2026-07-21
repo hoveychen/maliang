@@ -41,15 +41,23 @@ def run(h):
     h.say_when_open("点点，帮我造一个火箭")
     h.wait_until(lambda s: s.get("in_creation"), "进入引导造物", timeout=30)
 
-    # 4) 引导循环：有卡就 do pick_option（recipient 选 self），直到 naming_item 置位。
+    # 4) 引导循环：有卡就【真 tap 那张卡】（通用 press，不走 pick_option 后门），直到 naming_item 置位。
+    #    观察 state.creation_options 拿到选项 label，再从 actions 里找 label 匹配的 press:btn 卡去 do。
+    #    (卡是真 Button，world 给图标卡也挂了 tooltip=label，故 press 动作的 label == 选项 label。)
     for _ in range(12):
         s = h.state()
         if s.get("naming_item"):
             break
         opts = s.get("creation_options") or []
         if opts:
-            oid = opts[0]["id"]
-            h.do(f"pick_option:{oid}")
+            want = opts[0].get("label", "")
+            acts = h.actions().get("actions", [])
+            press = next((a["action_id"] for a in acts
+                          if a.get("kind") == "press" and a.get("label") == want), None)
+            if press:
+                h.do(press)                    # 真 tap 匹配 label 的造物卡
+            else:
+                h.say_when_open(want or "好的")  # 兜底：卡没采到就语音应答
             h.wait_delta("creation_question", timeout=20)
         else:
             h.say_when_open("好的")            # 开放问句：肯定应答

@@ -7068,9 +7068,14 @@ func _build_creation_cards(options: Array) -> void:
 		var oid := String((opt as Dictionary).get("id", ""))
 		if oid.is_empty():
 			continue
+		var label := String((opt as Dictionary).get("label", oid))
 		var card := Button.new()
 		card.custom_minimum_size = Vector2(220.0, 168.0) # 3 岁友好大点击区
-		card.text = String((opt as Dictionary).get("label", oid))
+		card.text = label
+		# 无障碍名：图标卡下面会把 text 清空（幼儿不识字），但保留 tooltip_text 作可读标签——
+		# harness 的通用 access(describe_control 回退 tooltip_text)据此把每张卡采成带 label 的 press:btn，
+		# 不再需要 pick_option 业务后门；家长长按也能看名。
+		card.tooltip_text = label
 		UiAssets.style_card_button(card, 24.0) # 奶油圆角卡片（die-cut 贴纸风，与图标同调）
 		card.add_theme_font_size_override("font_size", 40)
 		var icon_asset := String((opt as Dictionary).get("iconAsset", ""))

@@ -1184,17 +1184,8 @@ func _do_do(action_id: String, args: Dictionary) -> Dictionary:
 			base["execution_reason"] = "off_screen_fallback"
 			base["settled"] = true
 			return _do_reply_payload(base)
-		"pick_option":
-			# 造物卡也会作为根视口 Button 出现在 press:btn:* 里（可真 tap）；这里的 pick_option 走
-			# harness_pick_option handler，先保证造物链路对（P2）。落定看 creation_question/背包变化。
-			var w5 := _host()
-			if w5 != null and w5.has_method("harness_pick_option"):
-				w5.call("harness_pick_option", String(act.get("target_id", "")))
-			base["execution"] = "handler"
-			base["execution_reason"] = "creation_card"
-			_act_wait = {"predicate": "creation", "base": base, "elapsed": 0.0, "deadline": 6.0,
-				"start_q": _creation_q_text(), "start_bag": _bag_size()}
-			return {"__deferred": true}
+	# pick_option 已移除：造物卡是真 Button，走通用 press:btn 真 tap（harness_access.build_actions 不再造它）。
+	# press 是同步输入，卡触发的造物推进是服务端异步——驱动方按需 wait_delta(creation_question) 等落定。
 	return {"ok": false, "op": "do", "action": action_id, "error": "unhandled kind: %s" % kind}
 
 ## do 落定推进：逐帧查完成谓词，落定或超时（deadline）后统一回包。settled=false 表示超时未落定。
