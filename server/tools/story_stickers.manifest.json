@@ -1,5 +1,6 @@
 {
-  "comment": "M2《三只小猪》剧情纪念贴纸（幕奖励专属，小铺不卖）。kind=sticker 与 sticker_items 同管线同画风；id 与 items.ts renderRef 'sticker:story_*' 对应。",
+  "comment": "故事册剧情纪念贴纸（幕奖励专属，小铺不卖）。kind=sticker 与 sticker_items 同管线同画风；id 与 items.ts renderRef 'sticker:story_*' 对应。加一册只需 append 一行，直出 webp 资产：",
+  "recipe": "cd server && node --env-file=.env tools/gen_ui_assets.mjs tools/story_stickers.manifest.json ../assets/stickers --webp --candidates 1  # 幂等只补缺的；港区 403 先 --emit-jobs 去首尔拉图再 --raw-dir <dir> --webp",
   "assets": [
     { "id": "story_straw", "kind": "sticker", "targetSize": 256, "prompt": "a cute little haystack bundle of golden straw tied with a rope, a few straws sticking out" },
     { "id": "story_plank", "kind": "sticker", "targetSize": 256, "prompt": "a small stack of warm brown wooden planks with visible wood grain and two round nails" },

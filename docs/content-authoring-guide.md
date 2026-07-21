@@ -80,8 +80,14 @@ template（唯一权威母版，内容直接 seed 进来）──(cloneWorldInst
    每行同名 `<line.id>.wav`；`line.id` 守 `<bookId>_<幕>_<序>` 约定（如 `tortoise_hare_0_1`）。
    **客户端零改**：`scripts/story_voice.gd` 开机扫 `res://assets/voice/story_*` 全部册目录、合并进同一台词索引，
    新册目录自动被吃到、命中即播预烧 WAV（miss 才回落运行期 TTS）。
-4. **贴纸/盖章款**（可选）：`stampStyle`（`STAMP_STYLES` 之一）在册常量里写；纪念 `sticker` 要在服务端
-   `server/src/items.ts` 的 `BUILTIN_ITEMS` 里 **append** 该册自己的 `ItemDef`（见 §5，`souvenir:true`）。
+4. **贴纸/盖章款**（可选）：`stampStyle`（`STAMP_STYLES` 之一）在册常量里写；纪念 `sticker` 走**四处同口径**：
+   ① 服务端 `server/src/items.ts` `BUILTIN_ITEMS` append `{ ...sticker('story_<x>', '<名>'), souvenir: true }`（renderRef `sticker:story_<x>`）；
+   ② 客户端打包副本 `assets/terrain/builtin_items.json` append **逐项一致**的同一条（`terrain_assets.test.ts` 会逐字段比对）；
+   ③ 客户端贴纸包 `assets/packs/stickers/pack.json` append `story_<x>` → `res://assets/stickers/story_<x>.webp`；
+   ④ **贴纸图**：往 `server/tools/story_stickers.manifest.json` append 一行（id/prompt），跑通用出图管道直出 webp：
+   `cd server && node --env-file=.env tools/gen_ui_assets.mjs tools/story_stickers.manifest.json ../assets/stickers --webp --candidates 1`
+   （`--webp` 幂等只补缺的；港区 403 先 `--emit-jobs` 去首尔拉图再 `--raw-dir <dir> --webp`）。
+   `sticker_items.test.ts` 会核每个 `sticker:` renderRef 都有真 WebP，四处缺一测试就红。
 
 **种入**：`POST /admin/worlds/<world>/seed-story/<bookId>`（`server/src/server.ts:1149`）。同样**种进 `template`**。
 `seedStoryCharacters`（`server/src/story_seed.ts:24`）构造带 `storyRole:{bookId,castId,resident:false}` 的
