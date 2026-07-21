@@ -156,5 +156,7 @@
   { "id": "story_straw", "worldId": null, "name": "草垛纪念贴纸", "renderRef": "sticker:story_straw", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
   { "id": "story_plank", "worldId": null, "name": "木板纪念贴纸", "renderRef": "sticker:story_plank", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
   { "id": "story_brick", "worldId": null, "name": "砖房纪念贴纸", "renderRef": "sticker:story_brick", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
-  { "id": "story_basket", "worldId": null, "name": "点心篮纪念贴纸", "renderRef": "sticker:story_basket", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true }
+  { "id": "story_basket", "worldId": null, "name": "点心篮纪念贴纸", "renderRef": "sticker:story_basket", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
+  { "id": "story_ruby", "worldId": null, "name": "红宝石鞋纪念贴纸", "renderRef": "sticker:story_ruby", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
+  { "id": "story_emerald", "worldId": null, "name": "翡翠城纪念贴纸", "renderRef": "sticker:story_emerald", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true }
 ]

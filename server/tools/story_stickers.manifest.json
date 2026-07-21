@@ -5,6 +5,8 @@
     { "id": "story_straw", "kind": "sticker", "targetSize": 256, "prompt": "a cute little haystack bundle of golden straw tied with a rope, a few straws sticking out" },
     { "id": "story_plank", "kind": "sticker", "targetSize": 256, "prompt": "a small stack of warm brown wooden planks with visible wood grain and two round nails" },
     { "id": "story_brick", "kind": "sticker", "targetSize": 256, "prompt": "a sturdy little red brick house with a triangle roof and a tiny chimney, cozy and strong" },
-    { "id": "story_basket", "kind": "sticker", "targetSize": 256, "prompt": "a woven wicker picnic basket full of treats with a red-and-white checkered cloth peeking out, a couple of little cakes on top" }
+    { "id": "story_basket", "kind": "sticker", "targetSize": 256, "prompt": "a woven wicker picnic basket full of treats with a red-and-white checkered cloth peeking out, a couple of little cakes on top" },
+    { "id": "story_ruby", "kind": "sticker", "targetSize": 256, "prompt": "a pair of sparkly ruby-red slipper shoes covered in tiny glittering red gemstones, shiny and magical with little bows" },
+    { "id": "story_emerald", "kind": "sticker", "targetSize": 256, "prompt": "a cute little emerald-green crystal castle with sparkling shiny towers and a tiny flag on top, glowing softly, cheerful" }
   ]
 }

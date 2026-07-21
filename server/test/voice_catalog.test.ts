@@ -8,7 +8,10 @@ import type { Character } from '../src/types.ts';
 test('目录完整性：id 唯一、全 zh 前缀、仙子音色在目录且在主力池', () => {
   const ids = VOICE_CATALOG.map((v) => v.id);
   assert.equal(new Set(ids).size, ids.length, 'id 必须唯一');
-  assert.ok(ids.every((id) => id.startsWith('zh-')), '全部是中文系音色');
+  // 主力池（会被 fallbackVoice 稳定哈希 / LLM 随机分配）必须全中文——普通角色绝不会被分到外语音色。
+  // 非主力池可含专用外语音色（如《绿野仙踪》桃乐丝 en-US-AnaNeural），只让说英文的远方角色显式点用。
+  assert.ok(VOICE_CATALOG.filter((v) => v.main).every((v) => v.id.startsWith('zh-')), '主力池全部是中文系音色');
+  assert.ok(VOICE_CATALOG.filter((v) => !v.id.startsWith('zh-')).every((v) => !v.main), '非中文音色不得进主力池（不参与随机分配）');
   assert.ok(isKnownVoice(FAIRY_VOICE));
   assert.ok(VOICE_CATALOG.find((v) => v.id === FAIRY_VOICE)?.main, '仙子音色应在主力池');
   assert.ok(VOICE_CATALOG.filter((v) => v.main).length >= 3, '主力池至少 3 个保证多样性');
