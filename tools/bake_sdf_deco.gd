@@ -9,6 +9,9 @@ const SPECS := [
 	"res://assets/sdf_props/tree_puff_b.json",
 	"res://assets/sdf_props/tree_puff_c.json",
 	"res://assets/sdf_props/bush_puff.json",
+	# 静态布景 prop 一律构建期预烘焙（老板定策：不在 runtime 里烘）。烘出的 .res 一旦存在，
+	# chunk_manager._spawn_static_sdf 会自动优先加载它、跳过 raymarch + 运行时 bake_and_swap。
+	"res://assets/sdf_props/dwarf_bowl.json",  # 七矮人的碗（s1-snow-white P7）
 ]
 
 func _initialize() -> void:
