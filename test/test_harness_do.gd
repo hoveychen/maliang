@@ -185,6 +185,30 @@ func _run_once() -> void:
 	stub._speaking = false
 	fails += _check("说完 speaking=false", server._snapshot().get("speaking"), false)
 
+	print("[服务端 wait op：条件满足即回 / 未满足挂 _act_wait 逐帧查（§3.3 干掉客户端轮询）]")
+	var wp := DebugCmdServer.parse_command('{"op":"wait","field":"speaking","falsy":true}')
+	fails += _check("wait parse ok", wp.get("ok"), true)
+	fails += _check("wait conds mode=falsy", ((wp.get("conds") as Array)[0] as Dictionary).get("mode"), "falsy")
+	fails += _check("cond truthy 命中", server._cond_match({"x": 1}, {"field": "x", "mode": "truthy"}), true)
+	fails += _check("cond gte 命中", server._cond_match({"n": 8}, {"field": "n", "mode": "gte", "target": 8}), true)
+	fails += _check("cond gte 不足", server._cond_match({"n": 7}, {"field": "n", "mode": "gte", "target": 8}), false)
+	fails += _check("cond equals 命中", server._cond_match({"s": "a"}, {"field": "s", "mode": "equals", "target": "a"}), true)
+	fails += _check("conds 全 AND", server._conds_all_match({"a": 1, "b": 0}, [{"field": "a", "mode": "truthy"}, {"field": "b", "mode": "falsy"}]), true)
+	# 已满足即回（speaking=false → falsy 满足）
+	stub._speaking = false
+	var wi := server._do_wait([{"field": "speaking", "mode": "falsy"}], 5.0)
+	fails += _check("已满足即回 matched", wi.get("matched"), true)
+	fails += _check("已满足非 deferred", wi.has("__deferred"), false)
+	# 未满足挂 _act_wait（speaking=true → falsy 不满足）
+	stub._speaking = true
+	var wd := server._do_wait([{"field": "speaking", "mode": "falsy"}], 5.0)
+	fails += _check("未满足 deferred", wd.get("__deferred"), true)
+	fails += _check("挂 _act_wait predicate=conds", server._act_wait.get("predicate"), "conds")
+	# 变满足 → 逐帧查落定清空
+	stub._speaking = false
+	server._step_act_wait(0.1)
+	fails += _check("满足后落定清空 _act_wait", server._act_wait.is_empty(), true)
+
 	if fails == 0:
 		print("[PASS] test_harness_do")
 	else:
