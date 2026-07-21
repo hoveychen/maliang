@@ -323,22 +323,38 @@ class Harness:
         """wait_until 的兼容别名（超时抛错）。"""
         return self.wait_until(pred, desc, timeout, poll, soft=False)
 
-    def wait_world(self, timeout=120.0, need_vc=True, poll=2.0):
-        """等世界就绪：ws_open + npc≥8 (+ vc_ready)。桌面无端侧 ASR 时 need_vc=False。"""
-        return self.wait_until(
-            lambda s: (s.get("npc_count") or 0) >= 8 and s.get("ws_open")
-            and (s.get("vc_ready") or not need_vc),
-            "世界就绪(ws+8村民%s)" % ("+vc" if need_vc else ""), timeout, poll)
+    def wait_server(self, conds, timeout=40.0):
+        """服务端阻塞等待（对齐 Playwright §3.3）：一次性把条件交给游戏，逐帧查、满足/超时才回——
+        不再客户端每秒 poll。conds=[{field,mode,target?}]，mode∈truthy|falsy|present|equals|gte|changed。
+        读超时放宽到 server 超时 + 余量（server 不满足不会提前回）。返回回包（含 matched/state/settle_reason）。"""
+        r = self.send({"op": "wait", "conds": conds, "timeout": timeout}, timeout=timeout + 10.0)
+        st = r.get("state")
+        if isinstance(st, dict):
+            self._last_state = st
+        return r
 
-    def wait_scene(self, scene_id, timeout=60.0, poll=1.0):
-        """等进入某场景且过场结束（scene_id==目标 且 not transitioning）。"""
-        return self.wait_until(lambda s: s.get("scene_id") == scene_id and not s.get("transitioning"),
-                               f"进入场景 {scene_id}", timeout, poll)
+    def _wait_server_or_raise(self, conds, desc, timeout):
+        r = self.wait_server(conds, timeout)
+        if not r.get("matched"):
+            raise HarnessError(f"等待超时: {desc}；settle_reason={r.get('settle_reason')}")
+        return r.get("state", {})
 
-    def wait_delta(self, key, timeout=30.0, poll=0.5):
-        """等某状态字段相对当前值发生变化（造物问句翻页/背包增长等）。"""
-        base = self._state_soft().get(key)
-        return self.wait_until(lambda s: s.get(key) != base, f"{key} 变化", timeout, poll)
+    def wait_world(self, timeout=120.0, need_vc=True):
+        """等世界就绪：ws_open + npc≥8 (+ vc_ready)。桌面无端侧 ASR 时 need_vc=False。（服务端阻塞）"""
+        conds = [{"field": "npc_count", "mode": "gte", "target": 8}, {"field": "ws_open", "mode": "truthy"}]
+        if need_vc:
+            conds.append({"field": "vc_ready", "mode": "truthy"})
+        return self._wait_server_or_raise(conds, "世界就绪(ws+8村民%s)" % ("+vc" if need_vc else ""), timeout)
+
+    def wait_scene(self, scene_id, timeout=60.0):
+        """等进入某场景且过场结束（scene_id==目标 且 not transitioning）。（服务端阻塞）"""
+        return self._wait_server_or_raise(
+            [{"field": "scene_id", "mode": "equals", "target": scene_id},
+             {"field": "transitioning", "mode": "falsy"}], f"进入场景 {scene_id}", timeout)
+
+    def wait_delta(self, key, timeout=30.0):
+        """等某状态字段相对发起时发生变化（造物问句翻页/背包增长等）。（服务端阻塞）"""
+        return self._wait_server_or_raise([{"field": key, "mode": "changed"}], f"{key} 变化", timeout)
 
     def wait_action_available(self, action_id, enabled=True, timeout=30.0, poll=1.0):
         """轮询 actions() 直到某 action_id 出现（enabled=True 时还须可用）。返回该动作描述符。"""
@@ -373,7 +389,8 @@ class Harness:
         first = self._state_soft()
         if "speaking" not in first:
             return self.wait_banner_stable(timeout=timeout)  # 老服务端：无真位，回退墙钟
-        return self.wait_until(lambda s: not s.get("speaking"), "对方说完(speaking=false)", timeout, poll)
+        r = self.wait_server([{"field": "speaking", "mode": "falsy"}], timeout)  # 服务端阻塞，不 poll
+        return (r.get("state") or {})
 
     def say_when_open(self, text, tries=8):
         """门禁开着才真喂（对方说完）。关着就等对方说完再试。返回是否喂进去。"""

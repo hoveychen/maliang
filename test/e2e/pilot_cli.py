@@ -108,10 +108,12 @@ def main():
     p.add_argument("--timeout", type=float, default=120.0, dest="wtimeout")
     p.add_argument("--no-vc", action="store_true",
                    help="不等 vc_ready（桌面无端侧 ASR 时它只在 inject 之后才真）")
-    p = sub.add_parser("wait")
+    p = sub.add_parser("wait")   # 服务端阻塞等待某字段满足条件（不再客户端轮询）
     p.add_argument("--key", required=True)
     p.add_argument("--equals", default=None)
     p.add_argument("--truthy", action="store_true")
+    p.add_argument("--falsy", action="store_true")
+    p.add_argument("--changed", action="store_true", help="等该字段相对发起时变化")
     p.add_argument("--gte", type=float, default=None)
     p.add_argument("--timeout", type=float, default=45.0, dest="wtimeout")
     p = sub.add_parser("wait-banner")
@@ -182,16 +184,20 @@ def main():
                              timeout=args.wtimeout, poll=2.0)
             return out(s)
         if c == "wait":
-            def pred(s):
-                v = s.get(args.key)
-                if args.truthy:
-                    return bool(v)
-                if args.gte is not None:
-                    return (v or 0) >= args.gte
-                if args.equals is not None:
-                    return str(v) == args.equals
-                return v is not None
-            return out(h.wait_state(pred, f"wait {args.key}", timeout=args.wtimeout))
+            cond = {"field": args.key}
+            if args.truthy:
+                cond["mode"] = "truthy"
+            elif args.falsy:
+                cond["mode"] = "falsy"
+            elif args.changed:
+                cond["mode"] = "changed"
+            elif args.gte is not None:
+                cond["mode"] = "gte"; cond["target"] = args.gte
+            elif args.equals is not None:
+                cond["mode"] = "equals"; cond["target"] = args.equals
+            else:
+                cond["mode"] = "present"
+            return out(h.wait_server([cond], timeout=args.wtimeout))  # 服务端阻塞（§3.3）
         if c == "wait-banner":
             b = h.wait_banner_stable(secs=args.secs, timeout=args.wtimeout)
             return out({"ok": True, "banner_text": b})

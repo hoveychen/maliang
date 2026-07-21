@@ -159,6 +159,27 @@ static func parse_command(line: String) -> Dictionary:
 			if dict.has("args") and typeof(dict["args"]) == TYPE_DICTIONARY:
 				d["args"] = dict["args"]
 			return d
+		"wait":
+			# 服务端阻塞等待（对齐 Playwright §3.3）：逐帧查快照字段谓词满足才回包，干掉客户端每秒轮询。
+			# 形式：{conds:[{field,mode,target?}], timeout} 或简写 {field, truthy|falsy|changed|gte|equals}。
+			# mode ∈ truthy|falsy|present|equals|gte|changed（changed=相对发起时的值变化）。
+			var conds := []
+			if dict.has("conds") and typeof(dict["conds"]) == TYPE_ARRAY:
+				for c in (dict["conds"] as Array):
+					if typeof(c) == TYPE_DICTIONARY and not String((c as Dictionary).get("field", "")).is_empty():
+						conds.append(c)
+			elif dict.has("field"):
+				var cc := {"field": String(dict["field"])}
+				if bool(dict.get("truthy", false)): cc["mode"] = "truthy"
+				elif bool(dict.get("falsy", false)): cc["mode"] = "falsy"
+				elif bool(dict.get("changed", false)): cc["mode"] = "changed"
+				elif dict.has("gte"): cc["mode"] = "gte"; cc["target"] = float(dict["gte"])
+				elif dict.has("equals"): cc["mode"] = "equals"; cc["target"] = dict["equals"]
+				else: cc["mode"] = "present"
+				conds = [cc]
+			if conds.is_empty():
+				return {"ok": false, "error": "wait needs field or non-empty conds"}
+			return {"ok": true, "op": "wait", "conds": conds, "timeout": float(dict.get("timeout", 40.0))}
 		"click_ui":
 			# 语义点击：按节点 path 或可见文字找控件（Button 直发 pressed；SubViewport 内也可达）。
 			var cpath := String(dict.get("path", ""))
@@ -307,6 +328,12 @@ func _handle_line(line: String) -> void:
 		var dr := _do_do(String(cmd["action"]), cmd.get("args", {}) as Dictionary)
 		if not bool(dr.get("__deferred", false)):
 			_reply(dr)
+		return
+	# wait op：服务端阻塞等待。已满足即回，否则挂 _act_wait 逐帧查、满足/超时才回（§3.3）。
+	if String(cmd.get("op", "")) == "wait":
+		var wr := _do_wait(cmd["conds"] as Array, float(cmd["timeout"]))
+		if not bool(wr.get("__deferred", false)):
+			_reply(wr)
 		return
 	_reply(_execute(cmd))
 
@@ -1243,10 +1270,17 @@ func _step_act_wait(delta: float) -> void:
 				return  # 长按手势还在跑（silent，不自回包）
 			done = true  # 手势发出即算落定（拾取服务端结果异步，本地只确认手势完成）
 			detail["note"] = "长按手势已发出"
+		"conds":
+			var sc := _snapshot()
+			done = _conds_all_match(sc, _act_wait["conds"] as Array)
+			detail["conds"] = _conds_detail(sc, _act_wait["conds"] as Array)
+			detail["note"] = "条件满足" if done else "条件未满足"
 	if not done and float(_act_wait["elapsed"]) < float(_act_wait["deadline"]):
 		return
 	var base: Dictionary = _act_wait["base"]
 	base["settled"] = done
+	if String(base.get("op", "")) == "wait":
+		base["matched"] = done  # wait op 回包用 matched 语义
 	if not done:
 		# 超时未落定：带上诊断，别只回一个孤零零的 settled=false。
 		detail["waited_sec"] = snappedf(float(_act_wait["elapsed"]), 0.1)
@@ -1254,6 +1288,54 @@ func _step_act_wait(delta: float) -> void:
 		base["settle_reason"] = detail
 	_act_wait = {}
 	_reply(_do_reply_payload(base))
+
+# ── 服务端阻塞等待（§3.3）──────────────────────────────────────────────────────
+## null 安全的真值判定：bool(null) 在 GDScript 会抛「Nonexistent 'bool' constructor」，故 null 先判 false。
+func _truthy(v: Variant) -> bool:
+	return v != null and bool(v)
+
+## 单个条件对快照是否成立。mode ∈ truthy|falsy|present|equals|gte|changed。
+func _cond_match(s: Dictionary, c: Dictionary) -> bool:
+	var v: Variant = s.get(String(c.get("field", "")))
+	match String(c.get("mode", "present")):
+		"truthy": return _truthy(v)
+		"falsy": return not _truthy(v)
+		"present": return v != null
+		"equals": return str(v) == str(c.get("target"))
+		"gte": return float(v if v != null else 0.0) >= float(c.get("target", 0.0))
+		"changed": return v != c.get("start")
+	return false
+
+func _conds_all_match(s: Dictionary, conds: Array) -> bool:
+	for c in conds:
+		if not _cond_match(s, c as Dictionary):
+			return false
+	return true
+
+## 每个条件的当下读数（超时诊断用）：[{field,mode,current,ok}]。
+func _conds_detail(s: Dictionary, conds: Array) -> Array:
+	var out := []
+	for c in conds:
+		var cd := c as Dictionary
+		out.append({"field": String(cd.get("field", "")), "mode": String(cd.get("mode", "")),
+			"current": s.get(String(cd.get("field", ""))), "ok": _cond_match(s, cd)})
+	return out
+
+## wait：已满足即回；否则挂 _act_wait 逐帧查（"changed" 记发起时基线值）。
+func _do_wait(conds: Array, timeout: float) -> Dictionary:
+	var s := _snapshot()
+	var norm := []
+	for c in conds:
+		var cd := c as Dictionary
+		var cc := {"field": String(cd.get("field", "")), "mode": String(cd.get("mode", "present"))}
+		if cd.has("target"): cc["target"] = cd["target"]
+		if String(cc["mode"]) == "changed": cc["start"] = s.get(String(cc["field"]))
+		norm.append(cc)
+	if _conds_all_match(s, norm):
+		return _do_reply_payload({"ok": true, "op": "wait", "matched": true})
+	_act_wait = {"predicate": "conds", "conds": norm, "base": {"ok": true, "op": "wait"},
+		"elapsed": 0.0, "deadline": maxf(0.5, timeout)}
+	return {"__deferred": true}
 
 ## build_actions 用的扁平状态事实（供无障碍动作可用性判定）。
 func _gather_facts() -> Dictionary:
