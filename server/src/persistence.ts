@@ -352,6 +352,7 @@ export class WorldStore {
       this.#loadAssets();
       this.#loadSpriteAnims();
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
+      this.#migrateScenesDropAuthoredFields(); // base+overlay P2：清存量世界冗余的 pois/portals/homes 拷贝（读走 template base）
       this.#migratePropsToItems(); // 依赖场景矩阵已就位（placed 物件要写进矩阵）
     }
   }
@@ -1135,9 +1136,15 @@ export class WorldStore {
         'grid_tiles = excluded.grid_tiles, pois = excluded.pois, portals = excluded.portals, homes = excluded.homes, ' +
         'terrain = excluded.terrain, terrain_version = excluded.terrain_version',
     );
+    // base+overlay P2：非模板世界不再各存作者字段(pois/portals/homes)——读时从 template base 合成
+    // （见 getScene/listScenes）。克隆到玩家/沙箱世界时写空数组，只保留 per-world 的 name/terrain/版本。
+    const dropAuthored = dstWorldId !== TEMPLATE_WORLD_ID;
     for (const r of rows) {
       if (existing.has(r.scene_id)) continue; // additive：孩子已有的场景一律不覆盖
-      insert.run(dstWorldId, r.scene_id, r.name, r.terrain_asset, r.grid_tiles, r.pois, r.portals, r.homes, r.terrain, r.terrain_version);
+      const pois = dropAuthored ? '[]' : r.pois;
+      const portals = dropAuthored ? '[]' : r.portals;
+      const homes = dropAuthored ? '[]' : r.homes;
+      insert.run(dstWorldId, r.scene_id, r.name, r.terrain_asset, r.grid_tiles, pois, portals, homes, r.terrain, r.terrain_version);
     }
   }
 
@@ -1524,30 +1531,62 @@ export class WorldStore {
       );
   }
 
-  #rowToScene(r: SceneRow): Scene {
+  /**
+   * SceneRow → Scene。作者字段(pois/portals/homes)可由 base 覆盖：base+overlay P2 里这三字段读时
+   * 一律取自 template base，世界行不再各存副本（见 #authoredBase / getScene / listScenes）。
+   * base 缺省=用 row 自己的值（template 世界本身即 base，或模板无此场景的兼容/边界回退）。
+   */
+  #rowToScene(r: SceneRow, base?: { pois: string; portals: string; homes: string }): Scene {
+    const authored = base ?? r;
     return {
       worldId: r.world_id,
       sceneId: r.scene_id,
       name: r.name,
       terrainAsset: r.terrain_asset,
       gridTiles: r.grid_tiles,
-      pois: JSON.parse(r.pois) as ScenePoi[],
-      portals: JSON.parse(r.portals) as ScenePortal[],
-      homes: JSON.parse(r.homes ?? '[]') as SceneHome[],
+      pois: JSON.parse(authored.pois) as ScenePoi[],
+      portals: JSON.parse(authored.portals) as ScenePortal[],
+      homes: JSON.parse(authored.homes ?? '[]') as SceneHome[],
       terrainVersion: r.terrain_version,
     };
+  }
+
+  /**
+   * 作者字段(pois/portals/homes)的 base：一律取自 template 该场景（base+overlay P2，见设计文档 §3）。
+   * 世界行不再各存副本——作者改 template，存量世界下次读自动反映（传播天然成立，无需逐个 POST，
+   * 也不会被重 seed 冲掉）。返回 undefined = 模板无此场景，调用方回退世界自己行（兼容/边界）。
+   */
+  #authoredBase(sceneId: string): { pois: string; portals: string; homes: string } | undefined {
+    return this.#db
+      .prepare('SELECT pois, portals, homes FROM scenes WHERE world_id = ? AND scene_id = ?')
+      .get(TEMPLATE_WORLD_ID, sceneId) as { pois: string; portals: string; homes: string } | undefined;
   }
 
   getScene(worldId: string, sceneId: string): Scene | undefined {
     const row = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? AND scene_id = ?`).get(worldId, sceneId) as
       | SceneRow
       | undefined;
-    return row ? this.#rowToScene(row) : undefined;
+    if (!row) return undefined;
+    // template 世界本身即 base，用自己的行；其余世界作者字段取自 template base。
+    const base = worldId === TEMPLATE_WORLD_ID ? undefined : this.#authoredBase(sceneId);
+    return this.#rowToScene(row, base);
   }
 
   listScenes(worldId: string): Scene[] {
     const rows = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? ORDER BY scene_id`).all(worldId) as unknown as SceneRow[];
-    return rows.map((r) => this.#rowToScene(r));
+    if (worldId === TEMPLATE_WORLD_ID) return rows.map((r) => this.#rowToScene(r));
+    // 批量取 template 作者字段建映射（按 scene_id），避免逐场景 N+1 查询；缺失的场景 base=undefined 回退自身行。
+    const bases = new Map(
+      (
+        this.#db.prepare('SELECT scene_id, pois, portals, homes FROM scenes WHERE world_id = ?').all(TEMPLATE_WORLD_ID) as {
+          scene_id: string;
+          pois: string;
+          portals: string;
+          homes: string;
+        }[]
+      ).map((b) => [b.scene_id, b] as const),
+    );
+    return rows.map((r) => this.#rowToScene(r, bases.get(r.scene_id)));
   }
 
   /**
@@ -1569,6 +1608,21 @@ export class WorldStore {
         /* 坏字节：跳过，别让一个坏场景拦启动 */
       }
     }
+  }
+
+  /**
+   * base+overlay P2 迁移：存量世界的 pois/portals/homes 是快照拷贝——读路径已改为一律取自 template
+   * base（见 getScene/listScenes/#authoredBase），故非模板世界这三字段是冗余数据，清空。
+   * 【只清 template 也有的同名场景】：模板缺的场景（世界独有/边界）读路径回退世界自己行，保留不清——
+   * 迁移因此可证【无损】。幂等（已是 '[]' 再清无副作用）。事务由调用方外层保证（构造期串行）。
+   */
+  #migrateScenesDropAuthoredFields(): void {
+    this.#db
+      .prepare(
+        "UPDATE scenes SET pois = '[]', portals = '[]', homes = '[]' " +
+          'WHERE world_id != ? AND scene_id IN (SELECT scene_id FROM scenes WHERE world_id = ?)',
+      )
+      .run(TEMPLATE_WORLD_ID, TEMPLATE_WORLD_ID);
   }
 
   /** 场景地形矩阵（v2 blob）与版本。场景未入库/无地形 → undefined。 */
