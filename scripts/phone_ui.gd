@@ -472,6 +472,7 @@ func _make_app_icon(app: Array) -> Control:
 	btn.custom_minimum_size = Vector2(APP_TILE_PX, APP_TILE_PX)
 	btn.icon = tex
 	btn.expand_icon = true
+	btn.tooltip_text = String(app[1])  # 无障碍名：图标按钮无 text，harness access 靠 tooltip 回退取 label（回家/物品/…）
 	btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	btn.add_theme_constant_override("icon_max_width", APP_ICON_PX)
 	# app 图标底：近白 + 明显沙色描边 + 稍大投影（比奶油底对比高，像贴上去的贴纸）。
