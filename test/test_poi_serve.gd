@@ -53,6 +53,27 @@ func _init() -> void:
 	var no_radius := W.parse_server_pois([{ "tile": [3, 4], "name": "无半径", "trigger": "t" }])
 	fails += _check("radius 缺省 > 0", (no_radius[0] as Dictionary)["radius"] > 0.0, true)
 
+	# ── homes（「谁的家」建筑住户表，interaction-feedback B 档）→ { tile: characterId } ──
+	var homes := W.parse_server_homes([
+		{ "tile": [10, 12], "characterId": "bear" },
+		{ "tile": [20, 22], "characterId": "wolf" },
+	])
+	fails += _check("homes 解析出全部条目", homes.size(), 2)
+	fails += _check("homes tile→characterId 映射正确", homes.get(Vector2i(10, 12), ""), "bear")
+	fails += _check("homes 第二条映射正确", homes.get(Vector2i(20, 22), ""), "wolf")
+	# 非法/缺省载荷：空字典（调用方据此走通用解释，不崩）
+	fails += _check("homes 非数组 → 空字典", W.parse_server_homes("nope").size(), 0)
+	fails += _check("homes 空数组 → 空字典", W.parse_server_homes([]).size(), 0)
+	fails += _check("homes 缺 characterId → 跳过", W.parse_server_homes([{ "tile": [1, 2] }]).size(), 0)
+	fails += _check("homes tile 长度不对 → 跳过", W.parse_server_homes([{ "tile": [1], "characterId": "x" }]).size(), 0)
+	# 混合：坏条目跳过、好条目保留
+	var homes_mixed := W.parse_server_homes([
+		{ "tile": [5, 6], "characterId": "pig" },
+		{ "tile": [9], "characterId": "坏" },
+	])
+	fails += _check("homes 混合只留好的", homes_mixed.size(), 1)
+	fails += _check("homes 好条目正确", homes_mixed.get(Vector2i(5, 6), ""), "pig")
+
 	print("test_poi_serve: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
 

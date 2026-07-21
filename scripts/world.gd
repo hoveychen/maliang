@@ -383,6 +383,29 @@ static func parse_server_pois(list: Variant) -> Array:
 		})
 	return out
 
+## 「谁的家」建筑住户表（interaction-feedback B 档，服务端 scene.homes 下发）：
+## → { Vector2i(tile): String(characterId) } 运行期映射，供点不可进建筑时 O(1) 查住户
+## （P3 点点飞过去解释「这是 X 的家呀~」）。非法条目跳过；空/全非法 → 空字典（无住户就走通用解释）。
+static func parse_server_homes(list: Variant) -> Dictionary:
+	var out: Dictionary = {}
+	if typeof(list) != TYPE_ARRAY:
+		return out
+	for e in (list as Array):
+		if typeof(e) != TYPE_DICTIONARY:
+			continue
+		var d: Dictionary = e
+		var t: Variant = d.get("tile", null)
+		if typeof(t) != TYPE_ARRAY or (t as Array).size() != 2:
+			continue
+		var cid := String(d.get("characterId", ""))
+		if cid.is_empty():
+			continue
+		out[Vector2i(int((t as Array)[0]), int((t as Array)[1]))] = cid
+	return out
+
+## 当前场景的「谁的家」映射（tile → characterId），由 _apply_scene 从 scene.homes 填充。
+var _homes: Dictionary = {}
+
 const POI_FLY_CAP := 9.0          ## 提醒飞行离玩家的最远距离（保持在视野内）
 ## 引路参数（fairy-guide）。领飞距离比 POI 提醒远一些——要有「在前面带路」的感觉，但仍封顶在视野内：
 ## 她飞没影了，小朋友就不知道该往哪走，引路也就白引了。
@@ -3256,8 +3279,19 @@ func _apply_gesture_drag(index: int, prev: Vector2, cur: Vector2) -> void:
 			GESTURE_PITCH_MIN - _target_pitch, GESTURE_PITCH_MAX - _target_pitch)
 
 func _tap_pick(screen_pos: Vector2) -> void:
+	# 全局即时反馈层：任何触碰先给一声「咔哒」，不等命中判定、不等服务端。
+	# 消灭「点角色/点空/点天没声音」的零反馈挫败（铁律1）。空地分支的 _show_tap_marker
+	# 也会 play pluck，但 GameAudio.SFX_GAP(80ms) 会把紧随的同名音效吞掉，不会双响。
+	if game_audio != null:
+		game_audio.play_sfx("pluck")
 	var hit := _pick_npc(screen_pos)
 	if hit != null:
+		# 点角色瞬间头顶立即冒表情泡（复用村民打招呼那套：_animate_notice_bubble 每帧
+		# 对所有 npc 无条件驱动，故 pop 后自行 overshoot/淡出）。把「我注意到你了」本地
+		# 当场表达，不等小人走到、也不等 character_response 回来。
+		var hd := _find_npc_dict(hit)
+		if not hd.is_empty() and not hd.get("is_fairy", false):
+			_pop_notice_bubble(hd, "happy")
 		_approach_npc(hit)
 		return
 	# 点别的小朋友：跑过去进喊话态（表情盘/喊话在 P3/P5 叠加）
@@ -3278,8 +3312,44 @@ func _tap_pick(screen_pos: Vector2) -> void:
 	_clear_approach()
 	var ground := _pick_ground(screen_pos)
 	if ground != Vector2.INF and not player.is_empty():
+		# 点到不可进的布景建筑：别让玩家走过去卡门口（_pick_ground 只对地表求交、无视建筑网格，
+		# 射线打到房子脚下地面照样会下发移动，结果被寻路挡停在墙边）。改让点点飞过去给一句温柔
+		# 解释，把死胡同变成一次符合「情感联系/只问不答」的互动（interaction-feedback B 档）。
+		if _try_explain_building(ground):
+			return
 		_show_tap_marker(ground)
 		_move_player_to(ground)
+
+## 点到不可进建筑（静态占用 footprint）时，点点飞过去解释；接管本次点击返回 true（调用方不再走玩家）。
+## 点点正忙（引路/与她对话中）则不接管，返回 false 让原「走过去」逻辑继续——她一次只做一件事。
+## 台词分两味：该建筑在 homes 表里 = 某人的家；否则纯布景（α 通用预制台词，不带具体名字）。
+func _try_explain_building(ground: Vector2) -> bool:
+	if not OccupancyMap.static_at(ground):
+		return false
+	var fairy := _find_fairy()
+	if fairy.is_empty() or not _fairy_guide.is_empty() or selected == fairy.get("node"):
+		return false
+	var tile := WorldGrid.to_tile(ground)
+	# 复用 _fairy_poi「飞过去→说台词→停留→回来」机制（见 _update_fairy 的 POI 分支 / _step_fairy_poi）。
+	_fairy_poi = {
+		"point": WorldGrid.from_tile_center(tile),
+		"trigger": "house_locked" if _home_near_tile(tile) else "prop_scenery",
+		"spoke": false,
+		"hold": 2.0,
+	}
+	return true
+
+## tapped tile 附近（容差半径内）是否有登记的「谁的家」。homes 授权 tile 常是建筑锚点，
+## 孩子点在建筑任一格都该算命中，故按世界距离容差匹配而非精确 tile 相等。无 homes/无匹配 → false。
+const HOME_MATCH_R := 3.5 ## tile 容差半径（大建筑锚点到被点边缘的距离）
+func _home_near_tile(tile: Vector2i) -> bool:
+	if _homes.is_empty():
+		return false
+	var c := WorldGrid.from_tile_center(tile)
+	for htile in _homes:
+		if WorldGrid.shortest_delta(c, WorldGrid.from_tile_center(htile as Vector2i)).length() <= HOME_MATCH_R * WorldGrid.TILE_SIZE:
+			return true
+	return false
 
 ## 玩家移动指令：新点击替换旧指令（寻路 waypoint 队列 + Mover 规则由执行器统一处理）。
 func _move_player_to(target: Vector2, arrive := 0.0) -> void:
@@ -4762,6 +4832,10 @@ func _apply_scene(scene: Dictionary) -> void:
 	# 没有 portal 的场景就是没有出口，_portals 置空即可（离线/老服务端下发不了 portals）。
 	_portals = parse_server_portals(scene.get("portals", []))
 	_spawn_portal_markers()
+
+	# 「谁的家」住户表（interaction-feedback B 档）：点不可进建筑时供 P3 查住户。
+	# 换场景就是换一批建筑，故每次 _apply_scene 整表替换（无则空，走通用解释）。
+	_homes = parse_server_homes(scene.get("homes", []))
 
 	# 地形拉取：有版本号走矩阵端点（(world,scene,version) 缓存，terrain_patch 对齐依据）；
 	# 老服务端（version 0）回落内容寻址 asset 路径。

@@ -34,6 +34,19 @@ func _init() -> void:
 	fails += _check("to_cell", OccupancyMap.to_cell(Vector2(3.5, 149.2)) == Vector2i(3, 149), true)
 	fails += _check("tile_to_cell", OccupancyMap.tile_to_cell(Vector2i(37, 37)) == Vector2i(74, 74), true)
 
+	# static_at（interaction-feedback：点不可进建筑的探测——只看静态层，不受动态摆放影响）
+	OccupancyMap.clear()
+	var sc := PackedByteArray()
+	sc.resize(OccupancyMap.CELLS * OccupancyMap.CELLS)
+	sc[10 * OccupancyMap.CELLS + 10] = 1
+	OccupancyMap.load_static(sc)
+	fails += _check("static_at 命中静态格", OccupancyMap.static_at(Vector2(10.5, 10.5)), true)
+	fails += _check("static_at 空格不命中", OccupancyMap.static_at(Vector2(40.5, 40.5)), false)
+	# 动态占用不算静态（点语音造物走拾取通道，不该被当成建筑）
+	OccupancyMap.occupy_rect(Vector2i(40, 40), 2, 2)
+	fails += _check("static_at 只看静态层，动态占用不算", OccupancyMap.static_at(Vector2(40.5, 40.5)), false)
+	OccupancyMap.clear()
+
 	# prop_area_ok 双层判定（依赖 TerrainMap 默认地形）
 	OccupancyMap.clear()
 	fails += _check("grass ok", OccupancyMap.prop_area_ok(Vector2i(2, 68), 2, 2), true)

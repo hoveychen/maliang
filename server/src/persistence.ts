@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ActiveTask, ChatTurn, Character, CharacterDef, CharacterInstanceRecord, DeviceSnapshot, Familiarity, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, ScenePoi, ScenePortal, StoryProgress, TilePos, Visit, Wallet, WorldProp } from './types.ts';
+import type { ActiveTask, ChatTurn, Character, CharacterDef, CharacterInstanceRecord, DeviceSnapshot, Familiarity, ItemDef, MemoryItem, Player, PlayerOnboardingProfile, Scene, SceneHome, ScenePoi, ScenePortal, StoryProgress, TilePos, Visit, Wallet, WorldProp } from './types.ts';
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { coerceRelationship, deriveFamiliarity } from './social.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
@@ -267,11 +267,12 @@ interface SceneRow {
   grid_tiles: number;
   pois: string;
   portals: string;
+  homes: string;
   terrain_version: number;
 }
 
 /** getScene/listScenes 的列清单：刻意不含 terrain blob（50KB，别随场景元数据白拉）。 */
-const SCENE_COLS = 'world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, terrain_version';
+const SCENE_COLS = 'world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, homes, terrain_version';
 
 export interface World {
   id: string;
@@ -714,6 +715,7 @@ export class WorldStore {
         grid_tiles    INTEGER NOT NULL,
         pois          TEXT NOT NULL DEFAULT '[]',
         portals       TEXT NOT NULL DEFAULT '[]',
+        homes         TEXT NOT NULL DEFAULT '[]',
         terrain       BLOB,
         terrain_version INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (world_id, scene_id)
@@ -723,6 +725,7 @@ export class WorldStore {
     for (const ddl of [
       'ALTER TABLE scenes ADD COLUMN terrain BLOB',
       "ALTER TABLE scenes ADD COLUMN terrain_version INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE scenes ADD COLUMN homes TEXT NOT NULL DEFAULT '[]'",
     ]) {
       try {
         this.#db.exec(ddl);
@@ -1105,7 +1108,7 @@ export class WorldStore {
   #cloneScenes(srcWorldId: string, dstWorldId: string, additiveOnly: boolean): void {
     const rows = this.#db
       .prepare(
-        'SELECT scene_id, name, terrain_asset, grid_tiles, pois, portals, terrain, terrain_version FROM scenes WHERE world_id = ?',
+        'SELECT scene_id, name, terrain_asset, grid_tiles, pois, portals, homes, terrain, terrain_version FROM scenes WHERE world_id = ?',
       )
       .all(srcWorldId) as {
       scene_id: string;
@@ -1114,6 +1117,7 @@ export class WorldStore {
       grid_tiles: number;
       pois: string;
       portals: string;
+      homes: string;
       terrain: Uint8Array | null;
       terrain_version: number;
     }[];
@@ -1125,15 +1129,15 @@ export class WorldStore {
         )
       : new Set<string>();
     const insert = this.#db.prepare(
-      'INSERT INTO scenes (world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, terrain, terrain_version) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+      'INSERT INTO scenes (world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, homes, terrain, terrain_version) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
         'ON CONFLICT(world_id, scene_id) DO UPDATE SET name = excluded.name, terrain_asset = excluded.terrain_asset, ' +
-        'grid_tiles = excluded.grid_tiles, pois = excluded.pois, portals = excluded.portals, ' +
+        'grid_tiles = excluded.grid_tiles, pois = excluded.pois, portals = excluded.portals, homes = excluded.homes, ' +
         'terrain = excluded.terrain, terrain_version = excluded.terrain_version',
     );
     for (const r of rows) {
       if (existing.has(r.scene_id)) continue; // additive：孩子已有的场景一律不覆盖
-      insert.run(dstWorldId, r.scene_id, r.name, r.terrain_asset, r.grid_tiles, r.pois, r.portals, r.terrain, r.terrain_version);
+      insert.run(dstWorldId, r.scene_id, r.name, r.terrain_asset, r.grid_tiles, r.pois, r.portals, r.homes, r.terrain, r.terrain_version);
     }
   }
 
@@ -1510,13 +1514,13 @@ export class WorldStore {
     if (!this.#worldExists(scene.worldId)) throw new Error(`world not found: ${scene.worldId}`);
     this.#db
       .prepare(
-        'INSERT INTO scenes (world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals) VALUES (?, ?, ?, ?, ?, ?, ?) ' +
+        'INSERT INTO scenes (world_id, scene_id, name, terrain_asset, grid_tiles, pois, portals, homes) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ' +
           'ON CONFLICT(world_id, scene_id) DO UPDATE SET name = excluded.name, terrain_asset = excluded.terrain_asset, ' +
-          'grid_tiles = excluded.grid_tiles, pois = excluded.pois, portals = excluded.portals',
+          'grid_tiles = excluded.grid_tiles, pois = excluded.pois, portals = excluded.portals, homes = excluded.homes',
       )
       .run(
         scene.worldId, scene.sceneId, scene.name, scene.terrainAsset, scene.gridTiles,
-        JSON.stringify(scene.pois), JSON.stringify(scene.portals),
+        JSON.stringify(scene.pois), JSON.stringify(scene.portals), JSON.stringify(scene.homes ?? []),
       );
   }
 
@@ -1529,6 +1533,7 @@ export class WorldStore {
       gridTiles: r.grid_tiles,
       pois: JSON.parse(r.pois) as ScenePoi[],
       portals: JSON.parse(r.portals) as ScenePortal[],
+      homes: JSON.parse(r.homes ?? '[]') as SceneHome[],
       terrainVersion: r.terrain_version,
     };
   }

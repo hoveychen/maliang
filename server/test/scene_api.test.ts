@@ -178,3 +178,72 @@ test('getLocations：空名字的 POI 不进地名表', () => {
   const s = withScene([{ name: '' }, { name: '池塘' }]);
   assert.deepEqual(s.getLocations('w1'), ['池塘']);
 });
+
+// ── homes（「谁的家」建筑住户表，interaction-feedback B 档）────────────────
+
+test('upsertScene/getScene：homes 原样往返', () => {
+  const s = new WorldStore();
+  s.createWorld('w1');
+  s.upsertScene({
+    worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h', gridTiles: REQUIRED_GRID, terrainVersion: 1,
+    pois: [], portals: [], homes: [{ tile: [10, 12], characterId: 'bear' }, { tile: [20, 22], characterId: 'wolf' }],
+  });
+  assert.deepEqual(s.getScene('w1', DEFAULT_SCENE)?.homes, [
+    { tile: [10, 12], characterId: 'bear' }, { tile: [20, 22], characterId: 'wolf' },
+  ]);
+});
+
+test('rowToScene：老场景（未写 homes）读回为空数组，不为 undefined', () => {
+  const s = new WorldStore();
+  s.createWorld('w1');
+  s.upsertScene({
+    worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h', gridTiles: REQUIRED_GRID, terrainVersion: 1,
+    pois: [], portals: [],
+  });
+  assert.deepEqual(s.getScene('w1', DEFAULT_SCENE)?.homes, []);
+});
+
+test('cloneWorldInstances：scene.homes 随模板克隆到新世界', () => {
+  const s = new WorldStore();
+  s.createWorld('tpl');
+  s.upsertScene({
+    worldId: 'tpl', sceneId: DEFAULT_SCENE, name: '村庄', terrainAsset: 'h', gridTiles: REQUIRED_GRID, terrainVersion: 1,
+    pois: [], portals: [], homes: [{ tile: [10, 12], characterId: 'bear' }],
+  });
+  s.cloneWorldInstances('tpl', 'kid');
+  assert.deepEqual(s.getScene('kid', DEFAULT_SCENE)?.homes, [{ tile: [10, 12], characterId: 'bear' }]);
+});
+
+test('POST /admin/scenes：homes 入库并原样落 scene', async (t) => {
+  const { a, store } = await app();
+  t.after(() => a.close());
+  process.env.MALIANG_ADMIN_TOKEN = 'sesame';
+  try {
+    const res = await a.inject({
+      method: 'POST', url: '/admin/scenes', headers: { 'x-admin-token': 'sesame' },
+      payload: { worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainBase64: terrainB64(),
+        homes: [{ tile: [10, 12], characterId: 'bear' }] },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual((res.json() as { scene: { homes: unknown } }).scene.homes, [{ tile: [10, 12], characterId: 'bear' }]);
+    assert.deepEqual(store.getScene('w1', DEFAULT_SCENE)?.homes, [{ tile: [10, 12], characterId: 'bear' }]);
+  } finally {
+    delete process.env.MALIANG_ADMIN_TOKEN;
+  }
+});
+
+test('POST /admin/scenes：不带 homes 时落空数组（老工具/老场景不退化）', async (t) => {
+  const { a, store } = await app();
+  t.after(() => a.close());
+  process.env.MALIANG_ADMIN_TOKEN = 'sesame';
+  try {
+    const res = await a.inject({
+      method: 'POST', url: '/admin/scenes', headers: { 'x-admin-token': 'sesame' },
+      payload: { worldId: 'w1', sceneId: DEFAULT_SCENE, name: '村庄', terrainBase64: terrainB64() },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(store.getScene('w1', DEFAULT_SCENE)?.homes, []);
+  } finally {
+    delete process.env.MALIANG_ADMIN_TOKEN;
+  }
+});

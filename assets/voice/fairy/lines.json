@@ -360,6 +360,30 @@
       "trigger": "poi_story_pigs",
       "cooldown": 300,
       "text": "咦，是小猪的家呀……想听故事的话，去跟猪大哥说说话吧。"
+    },
+    {
+      "id": "fairy_house_locked_1",
+      "trigger": "house_locked",
+      "cooldown": 6,
+      "text": "这是别人的家呀，我们不好随便进去哦，去别处玩好不好？"
+    },
+    {
+      "id": "fairy_house_locked_2",
+      "trigger": "house_locked",
+      "cooldown": 6,
+      "text": "这里住着人家呢，我们轻轻的，不打扰啦～"
+    },
+    {
+      "id": "fairy_prop_scenery_1",
+      "trigger": "prop_scenery",
+      "cooldown": 6,
+      "text": "这个呀，是这里的小布景哦，看看就好啦～"
+    },
+    {
+      "id": "fairy_prop_scenery_2",
+      "trigger": "prop_scenery",
+      "cooldown": 6,
+      "text": "唔，这个进不去哦，我们去找能玩的地方吧！"
     }
   ]
 }
