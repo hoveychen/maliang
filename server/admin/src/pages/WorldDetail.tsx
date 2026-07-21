@@ -175,6 +175,65 @@ const ITEM_CLASS_COLORS: Record<string, string> = {
   建筑: '#c2410c', SDF物件: '#7c3aed', 造物: '#db2777', 未知: '#111',
 };
 
+const T_WATER = 2; // 水：唯一走「水深压暗」渲染的类型（与 server terrain.ts T_WATER 对齐）
+
+/**
+ * tile 类型 → 名称 + 底图 RGB（示意色，非游戏内真实贴图）。
+ * 键值与 server/src/terrain.ts 的 T_* 一一对应；缺项走 UNKNOWN_TILE。
+ * 旧版只认 0/1/2，把黄砖路(48)/雪/沙/瓷砖等一律画成草绿——这里补全，
+ * 让后台一眼分得清路/广场/特殊地表。未知类型故意画醒目品红，不再冒充草地。
+ */
+const TERRAIN_TYPES: Record<number, { name: string; rgb: [number, number, number] }> = {
+  0: { name: '草', rgb: [156, 189, 108] },
+  1: { name: '路', rgb: [206, 172, 118] },
+  2: { name: '水', rgb: [111, 169, 190] },
+  5: { name: '沙', rgb: [222, 205, 150] },
+  6: { name: '雪', rgb: [235, 240, 245] },
+  7: { name: '瓷砖', rgb: [210, 214, 220] },
+  8: { name: '粗沙', rgb: [214, 196, 150] },
+  9: { name: '珊瑚砂', rgb: [230, 208, 190] },
+  10: { name: '礁岩', rgb: [140, 150, 140] },
+  11: { name: '海草地', rgb: [96, 150, 110] },
+  12: { name: '深水床', rgb: [70, 110, 140] },
+  13: { name: '压实雪', rgb: [225, 232, 240] },
+  14: { name: '冰面', rgb: [190, 220, 230] },
+  15: { name: '雪泥', rgb: [200, 210, 215] },
+  16: { name: '裸岩积雪', rgb: [180, 188, 196] },
+  17: { name: '干裂土', rgb: [190, 160, 120] },
+  18: { name: '火山岩', rgb: [90, 80, 85] },
+  19: { name: '泥沼', rgb: [110, 95, 70] },
+  20: { name: '蕨类草地', rgb: [110, 160, 90] },
+  21: { name: '碎石', rgb: [150, 145, 135] },
+  22: { name: '鹅卵石', rgb: [170, 165, 158] },
+  23: { name: '石板', rgb: [160, 160, 165] },
+  24: { name: '农田垄', rgb: [160, 120, 80] },
+  25: { name: '大理石', rgb: [225, 222, 228] },
+  26: { name: '马赛克', rgb: [180, 150, 170] },
+  27: { name: '木地板', rgb: [175, 130, 85] },
+  28: { name: '沥青', rgb: [90, 92, 98] },
+  29: { name: '人行道砖', rgb: [190, 165, 150] },
+  30: { name: '斑马线', rgb: [200, 200, 200] },
+  31: { name: '水泥', rgb: [180, 180, 178] },
+  32: { name: '草坪格', rgb: [150, 180, 120] },
+  33: { name: '地毯红', rgb: [190, 90, 90] },
+  34: { name: '地毯蓝', rgb: [90, 110, 190] },
+  35: { name: '拼图垫', rgb: [210, 180, 120] },
+  36: { name: '格纹地砖', rgb: [200, 200, 205] },
+  37: { name: '防滑垫', rgb: [120, 130, 135] },
+  38: { name: '医用地胶浅绿', rgb: [170, 200, 180] },
+  39: { name: '医用地胶浅蓝', rgb: [175, 195, 210] },
+  40: { name: '金属板', rgb: [160, 168, 175] },
+  41: { name: '格栅', rgb: [120, 125, 130] },
+  42: { name: '发光地砖', rgb: [150, 220, 230] },
+  43: { name: '警戒条纹', rgb: [220, 200, 60] },
+  44: { name: '玩具房墙', rgb: [200, 170, 140] },
+  45: { name: '厨房墙', rgb: [225, 220, 210] },
+  46: { name: '医院墙', rgb: [220, 225, 228] },
+  47: { name: '未来舱壁墙', rgb: [140, 150, 165] },
+  48: { name: '黄砖路', rgb: [214, 182, 74] },
+};
+const UNKNOWN_TILE = { name: '未知类型', rgb: [230, 60, 180] as [number, number, number] };
+
 /**
  * 场景矩阵图：地貌底图（canvas：草/路/水 + 高度明暗 + 水深加深）+ 矩阵物品层
  * （按实体分类上色，可勾选过滤）+ 原 SVG 标记层（POI/传送门/角色/造物）叠最上。
@@ -212,11 +271,11 @@ function TerrainMatrix({ worldId, scene, characters }: { worldId: string; scene:
       for (let x = 0; x < n; x++) {
         const i = y * n + x;
         const t = grid.types[i]!;
-        let rgb: [number, number, number] = t === 1 ? [206, 172, 118] : t === 2 ? [111, 169, 190] : [156, 189, 108];
+        let rgb: [number, number, number] = [...(TERRAIN_TYPES[t]?.rgb ?? UNKNOWN_TILE.rgb)] as [number, number, number];
         const h = grid.heights[i]!;
         const d = grid.depths[i]!;
         // 高度提亮（每级 +6%），水深压暗（每级 -18%）——一眼读出台地与深潭
-        const k = t === 2 ? Math.max(0.4, 1 - d * 0.18) : 1 + h * 0.06;
+        const k = t === T_WATER ? Math.max(0.4, 1 - d * 0.18) : 1 + h * 0.06;
         rgb = rgb.map((v) => Math.min(255, Math.round(v * k))) as [number, number, number];
         ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
         ctx.fillRect(x * px, y * px, px, px);
@@ -257,11 +316,11 @@ function TerrainMatrix({ worldId, scene, characters }: { worldId: string; scene:
     const y = Math.floor(((e.clientY - rect.top) / rect.height) * n);
     if (x < 0 || x >= n || y < 0 || y >= n) return setHover('');
     const i = y * n + x;
-    const tname = ['草', '路', '水'][grid.types[i]!] ?? '?';
+    const tname = TERRAIN_TYPES[grid.types[i]!]?.name ?? `类型${grid.types[i]}`;
     const ref = grid.itemRef[i]!;
     const def = ref === 0 ? null : grid.items[ref - 1] ?? null;
     const item = ref === 0 ? '' : ` · 物品 ${grid.palette[ref - 1]}${def ? `（${def.name}）` : ''}`;
-    const depth = grid.types[i] === 2 ? ` 深${grid.depths[i]}` : '';
+    const depth = grid.types[i] === T_WATER ? ` 深${grid.depths[i]}` : '';
     setHover(`(${x},${y}) ${tname} 高${grid.heights[i]}${depth}${item}`);
   };
 
