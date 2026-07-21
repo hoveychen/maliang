@@ -65,6 +65,14 @@
     "story_basket": {
       "category": "sticker",
       "path": "res://assets/stickers/story_basket.webp"
+    },
+    "story_ruby": {
+      "category": "sticker",
+      "path": "res://assets/stickers/story_ruby.webp"
+    },
+    "story_emerald": {
+      "category": "sticker",
+      "path": "res://assets/stickers/story_emerald.webp"
     }
   }
 }
