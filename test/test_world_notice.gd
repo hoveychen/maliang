@@ -90,6 +90,27 @@ func _run_checks() -> void:
 	_check("走动中村民不打招呼", npc.get("paper_action", ""), "")
 	_check("走动中冷却保持到点(0)等站定", float(npc.get("notice_cd", -1.0)), 0.0)
 
+	# D) tap 即时反馈层(interaction-feedback P1):点中村民 → 头顶立即冒表情泡,不等走到、不等服务端。
+	# 红/绿护栏:改动前 _tap_pick 命中 NPC 只 _approach_npc、不 pop 气泡,故清掉残留后应再冒出。
+	var cam := scene.get("camera") as Camera3D
+	var pnode := ((scene.get("player") as Dictionary).get("node")) as Node3D
+	var nnode := npc.get("node") as Node3D
+	if cam == null or pnode == null or nnode == null:
+		_check("tap-feedback 前置:相机/玩家/村民节点就绪", false, true)
+		return
+	# 把村民摆到玩家跟前(必在相机视野内),清掉 B 段残留气泡,确认这次 pop 由本次 tap 触发。
+	nnode.global_position = pnode.global_position + Vector3(1.5, 0.0, 0.0)
+	var old_bub := npc.get("notice_bubble") as Sprite3D
+	if old_bub != null:
+		old_bub.visible = false
+	var head := nnode.global_position + Vector3(0.0, 1.6, 0.0)
+	_check("tap-feedback:村民头顶未被相机背面剔除", cam.is_position_behind(head), false)
+	var screen: Vector2 = cam.unproject_position(head)
+	_check("tap-feedback:点该屏幕点命中的正是该村民", scene.call("_pick_npc", screen) == nnode, true)
+	scene.call("_tap_pick", screen)
+	var bub2 := npc.get("notice_bubble") as Sprite3D
+	_check("tap-feedback:点中村民后头顶表情泡立即弹出可见", bub2 != null and bub2.visible, true)
+
 func _check(name: String, got: Variant, want: Variant) -> void:
 	if got == want:
 		print("  ok %s" % name)

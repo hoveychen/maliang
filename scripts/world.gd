@@ -3256,8 +3256,19 @@ func _apply_gesture_drag(index: int, prev: Vector2, cur: Vector2) -> void:
 			GESTURE_PITCH_MIN - _target_pitch, GESTURE_PITCH_MAX - _target_pitch)
 
 func _tap_pick(screen_pos: Vector2) -> void:
+	# 全局即时反馈层：任何触碰先给一声「咔哒」，不等命中判定、不等服务端。
+	# 消灭「点角色/点空/点天没声音」的零反馈挫败（铁律1）。空地分支的 _show_tap_marker
+	# 也会 play pluck，但 GameAudio.SFX_GAP(80ms) 会把紧随的同名音效吞掉，不会双响。
+	if game_audio != null:
+		game_audio.play_sfx("pluck")
 	var hit := _pick_npc(screen_pos)
 	if hit != null:
+		# 点角色瞬间头顶立即冒表情泡（复用村民打招呼那套：_animate_notice_bubble 每帧
+		# 对所有 npc 无条件驱动，故 pop 后自行 overshoot/淡出）。把「我注意到你了」本地
+		# 当场表达，不等小人走到、也不等 character_response 回来。
+		var hd := _find_npc_dict(hit)
+		if not hd.is_empty() and not hd.get("is_fairy", false):
+			_pop_notice_bubble(hd, "happy")
 		_approach_npc(hit)
 		return
 	# 点别的小朋友：跑过去进喊话态（表情盘/喊话在 P3/P5 叠加）
