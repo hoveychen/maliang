@@ -72,13 +72,11 @@ const SDF_PROPS_VF := [
 	{ "item": "race_flag", "tile": Vector2i(90, 56), "yaw": 250.0, "search": 2 },
 ]
 
-## 第一季册 5《绿野仙踪》独立场景（oz，75 格）的手工地标：翡翠城 = 黄砖路尽头几座房子聚成一座「城」
-## （铁皮人 56,54 广场旁的草地上，house 不能落路面故摆广场外围）。坐标见 docs/season-1-outline.md §4。
-## 说明：暂用现有 house/村牌/风车 prop 近似「城/路牌/农田」——专属奥兹 prop（玉米秆/翡翠城堡）留后续主题包。
+## 第一季册 5《绿野仙踪》独立场景（oz，75 格）的手工地标：翡翠城 = 黄砖路尽头的翡翠城堡
+## （span-3 emerald_castle 立在翡翠广场北缘草地上，广场/黄砖路留给铁皮人 56,54 与小朋友）。
+## 坐标见 docs/season-1-outline.md §4。P4 起用专属奥兹 prop（emerald_castle 替原 3 座 house）。
 const LANDMARKS_OZ := [
-	{ "item": "house_2", "tile": Vector2i(51, 56), "yaw": 90.0, "search": 2 },   # 翡翠城·西
-	{ "item": "house_0", "tile": Vector2i(64, 54), "yaw": 270.0, "search": 2 },  # 翡翠城·东
-	{ "item": "house_1", "tile": Vector2i(58, 64), "yaw": 0.0, "search": 2 },    # 翡翠城·南门
+	{ "item": "emerald_castle", "tile": Vector2i(58, 50), "yaw": 180.0, "search": 3 },  # 翡翠城堡：黄砖路尽头、广场北缘（门朝南迎路）
 ]
 
 ## oz 的 SDF 可动物件：黄砖路两处路牌（入口 + 玉米地岔口，呼应「找回家的路」）+ 玉米地一支风车点缀。
@@ -94,6 +92,7 @@ const ITEM_SPAN := {
 	"well": 3, "windmill": 3,
 	"house_0": 3, "house_1": 3, "house_2": 3, "house_3": 3,
 	"walking_hut": 3, "hop_mailbox": 3,
+	"emerald_castle": 3,
 }
 const ITEM_PATH_OK := { "well": true }
 
@@ -103,6 +102,7 @@ const DECO_TREE := 1
 const DECO_BUSH := 2
 const DECO_ROCK := 3
 const DECO_TUFT := 4
+const DECO_CORN := 5   ## 绿野仙踪玉米地专属：corn_stalk 成片当玉米（占位，同 bush）
 const TREE_IDS := ["tree_puff_a", "tree_puff_b", "tree_puff_c"]
 const ROCK_IDS := ["rock_0", "rock_1", "rock_2"]
 const TUFT_IDS := ["tuft_0", "tuft_1"]
@@ -155,6 +155,8 @@ static func compose(scene_id: String) -> Dictionary:
 					id = TREE_IDS[posmod(hk, TREE_IDS.size())]
 				DECO_BUSH:
 					id = "bush_puff"
+				DECO_CORN:
+					id = "corn_stalk"
 				DECO_ROCK:
 					id = ROCK_IDS[posmod(hk, ROCK_IDS.size())]
 				_:
@@ -264,10 +266,10 @@ static func _deco_kind_oz(gt: Vector2i) -> int:
 	# 入口小广场周边（portal 落点 14,14 半径 8）：开阔好落脚
 	if _tor_dist(gt, Vector2i(14, 14)) <= 8.0:
 		return DECO_TUFT if roll < 12 else DECO_NONE
-	# 玉米地（稻草人 36,34 半径 8）：隔位规则灌木成「田」
+	# 玉米地（稻草人 36,34 半径 8）：隔位规则 corn_stalk 成「田」
 	if _tor_dist(gt, Vector2i(36, 34)) <= 8.0:
 		if posmod(gt.x + gt.y, 2) == 0 and roll < 55:
-			return DECO_BUSH
+			return DECO_CORN
 		return DECO_TUFT if roll < 30 else DECO_NONE
 	# 翡翠城广场周边（56,54 半径 8）：整洁疏树
 	if _tor_dist(gt, Vector2i(56, 54)) <= 8.0:

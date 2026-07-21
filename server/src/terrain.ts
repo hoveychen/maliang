@@ -120,6 +120,7 @@ export const T_TOY_WALL = 44;      // 玩具房间墙面（室内房间围墙）
 export const T_KITCHEN_WALL = 45;  // 厨房墙面（室内房间围墙）
 export const T_HOSPITAL_WALL = 46; // 医院墙面（室内房间围墙）
 export const T_FUTURE_WALL = 47;   // 未来舱壁墙面（室内房间围墙）
+export const T_YELLOW_BRICK = 48;  // 黄砖路（绿野仙踪专属；paver_brick 纹理 + 金黄 tint）
 
 /** 合法的存储 tile 类型集合（校验用；3/4 是客户端崖壁 B 码，不入此集）。 */
 export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
@@ -132,7 +133,7 @@ export const VALID_TILE_TYPES: ReadonlySet<number> = new Set([
   T_CARPET_RED, T_CARPET_BLUE, T_PUZZLE_MAT,
   T_CHECKER_TILE, T_ANTISLIP, T_MED_VINYL_GREEN, T_MED_VINYL_BLUE,
   T_METAL_PLATE, T_GRATING, T_GLOW_TILE, T_HAZARD, T_TOY_WALL,
-  T_KITCHEN_WALL, T_HOSPITAL_WALL, T_FUTURE_WALL,
+  T_KITCHEN_WALL, T_HOSPITAL_WALL, T_FUTURE_WALL, T_YELLOW_BRICK,
 ]);
 /** 可行走地表（非水）——新地形一律按草地行走规则；仅水阻挡。 */
 export function isWalkableTileType(t: number): boolean {

@@ -466,6 +466,21 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 ## 静态 SDF 物件（矩阵物品层）：spec 来自打包 json（sdf_res:<name>）或实体行内联
 ## （sdf_inline，语音造物）。wander 来自实体定义；不登记占地（矩阵派生）。
 func _spawn_static_sdf(parent: Node3D, def: Dictionary, rref: String, pos: Vector3, yaw: float, seed_v: int) -> void:
+	# 预烘焙优先：builtin 静态 prop 在资产期已烘成 baked/<id>.res（禁 runtime 惰烘——见
+	# tools/bake_sdf_deco.gd）。命中即直接上零成本静态实例，跳过 live SdfProp + 每次区块重铺的
+	# bake_and_swap。缺 .res（会动的 prop / 孩子语音造物 sdf_inline / 未预烘）才回落下方 live 路径。
+	if rref.begins_with("sdf_res:"):
+		var baked_path := "res://assets/sdf_props/baked/%s.res" % rref.get_slice(":", 1)
+		if ResourceLoader.exists(baked_path):
+			var mesh := load(baked_path) as ArrayMesh
+			if mesh != null:
+				var mi := SdfStaticBaker.instance(mesh)
+				mi.position = pos
+				mi.rotation_degrees = Vector3(0.0, yaw, 0.0)
+				parent.add_child(mi)
+				var aabb := mesh.get_aabb()
+				BlobShadow.attach(mi, clampf(maxf(aabb.size.x, aabb.size.z) * 0.4, 0.4, 2.2), true)
+				return
 	var prop: SdfProp
 	if rref == "sdf_inline":
 		var spec: Variant = def.get("spec", null)

@@ -155,7 +155,9 @@ static func prop_area_ok(tile_origin: Vector2i, w_tiles: int, h_tiles: int, allo
 		for dx in range(w_tiles):
 			var t := tile_origin + Vector2i(dx, dz)
 			var ty := TerrainMap.tile_type(t)
-			if ty == TerrainMap.T_WATER or (ty == TerrainMap.T_PATH and not allow_path):
+			# 黄砖路(绿野仙踪)与土路同属「路」——props 不落路上保持明路（P1 前路是 T_PATH 自动排除，
+			# P1 改专属地块后须同列，否则手工锚点会扣在黄砖路/翡翠广场上）。
+			if ty == TerrainMap.T_WATER or ((ty == TerrainMap.T_PATH or ty == TerrainMap.T_YELLOW_BRICK) and not allow_path):
 				return false
 			if TerrainMap.tile_height(t) != h0:
 				return false

@@ -48,6 +48,9 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   // 龟兔赛跑跑道布景（s1-race P4）：红黄三角小旗，起点/终点旗门 + 两侧加油旗；
   // 纯装饰不挡路（blocking:false pathOk:true），别糊住跑道与引路。
   { ...builtin('race_flag', '赛跑小旗', 'sdf_res:race_flag', 1, false), pathOk: true },
+  // 绿野仙踪（s1-oz）专属布景 prop
+  builtin('corn_stalk', '玉米秆', 'sdf_res:corn_stalk', 1, true),
+  builtin('emerald_castle', '翡翠城堡', 'sdf_res:emerald_castle', 3, true), // 黄砖路尽头的地标（span 3 同 house）
 
   // ── 未来机器人主题（world-themes P2 打样；全 CC0：Quaternius 机器人 + Kenney Space Kit）──
   // 机器人（Quaternius，assets/scifi/robots/*.glb）
