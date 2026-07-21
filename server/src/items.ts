@@ -45,6 +45,9 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   builtin('paper_note', '纸条', 'sdf_res:paper_note', 1, true),
   builtin('crayon', '蜡笔', 'sdf_res:crayon', 1, true),
   builtin('village_sign', '村口路牌', 'sdf_res:village_sign', 1, true),
+  // 龟兔赛跑跑道布景（s1-race P4）：红黄三角小旗，起点/终点旗门 + 两侧加油旗；
+  // 纯装饰不挡路（blocking:false pathOk:true），别糊住跑道与引路。
+  { ...builtin('race_flag', '赛跑小旗', 'sdf_res:race_flag', 1, false), pathOk: true },
 
   // ── 未来机器人主题（world-themes P2 打样；全 CC0：Quaternius 机器人 + Kenney Space Kit）──
   // 机器人（Quaternius，assets/scifi/robots/*.glb）

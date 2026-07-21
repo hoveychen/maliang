@@ -56,9 +56,20 @@ const LANDMARKS_VF := [
 	{ "item": "house_2", "tile": Vector2i(66, 60), "yaw": 0.0, "search": 2 },  # 外婆家小屋（占位，P4 填实篱笆/门）
 ]
 
-## village_forest 的 SDF 可动物件：村北林口一块路牌，指向森林。
+## village_forest 的 SDF 可动物件：村北林口一块路牌，指向森林；东缘跑道的赛跑小旗
+## （龟兔 s1-race P4）——起点/终点各一对旗门（旗贴着跑道两侧的草带 x86/x90，不占跑道 T_PATH），
+## 两侧再点缀几面加油旗。yaw 让小旗朝向跑道内侧。
 const SDF_PROPS_VF := [
 	{ "item": "village_sign", "tile": Vector2i(23, 38), "yaw": 200.0, "search": 2 },
+	# 终点旗门（跑道北端 z≈12，森林深处方向）
+	{ "item": "race_flag", "tile": Vector2i(86, 12), "yaw": 90.0, "search": 2 },
+	{ "item": "race_flag", "tile": Vector2i(90, 12), "yaw": 270.0, "search": 2 },
+	# 起点旗门（跑道南端 z≈20，poi_race/大道到达处）
+	{ "item": "race_flag", "tile": Vector2i(86, 20), "yaw": 90.0, "search": 2 },
+	{ "item": "race_flag", "tile": Vector2i(90, 20), "yaw": 270.0, "search": 2 },
+	# 沿途加油旗（东侧草带）
+	{ "item": "race_flag", "tile": Vector2i(90, 38), "yaw": 250.0, "search": 2 },
+	{ "item": "race_flag", "tile": Vector2i(90, 56), "yaw": 250.0, "search": 2 },
 ]
 
 ## 内置物品的占地/压路语义（与 server items.ts BUILTIN_ITEMS 必须同步；
