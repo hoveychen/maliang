@@ -56,6 +56,17 @@ func _init() -> void:
 	qf.store_string(JSON.stringify(build_portal_json(scene_id), "  "))
 	qf.close()
 	print("导出 %s：%d 个传送点" % [portal_path, build_portal_json(scene_id).size()])
+
+	# homes（「谁的家」建筑住户表）一并导出（POST /admin/scenes 的 homes 字段直接吃它）
+	var homes_path := _arg("--homes-out", out_path.get_basename() + ".homes.json")
+	var hf := FileAccess.open(homes_path, FileAccess.WRITE)
+	if hf == null:
+		printerr("无法写入 ", homes_path)
+		quit(1)
+		return
+	hf.store_string(JSON.stringify(build_homes_json(scene_id), "  "))
+	hf.close()
+	print("导出 %s：%d 户住户" % [homes_path, build_homes_json(scene_id).size()])
 	quit(0)
 
 ## 合并大场景（village_forest）的 POI（POST /admin/scenes 的 pois 载荷）。
@@ -74,6 +85,25 @@ const POIS_OZ := [
 	{ "tile": [36, 34], "radius": 14.0, "trigger": "poi_cornfield", "name": "玉米地", "aliases": ["稻草人", "玉米田"] },
 	{ "tile": [58, 56], "radius": 14.0, "trigger": "poi_emerald", "name": "翡翠城", "aliases": ["绿城", "城堡", "铁皮人家"] },
 ]
+
+## 「谁的家」建筑住户表（interaction-feedback B 档，POST /admin/scenes 的 homes 载荷）。
+## village_forest 的 5 栋房子（tile 与 scene_compose.gd LANDMARKS_VF 的 house_* 锚点一致）：
+## 点村舍 → 客户端 _home_near_tile 命中 → 点点飞过去说 house_locked「这是别人的家呀」。
+## characterId 值当前【不被朗读】（α 小仙子语音纯预制、不带名字），只需非空即命中——
+## 外婆家填 grandma，村里 4 农舍填通用 resident；β 带名字预制后再回填真实 roster id。
+const HOMES_VF := [
+	{ "tile": [11, 10], "characterId": "resident" },  # house_0 村庄农舍
+	{ "tile": [29, 11], "characterId": "resident" },  # house_1
+	{ "tile": [10, 24], "characterId": "resident" },  # house_2
+	{ "tile": [31, 22], "characterId": "resident" },  # house_3
+	{ "tile": [66, 60], "characterId": "grandma" },   # 外婆家小屋（小红帽册）
+]
+
+## homes 载荷 → POST /admin/scenes 的 homes。老场景（village/oz）天然无住户 → 空数组。
+static func build_homes_json(scene_id: String) -> Array:
+	if scene_id == "village_forest":
+		return HOMES_VF.duplicate(true)
+	return []
 
 ## POI 载荷 → POST /admin/scenes 的 pois（tile 已是 [x,y]）。
 static func build_poi_json(scene_id: String) -> Array:

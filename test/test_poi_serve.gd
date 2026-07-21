@@ -74,6 +74,19 @@ func _init() -> void:
 	fails += _check("homes 混合只留好的", homes_mixed.size(), 1)
 	fails += _check("homes 好条目正确", homes_mixed.get(Vector2i(5, 6), ""), "pig")
 
+	# ── build_homes_json：village_forest 的 5 栋住户往返（导出 → JSON → parse）─────
+	var homes_export := EX.build_homes_json("village_forest")
+	fails += _check("village_forest 导出 5 户", homes_export.size(), 5)
+	var homes_rt: Variant = JSON.parse_string(JSON.stringify(homes_export))
+	fails += _check("homes JSON 可序列化", typeof(homes_rt), TYPE_ARRAY)
+	var homes_parsed := W.parse_server_homes(homes_rt)
+	fails += _check("往返后仍 5 户（全部 characterId 非空）", homes_parsed.size(), 5)
+	fails += _check("外婆家在表里", homes_parsed.get(Vector2i(66, 60), ""), "grandma")
+	fails += _check("村舍 house_0 在表里", homes_parsed.has(Vector2i(11, 10)), true)
+	# 老场景（village/oz）天然无住户 → 空数组（消费方走通用布景解释，不崩）
+	fails += _check("village 无住户", EX.build_homes_json("village").size(), 0)
+	fails += _check("oz 无住户", EX.build_homes_json("oz").size(), 0)
+
 	print("test_poi_serve: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
 
