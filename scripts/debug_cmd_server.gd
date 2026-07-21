@@ -1290,12 +1290,16 @@ func _step_act_wait(delta: float) -> void:
 	_reply(_do_reply_payload(base))
 
 # ── 服务端阻塞等待（§3.3）──────────────────────────────────────────────────────
+## null 安全的真值判定：bool(null) 在 GDScript 会抛「Nonexistent 'bool' constructor」，故 null 先判 false。
+func _truthy(v: Variant) -> bool:
+	return v != null and bool(v)
+
 ## 单个条件对快照是否成立。mode ∈ truthy|falsy|present|equals|gte|changed。
 func _cond_match(s: Dictionary, c: Dictionary) -> bool:
 	var v: Variant = s.get(String(c.get("field", "")))
 	match String(c.get("mode", "present")):
-		"truthy": return bool(v)
-		"falsy": return not bool(v)
+		"truthy": return _truthy(v)
+		"falsy": return not _truthy(v)
 		"present": return v != null
 		"equals": return str(v) == str(c.get("target"))
 		"gte": return float(v if v != null else 0.0) >= float(c.get("target", 0.0))

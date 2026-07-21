@@ -193,6 +193,9 @@ func _run_once() -> void:
 	fails += _check("cond gte 命中", server._cond_match({"n": 8}, {"field": "n", "mode": "gte", "target": 8}), true)
 	fails += _check("cond gte 不足", server._cond_match({"n": 7}, {"field": "n", "mode": "gte", "target": 8}), false)
 	fails += _check("cond equals 命中", server._cond_match({"s": "a"}, {"field": "s", "mode": "equals", "target": "a"}), true)
+	# ★ null 安全：缺失字段的 truthy/falsy 不能 bool(null) 抛错（GDScript 无 null→bool 构造）
+	fails += _check("cond truthy 缺失=false", server._cond_match({}, {"field": "gone", "mode": "truthy"}), false)
+	fails += _check("cond falsy 缺失=true", server._cond_match({}, {"field": "gone", "mode": "falsy"}), true)
 	fails += _check("conds 全 AND", server._conds_all_match({"a": 1, "b": 0}, [{"field": "a", "mode": "truthy"}, {"field": "b", "mode": "falsy"}]), true)
 	# 已满足即回（speaking=false → falsy 满足）
 	stub._speaking = false
