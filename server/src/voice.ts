@@ -211,6 +211,14 @@ export async function respondToTranscript(
       }
     }
   }
+  // 零挫败（铁律#1）：gate 角色搭话即开演，不指望孩子说对触发词「讲个故事」。册还没看完
+  // （非 interacting、未 settled）时，无论这句 routeIntent 分到什么都强制开演本册前沿幕——
+  // startStoryAsync 自带「演出中/满员/互动未完」的守卫，重复触发幂等安全，replyText 仍作 leadIn。
+  // 已 settled 的册留给 LLM（闲聊为主，说「再讲一遍」再重看）；interacting 中不打扰，让孩子安心去做互动。
+  if (storyGateBookId && !response.storyRequest) {
+    const bp = store.getStoryProgress(worldId, playerId).books[storyGateBookId];
+    if (!bp || (bp.state !== 'interacting' && !bp.settled)) response.storyRequest = storyGateBookId;
+  }
   // 造角色/造物/造贴纸入口：不在这里合成/发普通回应，交给 WS 层的引导会话（guideCreation/guideProp/guideSticker）驱动——
   // 由它合成仙子的问句 TTS 并下发 creation_prompt（含图标选项），避免入口这轮重复出声。
   if (response.characterRequest || response.propRequest || response.stickerRequest || response.gameRequest || response.storyRequest) return response;

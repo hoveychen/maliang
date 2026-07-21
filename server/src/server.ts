@@ -103,6 +103,7 @@ import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } fro
 import { buildDebut, buildStoryStageOpts, DebutError } from './stage_debut.ts';
 import { StoryDirector } from './story_director.ts';
 import { STORY_BOOKS, isUnsettledStoryRole, type StoryBook } from './story_books.ts';
+import { planGuide } from './guide.ts';
 import { seedStoryCharacters, settleStoryResidency } from './story_seed.ts';
 import { buildStageOptsFromDraft } from './screenplay_gen.ts';
 import { SCREENPLAYS, type ScreenplayName } from './screenplays.ts';
@@ -2129,7 +2130,14 @@ async function offerStoryTask(
 ): Promise<boolean> {
   const task = materializeStoryTask(worldId, session.playerId, book, chapter, store);
   if (!task) return false;
-  socket.send(JSON.stringify({ type: 'task_offer', worldId, task }));
+  // 零挫败（铁律#1）：visit 委托一物化就让点点自动引路——不指望孩子回头对点点说「带我去外婆家」。
+  // 与 storyAsk（「点点会飞在前面带路」）当场对齐。算不出计划（地点缺失/太远）就不带 guide，
+  // 孩子仍可自己走。同一条 task_offer 报文原子下发（客户端 _on_task_offer 见 guide 即 start_guide）。
+  const guide =
+    task.type === 'visit' && task.locationName
+      ? planGuide(store, worldId, session.currentScene ?? book.sceneId, { location_name: task.locationName })
+      : null;
+  socket.send(JSON.stringify({ type: 'task_offer', worldId, task, ...(guide ? { guide } : {}) }));
   if (task.storyAsk) {
     const voice = store.getCharacter(worldId, task.npcId)?.voiceId ?? '';
     await pushLineTts(socket, adapters, store, task.storyAsk, voice, session.clientTts);

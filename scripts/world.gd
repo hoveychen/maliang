@@ -8433,6 +8433,10 @@ func _stamp_icon(style: String) -> String:
 func _on_task_offer(data: Dictionary) -> void:
 	if typeof(data.get("task")) == TYPE_DICTIONARY:
 		_set_active_task(data["task"])
+	# 剧情 visit 委托自动引路（P2 降门槛）：offer 同报文带 guide 时点点即刻飞前面带路，
+	# 不必孩子回头对点点说「带我去外婆家」。服务端算不出计划就不带 guide（她绝不应下却不动）。
+	if typeof(data.get("guide")) == TYPE_DICTIONARY:
+		start_guide(data["guide"])
 
 func _on_task_complete(data: Dictionary) -> void:
 	var style := String(data.get("stampStyle", ""))
