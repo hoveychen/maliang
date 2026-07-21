@@ -74,8 +74,11 @@ function layoutOverlay() {
   for (const el of lastElements) {
     const r = el.screen_rect;
     if (!el.on_screen || !r) continue;
+    // SubViewport(手机内屏)元素的 rect 是手机屏自己的坐标系,不能直接画到主视窗截图上(会飘到左边错位)——
+    // 只叠加根视口元素(坐标与主截图 1:1)。SubViewport 元素仍在右栏动作列表里(走 phone/gui,非真 tap)。
+    if (el.viewport && el.viewport !== "root") continue;
     const b = document.createElement("div");
-    b.className = "box" + (el.viewport && el.viewport !== "root" ? " sub" : "");
+    b.className = "box";
     b.style.left = (r.x * sx) + "px"; b.style.top = (r.y * sy) + "px";
     b.style.width = (r.w * sx) + "px"; b.style.height = (r.h * sy) + "px";
     const tag = document.createElement("span"); tag.textContent = el.kind + ":" + (el.label || el.id);
