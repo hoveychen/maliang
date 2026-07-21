@@ -42,7 +42,8 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", "http://x");
     const p = url.pathname;
     if (req.method === "GET" && p === "/") {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      // no-store：面板 HTML/JS 迭代频繁，绝不让浏览器缓存旧版（否则改了面板刷新看不到，实测坑过）。
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store, must-revalidate" });
       res.end(readFileSync(INDEX));
       return;
     }
