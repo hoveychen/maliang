@@ -65,6 +65,7 @@ const POIS_VF := [
 	{ "tile": [34, 9], "radius": 18.0, "trigger": "poi_pond", "name": "池塘", "aliases": ["湖", "水边", "河边"] },
 	{ "tile": [66, 63], "radius": 14.0, "trigger": "poi_grandma", "name": "外婆家", "aliases": ["外婆", "奶奶家", "小屋"] },
 	{ "tile": [30, 86], "radius": 16.0, "trigger": "poi_forest_deep", "name": "森林深处", "aliases": ["深林", "大森林", "林子深处"] },
+	{ "tile": [88, 17], "radius": 16.0, "trigger": "poi_race", "name": "跑道", "aliases": ["终点", "起跑线", "赛跑", "跑道边", "比赛", "跑步"] },
 ]
 
 ## 第一季册 5《绿野仙踪》独立场景（oz）的 POI：玉米地（稻草人）+ 翡翠城（铁皮人）。

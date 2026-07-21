@@ -7,6 +7,7 @@
     { "id": "story_brick", "kind": "sticker", "targetSize": 256, "prompt": "a sturdy little red brick house with a triangle roof and a tiny chimney, cozy and strong" },
     { "id": "story_basket", "kind": "sticker", "targetSize": 256, "prompt": "a woven wicker picnic basket full of treats with a red-and-white checkered cloth peeking out, a couple of little cakes on top" },
     { "id": "story_ruby", "kind": "sticker", "targetSize": 256, "prompt": "a pair of sparkly ruby-red slipper shoes covered in tiny glittering red gemstones, shiny and magical with little bows" },
-    { "id": "story_emerald", "kind": "sticker", "targetSize": 256, "prompt": "a cute little emerald-green crystal castle with sparkling shiny towers and a tiny flag on top, glowing softly, cheerful" }
+    { "id": "story_emerald", "kind": "sticker", "targetSize": 256, "prompt": "a cute little emerald-green crystal castle with sparkling shiny towers and a tiny flag on top, glowing softly, cheerful" },
+    { "id": "story_cheer_flag", "kind": "sticker", "targetSize": 256, "prompt": "a cheerful little triangular pennant cheer flag on a short wooden stick, bright red and sunny yellow stripes, a tiny star on it, waving as if cheering at a race" }
   ]
 }

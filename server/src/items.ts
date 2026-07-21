@@ -45,6 +45,9 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   builtin('paper_note', '纸条', 'sdf_res:paper_note', 1, true),
   builtin('crayon', '蜡笔', 'sdf_res:crayon', 1, true),
   builtin('village_sign', '村口路牌', 'sdf_res:village_sign', 1, true),
+  // 龟兔赛跑跑道布景（s1-race P4）：红黄三角小旗，起点/终点旗门 + 两侧加油旗；
+  // 纯装饰不挡路（blocking:false pathOk:true），别糊住跑道与引路。
+  { ...builtin('race_flag', '赛跑小旗', 'sdf_res:race_flag', 1, false), pathOk: true },
 
   // ── 未来机器人主题（world-themes P2 打样；全 CC0：Quaternius 机器人 + Kenney Space Kit）──
   // 机器人（Quaternius，assets/scifi/robots/*.glb）
@@ -234,6 +237,8 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   // ── 剧情纪念贴纸（第一季册 5《绿野仙踪》）──
   { ...sticker('story_ruby', '红宝石鞋纪念贴纸'), souvenir: true },
   { ...sticker('story_emerald', '翡翠城纪念贴纸'), souvenir: true },
+  // ── 剧情纪念贴纸（第一季册 4《龟兔赛跑》）──
+  { ...sticker('story_cheer_flag', '加油小旗纪念贴纸'), souvenir: true },
 ];
 
 function builtin(id: string, name: string, renderRef: string, span: number, blocking: boolean): ItemDef {

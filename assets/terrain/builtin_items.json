@@ -21,6 +21,7 @@
   { "id": "paper_note", "worldId": null, "name": "纸条", "renderRef": "sdf_res:paper_note", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
   { "id": "crayon", "worldId": null, "name": "蜡笔", "renderRef": "sdf_res:crayon", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
   { "id": "village_sign", "worldId": null, "name": "村口路牌", "renderRef": "sdf_res:village_sign", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
+  { "id": "race_flag", "worldId": null, "name": "赛跑小旗", "renderRef": "sdf_res:race_flag", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0 },
   { "id": "robot_animated", "worldId": null, "name": "机器人", "renderRef": "scifi:robot_animated", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
   { "id": "robot_enemy", "worldId": null, "name": "守卫机器人", "renderRef": "scifi:robot_enemy", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
   { "id": "robot_flying", "worldId": null, "name": "飞行机器人", "renderRef": "scifi:robot_flying", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
@@ -158,5 +159,6 @@
   { "id": "story_brick", "worldId": null, "name": "砖房纪念贴纸", "renderRef": "sticker:story_brick", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
   { "id": "story_basket", "worldId": null, "name": "点心篮纪念贴纸", "renderRef": "sticker:story_basket", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
   { "id": "story_ruby", "worldId": null, "name": "红宝石鞋纪念贴纸", "renderRef": "sticker:story_ruby", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
-  { "id": "story_emerald", "worldId": null, "name": "翡翠城纪念贴纸", "renderRef": "sticker:story_emerald", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true }
+  { "id": "story_emerald", "worldId": null, "name": "翡翠城纪念贴纸", "renderRef": "sticker:story_emerald", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
+  { "id": "story_cheer_flag", "worldId": null, "name": "加油小旗纪念贴纸", "renderRef": "sticker:story_cheer_flag", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true }
 ]

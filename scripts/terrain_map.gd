@@ -518,6 +518,9 @@ static func _paint_village_forest() -> void:
 
 	# ---- 右缘跑道（龟兔预留）：南北向直跑道，清一条明路 ----
 	_paint_rect_type(87, 8, 89, 92, T_PATH)
+	# ---- 通往跑道的大道（龟兔 s1-race P4）：从广场东巷（x34）一路向东接上跑道，
+	#      让点点 guide_to poi_race 有条明路可走（否则东缘跑道被密林隔断、visit 到不了）----
+	_paint_rect_type(34, 16, 88, 18, T_PATH)
 
 	# ---- 水深：水面基础浅水 1 级，池塘中心加深 2 级 ----
 	for i in range(_types.size()):
