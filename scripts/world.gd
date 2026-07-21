@@ -2274,6 +2274,10 @@ var _my_voice_id := ""             ## 自己的稳定音色（world_state 下发
 ## 表情盘八格（❤=送爱心；flip/squish/paper_plane 是纸片动作精选）。加格子注意
 ## 卡片宽×格数+间距别超 1280 设计宽（_build_talk_view 的尺寸参数配套调）。
 const EMOTE_PANEL_ACTIONS := ["wave", "jump", "spin", "nod", "heart", "flip", "squish", "paper_plane"]
+## 表情动作的中文名——纯给无障碍名(tooltip_text)用：图标卡不显字(幼儿不识字),但 harness 通用 access
+## 靠 tooltip 回退拿到 label 才能按名点卡,家长长按也能看名。孩子看到的仍只是图标。
+const EMOTE_LABELS := {"wave": "挥手", "jump": "蹦跳", "spin": "转圈", "nod": "点头",
+	"heart": "爱心", "flip": "翻跟头", "squish": "挤一挤", "paper_plane": "纸飞机"}
 const EMOTE_CD_MS := 8000
 
 ## 自动回礼判定（纯函数，headless 可测）：对我做的动作 + 不在冷却期才回。
@@ -3685,6 +3689,7 @@ func _build_talk_view(host: CanvasLayer) -> void:
 		UiAssets.style_card_button(card, 24.0) # 奶油圆角卡片，与造角色选项卡同调
 		card.icon = UiAssets.emotion_tex(action)
 		card.expand_icon = true
+		card.tooltip_text = String(EMOTE_LABELS.get(action, action)) # 无障碍名(见 EMOTE_LABELS)
 		card.pressed.connect(_on_talk_emote_card.bind(String(action)))
 		row.add_child(card)
 
@@ -3779,6 +3784,7 @@ func _refresh_sticker_view() -> void:
 			UiAssets.style_card_button(card, 20.0)
 			card.icon = _sticker_tex(String(item_id))
 			card.expand_icon = true
+			card.tooltip_text = String(item_id) # 无障碍名：贴纸无客户端中文名，用稳定 item_id（harness 本就按 id 寻址）
 			card.pressed.connect(func() -> void:
 				_sticker_pick = String(item_id)
 				game_audio.play_sfx("bell")
