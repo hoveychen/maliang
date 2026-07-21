@@ -1037,11 +1037,24 @@ func _collect_all_elements(with_texts: bool) -> Array:
 	_collect_entities(out)
 	var tree := get_tree()
 	if tree != null and tree.root != null:
+		var phone_open := _phone_is_open()
 		var ui_els := []
 		_collect_ui(tree.root, "root", with_texts, ui_els)
 		for e in ui_els:
-			out.append(_control_to_element(e as Dictionary))
+			var el := _control_to_element(e as Dictionary)
+			# 手机没开:手机内屏(SubViewport)的元素不可交互,不该枚举(老板在面板看到关着的手机按钮蓝框即此 bug)。
+			if String(el.get("viewport", "root")) != "root" and not phone_open:
+				continue
+			out.append(el)
 	return out
+
+## 手机当前是否打开（world 的 _phone_cam 置位=开）。
+func _phone_is_open() -> bool:
+	var w := _host()
+	if w == null:
+		return false
+	var pc: Variant = w.get("_phone_cam")
+	return bool(pc) if pc != null else false
 
 ## 当前可用动作扁平列表（全局 build_actions + 各元素 element-targeted，按 action_id 去重）。不 bump rev。
 func _current_actions() -> Array:
@@ -1366,6 +1379,9 @@ func _gather_facts() -> Dictionary:
 	var w := _host()
 	var vc := _vc()
 	if w != null:
+		# 在世界里吗:宿主有 harness_walk_to(world 才有)= 真在 world 场景,而非 menu/onboarding。
+		# 世界级全局动作(say/confirm/phone)据此门控,免得标题页冒出一堆无意义动作。
+		f["in_world"] = w.has_method("harness_walk_to")
 		if w.has_method("_fsm_state"):
 			f["mic_open"] = InteractionFsm.mic_open(int(w.call("_fsm_state")))
 		f["in_creation"] = bool(w.get("_in_creation")) if w.get("_in_creation") != null else false

@@ -197,6 +197,24 @@ func _run_once() -> void:
 	fails += _check("settle_reason 有 note", (base2.get("settle_reason") as Dictionary).has("note"), true)
 	fails += _check("settle_reason 记 waited_sec", (base2.get("settle_reason") as Dictionary).has("waited_sec"), true)
 
+	print("[手机没开:SubViewport 内元素不枚举（老板发现关着的手机按钮不该出现）]")
+	var sub_vp := SubViewport.new()
+	sub_vp.name = "PhoneScreen"
+	get_root().add_child(sub_vp)
+	var sub_btn := Button.new()
+	sub_btn.text = "手机内按钮"
+	sub_vp.add_child(sub_btn)
+	stub._phone_cam = false
+	var has_sub := func(els: Array) -> bool:
+		for el in els:
+			if String((el as Dictionary).get("viewport", "root")) != "root":
+				return true
+		return false
+	fails += _check("手机关→无 SubViewport 元素", has_sub.call(server._collect_all_elements(false)), false)
+	stub._phone_cam = true
+	fails += _check("手机开→SubViewport 元素出现", has_sub.call(server._collect_all_elements(false)), true)
+	stub._phone_cam = false
+
 	print("[真 speaking 位：快照反映 _fsm_inputs().speaking()（对齐 Playwright §3.3）]")
 	stub._speaking = true
 	fails += _check("说话中 speaking=true", server._snapshot().get("speaking"), true)
