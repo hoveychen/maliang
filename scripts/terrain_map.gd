@@ -438,6 +438,8 @@ static func _ensure_built() -> void:
 	_palette = PackedStringArray()
 	if _paint_scene == "village_forest":
 		_paint_village_forest()
+	elif _paint_scene == "oz":
+		_paint_oz()
 	else:
 		_paint()
 
@@ -522,6 +524,22 @@ static func _paint_village_forest() -> void:
 		if _types[i] == T_WATER:
 			_depths[i] = 1
 	_paint_ellipse_depth(34.5, 9.5, 3.2, 2.4, 2)
+
+## 第一季册 5《绿野仙踪》独立场景（75 格，docs/season-1-outline.md §4）。
+## 只画「形状本身讲故事」的地貌骨架——一条从入口蜿蜒到翡翠城的黄砖路（远方之旅），
+## 加入口小广场（portal 落脚）、玉米地空地（稻草人）、翡翠城广场（铁皮人）。
+## 「黄」是后续主题着色的事（path tile 走通用路面纹理），此处只塑「一条要走到远方的路」的形。
+## 布景（路牌/房子聚成城/玉米）由 scene_compose.compose("oz") 出。前置：调用方须先 WorldGrid.configure(75)。
+static func _paint_oz() -> void:
+	# ---- 黄砖路：入口(14,14) 蜿蜒到翡翠城(58,56) ----
+	_paint_polyline_type([
+		Vector2(10.5, 10.5), Vector2(16.5, 16.5), Vector2(24.5, 22.5),
+		Vector2(30.5, 30.5), Vector2(36.5, 34.5), Vector2(44.5, 42.5),
+		Vector2(52.5, 50.5), Vector2(58.5, 56.5)], 1.2, T_PATH)
+	# ---- 入口小广场（portal 落点 14,14 附近，好落脚）----
+	_paint_rect_type(10, 10, 18, 18, T_PATH)
+	# ---- 翡翠城广场（黄砖路尽头，铁皮人 56,54 与「城」所在）----
+	_paint_rect_type(54, 52, 62, 60, T_PATH)
 
 ## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂类型（含端点）。
 static func _paint_rect_type(x0: int, z0: int, x1: int, z1: int, t: int) -> void:

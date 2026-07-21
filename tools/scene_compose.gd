@@ -61,6 +61,22 @@ const SDF_PROPS_VF := [
 	{ "item": "village_sign", "tile": Vector2i(23, 38), "yaw": 200.0, "search": 2 },
 ]
 
+## 第一季册 5《绿野仙踪》独立场景（oz，75 格）的手工地标：翡翠城 = 黄砖路尽头几座房子聚成一座「城」
+## （铁皮人 56,54 广场旁的草地上，house 不能落路面故摆广场外围）。坐标见 docs/season-1-outline.md §4。
+## 说明：暂用现有 house/村牌/风车 prop 近似「城/路牌/农田」——专属奥兹 prop（玉米秆/翡翠城堡）留后续主题包。
+const LANDMARKS_OZ := [
+	{ "item": "house_2", "tile": Vector2i(51, 56), "yaw": 90.0, "search": 2 },   # 翡翠城·西
+	{ "item": "house_0", "tile": Vector2i(64, 54), "yaw": 270.0, "search": 2 },  # 翡翠城·东
+	{ "item": "house_1", "tile": Vector2i(58, 64), "yaw": 0.0, "search": 2 },    # 翡翠城·南门
+]
+
+## oz 的 SDF 可动物件：黄砖路两处路牌（入口 + 玉米地岔口，呼应「找回家的路」）+ 玉米地一支风车点缀。
+const SDF_PROPS_OZ := [
+	{ "item": "village_sign", "tile": Vector2i(22, 18), "yaw": 200.0, "search": 2 },
+	{ "item": "village_sign", "tile": Vector2i(44, 38), "yaw": 150.0, "search": 2 },
+	{ "item": "pinwheel", "tile": Vector2i(33, 30), "yaw": 200.0, "search": 2 },
+]
+
 ## 内置物品的占地/压路语义（与 server items.ts BUILTIN_ITEMS 必须同步；
 ## P4 起客户端渲染层也从这里取 footprint——单一副本，别在别处再抄）。
 const ITEM_SPAN := {
@@ -104,6 +120,11 @@ static func compose(scene_id: String) -> Dictionary:
 		for lm in LANDMARKS_VF:
 			_place_anchor(item_ref, item_arg, palette, lm)
 		for sp in SDF_PROPS_VF:
+			_place_anchor(item_ref, item_arg, palette, sp)
+	elif scene_id == "oz":
+		for lm in LANDMARKS_OZ:
+			_place_anchor(item_ref, item_arg, palette, lm)
+		for sp in SDF_PROPS_OZ:
 			_place_anchor(item_ref, item_arg, palette, sp)
 
 	# ── 分区散布：全图行主序逐 tile 判定（草丛不占位，其余 1×1 占地）──
@@ -219,7 +240,37 @@ static func _deco_kind(scene_id: String, gt: Vector2i) -> int:
 		return _deco_kind_village(gt)
 	if scene_id == "village_forest":
 		return _deco_kind_village_forest(gt)
+	if scene_id == "oz":
+		return _deco_kind_oz(gt)
 	return DECO_NONE
+
+## 奥兹黄砖路散布：入口/翡翠城两广场开阔；玉米地（稻草人一带）成片规则灌木当玉米；
+## 其余是「远方旷野」——比森林疏朗的疏树+灌木+草丛。黄砖路/广场走 T_PATH 自动排除保持明路。
+static func _deco_kind_oz(gt: Vector2i) -> int:
+	if TerrainMap.tile_type(gt) != TerrainMap.T_GRASS:
+		return DECO_NONE
+	var roll := posmod(hash(Vector2i(gt.x * 3 + 11, gt.y * 7 + 5)), 100)
+	# 入口小广场周边（portal 落点 14,14 半径 8）：开阔好落脚
+	if _tor_dist(gt, Vector2i(14, 14)) <= 8.0:
+		return DECO_TUFT if roll < 12 else DECO_NONE
+	# 玉米地（稻草人 36,34 半径 8）：隔位规则灌木成「田」
+	if _tor_dist(gt, Vector2i(36, 34)) <= 8.0:
+		if posmod(gt.x + gt.y, 2) == 0 and roll < 55:
+			return DECO_BUSH
+		return DECO_TUFT if roll < 30 else DECO_NONE
+	# 翡翠城广场周边（56,54 半径 8）：整洁疏树
+	if _tor_dist(gt, Vector2i(56, 54)) <= 8.0:
+		if roll < 6:
+			return DECO_TREE
+		return DECO_TUFT if roll < 16 else DECO_NONE
+	# 其余旷野：疏树 + 灌木 + 石 + 草丛（疏朗，是「远方」的开阔感）
+	if roll < 8:
+		return DECO_TREE
+	if roll < 13:
+		return DECO_BUSH
+	if roll < 16:
+		return DECO_ROCK
+	return DECO_TUFT if roll < 30 else DECO_NONE
 
 ## 合并大场景散布：村庄核心（近端）整洁疏树，往森林深处（z 大）越走越密；
 ## 穿林小径/跑道走 T_PATH → 自动排除（保持明路）；外婆家/七矮人两处林间空地留空。
