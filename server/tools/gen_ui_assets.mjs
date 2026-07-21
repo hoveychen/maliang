@@ -2,9 +2,17 @@
 // 两种模式：
 //   sticker      — 绿幕生成 → 抠图 → alpha 包围盒裁边(带留白) → 降采样到 targetSize（HUD/按钮图标）
 //   illustration — 全幅画面 → 居中裁到 targetW×targetH 宽高比 → 降采样（绘本插画/背景/书页纹理）
-// 用法：node --env-file=.env tools/gen_ui_assets.mjs <manifest.json> <outDir> [--only id1,id2] [--candidates N] [--concurrency N]
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+// 用法：node --env-file=.env tools/gen_ui_assets.mjs <manifest.json> <outDir> [--only id1,id2] [--candidates N] [--concurrency N] [--webp]
+//
+// --webp：sticker/pencil 资产除候选 PNG 外，把【第 1 个候选】直接落成最终 <outDir>/<id>.webp
+//   （走 cwebp，dev 依赖，同 gen_voice_lines 的 ffmpeg 惯例）。这是「故事纪念贴纸」的通用出图管道：
+//   加一册只需往 story_stickers.manifest.json append 一行，跑一条命令直出 assets/stickers/<id>.webp，
+//   无需再手动挑候选+转格式。想多挑：先不带 --webp 跑 --candidates N 看候选，选定后带 --only <id>
+//   --candidates 1 --webp（或 --raw-dir 指向选定原图）重跑即定稿。幂等：已存在的 .webp 跳过，--force 覆盖。
+//   港区 403：同两段式——先 --emit-jobs 拿去首尔拉原图，再 --raw-dir <dir> --webp 本地后处理直出 webp。
+import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import { PNG } from 'pngjs';
 import jpeg from 'jpeg-js';
 import { OpenRouterClient } from '../src/adapters/openrouter_client.ts';
@@ -44,6 +52,8 @@ const concurrency = Number(flag('--concurrency', '4'));
 //   --raw-dir <dir>        跳过生图，从 <dir>/<id>_c<idx>.(png|jpg) 读原图走同一套抠图/裁剪后处理
 const emitJobs = flag('--emit-jobs', '');
 const rawDir = flag('--raw-dir', '');
+const asWebp = args.includes('--webp');
+const force = args.includes('--force');
 
 const cfg = loadConfig();
 if (!cfg.openrouterApiKey && !rawDir && !emitJobs) {
@@ -75,6 +85,19 @@ function encodePng(r) {
   const png = new PNG({ width: r.width, height: r.height });
   png.data = Buffer.from(r.data.buffer, r.data.byteOffset, r.data.byteLength);
   return new Uint8Array(PNG.sync.write(png));
+}
+
+// RGBA raster → 无损保 alpha 的 WebP（管道喂 cwebp，dev 依赖）。透明贴纸不能走有损，
+// 否则边缘出脏边——用 -lossless -exact 保住 die-cut 白边与透明区。
+function writeWebp(raster, path) {
+  return new Promise((res, rej) => {
+    const cw = spawn('cwebp', ['-quiet', '-lossless', '-exact', '-o', path, '--', '-']);
+    const err = [];
+    cw.stderr.on('data', (d) => err.push(d));
+    cw.on('error', rej);
+    cw.on('close', (code) => code === 0 ? res(path) : rej(new Error(`cwebp exit ${code}: ${Buffer.concat(err)}`)));
+    cw.stdin.end(Buffer.from(encodePng(raster)));
+  });
 }
 
 function crop(r, x0, y0, w, h) {
@@ -214,6 +237,11 @@ async function generateOne(asset, idx) {
   }
   const file = join(outDir, `${asset.id}_c${idx}.png`);
   await writeFile(file, encodePng(raster));
+  // --webp：把第 1 个候选直接定稿成 <outDir>/<id>.webp（故事贴纸通用管道的最后一公里）。
+  // 只对透明主体（sticker/pencil）有意义；illustration 是全幅背景，不走 webp。
+  if (asWebp && idx === 1 && (isSticker || asset.kind === 'pencil')) {
+    await writeWebp(raster, join(outDir, `${asset.id}.webp`));
+  }
   return file;
 }
 
@@ -223,6 +251,14 @@ await mkdir(outDir, { recursive: true });
 
 const jobs = [];
 for (const asset of assets) {
+  // --webp 幂等：最终 webp 已在就跳过（除非 --force），几十册重跑只补缺的那几张。
+  if (asWebp && !force) {
+    const webpPath = join(outDir, `${asset.id}.webp`);
+    if (await access(webpPath).then(() => true, () => false)) {
+      console.log(`skip ${asset.id} (webp 已存在)`);
+      continue;
+    }
+  }
   const count = asset.candidates ?? defaultCandidates;
   for (let i = 1; i <= count; i++) jobs.push({ asset, idx: i });
 }

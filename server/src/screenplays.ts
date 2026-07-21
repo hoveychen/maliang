@@ -15,6 +15,8 @@ export const SCREENPLAYS = [
   'story_pigs_2',
   'story_pigs_3',
   'story_pigs_end',
+  'story_hood_1',
+  'story_hood_end',
 ] as const;
 export type ScreenplayName = (typeof SCREENPLAYS)[number];
 

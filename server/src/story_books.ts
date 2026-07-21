@@ -173,8 +173,66 @@ export const THREE_PIGS: StoryBook = {
   ],
 };
 
+// ── 第二册《小红帽》（village_forest 合并大场景，1 幕 + 尾声）──────────────────
+// 第一季册 2（docs/season-1-outline.md §4）。语文（听 → 复述）+ 引路认路。
+// 场景是新的 village+forest 合并大场景（100 格，docs/s1-merged-scene-layout.md）：小红帽在村里
+// 搭话触发，互动是 task:visit 外婆家——点点飞前面 guide_to 引路，孩子沿穿林小径把点心送到外婆家
+// （poi_grandma）。尾声在外婆家演出，点点请孩子把故事讲给外婆听（复述，剧本内 stage.prompt，
+// 零挫败不打分），整册完结小红帽与外婆入住。无狼——避免与《三只小猪》已改邪归正的狼设定打架
+// （outline §4：狼版弱化/去惊吓）。guide_to 引路的互动接线 + souvenir 贴纸 story_basket 在 s1-hood P4。
+
+export const LITTLE_RED_HOOD: StoryBook = {
+  id: 'hood',
+  title: '小红帽',
+  sceneId: 'village_forest',
+  gateCastId: 'red_hood',
+  cast: [
+    {
+      castId: 'red_hood',
+      name: '小红帽',
+      personality: '戴着红帽子、活泼懂事的小姑娘，最爱外婆，答应了妈妈就一定把点心送到；路上好奇又不贪玩。',
+      voiceId: 'zh-CN-XiaoyiNeural',
+      visualDescription:
+        'a cheerful little girl with a bright red hooded cape over a simple dress, holding a small basket of treats, rosy cheeks and a sweet smile, standing upright like a person',
+      // 村庄核心近端带（广场旁），gate 角色好找、搭话即触发。
+      position: { tileX: 25, tileY: 18 },
+      greetingStyle: 'warm',
+    },
+    {
+      castId: 'granny',
+      name: '外婆',
+      personality: '住在树林边小屋里的慈祥外婆，说话慢悠悠暖融融，见到小红帽和小朋友来看她，病都好了一半。',
+      voiceId: 'zh-CN-XiaoxiaoNeural',
+      visualDescription:
+        'a kindly old grandmother with silver hair in a bun, round glasses, a warm shawl and apron, gentle wrinkled smile, standing upright like a person',
+      // 穿林小径尽头的外婆家小屋前（poi_grandma 附近）。
+      position: { tileX: 67, tileY: 62 },
+      greetingStyle: 'gentle',
+    },
+  ],
+  chapters: [
+    {
+      screenplay: 'story_hood_1',
+      interaction: {
+        kind: 'task',
+        type: 'visit',
+        npcCastId: 'red_hood',
+        locationName: '外婆家',
+        ask: '外婆生病啦，我要给她送这篮点心……你陪我一起走小路去外婆家好不好？点点会飞在前面带路。',
+        thanks: '我们把点心送到外婆家啦！谢谢你一路陪着我、没让我迷路。',
+      },
+      stampStyle: 'heart',
+      sticker: 'story_basket',
+    },
+    { screenplay: 'story_hood_end' }, // 尾声谢幕：讲给外婆听（复述）+ 整册完结入住
+  ],
+};
+
 /** 全部册注册表（bookId → 册）。 */
-export const STORY_BOOKS: Record<string, StoryBook> = { [THREE_PIGS.id]: THREE_PIGS };
+export const STORY_BOOKS: Record<string, StoryBook> = {
+  [THREE_PIGS.id]: THREE_PIGS,
+  [LITTLE_RED_HOOD.id]: LITTLE_RED_HOOD,
+};
 
 /**
  * 故事角色在 roster 里的 characterId 约定（seed 与选角共用同一推导，不查表）：

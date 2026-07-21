@@ -61,6 +61,10 @@
     "story_brick": {
       "category": "sticker",
       "path": "res://assets/stickers/story_brick.webp"
+    },
+    "story_basket": {
+      "category": "sticker",
+      "path": "res://assets/stickers/story_basket.webp"
     }
   }
 }

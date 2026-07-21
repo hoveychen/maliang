@@ -1,0 +1,76 @@
+{
+  "voice": "zh-CN-YunxiaNeural",
+  "lines": [
+    {
+      "id": "hood_0_1",
+      "role": "narrate",
+      "text": "小红帽的外婆生病啦，妈妈装了一篮子香喷喷的点心。"
+    },
+    {
+      "id": "hood_0_2",
+      "role": "小红帽",
+      "voice": "zh-CN-XiaoyiNeural",
+      "text": "我要把点心送给外婆，让她快点好起来！"
+    },
+    {
+      "id": "hood_0_3",
+      "role": "narrate",
+      "text": "妈妈说，去外婆家要走那条穿过树林的小路，一路上别贪玩，早点到哦。"
+    },
+    {
+      "id": "hood_0_4",
+      "role": "小红帽",
+      "voice": "zh-CN-XiaoyiNeural",
+      "text": "好哒！我这就出发，走小路去外婆家！"
+    },
+    {
+      "id": "hood_0_5",
+      "role": "narrate",
+      "text": "小路弯弯，穿过一片树林。点点会飞在前面给你带路，我们一起把点心送到外婆家吧！"
+    },
+    {
+      "id": "hood_1_1",
+      "role": "narrate",
+      "text": "走过弯弯的小路，你和小红帽一起来到了外婆家。"
+    },
+    {
+      "id": "hood_1_2",
+      "role": "小红帽",
+      "voice": "zh-CN-XiaoyiNeural",
+      "text": "外婆外婆，我来给你送点心啦！"
+    },
+    {
+      "id": "hood_1_3",
+      "role": "外婆",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "text": "哎哟，我的乖宝贝，还有小朋友一起来，外婆真高兴！"
+    },
+    {
+      "id": "hood_1_4",
+      "role": "外婆",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "text": "有你们来看外婆，外婆的病一下子就好了一半啦。"
+    },
+    {
+      "id": "hood_1_5",
+      "role": "narrate",
+      "text": "点点悄悄飞到你的耳边，轻轻地问。"
+    },
+    {
+      "id": "hood_1_6",
+      "role": "narrate",
+      "text": "小朋友，你愿意把小红帽送点心的故事，讲给外婆听一听吗？"
+    },
+    {
+      "id": "hood_1_7",
+      "role": "外婆",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "text": "讲得真好听，谢谢你陪小红帽走这一趟。"
+    },
+    {
+      "id": "hood_1_8",
+      "role": "narrate",
+      "text": "从今天起，小红帽和外婆就住在这片树林边啦，随时欢迎你来玩。"
+    }
+  ]
+}

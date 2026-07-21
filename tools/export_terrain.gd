@@ -1,19 +1,28 @@
 extends SceneTree
-## 把村庄场景导出成 .mltr v2 二进制（地貌 + 物品层 + palette），供 POST /admin/scenes 入库。
+## 把场景导出成 .mltr v2 二进制（地貌 + 物品层 + palette），供 POST /admin/scenes 入库。
 ##
 ## 用法：
 ##   godot --headless --path . --script res://tools/export_terrain.gd -- --out village.mltr
+##   godot --headless --path . --script res://tools/export_terrain.gd -- --scene village_forest --out village_forest.mltr
 ##
-## 地貌三平面与 TerrainMap._paint() 逐字节相同（上线地图与本地一致）；物品层由
-## tools/scene_compose.gd 组装（地标/SDF 物件常量表 + 分区散布规则的唯一权威）。
-## 格式见 server/src/terrain.ts（两边必须同步改）。
+## --scene village（默认，75 格）/ village_forest（第一季合并大场景，100 格，见
+## docs/s1-merged-scene-layout.md）。地貌三平面与 TerrainMap 逐字节相同（上线地图与本地一致）；
+## 物品层由 tools/scene_compose.gd 组装。格式见 server/src/terrain.ts（两边必须同步改）。
 
 const COMPOSE := preload("res://tools/scene_compose.gd")
 const HEADER_BYTES := 11
 
+## 各场景网格边长（tile 数）——须与 server/src/terrain.ts PRESET_GRIDS 一致。
+const SCENE_GRIDS := { "village": 75, "village_forest": 100 }
+
 func _init() -> void:
-	var out_path := _arg("--out", "village.mltr")
-	var buf := build_terrain_bytes()
+	var scene_id := _arg("--scene", "village")
+	if not SCENE_GRIDS.has(scene_id):
+		printerr("未知场景 ", scene_id, "，支持：", SCENE_GRIDS.keys())
+		quit(1)
+		return
+	var out_path := _arg("--out", scene_id + ".mltr")
+	var buf := build_terrain_bytes(scene_id)
 	var f := FileAccess.open(out_path, FileAccess.WRITE)
 	if f == null:
 		printerr("无法写入 ", out_path, "：", error_string(FileAccess.get_open_error()))
@@ -33,9 +42,9 @@ func _init() -> void:
 		printerr("无法写入 ", poi_path)
 		quit(1)
 		return
-	pf.store_string(JSON.stringify(build_poi_json(), "  "))
+	pf.store_string(JSON.stringify(build_poi_json(scene_id), "  "))
 	pf.close()
-	print("导出 %s：%d 个 POI" % [poi_path, build_poi_json().size()])
+	print("导出 %s：%d 个 POI" % [poi_path, build_poi_json(scene_id).size()])
 
 	# 传送点一并导出（POST /admin/scenes 的 portals 字段直接吃它）
 	var portal_path := _arg("--portal-out", out_path.get_basename() + ".portals.json")
@@ -44,13 +53,28 @@ func _init() -> void:
 		printerr("无法写入 ", portal_path)
 		quit(1)
 		return
-	qf.store_string(JSON.stringify(build_portal_json(), "  "))
+	qf.store_string(JSON.stringify(build_portal_json(scene_id), "  "))
 	qf.close()
-	print("导出 %s：%d 个传送点" % [portal_path, build_portal_json().size()])
+	print("导出 %s：%d 个传送点" % [portal_path, build_portal_json(scene_id).size()])
 	quit(0)
 
+## 合并大场景（village_forest）的 POI（POST /admin/scenes 的 pois 载荷）。
+## 与 world.gd POIS（village 专属）分开维护——B 全量合并后客户端离线 POIS 常量的迁移
+## 在 s1-hood P3-P4 补；服务端下发的就是这份。poi_grandma 的仙子台词 P4 填。
+const POIS_VF := [
+	{ "tile": [34, 9], "radius": 18.0, "trigger": "poi_pond", "name": "池塘", "aliases": ["湖", "水边", "河边"] },
+	{ "tile": [66, 63], "radius": 14.0, "trigger": "poi_grandma", "name": "外婆家", "aliases": ["外婆", "奶奶家", "小屋"] },
+	{ "tile": [30, 86], "radius": 16.0, "trigger": "poi_forest_deep", "name": "森林深处", "aliases": ["深林", "大森林", "林子深处"] },
+]
+
+## POI 载荷 → POST /admin/scenes 的 pois（tile 已是 [x,y]）。
+static func build_poi_json(scene_id: String) -> Array:
+	if scene_id == "village_forest":
+		return POIS_VF.duplicate(true)
+	return build_poi_json_village()
+
 ## world.gd 的 POIS 常量 → POST /admin/scenes 的 pois 载荷（tile 由 Vector2i 摊平成 [x,y]）。
-static func build_poi_json() -> Array:
+static func build_poi_json_village() -> Array:
 	var world_script: GDScript = load("res://scripts/world.gd")
 	var out: Array = []
 	for poi in world_script.POIS:
@@ -64,19 +88,19 @@ static func build_poi_json() -> Array:
 		})
 	return out
 
-## 村庄传送点：暂无。原先通往 forest/medieval/modern_city 的三对 portal 随那些场景退役
-## 一并移除（scene-retire）——village 现为独立单场景。新场景上线时在此加回对应 portal，
-## 并与对向场景的 build_portal_json() 互指（scene-portal-graph）。
-static func build_portal_json() -> Array:
+## 传送点：village 与 village_forest 均暂无。B 全量合并（世界主场景不切场景）不设 portal；
+## 将来若有跨场景需求在此加回，并与对向场景 build_portal_json() 互指（scene-portal-graph）。
+static func build_portal_json(_scene_id: String) -> Array:
 	return []
 
-## 构建 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。
-## 前置副作用：把 TerrainMap 复位成本地村庄地貌（组装规则要读它判水/高度）。
-static func build_terrain_bytes() -> PackedByteArray:
+## 构建指定场景的 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。
+## 前置副作用：configure(WorldGrid) 到该场景网格 + reset_scene 让 TerrainMap 画对应地貌
+## （组装规则要读它判水/高度）。同进程可能残留别的场景，故每次都重配重画。
+static func build_terrain_bytes(scene_id: String = "village") -> PackedByteArray:
+	WorldGrid.configure(SCENE_GRIDS.get(scene_id, WorldGrid.DEFAULT_GRID_TILES))
+	TerrainMap.reset_scene(scene_id)
 	var n := WorldGrid.GRID_TILES
 	var count := n * n
-	# 组装规则读 TerrainMap，先确保是干净的村庄 _paint()（同进程可能残留别的场景）
-	TerrainMap.reset()
 	var types := PackedByteArray()
 	types.resize(count)
 	var heights := PackedByteArray()
@@ -91,7 +115,7 @@ static func build_terrain_bytes() -> PackedByteArray:
 			types[i] = TerrainMap.tile_type(t)
 			heights[i] = TerrainMap.tile_height(t)
 			depths[i] = TerrainMap.tile_depth(t)
-	var composed: Dictionary = COMPOSE.compose("village")
+	var composed: Dictionary = COMPOSE.compose(scene_id)
 	return COMPOSE.build_v2_bytes(types, heights, depths, composed)
 
 static func _arg(name: String, fallback: String) -> String:

@@ -11,7 +11,7 @@ func _init() -> void:
 	var fails := 0
 
 	# ── 导出的 POI JSON 覆盖全部内置 POI ────────────────────────────────
-	var exported := EX.build_poi_json()
+	var exported := EX.build_poi_json("village")
 	fails += _check("导出数量 == 内置数量", exported.size(), (W.POIS as Array).size())
 
 	# ── 往返：导出 → JSON 文本 → 解析 → 与内置常量逐字段等价 ────────────
