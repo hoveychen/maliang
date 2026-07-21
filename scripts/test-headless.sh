@@ -260,10 +260,15 @@ run_macos_asr_test() {
 }
 run_macos_asr_test
 
-# ── e2e 驱动 SDK 自测（纯 python，假 TCP 服务端回放，不起游戏，<1s）─────────────
+# ── e2e 驱动 SDK 自测（纯 python，假 TCP 服务端回放/纯函数，不起游戏，<1s）─────────
 echo "== test_harness_sdk (python) =="
 if ! python3 "$ROOT/test/e2e/test_harness_sdk.py" >/dev/null 2>&1; then
   echo "-- test_harness_sdk FAILED"
+  fails=$((fails + 1))
+fi
+echo "== test_harness_delta (python) =="
+if ! python3 "$ROOT/test/e2e/test_harness_delta.py" >/dev/null 2>&1; then
+  echo "-- test_harness_delta FAILED"
   fails=$((fails + 1))
 fi
 

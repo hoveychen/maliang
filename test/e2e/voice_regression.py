@@ -43,45 +43,22 @@ sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from naming_e2e import Harness, adb, PACKAGE, LAUNCH_ACTIVITY, PORT, setup_forward
 
 
+# 这三个 helper 曾在此重复实现，harness 重写 P3 已整合进 Harness——此处只做薄委托，保留原调用签名
+# 与语义（wait 超时返 None、st 出错返 {}）。新代码请直接用 h.wait_until / h.wait_banner_stable / h.say_when_open。
 def st(h):
-    try:
-        return h.state()
-    except Exception:
-        return {}
+    return h._state_soft()
 
 
 def wait(h, pred, timeout=40, poll=1.0):
-    dl = time.time() + timeout
-    while time.time() < dl:
-        s = st(h)
-        if s and pred(s):
-            return s
-        time.sleep(poll)
-    return None
+    return h.wait_until(pred, "voice_regression wait", timeout, poll, soft=True)
 
 
 def wait_banner_stable(h, secs=5.0, timeout=45):
-    """等 banner 连续 secs 秒不变（=对方 TTS 放完）再返回其值。"""
-    dl = time.time() + timeout
-    last, since = None, time.time()
-    while time.time() < dl:
-        b = st(h).get("banner_text", "")
-        if b != last:
-            last, since = b, time.time()
-        elif time.time() - since >= secs:
-            return last
-        time.sleep(1.0)
-    return last
+    return h.wait_banner_stable(secs=secs, timeout=timeout)
 
 
 def say_when_open(h, text, tries=8):
-    """门禁开着才真喂（对方说完）。关着就等 banner 稳定再试。返回是否喂进去。"""
-    for i in range(tries):
-        r = h.send({"op": "say", "text": text})
-        if r.get("fed"):
-            return True
-        wait_banner_stable(h, secs=4.0, timeout=12)
-    return False
+    return h.say_when_open(text, tries=tries)
 
 
 def fresh_world(launch=True):
