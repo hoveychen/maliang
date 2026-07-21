@@ -240,11 +240,15 @@ export const LITTLE_RED_HOOD: StoryBook = {
 };
 
 // ── 第三册《白雪公主》（village_forest 合并大场景，1 幕互动数数游戏 + 尾声）────────────
-// 第一季册 3（docs/s1-snow-white-design.md）。数学（数到 7）。白雪在村庄核心搭话触发，
-// 幕 0 是【互动演出数数游戏】story_snow_count（点矮人数 1→7 + 再点每人盛一碗一一对应）——
-// 无 task 互动，演赢走 performReward 发盖章 story_snow（emitPerformReward，见 server §5）。
-// 尾声 story_snow_end 讲给小矮人听（复述），整册完结白雪 + 七矮人入住森林深处（跑腿大户）。
-// 七矮人降生在森林深处操场（poi_forest_deep≈(30,86) 那块林中空地）；白雪 gate 在村庄广场近端。
+// 第一季册 3（docs/s1-snow-white-design.md）。数学（数到 7）。白雪与七矮人同处森林深处操场，
+// 孩子走进森林在操场找到白雪、搭话触发；幕 0 是【互动演出数数游戏】story_snow_count
+// （点矮人数 1→7 + 再点每人盛一碗一一对应）——无 task 互动，演赢走 performReward 发盖章 story_snow
+// （emitPerformReward，见 server §5）。尾声 story_snow_end 讲给小矮人听（复述），整册完结
+// 白雪 + 七矮人入住森林深处（跑腿大户）。
+// ⚠️ 白雪 gate 必须与七矮人【同处操场】（不放村广场）：数数游戏纯 tap，需白雪+七矮人同屏，
+// 而演出相机 overview 框住全体 actor 中心并缩放适配（world.gd compute_overview_cam）——gate 若远在
+// 村广场，overview 会横跨 60 格把矮人缩成芝麻、点不到（P6 harness 坐实的 blocker，老板 2026-07-21 拍板同处）。
+// 七矮人 x∈[25,35] y∈[84,89] 中心≈(30,86)；白雪站簇北侧前方 (30,82) 面向矮人，孩子从村庄往南走到操场。
 
 export const SNOW_WHITE: StoryBook = {
   id: 'snow_white',
@@ -259,8 +263,9 @@ export const SNOW_WHITE: StoryBook = {
       voiceId: 'zh-TW-HsiaoYuNeural',
       visualDescription:
         'a fair-skinned girl with a short black bob and a red hairband, wearing a blue-and-yellow dress, gentle warm smile, standing upright like a person',
-      // 村庄核心广场近端（z<40 广场 T_PATH 内），gate 角色好找、搭话即触发。
-      position: { tileX: 30, tileY: 24 },
+      // 森林深处操场·七矮人簇北侧前方，面向矮人；与七矮人同处，孩子走进森林即遇见、搭话触发。
+      // （不放村广场：数数游戏纯 tap 需同屏，见册头 ⚠️ 与 docs/s1-snow-white-design.md §2。）
+      position: { tileX: 30, tileY: 82 },
       greetingStyle: 'warm',
     },
     {

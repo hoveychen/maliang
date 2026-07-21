@@ -54,6 +54,10 @@ await snow.say('这里好乱呀，我来帮小矮人们把家收拾好！', 'twi
 await stage.narrate('白雪想帮忙，可要先数清楚——一共有几个小矮人呢？');
 
 // ── 第一关：点一点，数矮人 ──
+// 相机回 overview：数数是纯 tap 多演员游戏，必须把白雪+七矮人全框进画面（focus(snow) 特写只框白雪、
+// 矮人在画外点不到——P6 harness 坐实的 blocker）。overview 取全体 actor 中心缩放适配
+// （world.gd compute_overview_cam），故此后两关全程七矮人同屏可 tap，直到收场再 focus(snow)。
+stage.camera.overview();
 await stage.narrate('小朋友，我们一个一个点点看，数数一共有几个小矮人，好不好？');
 await runTapPhase('数矮人', [
   [doc, () => doc.say('我是博士，数数交给我最在行！', 'nod')],
