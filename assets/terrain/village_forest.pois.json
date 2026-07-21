@@ -1,0 +1,44 @@
+[
+  {
+    "aliases": [
+      "湖",
+      "水边",
+      "河边"
+    ],
+    "name": "池塘",
+    "radius": 18.0,
+    "tile": [
+      34,
+      9
+    ],
+    "trigger": "poi_pond"
+  },
+  {
+    "aliases": [
+      "外婆",
+      "奶奶家",
+      "小屋"
+    ],
+    "name": "外婆家",
+    "radius": 14.0,
+    "tile": [
+      66,
+      63
+    ],
+    "trigger": "poi_grandma"
+  },
+  {
+    "aliases": [
+      "深林",
+      "大森林",
+      "林子深处"
+    ],
+    "name": "森林深处",
+    "radius": 16.0,
+    "tile": [
+      30,
+      86
+    ],
+    "trigger": "poi_forest_deep"
+  }
+]

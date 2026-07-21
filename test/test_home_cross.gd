@@ -49,13 +49,13 @@ func _tick() -> void:
 	# 走进完成 → enter_scene 发出 → 喂 scene_entered(村子)
 	if not fed and _count("enter_scene") >= 1:
 		_check("走进后发出 enter_scene", _count("enter_scene") >= 1, true)
-		_check("enter_scene 目标是 village", String(_last_of("enter_scene").get("sceneId", "")), "village")
+		_check("enter_scene 目标是主场景", String(_last_of("enter_scene").get("sceneId", "")), "village_forest")
 		_check("进入 CROSS_WAIT 阶段", scene.get("_home_phase"), HP_CROSS_WAIT)
 		_check("过场进行中", scene.get("_transitioning"), true)
 		reached_cross = true
 		scene.call("_on_scene_entered", {
-			"sceneId": "village",
-			"scene": { "sceneId": "village", "terrainAsset": "", "pois": [], "portals": [] },
+			"sceneId": "village_forest",
+			"scene": { "sceneId": "village_forest", "terrainAsset": "", "pois": [], "portals": [] },
 			"characters": [], "props": [],
 		})
 		fed = true
@@ -64,7 +64,7 @@ func _tick() -> void:
 	if fed and not done and not bool(scene.get("_homing")):
 		done = true
 		_check("回家结束 _homing=false", scene.get("_homing"), false)
-		_check("已切到 village", String(scene.get("_scene_id")), "village")
+		_check("已切到主场景", String(scene.get("_scene_id")), "village_forest")
 		_check("临时门全消散", (scene.get("_home_portals") as Array).size(), 0)
 		_check("玩家落在原点附近(≤3格)", _player_dist(HOME_TILE) <= 3, true)
 		_finish()

@@ -34,7 +34,7 @@ func _tick() -> void:
 		var p: Dictionary = scene.get("player")
 		if p.is_empty():
 			printerr("  ✗ 没有玩家节点"); fails += 1; _finish(); return
-		_check("起始就在村子里", String(scene.get("_scene_id")), "village")
+		_check("起始就在主场景（村庄+森林合并）", String(scene.get("_scene_id")), "village_forest")
 		scene.call("_go_home")
 		_check("回家启动 _homing", scene.get("_homing"), true)
 		_check("标记为非跨场景(软过场)", scene.get("_home_cross"), false)
@@ -52,7 +52,7 @@ func _tick() -> void:
 		_check("过场收尾后黑幕已淡回(_fade_a≈0)", float(scene.get("_fade_a")) <= 0.01, true)
 		# 同场景软过场不发任何换场景报文
 		_check("全程未发 enter_scene(不是换场景)", _count("enter_scene"), 0)
-		_check("仍在村子里(没换场景)", String(scene.get("_scene_id")), "village")
+		_check("仍在主场景(没换场景)", String(scene.get("_scene_id")), "village_forest")
 		# 末态：落原点、门清空、已解锁
 		_check("玩家落在原点附近(≤3格)", _player_dist(HOME_TILE) <= 3, true)
 		_check("临时门全消散", (scene.get("_home_portals") as Array).size(), 0)

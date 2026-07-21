@@ -57,7 +57,7 @@ func _tick() -> void:
 	# ── C. 离线软过场 ──
 	if frame == 18:
 		scene.set("online", false)
-		scene.set("_scene_id", "village")
+		scene.set("_scene_id", "village_forest") # 与 HOME_SCENE 同 → 软过场（同场景）分支
 		sent.clear()
 		# 把玩家挪离原点，好验证软过场真把它送回来
 		var p: Dictionary = scene.get("player")

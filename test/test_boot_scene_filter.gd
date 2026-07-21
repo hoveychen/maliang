@@ -35,7 +35,9 @@ func _run_checks() -> void:
 		{ "id": "fairy", "name": "小神仙", "isFairy": true, "sceneId": "village" },
 		{ "id": "legacy", "name": "存量角色" }, # 无 sceneId → 按 village
 	]
-	# 引导期 _scene_id 固定 village
+	# 当前场景 = village 时：只留 village 角色 + 仙女 + 存量（缺 sceneId 按 village）。
+	# （主场景已改 village_forest，此处显式置 village 验过滤逻辑本身——引导默认场景另由 home 系列测试覆盖。）
+	scene.set("_scene_id", "village")
 	var got: Array = scene.call("_filter_boot_characters", roster)
 	var ids: Array = []
 	for c in got:
