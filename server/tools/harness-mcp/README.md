@@ -46,6 +46,22 @@ claude mcp add maliang-pilot \
 
 真机把 `MALIANG_HARNESS_PORT` 设 8577，并先 `adb forward tcp:8577 tcp:8577`。
 
+## CDP 式双栏 web 控制面板（人可驱动）
+
+零依赖：`node:http` 服务一张 vanilla HTML 面板 + JSON API，复用同一个 `tcp_client.ts`。
+
+```bash
+MALIANG_HARNESS_PORT=8578 node server/tools/harness-mcp/src/serve_web.ts --web-port 8600
+# 浏览器打开 http://127.0.0.1:8600
+```
+
+- **左栏**：实时视窗截图（`/api/shot.jpg`，不降采样→与 `screen_rect` 1:1）+ 无障碍元素矩形叠加
+  （SubViewport 元素紫框标注：真 tap 到不了）。
+- **右栏**：当前可用动作列表，点 `do` 即执行（真输入优先）；需参数的动作（如 `say`）会弹输入框。
+  面板顶部显示上一次 `do` 的 `execution`/`settled`/`delta`。
+
+API：`GET /api/observe`（state+actions+elements）、`GET /api/shot.jpg`、`POST /api/do {action,args}`。
+
 ## 测试
 
 ```bash
