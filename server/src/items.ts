@@ -47,6 +47,7 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   builtin('village_sign', '村口路牌', 'sdf_res:village_sign', 1, true),
   // 绿野仙踪（s1-oz）专属布景 prop
   builtin('corn_stalk', '玉米秆', 'sdf_res:corn_stalk', 1, true),
+  builtin('emerald_castle', '翡翠城堡', 'sdf_res:emerald_castle', 3, true), // 黄砖路尽头的地标（span 3 同 house）
 
   // ── 未来机器人主题（world-themes P2 打样；全 CC0：Quaternius 机器人 + Kenney Space Kit）──
   // 机器人（Quaternius，assets/scifi/robots/*.glb）
