@@ -9,6 +9,9 @@ const SPECS := [
 	"res://assets/sdf_props/tree_puff_b.json",
 	"res://assets/sdf_props/tree_puff_c.json",
 	"res://assets/sdf_props/bush_puff.json",
+	# 绿野仙踪静态布景 prop（禁 runtime 惰烘，资产期预烘一次；chunk_manager._spawn_static_sdf 命中 .res 直接上静态实例）
+	"res://assets/sdf_props/corn_stalk.json",
+	"res://assets/sdf_props/emerald_castle.json",
 ]
 
 func _initialize() -> void:
