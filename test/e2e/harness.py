@@ -175,7 +175,10 @@ class Harness:
     def talk_npc(self):
         return self.send({"op": "talk_npc"})
 
-    # ── 触屏/手势（手势完成才回包：读超时按手势时长放宽）──
+    # ── 触屏/手势（LEGACY 盲坐标层，对齐 Playwright §3.1）──
+    # ⚠️ 盲坐标 tap/drag/swipe/long_press/pinch 全部【跳过 actionability】(不查可见/遮挡/enabled)，
+    #    打不中会被当点地面把玩家支使走。**新脚本走 access→actions→do()**：按 id 寻址、真输入执行、
+    #    落定才回包。这些保留只为极少数没有可寻址元素的场景（纯坐标手势）与 back-compat。
     def tap(self, x, y):
         return self.send({"op": "tap", "x": x, "y": y})
 
@@ -197,6 +200,8 @@ class Harness:
 
     # ── 语义动作 ──
     def click_ui(self, text=None, path=None):
+        """LEGACY（§3.1/§3.2）：BaseButton 命中走 pressed.emit() 会【穿透遮罩】（假绿灯老坑），
+        且 text 多命中现在报 ambiguous（strict）。**新脚本用 do('press:btn:<path>')**（真触屏、遮罩正确吞）。"""
         cmd = {"op": "click_ui"}
         if text:
             cmd["text"] = text
@@ -214,6 +219,8 @@ class Harness:
         return self.send({"op": "pickup", "tileX": tile_x, "tileY": tile_y, "edgeSide": edge_side})
 
     def teleport(self, tile_x=None, tile_y=None, near=False):
+        """⚠️ DEBUG-ONLY 瞬移（§3.6）：**会污染 e2e 有效性**——瞬移作弊替代真走路，本该验证「孩子真的走到了」
+        却跳过寻路/引路。仅供摄影找机位/测试 setup。常规导航用 do('walk:poi:…')/do('enter_portal:…')（真走）。"""
         cmd = {"op": "teleport", "near": near}
         if tile_x is not None:
             cmd.update({"tileX": tile_x, "tileY": tile_y})
