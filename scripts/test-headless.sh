@@ -101,6 +101,7 @@ UNIT_TESTS=(
   test_presence
   test_player_talk
   test_terrain_export
+  test_terrain_village_forest
   test_terrain_load
   test_terrain_v2
   test_terrain_v3_crosscheck

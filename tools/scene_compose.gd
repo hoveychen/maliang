@@ -43,6 +43,24 @@ const SDF_PROPS := [
 	{ "item": "village_sign", "tile": Vector2i(36, 24), "yaw": 190.0, "search": 2 },
 ]
 
+## 合并大场景（village_forest，100 格）的手工地标：村庄核心近原点带的农舍 + 水井，
+## 外婆家小屋在穿林小径尽头（(66,64) 空地南口，面朝孩子来路）。坐标见
+## docs/s1-merged-scene-layout.md；森林布景/树木由散布层出，此处只放「人造建筑」锚点。
+## ⚠️ 三只小猪的房子/POI 迁入（B 全量合并）在 s1-hood P3-P4 再补，本表先只放村庄骨架 + 外婆家占位屋。
+const LANDMARKS_VF := [
+	{ "item": "well", "tile": Vector2i(20, 16), "yaw": 0.0, "search": 0 },   # 广场水井
+	{ "item": "house_0", "tile": Vector2i(11, 10), "yaw": 90.0, "search": 2 },
+	{ "item": "house_1", "tile": Vector2i(29, 11), "yaw": 180.0, "search": 2 },
+	{ "item": "house_2", "tile": Vector2i(10, 24), "yaw": 90.0, "search": 2 },
+	{ "item": "house_3", "tile": Vector2i(31, 22), "yaw": 270.0, "search": 2 },
+	{ "item": "house_2", "tile": Vector2i(66, 60), "yaw": 0.0, "search": 2 },  # 外婆家小屋（占位，P4 填实篱笆/门）
+]
+
+## village_forest 的 SDF 可动物件：村北林口一块路牌，指向森林。
+const SDF_PROPS_VF := [
+	{ "item": "village_sign", "tile": Vector2i(23, 38), "yaw": 200.0, "search": 2 },
+]
+
 ## 内置物品的占地/压路语义（与 server items.ts BUILTIN_ITEMS 必须同步；
 ## P4 起客户端渲染层也从这里取 footprint——单一副本，别在别处再抄）。
 const ITEM_SPAN := {
@@ -76,11 +94,16 @@ static func compose(scene_id: String) -> Dictionary:
 
 	OccupancyMap.clear()
 
-	# ── 手工锚点（村庄专属）：地标先占地，SDF 物件次之——与 _skin 顺序一致 ──
+	# ── 手工锚点（各场景专属）：地标先占地，SDF 物件次之——与 _skin 顺序一致 ──
 	if scene_id == "village":
 		for lm in LANDMARKS:
 			_place_anchor(item_ref, item_arg, palette, lm)
 		for sp in SDF_PROPS:
+			_place_anchor(item_ref, item_arg, palette, sp)
+	elif scene_id == "village_forest":
+		for lm in LANDMARKS_VF:
+			_place_anchor(item_ref, item_arg, palette, lm)
+		for sp in SDF_PROPS_VF:
 			_place_anchor(item_ref, item_arg, palette, sp)
 
 	# ── 分区散布：全图行主序逐 tile 判定（草丛不占位，其余 1×1 占地）──
@@ -194,7 +217,51 @@ static func _deco_kind(scene_id: String, gt: Vector2i) -> int:
 	# 新场景各自定义散布规则时在此加分支。
 	if scene_id == "village":
 		return _deco_kind_village(gt)
+	if scene_id == "village_forest":
+		return _deco_kind_village_forest(gt)
 	return DECO_NONE
+
+## 合并大场景散布：村庄核心（近端）整洁疏树，往森林深处（z 大）越走越密；
+## 穿林小径/跑道走 T_PATH → 自动排除（保持明路）；外婆家/七矮人两处林间空地留空。
+## 见 docs/s1-merged-scene-layout.md。
+static func _deco_kind_village_forest(gt: Vector2i) -> int:
+	if TerrainMap.tile_type(gt) != TerrainMap.T_GRASS:
+		return DECO_NONE  # 路面（广场/小径/跑道）与水面自动排除，保持明路
+	var roll := posmod(hash(Vector2i(gt.x * 3 + 11, gt.y * 7 + 5)), 100)  # 与外观 hash 解耦
+	# 出生林间空地（环面距原点 8 tile 内）：开阔便于新手起步
+	if _tor_dist(gt, Vector2i.ZERO) <= 8.0:
+		return DECO_TUFT if roll < 10 else DECO_NONE
+	# 岸边一圈芦苇灌木
+	if _near_water(gt):
+		if roll < 24:
+			return DECO_BUSH
+		return DECO_TUFT if roll < 50 else DECO_NONE
+	# 村庄核心（近端 z<38）：整洁，只零星疏树/灌木
+	if gt.y < 38:
+		if roll < 4:
+			return DECO_TREE
+		if roll < 8:
+			return DECO_BUSH
+		return DECO_TUFT if roll < 18 else DECO_NONE
+	# 外婆家林间空地（(66,64) 半径 6）：开阔院子
+	if _tor_dist(gt, Vector2i(66, 64)) <= 6.0:
+		return DECO_TUFT if roll < 12 else DECO_NONE
+	# 森林深处·七矮人空地（(30,86) 半径 8，白雪预留）：开阔
+	if _tor_dist(gt, Vector2i(30, 86)) <= 8.0:
+		return DECO_TUFT if roll < 12 else DECO_NONE
+	# 跑道两侧缓冲（x>=84）：稀疏，别糊住跑道
+	if gt.x >= 84:
+		return DECO_TUFT if roll < 15 else DECO_NONE
+	# 其余森林带（z>=38）：密林——隔位下种防挤团，密度远高于村庄
+	if posmod(gt.x + gt.y, 2) == 0 and roll < 46:
+		return DECO_TREE
+	if roll < 12:
+		return DECO_TREE
+	if roll < 18:
+		return DECO_BUSH
+	if roll < 22:
+		return DECO_ROCK
+	return DECO_TUFT if roll < 40 else DECO_NONE
 
 ## village 分区散布：从北往南——山地（松树/岩石随海拔变稀）、西南密林（隔位下种的高密度树）、
 ## 果园（规则行距的浆果灌木）、瞭望丘坡面、村核心（整洁）、出生空地（开阔）、

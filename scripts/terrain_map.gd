@@ -119,6 +119,10 @@ static var _edges: Array[PackedInt32Array] = []
 static var _palette := PackedStringArray()
 ## true = 数组来自服务端下发的 .mltr，而非本地 _paint()。离线/回测时恒为 false。
 static var _from_server := false
+## 本地 _ensure_built() 该画哪张地图。默认 "village"（既有唯一场景）；
+## "village_forest" 走 100 格合并大场景（第一季，docs/s1-merged-scene-layout.md）。
+## 导出工具 / 回测用 reset_scene() 切；服务端下发地形时此值不参与（load_from_bytes 覆盖）。
+static var _paint_scene := "village"
 
 const MLTR_MAGIC := "MLTR"
 const MLTR_VERSION_1 := 1
@@ -146,6 +150,13 @@ static func reset() -> void:
 	_edges = []
 	_palette = PackedStringArray()
 	_from_server = false
+	_paint_scene = "village"
+
+## 清空并指定下一次本地重建画哪张地图（"village" / "village_forest"）。
+## 调用方须自行确保 WorldGrid.configure() 已按该场景网格边长（village=75 / village_forest=100）生效。
+static func reset_scene(scene_id: String) -> void:
+	reset()
+	_paint_scene = scene_id
 
 ## 载入服务端下发的 .mltr 地形（格式见 server/src/terrain.ts 与 tools/export_terrain.gd）。
 ## 兼容 v1（三平面，物品层补零）与 v2（九平面 + palette）。
@@ -425,7 +436,10 @@ static func _ensure_built() -> void:
 		z.resize(n * n)
 		_edges.append(z)
 	_palette = PackedStringArray()
-	_paint()
+	if _paint_scene == "village_forest":
+		_paint_village_forest()
+	else:
+		_paint()
 
 static func _paint() -> void:
 	# ---- 高地 ----
@@ -479,6 +493,35 @@ static func _paint() -> void:
 		if _types[i] == T_WATER:
 			_depths[i] = 1
 	_paint_ellipse_depth(24.5, 24.5, 3.6, 2.7, 2)
+
+## 第一季合并大场景（100 格 village+forest；docs/s1-merged-scene-layout.md）。
+## 约定：z 小 = 村庄近端（家，玩家出生在原点角），z 大 = 森林深处（远）。
+## 只画「形状本身讲故事」的地貌骨架——广场、蜿蜒穿林小径、村东池塘、右缘直跑道；
+## 外婆家/七矮人两处「林间空地」= 草地留空，密林与布景由 scene_compose.compose("village_forest") 出。
+## 前置：调用方须先 WorldGrid.configure(100)（本函数按 GRID_TILES 派生尺寸）。
+static func _paint_village_forest() -> void:
+	# ---- 村庄核心（近原点带 z<40）----
+	_paint_rect_type(16, 12, 24, 20, T_PATH)   # 中央广场（水井所在）
+	# 出生角 → 广场的引路小径（玩家 spawn 在原点附近，给条明路进村）
+	_paint_polyline_type([Vector2(3.5, 3.5), Vector2(10.5, 8.5), Vector2(16.5, 14.5)], 0.8, T_PATH)
+	_paint_rect_type(19, 20, 21, 40, T_PATH)   # 广场 → 村北林口（接穿林小径）
+	_paint_rect_type(24, 15, 34, 17, T_PATH)   # 广场东巷（农舍）
+	_paint_rect_type(8, 15, 15, 17, T_PATH)    # 广场西巷（农舍）
+	_paint_ellipse_type(34.5, 9.5, 5.0, 4.0, T_WATER)  # 村东池塘
+
+	# ---- 穿林小径（村北林口 → 外婆家），一条要走完的蜿蜒路 ----
+	_paint_polyline_type([
+		Vector2(20.5, 40.5), Vector2(28.5, 46.5), Vector2(40.5, 50.5),
+		Vector2(52.5, 56.5), Vector2(60.5, 60.5), Vector2(66.5, 64.5)], 1.0, T_PATH)
+
+	# ---- 右缘跑道（龟兔预留）：南北向直跑道，清一条明路 ----
+	_paint_rect_type(87, 8, 89, 92, T_PATH)
+
+	# ---- 水深：水面基础浅水 1 级，池塘中心加深 2 级 ----
+	for i in range(_types.size()):
+		if _types[i] == T_WATER:
+			_depths[i] = 1
+	_paint_ellipse_depth(34.5, 9.5, 3.2, 2.4, 2)
 
 ## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂类型（含端点）。
 static func _paint_rect_type(x0: int, z0: int, x1: int, z1: int, t: int) -> void:
