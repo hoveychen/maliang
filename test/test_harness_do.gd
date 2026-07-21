@@ -40,6 +40,7 @@ class StubWorld extends Node:
 	var _in_creation := false
 	var _creation_options: Array = []
 	var _phone_cam := false
+	var _bench_freeze := false
 	var _play_blocked := false
 	var _stage_active := false
 	var talk_npc_calls: Array = []
@@ -214,6 +215,22 @@ func _run_once() -> void:
 	stub._phone_cam = true
 	fails += _check("手机开→SubViewport 元素出现", has_sub.call(server._collect_all_elements(false)), true)
 	stub._phone_cam = false
+
+	print("[统一输入门 _act_gate：loading/intro(_bench_freeze) 等阻塞态一处判，交互动作 disabled+reason]")
+	stub._bench_freeze = true
+	fails += _check("bench_freeze → gated", server._act_gate()["gated"], true)
+	fails += _check("bench_freeze → reason loading_intro", server._act_gate()["reason"], "loading_intro")
+	var gated_els := server._collect_all_elements(false)
+	var npc_el := {}
+	for el in gated_els:
+		if String((el as Dictionary).get("kind", "")) == "npc":
+			npc_el = el
+	fails += _check("gated 下有 npc 元素", npc_el.is_empty(), false)
+	if not npc_el.is_empty():
+		var ta := (npc_el["actions"][0]) as Dictionary
+		fails += _check("bench_freeze 下 npc talk disabled", ta.get("enabled"), false)
+		fails += _check("bench_freeze npc talk reason", ta.get("reason_disabled"), "loading_intro")
+	stub._bench_freeze = false
 
 	print("[真 speaking 位：快照反映 _fsm_inputs().speaking()（对齐 Playwright §3.3）]")
 	stub._speaking = true
