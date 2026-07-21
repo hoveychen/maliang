@@ -3312,8 +3312,44 @@ func _tap_pick(screen_pos: Vector2) -> void:
 	_clear_approach()
 	var ground := _pick_ground(screen_pos)
 	if ground != Vector2.INF and not player.is_empty():
+		# 点到不可进的布景建筑：别让玩家走过去卡门口（_pick_ground 只对地表求交、无视建筑网格，
+		# 射线打到房子脚下地面照样会下发移动，结果被寻路挡停在墙边）。改让点点飞过去给一句温柔
+		# 解释，把死胡同变成一次符合「情感联系/只问不答」的互动（interaction-feedback B 档）。
+		if _try_explain_building(ground):
+			return
 		_show_tap_marker(ground)
 		_move_player_to(ground)
+
+## 点到不可进建筑（静态占用 footprint）时，点点飞过去解释；接管本次点击返回 true（调用方不再走玩家）。
+## 点点正忙（引路/与她对话中）则不接管，返回 false 让原「走过去」逻辑继续——她一次只做一件事。
+## 台词分两味：该建筑在 homes 表里 = 某人的家；否则纯布景（α 通用预制台词，不带具体名字）。
+func _try_explain_building(ground: Vector2) -> bool:
+	if not OccupancyMap.static_at(ground):
+		return false
+	var fairy := _find_fairy()
+	if fairy.is_empty() or not _fairy_guide.is_empty() or selected == fairy.get("node"):
+		return false
+	var tile := WorldGrid.to_tile(ground)
+	# 复用 _fairy_poi「飞过去→说台词→停留→回来」机制（见 _update_fairy 的 POI 分支 / _step_fairy_poi）。
+	_fairy_poi = {
+		"point": WorldGrid.from_tile_center(tile),
+		"trigger": "house_locked" if _home_near_tile(tile) else "prop_scenery",
+		"spoke": false,
+		"hold": 2.0,
+	}
+	return true
+
+## tapped tile 附近（容差半径内）是否有登记的「谁的家」。homes 授权 tile 常是建筑锚点，
+## 孩子点在建筑任一格都该算命中，故按世界距离容差匹配而非精确 tile 相等。无 homes/无匹配 → false。
+const HOME_MATCH_R := 3.5 ## tile 容差半径（大建筑锚点到被点边缘的距离）
+func _home_near_tile(tile: Vector2i) -> bool:
+	if _homes.is_empty():
+		return false
+	var c := WorldGrid.from_tile_center(tile)
+	for htile in _homes:
+		if WorldGrid.shortest_delta(c, WorldGrid.from_tile_center(htile as Vector2i)).length() <= HOME_MATCH_R * WorldGrid.TILE_SIZE:
+			return true
+	return false
 
 ## 玩家移动指令：新点击替换旧指令（寻路 waypoint 队列 + Mover 规则由执行器统一处理）。
 func _move_player_to(target: Vector2, arrive := 0.0) -> void:

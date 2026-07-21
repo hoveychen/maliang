@@ -111,6 +111,38 @@ func _run_checks() -> void:
 	var bub2 := npc.get("notice_bubble") as Sprite3D
 	_check("tap-feedback:点中村民后头顶表情泡立即弹出可见", bub2 != null and bub2.visible, true)
 
+	# E) 点不可进建筑 → 点点飞过去解释,不走玩家(interaction-feedback B 档路由护栏)。
+	var fairy: Dictionary = scene.call("_find_fairy")
+	if fairy.is_empty():
+		_check("explain-building 前置:离线世界有小仙子", false, true)
+		return
+	var htile := Vector2i(40, 40)
+	var hground: Vector2 = WorldGrid.from_tile_center(htile)
+	# 空静态层:任何空地都不该被点点接管——否则孩子永远走不动路(负面护栏)。
+	OccupancyMap.clear()
+	scene.set("_fairy_guide", {})
+	scene.set("_fairy_poi", {})
+	_check("explain-building:空地不接管(返回 false,照常走过去)", scene.call("_try_explain_building", hground), false)
+	# 整层置静态 = 该 ground 落在建筑里;homes 内 → 家的台词。
+	var sc := PackedByteArray(); sc.resize(OccupancyMap.CELLS * OccupancyMap.CELLS); sc.fill(1)
+	OccupancyMap.load_static(sc)
+	scene.set("_homes", { htile: "bear" })
+	scene.set("_fairy_poi", {})
+	_check("explain-building:点建筑被点点接管(返回 true)", scene.call("_try_explain_building", hground), true)
+	var poi: Dictionary = scene.get("_fairy_poi")
+	_check("explain-building:接管后 _fairy_poi 已设(点点将飞过去说)", not poi.is_empty(), true)
+	_check("explain-building:homes 内建筑→说家的台词", String(poi.get("trigger", "")), "house_locked")
+	# 不在 homes 的建筑 → 通用布景台词。
+	scene.set("_homes", {})
+	scene.set("_fairy_poi", {})
+	scene.call("_try_explain_building", hground)
+	_check("explain-building:非 homes 建筑→说布景台词", String((scene.get("_fairy_poi") as Dictionary).get("trigger", "")), "prop_scenery")
+	# 引路中不接管:她一次只做一件事。
+	scene.set("_fairy_guide", { "plan": {} })
+	_check("explain-building:引路中不接管(返回 false)", scene.call("_try_explain_building", hground), false)
+	scene.set("_fairy_guide", {})
+	OccupancyMap.clear()
+
 func _check(name: String, got: Variant, want: Variant) -> void:
 	if got == want:
 		print("  ok %s" % name)

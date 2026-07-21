@@ -68,6 +68,12 @@ static func to_cell(p: Vector2) -> Vector2i:
 	var w := WorldGrid.wrap_pos(p)
 	return Vector2i(int(w.x / CELL_SIZE), int(w.y / CELL_SIZE))
 
+## 该世界坐标是否落在静态占用（地形矩阵派生的建筑/树/石 footprint）里。
+## interaction-feedback B 档：点这类不可通行布景时，点点飞过去解释而非让玩家走去卡门口。
+static func static_at(p: Vector2) -> bool:
+	_ensure()
+	return (_occ[_idx(to_cell(p))] & BIT_STATIC) != 0
+
 ## tile 索引 → 该 tile 的 NW 半格索引。
 static func tile_to_cell(t: Vector2i) -> Vector2i:
 	return Vector2i(posmod(t.x, WorldGrid.GRID_TILES) * 2, posmod(t.y, WorldGrid.GRID_TILES) * 2)
