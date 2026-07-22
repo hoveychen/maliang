@@ -48,24 +48,24 @@ func _init() -> void:
 	fails += _check("客户端载入 ok", r["ok"], true)
 	fails += _check("载入后 GRID_TILES = 50", WorldGrid.GRID_TILES, 50)
 
-	# ── 地板 / 四壁落对 ────────────────────────────────────────────────────
+	# ── 地板 / 四壁落对（房间从实心里掏出：室内木地板，室外实心墙体）──────────
 	fails += _check("房间中心 = 木地板", TerrainMap.tile_type(Vector2i(25, 25)), TerrainMap.T_WOOD_FLOOR)
-	fails += _check("墙外角落 = 木地板", TerrainMap.tile_type(Vector2i(2, 2)), TerrainMap.T_WOOD_FLOOR)
-	fails += _check("北墙 = 墙面", TerrainMap.tile_type(Vector2i(25, 16)), TerrainMap.T_TOY_WALL)
-	fails += _check("西墙 = 墙面", TerrainMap.tile_type(Vector2i(16, 25)), TerrainMap.T_TOY_WALL)
-	fails += _check("东墙 = 墙面", TerrainMap.tile_type(Vector2i(33, 25)), TerrainMap.T_TOY_WALL)
-	fails += _check("南墙 = 墙面", TerrainMap.tile_type(Vector2i(20, 33)), TerrainMap.T_TOY_WALL)
+	fails += _check("墙外角落 = 实心墙体（非地面！）", TerrainMap.tile_type(Vector2i(2, 2)), TerrainMap.T_TOY_WALL)
+	fails += _check("北壁 = 墙面", TerrainMap.tile_type(Vector2i(25, 16)), TerrainMap.T_TOY_WALL)
+	fails += _check("西壁 = 墙面", TerrainMap.tile_type(Vector2i(16, 25)), TerrainMap.T_TOY_WALL)
+	fails += _check("东壁 = 墙面", TerrainMap.tile_type(Vector2i(33, 25)), TerrainMap.T_TOY_WALL)
+	fails += _check("南壁 = 墙面", TerrainMap.tile_type(Vector2i(20, 33)), TerrainMap.T_TOY_WALL)
 	fails += _check("墙角 = 墙面", TerrainMap.tile_type(Vector2i(16, 16)), TerrainMap.T_TOY_WALL)
-	# 南墙门洞（对齐出口 portal 24,32）：2 格复原成平地板
+	# 南墙门洞（对齐出口 portal 24,32）：2 格掏成平地板
 	fails += _check("南墙门洞左 = 地板", TerrainMap.tile_type(Vector2i(24, 33)), TerrainMap.T_WOOD_FLOOR)
 	fails += _check("南墙门洞右 = 地板", TerrainMap.tile_type(Vector2i(25, 33)), TerrainMap.T_WOOD_FLOOR)
-	fails += _check("门洞高度 = 0（可走出）", TerrainMap.tile_height(Vector2i(24, 33)), 0)
+	fails += _check("门洞高度 = 0", TerrainMap.tile_height(Vector2i(24, 33)), 0)
 
-	# ── 高度：墙抬高、室内平地板 ───────────────────────────────────────────
-	fails += _check("北墙抬高 = 2", TerrainMap.tile_height(Vector2i(25, 16)), 2)
-	fails += _check("墙角抬高 = 2", TerrainMap.tile_height(Vector2i(16, 16)), 2)
+	# ── 高度：墙外实心抬高、室内平地板（关键：墙外不是 h0 地面）──────────────
+	fails += _check("北壁抬高 = 3", TerrainMap.tile_height(Vector2i(25, 16)), 3)
+	fails += _check("墙角抬高 = 3", TerrainMap.tile_height(Vector2i(16, 16)), 3)
 	fails += _check("室内净空是平地板", TerrainMap.tile_height(Vector2i(25, 25)), 0)
-	fails += _check("墙外地板也是平地", TerrainMap.tile_height(Vector2i(2, 2)), 0)
+	fails += _check("墙外实心也抬高 = 3（不露地面）", TerrainMap.tile_height(Vector2i(2, 2)), 3)
 
 	# ── 空房：无 POI、无物品（家具靠布置模式后摆）─────────────────────────
 	fails += _check("home_interior 无 POI", EX.build_poi_json("home_interior").size(), 0)
