@@ -690,6 +690,24 @@ func _snapshot() -> Dictionary:
 		# 会话标识 / 喊话对象。
 		snap["world_id"] = String(w.get("world_id") if w.get("world_id") != null else "")
 		snap["talk_pid"] = String(w.get("_talk_pid") if w.get("_talk_pid") != null else "")
+	# onboarding 态（flow-registry P9）：非 world 场景（首次建角色）时 _host() 是 onboarding 节点，world_id
+	# 为空。暴露「当前哪页/阶段」，好让 monkey harness 判页决策——否则 harness/MCP 看不见 onboarding 进度。
+	# onboarding.gd 有 _page_kind()→intro|avatar_chat|generate|story|""；据此路由：
+	#   intro   说名字 → 服务端念「你叫X对不对呀」→ _intro_confirm 行显 → do press ✓
+	#   avatar_chat  点点动态提问，点图标卡（SubViewport Button）或开麦答；done 翻页 generate
+	#   generate  照镜子 refine：说想改哪 或说「不用改了」收尾 → change_scene world（world_id 出现=终止）
+	# 注意：名字页【不】走 VC 确认模式（onboarding.gd _ready 注释），故 vc_confirming 恒 false——
+	# 判「名字已识别待确认」须键 _intro_confirm.visible，不是 vc_confirming。
+	if w != null and w.has_method("_page_kind"):
+		snap["onboarding_page"] = String(w.call("_page_kind"))
+		var icf: Variant = w.get("_intro_confirm")
+		snap["onboarding_intro_confirm"] = icf != null and icf is Control and (icf as Control).visible
+		snap["onboarding_intro_submitting"] = bool(w.get("_intro_submitting")) if w.get("_intro_submitting") != null else false
+		snap["onboarding_chat_busy"] = bool(w.get("_chat_busy")) if w.get("_chat_busy") != null else false
+		snap["onboarding_refine_ready"] = bool(w.get("_refine_ready")) if w.get("_refine_ready") != null else false
+		snap["onboarding_refine_busy"] = bool(w.get("_refine_busy")) if w.get("_refine_busy") != null else false
+		snap["onboarding_refine_count"] = int(w.get("_refine_count")) if w.get("_refine_count") != null else 0
+		snap["onboarding_prefetch"] = String(w.get("_prefetch_state")) if w.get("_prefetch_state") != null else ""
 	var vc := _vc()
 	if vc != null:
 		snap["vc_open"] = vc.is_open()
@@ -1044,12 +1062,17 @@ func _collect_all_elements(with_texts: bool) -> Array:
 	var tree := get_tree()
 	if tree != null and tree.root != null:
 		var phone_open := _phone_is_open()
+		# onboarding（首次建角色）的页面渲进 PaperBook 的跨页 SubViewport——它是当前唯一的全屏交互面，
+		# 其按钮（名字✓、形象卡、照镜子收尾）正是孩子要点的。故在 onboarding 场景放行非 root 视口元素，
+		# 否则 monkey 的 do press:btn 找不到它们（flow-registry P9）。world 里背景 SubViewport（关着的手机）照旧过滤。
+		var host := _host()
+		var onboarding := host != null and host.has_method("_page_kind")
 		var ui_els := []
 		_collect_ui(tree.root, "root", with_texts, ui_els)
 		for e in ui_els:
 			var el := _control_to_element(e as Dictionary)
 			# 手机没开:手机内屏(SubViewport)的元素不可交互,不该枚举(老板在面板看到关着的手机按钮蓝框即此 bug)。
-			if String(el.get("viewport", "root")) != "root" and not phone_open:
+			if String(el.get("viewport", "root")) != "root" and not phone_open and not onboarding:
 				continue
 			out.append(el)
 	return out
