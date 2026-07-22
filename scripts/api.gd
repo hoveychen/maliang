@@ -260,17 +260,24 @@ func fetch_terrain(world_id: String, scene_id: String, version := 0) -> Dictiona
 ## gpu_compress：解码后做显存块压缩（见 _compress_for_gpu）。动画图集走 true——它是显存大头
 ## （三段 93 帧，未压缩 ~17MB/角色）。静态立绘/图标走 false：它们小，且会被放大了给孩子看，
 ## 块压缩的色块瑕疵在大尺寸上更容易被看出来。
-func fetch_texture(asset_hash: String, gpu_compress := false) -> Texture2D:
+##
+## cache_in_mem：解码后的纹理是否进 _tex_mem（默认进，永不驱逐）。角色动画 LOD 的 24fps 高保真
+## 图集走 false——它按最近 N 动态升降，若进了永不驱逐的 _tex_mem，则「跌出 N 集丢引用→回收显存」
+## 就失效了（图集常驻，峰值显存随本会话见过的角色数无界增长）。走 false：只有 CharAnimLod 的强
+## 引用池持有它，跌出 N 集丢引用即无人引用→显存回收。代价是重新入集要再解码一次（磁盘字节仍缓存，
+## 不重下载；解码在 worker 线程 ~4ms）。见 world._raise_char_hi / docs/char-anim-lod。
+func fetch_texture(asset_hash: String, gpu_compress := false, cache_in_mem := true) -> Texture2D:
 	if asset_hash.is_empty():
 		return null
 	if _tex_mem.has(asset_hash):
 		return _tex_mem[asset_hash]
-	# 磁盘缓存命中：解码后进内存，直接返回，不发网络请求
+	# 磁盘缓存命中：解码后（按需）进内存，直接返回，不发网络请求
 	var cached := _cache_read(asset_hash)
 	if not cached.is_empty():
 		var ctex := await _decode_image_async(cached, gpu_compress)
 		if ctex != null:
-			_tex_mem[asset_hash] = ctex
+			if cache_in_mem:
+				_tex_mem[asset_hash] = ctex
 			return ctex
 		# 缓存文件损坏（解码失败）：往下走重新下载覆盖
 	var http := HTTPRequest.new()
@@ -287,8 +294,9 @@ func fetch_texture(asset_hash: String, gpu_compress := false) -> Texture2D:
 	var tex := await _decode_image_async(buf, gpu_compress)
 	if tex == null:
 		return null
-	_cache_write(asset_hash, buf) # 落盘供下次免下载（内容寻址，永久有效）
-	_tex_mem[asset_hash] = tex
+	_cache_write(asset_hash, buf) # 落盘供下次免下载（内容寻址，永久有效）——与是否进内存无关
+	if cache_in_mem:
+		_tex_mem[asset_hash] = tex
 	return tex
 
 ## 轮询立绘 idle 动画状态。返回 { status, animAsset?, meta? }；

@@ -82,6 +82,7 @@ UNIT_TESTS=(
   test_task_chip_portrait
   test_anim_clip_pick
   test_atlas_compress
+  test_tex_mem_cache
   test_player_profile
   test_my_world_api
   test_bootstrap_world_select
