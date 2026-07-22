@@ -82,6 +82,7 @@ run_flow  name=enter_world          # MCP 工具；带参: run_flow name=naming_
 python3 test/e2e/pilot_runner.py --flow enter_world [--args '{"name":"小火箭"}'] [--json]   # CLI 等价
 ```
 - `run_flow` **先按 `depends` 拓扑序跑前置链**再跑本体：如 `enter_world`（诚实真输入进世界，已在世界则记 `reused` 跳过导航）是最常见前置，声明 `depends:[enter_world]` 的 flow 会自动先把你带进世界。
+  - **首次设备/没角色档**：`enter_world` 会诚实报错（菜单分流进 onboarding、语音建角色，它不做）。这时用 `onboarding`（同为 `setup`，provides 同一组世界就绪条件）——它 monkey 跑过完整建角色：菜单→绘本→说名字(`say`)→点 ✓ 确认→形象对话点卡→照镜子按 ✓ 收尾→落档进世界。已有角色则记 `reused`（幂等）。带参 `run_flow name=onboarding args={"name":"小马"}`。
 - 回包带 **`coverage`**：`{used_setup:[...], skipped:[...], bypassed_regression}`——**旁路日志**。哪条前置被复用、有没有真跑到回归都显式可见；`bypassed_regression=true` = 这次只做了 setup、没真验回归。**绝不静默跳回归。**
 - **`list_flows` 每条带 `available:{ok,reasons}`**（按当前游戏 state 算，对齐 action 的 `enabled`/`reason_disabled`）：`ok:true`=现在能跑、`false`=当前不可跑(reasons 是人话原因，如「世界未就绪」)、`null`=游戏没连上。**先看 available 再挑**，别对着不可跑的 flow 空跑。
 - web 面板（`serve_web.ts`，见 README）右栏「可复用流程」栏也能点「跑」，带参弹输入、展示 coverage。

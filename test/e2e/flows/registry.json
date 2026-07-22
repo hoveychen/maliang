@@ -12,6 +12,20 @@
       "provides": ["in_world", "online", "villagers_ready"]
     },
     {
+      "name": "onboarding",
+      "desc": "monkey 跑过首次建角色(语音多轮→照镜子 refine→落档进世界);enter_world 的替代 setup(它建角色,enter_world 用已有角色)",
+      "kind": "setup",
+      "tags": ["onboarding", "creation", "voice", "prereq"],
+      "script": "flows/onboarding.py",
+      "args_schema": {
+        "name": "给角色起的名字(说给点点做自我介绍;默认 小马)",
+        "intro": "自我介绍原话(默认 我叫<name>);服务端从中提名字"
+      },
+      "depends": [],
+      "requires": [],
+      "provides": ["in_world", "online", "villagers_ready"]
+    },
+    {
       "name": "world_ready",
       "desc": "冒烟回归:进世界后断言世界就绪(ws_open + npc>=8),证 depends 链先跑 enter_world",
       "kind": "regression",
