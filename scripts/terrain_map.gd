@@ -579,31 +579,16 @@ static func _paint_oz() -> void:
 		_paint_ellipse_height(44.0, 42.0, 8.0 - 3.0 * float(lvl), 8.0 - 3.0 * float(lvl), lvl)
 	# 入口小广场(10~18,10~18,含 portal 落点 14,14)与玉米地(36,34)刻意留平——两处离两丘均 >半径，天然 h0。
 
-## 室内系统 MVP（home-interior）：玩家自己的家，从一整块实心墙体里「掏」出来的一间房（50 格预设）。
-## ★ 关键（老板一眼看穿的坑修复）：室内是把中间一块【掏空】成木地板、四周【维持实心墙体】——
-## 这样「墙外没有地面」（掏出的坑之外都是墙顶实心）。早先做法是「整格铺地板 + 中间围一圈墙」，
-## 那样墙外/前景会露出室外地面，一看就不像室内。四壁 = 实心与地板的高差，_emit_walls 依
-## T_TOY_WALL（专属程序化墙面贴图）出侧壁。
-## 家具由玩家用既有布置模式（world.gd _begin_placement → item_place）自己摆；本函数只出空房骨架，
-## 不放锚点/散布（scene_compose 对 home_interior 无分支 = 空物品层）。「无天空+暖光」封闭观感在 P3。
-## 房间净空 [17..32]×[17..32]（16×16 tile ≈ 32m），墙高 3 级（6m，够挡住相机看到墙外实心顶）。
-const HOME_FLOOR_MIN := 17
-const HOME_FLOOR_MAX := 32
-const HOME_WALL_H := 3
-## 南墙门洞 2 格 [24..25]（z=HOME_FLOOR_MAX+1 那道墙上掏 1 格深的门凹，读成门；出屋走门口 portal 24,32）。
-const HOME_DOOR_X0 := 24
-const HOME_DOOR_X1 := 25
+## 室内系统（home-interior）：玩家自己的家（50 格预设，房间只占其中一小块，见 world.gd ROOM_*）。
+## 家具由玩家用既有布置模式（world.gd _begin_placement → item_place）自己摆；本函数只出空房地板，
+## 不放锚点/散布（scene_compose 对 home_interior 无分支 = 空物品层）。「无天空+暖光」封闭观感见 world.gd。
+## 室内重做：地貌简化成纯平地板（全格木地板、高度 0）——房间的墙/地几何由客户端 RoomStage
+## 真几何渲染（scripts/room_stage.gd），不再靠抬地形块假装墙、掏实心躲露地（旧 hack 已否决）。
+## 地形字节此处只承载「放置/占用坐标系」：全平地板 = 处处可走、可摆，房间边界由 RoomStage 楼板网格
+## 与室内收束相机（world.gd）共同框定，玩家看不到也走不到房间外。
 static func _paint_home_interior() -> void:
 	var n := WorldGrid.GRID_TILES
-	# ① 整格填成实心墙体（抬高墙高）——房间从这块实心里掏出，故墙外无地面
-	_paint_rect_type(0, 0, n - 1, n - 1, T_TOY_WALL)
-	_paint_rect_height(0, 0, n - 1, n - 1, HOME_WALL_H)
-	# ② 掏出房间净空：中间一块落回木地板 + 高度 0（四周高差即四壁）
-	_paint_rect_type(HOME_FLOOR_MIN, HOME_FLOOR_MIN, HOME_FLOOR_MAX, HOME_FLOOR_MAX, T_WOOD_FLOOR)
-	_paint_rect_height(HOME_FLOOR_MIN, HOME_FLOOR_MIN, HOME_FLOOR_MAX, HOME_FLOOR_MAX, 0)
-	# ③ 南墙门洞：那道墙掏 2 格 1 深的门凹（读成门；不通到外，出屋走门口 portal 24,32）
-	_paint_rect_type(HOME_DOOR_X0, HOME_FLOOR_MAX + 1, HOME_DOOR_X1, HOME_FLOOR_MAX + 1, T_WOOD_FLOOR)
-	_paint_rect_height(HOME_DOOR_X0, HOME_FLOOR_MAX + 1, HOME_DOOR_X1, HOME_FLOOR_MAX + 1, 0)
+	_paint_rect_type(0, 0, n - 1, n - 1, T_WOOD_FLOOR)  # 纯平木地板（高度/水深已在 reset 清零）
 
 ## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂类型（含端点）。
 static func _paint_rect_type(x0: int, z0: int, x1: int, z1: int, t: int) -> void:

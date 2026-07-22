@@ -136,6 +136,18 @@ func _refresh_base_layer() -> void:
 var _ground_shadows := true  ## 地面斜阳椭圆贴片影（散布 + 建筑）
 var _props_shown := true     ## 会动的 SDF 物件
 
+## 室内房间舞台（home-interior 重做）：室内场景不铺无限地形，全部地形槽隐藏，屋子几何由
+## world.gd 的 RoomStage 单独渲染。on 时 update() 强制所有槽 invisible 并跳过铺设（省成本）；
+## off 复位后下一帧 update() 按半径正常显隐。换场景切室内/室外时由 world.gd 调用。
+var _terrain_hidden := false
+
+## 室内隐藏全部地形槽（RoomStage 接管房间渲染）。
+func set_terrain_hidden(on: bool) -> void:
+	_terrain_hidden = on
+	if on:
+		for slot in _slots:
+			(slot["root"] as Node3D).visible = false
+
 ## 画质：地面贴片影开/关。切现有 ScatterShadows/BuildingShadows + 记住供 chunk 重铺沿用。
 ## （不能按 perf_scatter 组切——那组混了散布植被本体，会连树一起隐藏，只能按节点 name。）
 func set_ground_shadows(on: bool) -> void:
@@ -335,6 +347,8 @@ func clear_dynamic_props() -> void:
 
 func update(player_logical: Vector2) -> void:
 	_ensure_slots()  # 换到不同尺寸场景后自愈重建槽（幂等，尺寸没变零成本）
+	if _terrain_hidden:
+		return  # 室内：RoomStage 接管，地形全隐（set_terrain_hidden 已置 invisible），跳过铺设
 	var pending: Array = []  # 未铺设槽位 [距离, slot, wrapped]，每帧只铺最近的一块
 	# 遍历全部常驻槽（每 wrapped 区块一个），把每个摆到离焦点最近的环面镜像、按半径圆形裁剪。
 	# 不再用「以焦点为中心的 (2R+1)² 奇数窗口」——那要求 CHUNKS_PER_SIDE==2R+1（奇数）才能

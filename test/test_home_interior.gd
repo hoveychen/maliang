@@ -1,11 +1,12 @@
 extends SceneTree
-## 室内系统 MVP（home-interior）场景导出/载入回归（home-interior P1）。
-## - 网格自描述为 50（现有预设，服务端 PRESET_GRIDS 已含 50，无需改服务端校验）
-## - 地貌三平面与 _paint_home_interior() 逐字节一致
-## - 客户端 load_from_bytes 可载入、grid 自动 configure 到 50、不崩
-## - 地板铺满木地板；四壁一圈 T_TOY_WALL 且抬高（_emit_walls 据此出侧壁）
-## - 室内净空是平地板（高度 0），墙圈高度 2
-## - 空房：无 POI / 无物品层（家具由玩家用布置模式自己摆）
+## 室内场景（home_interior）地形导出/载入回归（室内重做 P2）。
+## 室内重做后地貌简化成纯平地板——房间的墙/地几何由客户端 RoomStage 真几何渲染（不再抬地形块
+## 假装墙、掏实心躲露地）。故本测试断言：
+## - 网格自描述为 50（预设，服务端 PRESET_GRIDS 已含 50）
+## - 全格木地板、高度 0、水深 0（纯平地板）
+## - 地貌逐字节与 _paint_home_interior() 一致
+## - 客户端 load_from_bytes 可载入、grid 自动 configure 到 50
+## - 空房：无 POI / 无住户 / 无物品层
 ## - 类型全合法、非水格水深 0（服务端解码不变量）
 ## - 确定性：连续两次导出逐字节相同
 ## 运行: godot --headless --path . --script res://test/test_home_interior.gd
@@ -48,26 +49,22 @@ func _init() -> void:
 	fails += _check("客户端载入 ok", r["ok"], true)
 	fails += _check("载入后 GRID_TILES = 50", WorldGrid.GRID_TILES, 50)
 
-	# ── 地板 / 四壁落对（房间从实心里掏出：室内木地板，室外实心墙体）──────────
-	fails += _check("房间中心 = 木地板", TerrainMap.tile_type(Vector2i(25, 25)), TerrainMap.T_WOOD_FLOOR)
-	fails += _check("墙外角落 = 实心墙体（非地面！）", TerrainMap.tile_type(Vector2i(2, 2)), TerrainMap.T_TOY_WALL)
-	fails += _check("北壁 = 墙面", TerrainMap.tile_type(Vector2i(25, 16)), TerrainMap.T_TOY_WALL)
-	fails += _check("西壁 = 墙面", TerrainMap.tile_type(Vector2i(16, 25)), TerrainMap.T_TOY_WALL)
-	fails += _check("东壁 = 墙面", TerrainMap.tile_type(Vector2i(33, 25)), TerrainMap.T_TOY_WALL)
-	fails += _check("南壁 = 墙面", TerrainMap.tile_type(Vector2i(20, 33)), TerrainMap.T_TOY_WALL)
-	fails += _check("墙角 = 墙面", TerrainMap.tile_type(Vector2i(16, 16)), TerrainMap.T_TOY_WALL)
-	# 南墙门洞（对齐出口 portal 24,32）：2 格掏成平地板
-	fails += _check("南墙门洞左 = 地板", TerrainMap.tile_type(Vector2i(24, 33)), TerrainMap.T_WOOD_FLOOR)
-	fails += _check("南墙门洞右 = 地板", TerrainMap.tile_type(Vector2i(25, 33)), TerrainMap.T_WOOD_FLOOR)
-	fails += _check("门洞高度 = 0", TerrainMap.tile_height(Vector2i(24, 33)), 0)
+	# ── 纯平地板：全格木地板、高度 0（无抬高墙、无掏实心）──────────────────
+	var non_floor := 0
+	var non_flat := 0
+	for y in range(n):
+		for x in range(n):
+			var t := Vector2i(x, y)
+			if TerrainMap.tile_type(t) != TerrainMap.T_WOOD_FLOOR:
+				non_floor += 1
+			if TerrainMap.tile_height(t) != 0:
+				non_flat += 1
+	fails += _check("全格木地板（无墙）", non_floor, 0)
+	fails += _check("全格高度 0（无抬高墙）", non_flat, 0)
+	fails += _check("房间中心 = 木地板", TerrainMap.tile_type(Vector2i(24, 24)), TerrainMap.T_WOOD_FLOOR)
+	fails += _check("旧墙位现在也是地板（不再有墙）", TerrainMap.tile_type(Vector2i(16, 16)), TerrainMap.T_WOOD_FLOOR)
 
-	# ── 高度：墙外实心抬高、室内平地板（关键：墙外不是 h0 地面）──────────────
-	fails += _check("北壁抬高 = 3", TerrainMap.tile_height(Vector2i(25, 16)), 3)
-	fails += _check("墙角抬高 = 3", TerrainMap.tile_height(Vector2i(16, 16)), 3)
-	fails += _check("室内净空是平地板", TerrainMap.tile_height(Vector2i(25, 25)), 0)
-	fails += _check("墙外实心也抬高 = 3（不露地面）", TerrainMap.tile_height(Vector2i(2, 2)), 3)
-
-	# ── 空房：无 POI、无物品（家具靠布置模式后摆）─────────────────────────
+	# ── 空房：无 POI、无住户、无物品 ──────────────────────────────────────
 	fails += _check("home_interior 无 POI", EX.build_poi_json("home_interior").size(), 0)
 	fails += _check("home_interior 无住户", EX.build_homes_json("home_interior").size(), 0)
 	fails += _check("物品层空（palette 为空）", TerrainMap.palette().size(), 0)

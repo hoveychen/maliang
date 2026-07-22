@@ -79,6 +79,11 @@ const OUTDOOR_SUN_ENERGY := 1.45
 ## 按 _scene_id 切换/还原；相机是俯视 3/4 角，四壁（2 级=4m）遮住远处地板，BG_COLOR + 暖光即成封闭室内，
 ## 故不额外铺天花板 mesh（会撞浮动原点且相机看不到顶）。
 const INDOOR_SCENES := ["home_interior"]
+## 室内房间舞台（home-interior 重做）：房间边长 N（tile 数，眼验在 8/10/12 取值）与其在 50 网格里的
+## 左上角 tile。网格必须 25 整除故 home_interior 仍是 50，房间只占其中 N×N 一小块，其余地形隐藏。
+## 相机（P3）把 focus 钉在房间中心、RoomStage 摆在渲染原点，家具/玩家按「相对房间中心」落到房间格。
+const ROOM_N := 10
+const ROOM_ORIGIN_TILE := Vector2i(19, 19)   ## 房间格区间 [19..28]×[19..28]（含端点）；中心世界坐标 (48,48)
 const INDOOR_BG_COLOR := Color(0.12, 0.09, 0.10)      ## 墙外/天顶看到的暖暗色（读成室内不是天）
 const INDOOR_AMBIENT_COLOR := Color(1.0, 0.90, 0.78)  ## 暖色环境光
 const INDOOR_AMBIENT_ENERGY := 0.85
@@ -134,6 +139,7 @@ var _hop_t := -1.0                 ## 玩家小跳已播秒数（<0=不在跳，
 var camera: Camera3D
 var photo_cam := {}   ## 摄影机位覆盖（debug photo 命令，menu 相册拍摄）：非空时 _update_camera 改用 {pitch,yaw,dist,lift}
 var chunk_manager: ChunkManager
+var room_stage: RoomStage    ## 室内房间舞台（home-interior 重做）：室内场景隐地形、由它渲屋子；室外为空
 var coord_label: Label
 var perf_label: Label    ## 调试性能浮层（仅 debug 构建）：CPU 逻辑/渲染提交/GPU 实测三组耗时对比判瓶颈
 var _perf_accum := 0.0   ## 浮层刷新节流（0.25s 一次，避免数字抖到读不了）
@@ -469,6 +475,9 @@ func _ready() -> void:
 	chunk_manager = ChunkManager.new()
 	chunk_manager.name = "ChunkManager"
 	add_child(chunk_manager)
+	room_stage = RoomStage.new()
+	room_stage.name = "RoomStage"
+	add_child(room_stage)  # 室内才 build()；室外空节点零开销
 	# 物品实体目录 + 打包默认矩阵：区块首铺/NPC 落位之前就位——离线也有完整世界
 	# （树/建筑/占用全来自矩阵；在线时服务端矩阵与打包一致则 changed=false 零重铺）。
 	ItemCatalog.ensure_builtin()
@@ -495,6 +504,7 @@ func _ready() -> void:
 	# 在移动端落保守起步档。这里不再做任何自适应定档——benchmark 只嵌在 intro 注魔幕里跑。
 	_apply_saved_graphics()
 	_apply_scene_env(_scene_id) # 首进场景的室内/室外环境观感（home-interior P3）；室外无变化，室内切封闭观感
+	_apply_indoor_render(_scene_id) # 首进室内隐地形+build 屋子（home-interior 重做 P2）
 	# 真机性能分解扫频（见 PerfSweep 注释；标记文件触发，跑完自动摘除）
 	if OS.is_debug_build() and FileAccess.file_exists("user://perf_sweep"):
 		Engine.max_fps = 0  # 扫频要真实帧时，解除 menu 设的移动端限帧
@@ -745,6 +755,19 @@ func _apply_scene_env(scene_id: String) -> void:
 	if _sun != null:
 		_sun.light_color = INDOOR_SUN_COLOR if indoor else OUTDOOR_SUN_COLOR
 		_sun.light_energy = INDOOR_SUN_ENERGY if indoor else OUTDOOR_SUN_ENERGY
+
+## 室内/室外渲染分支（home-interior 重做 P2）：进室内隐全部地形 chunk + build RoomStage 屋子几何；
+## 出室内显地形 + 拆 RoomStage。boot 与 _on_scene_entered 两处调用（随 _apply_scene_env 一起），
+## 覆盖首进与走 portal 换场景。相机收束到整屋在 P3（这里只管几何显隐）。
+func _apply_indoor_render(scene_id: String) -> void:
+	var indoor := scene_id in INDOOR_SCENES
+	if chunk_manager != null:
+		chunk_manager.set_terrain_hidden(indoor)
+	if room_stage != null:
+		if indoor:
+			room_stage.build(ROOM_N)
+		else:
+			room_stage.clear()
 
 func _make_day_sky() -> Sky:
 	var noise := FastNoiseLite.new()
@@ -4965,6 +4988,7 @@ func _on_scene_entered(data: Dictionary) -> void:
 		await _apply_scene(scene as Dictionary)
 	_scene_id = sid
 	_apply_scene_env(sid) # 进/出室内切封闭观感（home-interior P3）：进 home_interior 无天空+暖光，回室外还原
+	_apply_indoor_render(sid) # 进/出室内隐/显地形 + build/clear 屋子（home-interior 重做 P2）
 
 	# 新场景角色：与初始进世界同一条并发预取 + 顺序降生链路。
 	var chars: Array = data.get("characters", [])
