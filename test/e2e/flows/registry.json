@@ -1,0 +1,38 @@
+{
+  "flows": [
+    {
+      "name": "enter_world",
+      "desc": "真过 menu(→onboarding)进世界;已在世界则复用跳过导航(幂等)",
+      "kind": "setup",
+      "tags": ["onboarding", "prereq"],
+      "script": "flows/enter_world.py",
+      "args_schema": {},
+      "depends": [],
+      "requires": [],
+      "provides": ["in_world", "online", "villagers_ready"]
+    },
+    {
+      "name": "world_ready",
+      "desc": "冒烟回归:进世界后断言世界就绪(ws_open + npc>=8),证 depends 链先跑 enter_world",
+      "kind": "regression",
+      "tags": ["smoke"],
+      "script": "flows/world_ready.py",
+      "args_schema": {},
+      "depends": ["enter_world"],
+      "requires": ["in_world"]
+    },
+    {
+      "name": "naming_e2e",
+      "desc": "回归:造物(guided-creation 多轮)→起名 全链;参数化造物名",
+      "kind": "regression",
+      "tags": ["creation", "naming", "voice"],
+      "script": "naming_e2e.py",
+      "args_schema": {
+        "name": "给造物起的名字(说给点点后进起名子模式用)",
+        "intent": "造物意图,说给点点(默认:点点,帮我造一个火箭)"
+      },
+      "depends": ["enter_world"],
+      "requires": ["villagers_ready"]
+    }
+  ]
+}

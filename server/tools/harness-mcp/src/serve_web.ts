@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { TcpClient } from "./tcp_client.ts";
+import { listFlows, runFlow } from "./flow_runner.ts";
 
 function argOf(name: string, dflt: string): string {
   const i = process.argv.indexOf(name);
@@ -68,6 +69,16 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "no-store" });
       res.end(buf);
       return;
+    }
+    // Flow Registry 面（P3）：列注册流程 / 按名跑（经 pilot_runner 子进程，与 MCP/CLI 同一执行路径）。
+    if (p === "/api/flows" && req.method === "GET") {
+      return sendJson(res, 200, await listFlows({ host: HOST, port: PORT }));   // 带 available（连游戏取 state）
+    }
+    if (p === "/api/run_flow" && req.method === "POST") {
+      const body = await readBody(req);
+      const parsed = JSON.parse(body || "{}") as { name?: string; args?: Record<string, unknown> };
+      if (!parsed.name) return sendJson(res, 400, { ok: false, error: "需要 flow name" });
+      return sendJson(res, 200, await runFlow(parsed.name, parsed.args, { host: HOST, port: PORT }));
     }
     if (p === "/api/do" && req.method === "POST") {
       await ensure();

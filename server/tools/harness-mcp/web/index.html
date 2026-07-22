@@ -31,6 +31,15 @@
   .act.disabled { opacity:.45; }
   #reply { white-space:pre-wrap; font-size:11px; color:var(--dim); background:#0f0d09; border:1px solid var(--line); border-radius:6px; padding:8px; max-height:220px; overflow:auto; margin-top:8px; }
   .pill { font-size:11px; padding:1px 7px; border-radius:9px; border:1px solid var(--line); }
+  .flow { display:flex; align-items:center; gap:8px; padding:5px 6px; border:1px solid var(--line); border-radius:6px; margin-bottom:5px; }
+  .flow .meta { flex:1; min-width:0; }
+  .flow .name { color:var(--ink); }
+  .flow .desc { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .kind { font-size:10px; padding:1px 6px; border-radius:8px; border:1px solid var(--line); }
+  .kind.setup { color:var(--accent); border-color:var(--accent); }
+  .kind.regression { color:var(--ok); border-color:var(--ok); }
+  .flow.unavail { opacity:.5; }
+  .flow .why { color:var(--bad); font-size:10px; }
 </style>
 </head>
 <body>
@@ -48,10 +57,12 @@
     <div id="stage"><img id="shot" alt="screenshot" /><div id="overlay"></div></div>
   </div>
   <div id="right">
-    <h3>可用动作 <span id="acount" class="pill">0</span></h3>
+    <h3>可复用流程 <span id="fcount" class="pill">0</span></h3>
+    <div id="flows"></div>
+    <h3 style="margin-top:12px">可用动作 <span id="acount" class="pill">0</span></h3>
     <div id="actions"></div>
-    <h3 style="margin-top:12px">上一次 do 回包</h3>
-    <div id="reply">（点右侧动作或左侧元素上的动作触发 do）</div>
+    <h3 style="margin-top:12px">上一次回包</h3>
+    <div id="reply">（点流程「跑」复用前置，或点动作触发 do）</div>
   </div>
 </div>
 <script>
@@ -128,6 +139,65 @@ async function doAction(action_id, argsSchema) {
   await observe();
 }
 
+function renderFlows(flows) {
+  $("#fcount").textContent = flows.length;
+  const box = $("#flows"); box.innerHTML = "";
+  for (const f of flows) {
+    // available.ok: true=可跑 / false=当前不可跑(标原因,置灰) / null=未知(游戏没连) → 不拦，让 do 时自然报
+    const av = f.available || { ok: null, reasons: [] };
+    const blocked = av.ok === false;
+    const row = document.createElement("div"); row.className = "flow" + (blocked ? " unavail" : "");
+    const meta = document.createElement("div"); meta.className = "meta";
+    const n = document.createElement("div"); n.className = "name";
+    n.textContent = f.name + (f.depends && f.depends.length ? "  ← " + f.depends.join(",") : "");
+    const d = document.createElement("div"); d.className = "desc"; d.textContent = f.desc || "";
+    meta.appendChild(n); meta.appendChild(d);
+    if (blocked && av.reasons && av.reasons.length) {
+      const why = document.createElement("div"); why.className = "why"; why.textContent = "✕ " + av.reasons.join("；");
+      meta.appendChild(why);
+    }
+    const kind = document.createElement("span"); kind.className = "kind " + f.kind; kind.textContent = f.kind;
+    const btn = document.createElement("button"); btn.textContent = "跑";
+    btn.disabled = blocked;                       // 当前不可跑 → 禁用按钮(与 action 的 enabled 同款)
+    btn.onclick = () => runFlow(f);
+    row.appendChild(meta); row.appendChild(kind); row.appendChild(btn);
+    box.appendChild(row);
+  }
+}
+
+async function loadFlows() {
+  try {
+    const r = await jget("/api/flows");
+    renderFlows(r.flows || []);
+  } catch (e) { $("#fcount").textContent = "err"; }
+}
+
+async function runFlow(f) {
+  // 按 args_schema 逐项收参（值是描述串，弹 prompt）——与 doAction 同套路。
+  let args = undefined;
+  const schema = f.args_schema || {};
+  if (Object.keys(schema).length) {
+    const vals = {};
+    for (const k of Object.keys(schema)) {
+      const v = prompt("流程 " + f.name + " 参数 " + k + " (" + schema[k] + ")", "");
+      if (v === null) return; vals[k] = v;
+    }
+    args = vals;
+  }
+  $("#reply").textContent = "跑流程: " + f.name + " …（含 depends 前置链，可能需数十秒）";
+  try {
+    const r = await fetch("/api/run_flow", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: f.name, args }) }).then((x) => x.json());
+    if (!r.ok) { $("#reply").textContent = "流程失败: " + (r.error || JSON.stringify(r)); await observe(); return; }
+    const chain = (r.ran || []).map((x) => x.name + "(" + x.status + "," + x.dt + "s)").join(" → ");
+    $("#reply").textContent =
+      "flow: " + r.flow + "  (" + r.duration + "s)\n链: " + chain +
+      "\ncoverage: " + JSON.stringify(r.coverage) +
+      "\ndelta.changed: " + JSON.stringify((r.delta || {}).changed || {});
+  } catch (e) { $("#reply").textContent = "流程异常: " + e; }
+  await observe();
+}
+
 async function observe() {
   try {
     const o = await jget("/api/observe");
@@ -136,6 +206,7 @@ async function observe() {
     renderActions(o.actions || []);
     const s = o.state || {};
     $("#status").textContent = (s.scene_id || "—") + " / " + (s.fsm_state || "?");
+    loadFlows();          // 随 state 刷新流程可用性（进世界后 in_world/villagers_ready 变 → 可跑态变）
     refreshShot();
   } catch (e) { $("#status").textContent = "连不上"; }
 }
@@ -147,7 +218,7 @@ $("#auto").onchange = (e) => {
   else { clearInterval(timer); timer = null; }
 };
 window.addEventListener("resize", layoutOverlay);
-observe();
+observe();   // observe() 内已 loadFlows()（带可用性）
 </script>
 </body>
 </html>
