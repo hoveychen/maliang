@@ -88,7 +88,15 @@ python3 test/e2e/pilot_runner.py --flow enter_world [--args '{"name":"小火箭"
 - MCP/web/CLI 三入口**都经 `pilot_runner.py` 子进程**跑——单一执行路径，同一份注册表。
 
 **写（新 flow 入库）**——摸索出一段可复用交互后，落成 flow 而不是散在脚本里：
-1. `test/e2e/flows/<name>.py` 暴露 `def run(h, **args): ...`（`h` 已连、已进世界的 Harness；抛 `HarnessError`/`AssertionError` = 失败）。**诚实**：走真输入（`actions`→`do`、真走路、真 tap），复用档案，**不引瞬移/seed 后门**；`setup` 型要**幂等**（已达成则记 `reused` 跳过，见 `flows/enter_world.py` 范例）。
+1. `test/e2e/flows/<name>.py` 暴露 `def run(h, **args): ...`（抛 `HarnessError`/`AssertionError` = 失败）。
+   **★ flow 收到的 `h` 是受限 harness（monkey 脚本，不是 god 脚本）——诚实被代码强制，不靠自觉**：
+   只放行**用户真能做的操作** + 感知 + 等待——`state`/`access`/`actions`/`observe`/`screenshot`（眼睛）、
+   `do`（真 tap 投影矩形/真走路/真长按）、`say`/`say_when_open`/`inject`（真说话+语音通道）、`wait_*`。
+   **调后门/遗留 op 直接抛错**：`teleport`/`scene`/`reset_budget`/`pick`/`accept`/`talk_fairy`/`talk_npc`/
+   `click_ui`/`phone`/`pickup`/盲坐标 `tap`/`drag`/… 都够不到。想造物就像孩子一样 `actions`→`do` **真 tap 卡**
+   （按 label 找 `press:btn` 去 `do`）、`say` 真说话、`do confirm:confirm_accept` 真 tap 采纳——别按 id 直选或瞬移。
+   （`--script` 逃生口不受限，legacy/device 盲手势脚本仍走它；只有 `--flow` 注册流程受限。范例见 `flows/enter_world.py`、
+   `naming_e2e.py` 的 `run()`。）`setup` 型要**幂等**（已达成记 `reused` 跳过）。
 2. 在 `test/e2e/flows/registry.json` 登记一条：`{name, desc, kind, tags, script, args_schema, depends}`。
    - `kind`：`setup`（前置夹具，幂等）| `regression`（被测流程）。
    - `depends`：前置 flow 名列表，runner 按拓扑序先跑（有环会被检测报错）。

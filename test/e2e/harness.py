@@ -402,6 +402,45 @@ class Harness:
         return False
 
 
+class RestrictedHarness:
+    """给注册 flow 用的**受限 harness（monkey 脚本，不是 god 脚本）**。
+
+    老板要求：flow 里每个动作都必须是**真实用户能做到的操作**——像小朋友一样 `actions`→`do` 真 tap 屏上
+    元素、`say` 真说话；**不许**瞬移玩家、按 id 直接 pick 选项、直接触发对话 handler、盲坐标乱点、清冷却门。
+    这层把「诚实」从 SKILL 文本约束**升级为代码强制**：flow 调被封的后门/遗留 op 直接抛错，够不到。
+
+    放行 = 用户能做的真输入 + agent 的眼睛（感知）+ 等落定 + 连接基建 + 语音输入通道：
+      - 感知（眼睛，非动作、不算作弊）：state/access/actions/observe/screenshot/ui
+      - 真输入（用户能做）：do（真 tap 投影矩形/真走路/真长按）、say（真说话）、say_when_open
+      - 语音通道：inject（桌面/headless 无麦 → 换 ScriptedAsr 让 say 喂进真 VAD，等价于「用户的嘴」）
+      - 等待（等落定，非动作）：wait_* 全家
+      - 基建（非玩法）：connect/close/reconnect/start_trace
+    封禁 = 上帝视角/遗留后门（调即抛）：
+      teleport（瞬移）、scene（切场）、photo、reset_budget（清冷却门=用户做不到）、
+      pick/accept/replay/retry（直接改 VC 子模式，绕真 tap）、talk_fairy/talk_npc/click_ui/phone/pickup（直触 handler 绕 UI）、
+      tap/drag/swipe/long_press/pinch（盲坐标，跳过 actionability）。
+
+    仅 **`--flow` 注册流程**走这层；`--script` 逃生口保持非受限（legacy/device 脚本仍可用盲手势/真机 op）。
+    """
+    ALLOWED = frozenset({
+        "state", "access", "actions", "observe", "screenshot", "ui",
+        "do", "say", "say_when_open", "inject",
+        "wait_until", "wait_state", "wait_server", "wait_world", "wait_scene", "wait_delta",
+        "wait_action_available", "wait_banner_stable", "wait_speaking_done",
+        "connect", "close", "reconnect", "start_trace",
+    })
+
+    def __init__(self, h):
+        object.__setattr__(self, "_h", h)
+
+    def __getattr__(self, name):
+        if name in RestrictedHarness.ALLOWED:
+            return getattr(self._h, name)
+        raise HarnessError(
+            f"flow 禁用后门/遗留 op「{name}」——monkey 脚本只能做用户能做的操作："
+            "actions→do 真 tap / say 真说话 / 感知与 wait。想造物就像孩子一样点卡，别按 id 直选或瞬移。")
+
+
 # ── Android 真机 ──
 def adb(*args):
     return subprocess.run([ADB, *args], capture_output=True, text=True)

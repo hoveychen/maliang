@@ -71,25 +71,26 @@ def _say_until(h, text, progressed, desc, tries=4, timeout=25.0):
 
 
 def _answer_prompt(h, snap, start_bag):
-    """应答当前这一轮引导：有卡就 pick（recipient→self，否则第一张），无卡开放问就 say 肯定。"""
+    """应答当前这一轮引导。**受限 harness（monkey 非 god）下不许用 pick 直选**：有卡就**真 tap 那张卡**
+    （按 label 在 actions 里找 press:btn 去 do，取代旧 pick 后门）；无卡/卡没采到就 say 肯定应答。"""
+    q = snap.get("creation_question", "")
     opts = snap.get("creation_options") or []
     cat = snap.get("creation_category", "")
     if opts:
-        oid = None
-        if cat == "recipient":
-            for o in opts:
-                if o.get("id") == "self":
-                    oid = o["id"]
-                    break
-        if oid is None:
-            oid = opts[0]["id"]
-        r = h.pick(oid)
-        print(f"    → pick optionId={oid!r}（{cat or '无类别'}）picked={r.get('picked')}")
-        return bool(r.get("picked"))
-    # 无卡 = 开放语音问句（如属性确认「对吗？」）：语音肯定应答，撞真麦干扰会重说。
-    # 进展＝问句变了(下一轮)或造物完成。
-    q = snap.get("creation_question", "")
-    ans = "对呀就是这样"
+        # 选中目标选项（recipient→self，否则第一张），按其 label 找真 press 卡去 do（真 tap，像孩子点卡）。
+        target = next((o for o in opts if o.get("id") == "self"), None) if cat == "recipient" else None
+        if target is None:
+            target = opts[0]
+        want = target.get("label", "")
+        press = next((a["action_id"] for a in h.actions().get("actions", [])
+                      if a.get("kind") == "press" and a.get("label") == want), None)
+        if press:
+            h.do(press)                      # 真 tap 造物卡（取代 pick 直选后门）
+            print(f"    → 真 tap 卡「{want}」（{cat or '无类别'}）")
+            return True
+        print(f"    → 卡「{want}」没采到 press，转语音兜底")
+    # 无卡（开放问句，如「对吗？」）或卡没采到 → 语音肯定应答；进展＝问句变了或造物完成。
+    ans = (opts[0].get("label", "") if opts else "") or "对呀就是这样"
     got = _say_until(h, ans,
                      lambda s: (s.get("naming_item") or (s.get("bag_size", 0) or 0) > start_bag
                                 or (s.get("in_creation") and s.get("creation_question", "") not in (q, "", *TRANSIENT_Q))),
@@ -110,17 +111,28 @@ def run(h, name="小火箭", intent="点点，帮我造一个火箭"):
     if not (r.get("ok") and r.get("injected") and r.get("ready")):
         raise HarnessError(f"inject 未成功（不在世界里？VoiceCapture 未就绪？）: {r}")
     print("  ✓ 已换 ScriptedAsr 且 ready")
-    h.reset_budget()  # 清游玩时长冷却门，免得连测被拦
+    # 注：不再 reset_budget（清游玩冷却门是用户做不到的后门，受限 harness 已封）。连测撞冷却就换 fresh 实例。
 
     # 真输入 do talk:fairy 取代旧 talk_fairy op：实测旧 op 的 APPROACH 会中止回 EXPLORE、dialogue 从不建立、
     # mic 永不开（造物意图喂不进）；do talk:fairy 直接进 LISTENING+开麦（与 SKILL「优先 actions→do」一致）。
-    print("[2] 进与点点对话（真输入 do talk:fairy:<id>）")
-    acts = h.actions().get("actions", [])
-    fairy = next((a["action_id"] for a in acts if a.get("action_id", "").startswith("talk:fairy:")), None)
-    if not fairy:
-        raise HarnessError("actions 里没有 talk:fairy:*（无仙子？不在世界？）")
-    h.do(fairy)
-    h.wait_until(lambda s: s.get("mic_open") or s.get("fsm_state") == "LISTENING", "进对话+开麦", timeout=20.0)
+    # 刚进世界时仙子可能还没就绪，第一 tap 会 APPROACH→EXPLORE 中止；像真孩子那样多点几下（重试真 tap）。
+    print("[2] 进与点点对话（真输入 do talk:fairy:<id>，未开麦就重点）")
+    opened = False
+    for attempt in range(4):
+        acts = h.actions().get("actions", [])
+        fairy = next((a["action_id"] for a in acts if a.get("action_id", "").startswith("talk:fairy:")), None)
+        if not fairy:
+            time.sleep(2.0)                  # 仙子还没 spawn，等一下再看（time.sleep 是纯 Python，非 harness op）
+            continue
+        h.do(fairy)                          # 真 tap 仙子
+        s = h.wait_until(lambda s: s.get("mic_open") or s.get("fsm_state") == "LISTENING",
+                         "进对话+开麦", timeout=10.0, soft=True)
+        if s:
+            opened = True
+            break
+        print(f"    (第{attempt + 1}次点仙子没开麦，重点)")
+    if not opened:
+        raise HarnessError("反复 do talk:fairy 都没进对话开麦（仙子未就绪/approach 中止）")
     print(f"  ✓ 进对话开麦 banner={h.state().get('banner_text')!r}")
 
     start_bag = h.state().get("bag_size", 0) or 0
@@ -165,8 +177,8 @@ def run(h, name="小火箭", intent="点点，帮我造一个火箭"):
             time.sleep(1.5)
             snap = h.state()
             if snap.get("vc_confirming"):
-                print("  · 确认模式：回放中，发 accept 采纳")
-                h.accept()
+                print("  · 确认模式：回放中，do confirm:confirm_accept 真 tap 采纳键")
+                h.do("confirm:confirm_accept")   # 真 tap 采纳键（取代 accept 直触后门）
             try:
                 h.wait_state(lambda s: not s.get("naming_item"),
                              "起名收尾 → naming_item 回空", timeout=25.0)

@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from harness import Harness, HarnessError, diff_state  # noqa: E402
+from harness import Harness, HarnessError, RestrictedHarness, diff_state  # noqa: E402
 
 FLOWS_DIR = Path(__file__).parent / "flows"
 sys.path.insert(0, str(FLOWS_DIR))
@@ -97,7 +97,8 @@ def run_flow(h, name, args=None, registry_path=None):
             raise HarnessError(f"flow {fname} 前置未满足: {'; '.join(gate['reasons'])}")
         t0 = time.time()
         fn = load_run(fdef["script_path"])
-        result = _call_run(fn, h, fargs)
+        # 注册 flow 走受限 harness（monkey 非 god）：后门/遗留 op 代码封禁。runner 自己的编排仍用 raw h。
+        result = _call_run(fn, RestrictedHarness(h), fargs)
         dt = round(time.time() - t0, 2)
         # fixture 可自报 status（如 enter_world 的 reused/navigated）；否则记 ok。
         status = result.get("status") if isinstance(result, dict) and result.get("status") else "ok"
