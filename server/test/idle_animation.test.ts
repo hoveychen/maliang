@@ -340,6 +340,31 @@ test('GET /sprite-anim/:hash: ready 返回记录（含 clips meta）；未知返
   await app.close();
 });
 
+test('GET /sprite-anim/:hash: 下发高保真档字段（hiAnimAsset/hiMeta），客户端 LOD 近距切 24fps 靠它', async () => {
+  const store = new WorldStore();
+  const sprite = putSprite(store);
+  const HI_META: SpriteSheetMeta = { ...META, fps: HI_FPS, frameCount: 21 };
+  store.setSpriteAnimReady(sprite, 'lo123', META, {
+    version: SPRITE_ANIM_VERSION,
+    packVersion: SPRITE_PACK_VERSION,
+    hiAnimAsset: 'hi456',
+    hiMeta: HI_META,
+  });
+  const app = await buildServer({ adapters: createMockAdapters(), store });
+  try {
+    const res = await app.inject({ method: 'GET', url: `/sprite-anim/${sprite}` });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as {
+      animAsset: string; hiAnimAsset: string; hiMeta: SpriteSheetMeta;
+    };
+    assert.equal(body.animAsset, 'lo123', '底座档照旧');
+    assert.equal(body.hiAnimAsset, 'hi456', '高保真档图集 hash 要下发');
+    assert.equal(body.hiMeta.fps, HI_FPS, '高保真 meta 要下发（客户端 play_anim 靠 fps 推进）');
+  } finally {
+    await app.close();
+  }
+});
+
 test('sprite-anim 持久化：重启后 ready 保留（含 version/原片 hash）、pending 转 failed', () => {
   const dir = mkdtempSync(join(tmpdir(), 'mlanim-persist-'));
 
