@@ -5,6 +5,7 @@
 // 协议：stdout 只走 JSON-RPC，日志一律 stderr。
 import { TcpClient, type Reply } from "./tcp_client.ts";
 import { diffState, type State } from "./delta.ts";
+import { listFlows, runFlow } from "./flow_runner.ts";
 
 const HOST = process.env.MALIANG_HARNESS_HOST || "127.0.0.1";
 const PORT = Number(process.env.MALIANG_HARNESS_PORT || "8578");
@@ -89,6 +90,18 @@ async function toolObserve(): Promise<Reply> {
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<Content[]> {
+  // 流程中心两工具经 pilot_runner 子进程跑（子进程自建 TCP 连接），不占 MCP 自己的连接。
+  // list_flows 更不需要游戏在线 → 放在 ensureConnected 之前，游戏没起也能列。
+  if (name === "list_flows") return [textContent(await listFlows())];
+  if (name === "run_flow") {
+    const flowName = String(args.name || "");
+    if (!flowName) throw new Error("run_flow 需要 name");
+    const flowArgs = (args.args && typeof args.args === "object" ? args.args : {}) as Record<string, unknown>;
+    const r = await runFlow(flowName, flowArgs, { host: HOST, port: PORT });
+    // 子进程跑完游戏状态已变，刷新 MCP 的 delta 基线（下一个 do/state 的 delta 才准）。
+    if (r && typeof r === "object" && (r as Reply).ran) lastState = null;
+    return [textContent(r)];
+  }
   await ensureConnected();
   switch (name) {
     case "observe":
@@ -196,6 +209,29 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: { max_dim: { type: "number" }, quality: { type: "number" } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_flows",
+    description:
+      "列出可复用流程中心(Flow Registry)里注册的全部 flow：{name,desc,kind(setup|regression),tags,args_schema,depends}。" +
+      "跑某条链路前先 list 看有没有现成 flow 可复用，别手搓重走 onboarding/前置。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "run_flow",
+    description:
+      "按名跑一条注册流程(经 pilot_runner 子进程,单一执行路径)：先按 depends 拓扑序跑前置链(如 enter_world 真进世界)," +
+      "再按 args_schema 校验并传参跑本体。回 {ran:[{name,kind,status,dt}], coverage{used_setup,skipped,bypassed_regression}, delta, duration}。" +
+      "coverage 让『哪条流程被复用/跳过、有没有真跑到回归』显式可见——绝不静默丢回归。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "注册 flow 名(见 list_flows)" },
+        args: { type: "object", description: "传给本体 flow 的参数(按其 args_schema)" },
+      },
+      required: ["name"],
       additionalProperties: false,
     },
   },
