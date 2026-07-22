@@ -5,9 +5,10 @@ import { WorldStore, TEMPLATE_WORLD_ID } from '../src/persistence.ts';
 import { createMockAdapters } from '../src/adapters/mock.ts';
 import type { Character } from '../src/types.ts';
 
-// 管理端点：自增模板放置版本（世界模板架构 v2 P5 的下发开关）。
-// 作者把新内容 seed 进 template 后调它，存量玩家世界下次进入触发 additive 补齐。
-// 必须过 admin token 门禁；bumpTemplateVersion 内部 ensureTemplateWorld，模板不存在也不炸。
+// 管理端点：自增模板放置版本。必须过 admin token 门禁；bumpTemplateVersion 内部 ensureTemplateWorld，模板不存在也不炸。
+// ★路线 A（角色实例层 base+overlay，char-instance-overlay）后：存量世界的角色【存在】读时从 template base 合成
+// → 作者 seed 进 template 的新角色【立即】出现在存量世界，不再依赖 bump/additive。bump 仅剩版本记账 +
+// 冗余的 additive 补行（无害、不重复）。本测试相应验证：新角色 bump 前即在 + 版本自增仍工作。
 
 function villager(worldId: string, id: string, name: string): Character {
   return {
@@ -18,7 +19,7 @@ function villager(worldId: string, id: string, name: string): Character {
   };
 }
 
-test('admin template bump: token 门禁 + 版本自增 + 触发存量世界 additive 补齐', async (t) => {
+test('admin template bump: token 门禁 + 版本自增（路线A：新角色读时合成即在，不靠 bump）', async (t) => {
   const store = new WorldStore();
   store.ensureTemplateWorld(); // P6：空建 template，内容直接 seed 进去
   store.saveCharacter(villager(TEMPLATE_WORLD_ID, 'rabbit1', '舞舞兔'));
@@ -42,18 +43,19 @@ test('admin template bump: token 门禁 + 版本自增 + 触发存量世界 addi
 
     // 作者往 template 加一个新村民（模拟 seed 进 template）
     store.saveCharacter(villager(TEMPLATE_WORLD_ID, 'newbird', '唱唱鸟'));
-    assert.equal(store.getCharacter(wa, 'newbird'), undefined, 'bump 前存量世界没有新村民');
+    // 路线 A：存在读时从 template base 合成 → 新村民【立即】出现在存量世界，不依赖 bump/additive。
+    assert.ok(store.getCharacter(wa, 'newbird'), '路线A：新村民读时合成，bump 前即在存量世界');
 
-    // 正确 token → 200 + 版本自增为 1
+    // 正确 token → 200 + 版本自增为 1（版本记账仍工作）
     const res1 = await app.inject({ method: 'POST', url, headers: { 'x-admin-token': 'sesame' } });
     assert.equal(res1.statusCode, 200);
     assert.equal((res1.json() as { version: number }).version, 1, '首次 bump 版本=1');
     assert.equal(store.getTemplateVersion(TEMPLATE_WORLD_ID), 1);
 
-    // 存量玩家下次进入 → additive 补齐新村民，且不覆盖已有实例
+    // 存量玩家下次进入仍正确（冗余 additive 补行不炸、不重复、不覆盖已有实例）
     store.getOrCreateMyWorld('alice');
     const bird = store.getCharacter(wa, 'newbird');
-    assert.ok(bird, 'bump 后存量世界补出新村民');
+    assert.ok(bird, '存量世界有新村民');
     assert.equal(bird!.name, '唱唱鸟');
     assert.equal(store.getCharacter(wa, 'rabbit1')!.name, '舞舞兔', '原有村民仍在');
 
