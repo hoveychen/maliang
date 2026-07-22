@@ -17,6 +17,18 @@
       "script": "flows/world_ready.py",
       "args_schema": {},
       "depends": ["enter_world"]
+    },
+    {
+      "name": "naming_e2e",
+      "desc": "回归:造物(guided-creation 多轮)→起名 全链;参数化造物名",
+      "kind": "regression",
+      "tags": ["creation", "naming", "voice"],
+      "script": "naming_e2e.py",
+      "args_schema": {
+        "name": "给造物起的名字(说给点点后进起名子模式用)",
+        "intent": "造物意图,说给点点(默认:点点,帮我造一个火箭)"
+      },
+      "depends": ["enter_world"]
     }
   ]
 }

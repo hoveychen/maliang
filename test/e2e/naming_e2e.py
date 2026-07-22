@@ -98,39 +98,30 @@ def _answer_prompt(h, snap, start_bag):
     return got is not None
 
 
-def run_flow(h, intent, name, pre_taps):
-    fails = 0
+def run(h, name="小火箭", intent="点点，帮我造一个火箭"):
+    """造物(guided-creation 多轮)→起名 的**在世界内**核心（Flow Registry regression flow, depends=[enter_world]）。
 
-    # [0] 进世界：标题页→世界的 pre_taps（如进世界按钮）+ 等世界就绪。inject 必须在世界里
-    # （VoiceCapture.current 只在 world 场景 _ready 后才有；标题页 inject 会「no active VoiceCapture」）。
-    for (x, y) in pre_taps:
-        print(f"[0] 进世界 tap ({x},{y})")
-        h.tap(x, y)
-        time.sleep(0.6)
-    if pre_taps:
-        # 就绪＝服务端 bootstrap 完成：ws 连上 + 8 个服务端村民 + vc 就绪。只等「有村民」不够——
-        # 本地种子村民(4)立即出现但 ws 未连=离线模式,造物意图发不出去(实测 npc=4/ws=False 时门禁不开)。
-        print("[0] 等世界就绪（ws_open + npc≥8 + vc_ready，冷缓存慢填最多 120s）…")
-        try:
-            s = h.wait_state(lambda s: (s.get("npc_count") or 0) >= 8 and s.get("ws_open") and s.get("vc_ready"),
-                             "世界就绪(ws+8村民+vc)", timeout=120.0, poll=2.0)
-            print(f"  ✓ 世界就绪 npc={s.get('npc_count')} ws_open={s.get('ws_open')} vc_ready={s.get('vc_ready')}")
-        except HarnessError as e:
-            print(f"  ✗ {e}"); return 1
-
+    假设已进世界（enter_world 前置已跑）——故不做 pre_taps/等世界，直接从 inject 起。硬失败抛 HarnessError
+    （runner 据此判 FAIL；老 run_flow 的返回 fails 计数模型对 flow 无效，flow 一律「抛=失败/正常返回=通过」）。
+    参数化：`name`=给造物起的名字，`intent`=说给点点的造物意图。返回 {created, bag_size, naming_item, name}。
+    """
     print("[1] inject：运行时换 ScriptedAsr（真机注入入口，不推标志文件）")
     r = h.inject()
     if not (r.get("ok") and r.get("injected") and r.get("ready")):
-        print(f"  ✗ inject 未成功（不在世界里？VoiceCapture 未就绪？）: {r}"); return 1
+        raise HarnessError(f"inject 未成功（不在世界里？VoiceCapture 未就绪？）: {r}")
     print("  ✓ 已换 ScriptedAsr 且 ready")
     h.reset_budget()  # 清游玩时长冷却门，免得连测被拦
 
-    print("[2] talk_fairy：进与点点的对话（造物意图对她说）")
-    r = h.talk_fairy()
-    if not r.get("entered"):
-        print(f"  ✗ talk_fairy 没进对话（无仙子？不在世界？）: {r}"); return 1
-    greet = h.wait_banner_stable(secs=4.0, timeout=40.0)
-    print(f"  ✓ 进对话，招呼稳定 banner={greet!r}")
+    # 真输入 do talk:fairy 取代旧 talk_fairy op：实测旧 op 的 APPROACH 会中止回 EXPLORE、dialogue 从不建立、
+    # mic 永不开（造物意图喂不进）；do talk:fairy 直接进 LISTENING+开麦（与 SKILL「优先 actions→do」一致）。
+    print("[2] 进与点点对话（真输入 do talk:fairy:<id>）")
+    acts = h.actions().get("actions", [])
+    fairy = next((a["action_id"] for a in acts if a.get("action_id", "").startswith("talk:fairy:")), None)
+    if not fairy:
+        raise HarnessError("actions 里没有 talk:fairy:*（无仙子？不在世界？）")
+    h.do(fairy)
+    h.wait_until(lambda s: s.get("mic_open") or s.get("fsm_state") == "LISTENING", "进对话+开麦", timeout=20.0)
+    print(f"  ✓ 进对话开麦 banner={h.state().get('banner_text')!r}")
 
     start_bag = h.state().get("bag_size", 0) or 0
     print(f"[3] say 造物意图: 「{intent}」（初始 bag={start_bag}）")
@@ -138,10 +129,10 @@ def run_flow(h, intent, name, pre_taps):
                          lambda s: s.get("in_creation") or (s.get("bag_size", 0) or 0) > start_bag,
                          "造物意图→引导开启", tries=4, timeout=30.0)
     if started is None:
-        print("  ✗ 意图反复没进引导（门禁没开 / 真麦干扰未克服）"); return 1
+        raise HarnessError("造物意图反复没进引导（门禁没开 / 真麦干扰未克服）")
     print("  ✓ 意图已说出，进引导多轮应答…")
 
-    print("[4] guided-creation 逐轮应答直到火箭落背包")
+    print("[4] guided-creation 逐轮应答直到造物落背包")
     last_q = None
     created = None
     for rnd in range(8):
@@ -153,10 +144,7 @@ def run_flow(h, intent, name, pre_taps):
                 if q and q != last_q and q not in TRANSIENT_Q:
                     return True
             return False
-        try:
-            snap = h.wait_state(settled, "新引导问句或造物完成", timeout=55.0)
-        except HarnessError as e:
-            print(f"  ✗ 第{rnd}轮 {e}"); fails += 1; break
+        snap = h.wait_state(settled, "新引导问句或造物完成", timeout=55.0)  # 超时抛 HarnessError=FAIL
         if snap.get("naming_item") or (snap.get("bag_size", 0) or 0) > start_bag:
             created = snap
             print(f"  ✓✓ 造物落地！bag={snap.get('bag_size')} naming_item={snap.get('naming_item')!r} banner={snap.get('banner_text')!r}")
@@ -166,13 +154,9 @@ def run_flow(h, intent, name, pre_taps):
         print(f"  轮{rnd}: 问「{q}」options={labels}")
         last_q = q
         if not _answer_prompt(h, snap, start_bag):
-            print(f"  ✗ 第{rnd}轮应答没喂进去"); fails += 1; break
-    else:
-        print("  ✗ 8 轮内造物没落地（引导没走完）"); fails += 1
-
+            raise HarnessError(f"第{rnd}轮应答没喂进去")
     if created is None:
-        print(f"  末态: {_brief(h.state())}")
-        return max(fails, 1)
+        raise HarnessError("8 轮内造物没落地（引导没走完）")
 
     # 造物成功。可选：起名收尾（naming_item 置位=已进起名子模式）
     if name and created.get("naming_item"):
@@ -193,7 +177,37 @@ def run_flow(h, intent, name, pre_taps):
             print("  ⚠ 名字没喂进去（起名可选，不算硬失败）")
         print("\n[核验] 服务端 nameVoiceAsset 是否落库需另查：debug 物品页 / muveectl curl 该 world items。")
 
-    return fails
+    return {"created": True, "bag_size": created.get("bag_size"),
+            "naming_item": created.get("naming_item", ""), "name": name}
+
+
+def run_flow(h, intent, name, pre_taps):
+    """独立 CLI/真机入口：先 pre_taps 进世界 + 等就绪，再委托 run() 跑造物→起名核心。返回 fails 计数（0=通过）。
+
+    （flow 化后核心在 run()；这里保留 pre_taps + 设备侧「等 vc_ready」的等待，是 flow 的 enter_world 前置不覆盖的
+    真机启动段。）"""
+    # [0] 进世界：标题页→世界的 pre_taps（如进世界按钮）+ 等世界就绪。inject 必须在世界里
+    # （VoiceCapture.current 只在 world 场景 _ready 后才有；标题页 inject 会「no active VoiceCapture」）。
+    for (x, y) in pre_taps:
+        print(f"[0] 进世界 tap ({x},{y})")
+        h.tap(x, y)
+        time.sleep(0.6)
+    if pre_taps:
+        # 就绪＝服务端 bootstrap 完成：ws 连上 + 8 个服务端村民 + vc 就绪。只等「有村民」不够——
+        # 本地种子村民(4)立即出现但 ws 未连=离线模式,造物意图发不出去(实测 npc=4/ws=False 时门禁不开)。
+        print("[0] 等世界就绪（ws_open + npc≥8 + vc_ready，冷缓存慢填最多 120s）…")
+        try:
+            s = h.wait_state(lambda s: (s.get("npc_count") or 0) >= 8 and s.get("ws_open") and s.get("vc_ready"),
+                             "世界就绪(ws+8村民+vc)", timeout=120.0, poll=2.0)
+            print(f"  ✓ 世界就绪 npc={s.get('npc_count')} ws_open={s.get('ws_open')} vc_ready={s.get('vc_ready')}")
+        except HarnessError as e:
+            print(f"  ✗ {e}"); return 1
+    try:
+        run(h, name=name, intent=intent)
+        return 0
+    except HarnessError as e:
+        print(f"  ✗ {e}")
+        return 1
 
 
 def main():
