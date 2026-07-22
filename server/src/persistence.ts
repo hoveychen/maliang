@@ -6,7 +6,7 @@ import type { ActiveTask, ChatTurn, Character, CharacterDef, CharacterInstanceRe
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { coerceRelationship, deriveFamiliarity } from './social.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
-import { creationItemDef, getBuiltinItem } from './items.ts';
+import { creationItemDef, getBuiltinItem, STARTER_HOME_FURNITURE } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
 import { decodeTerrain, encodeTerrain, type Terrain } from './terrain.ts';
 import { composeTerrain, diffTerrain, deserializeOverlay, serializeOverlay } from './terrain_overlay.ts';
@@ -1205,6 +1205,9 @@ export class WorldStore {
       return worldId;
     }
     this.#buildWorldFromTemplate(worldId, makeFairy);
+    // 室内系统 MVP（home-interior）：新世界首建即给玩家背包发一套预置家具起始包（进自己家就能摆）。
+    // 一玩家一世界、此创建分支仅首访跑一次（已存在世界走上面 #worldExists 早返回）→ 天然幂等，不重发。
+    for (const f of STARTER_HOME_FURNITURE) this.bagAdd(worldId, playerId, f.id, f.count);
     return worldId;
   }
 
