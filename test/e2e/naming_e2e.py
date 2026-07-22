@@ -125,12 +125,14 @@ def run(h, name="小火箭", intent="点点，帮我造一个火箭"):
             time.sleep(2.0)                  # 仙子还没 spawn，等一下再看（time.sleep 是纯 Python，非 harness op）
             continue
         h.do(fairy)                          # 真 tap 仙子
+        # 给足时间等开麦——仙子招呼可能很长（如「魔法用完啦…」），10s 不够；过早重点会打断正在进行的对话，
+        # 反把 VC 搞乱导致后面 say 喂不进（实测栽过）。只要进了对话就耐心等，不掉回 EXPLORE 就别再点。
         s = h.wait_until(lambda s: s.get("mic_open") or s.get("fsm_state") == "LISTENING",
-                         "进对话+开麦", timeout=10.0, soft=True)
-        if s:
+                         "进对话+开麦", timeout=28.0, soft=True)
+        if s and (s.get("mic_open") or s.get("fsm_state") == "LISTENING"):
             opened = True
             break
-        print(f"    (第{attempt + 1}次点仙子没开麦，重点)")
+        print(f"    (第{attempt + 1}次没开麦 fsm={h.state().get('fsm_state')!r}，重点)")
     if not opened:
         raise HarnessError("反复 do talk:fairy 都没进对话开麦（仙子未就绪/approach 中止）")
     print(f"  ✓ 进对话开麦 banner={h.state().get('banner_text')!r}")

@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from harness import Harness, HarnessError, RestrictedHarness, diff_state  # noqa: E402
+from harness import Harness, MonkeyHarness, HarnessError, diff_state  # noqa: E402
 
 FLOWS_DIR = Path(__file__).parent / "flows"
 sys.path.insert(0, str(FLOWS_DIR))
@@ -97,8 +97,8 @@ def run_flow(h, name, args=None, registry_path=None):
             raise HarnessError(f"flow {fname} 前置未满足: {'; '.join(gate['reasons'])}")
         t0 = time.time()
         fn = load_run(fdef["script_path"])
-        # 注册 flow 走受限 harness（monkey 非 god）：后门/遗留 op 代码封禁。runner 自己的编排仍用 raw h。
-        result = _call_run(fn, RestrictedHarness(h), fargs)
+        # h 已是 MonkeyHarness（玩家 SDK，god op 根本不存在）——直接传给 flow，无需包装/拦截。
+        result = _call_run(fn, h, fargs)
         dt = round(time.time() - t0, 2)
         # fixture 可自报 status（如 enter_world 的 reused/navigated）；否则记 ok。
         status = result.get("status") if isinstance(result, dict) and result.get("status") else "ok"
@@ -177,7 +177,9 @@ def main():
             print("[runner] --args 须为 JSON 对象", file=sys.stderr)
             return 2
 
-    h = Harness(args.host, args.port, timeout=args.timeout)
+    # 注册 flow 走 MonkeyHarness（玩家 SDK，god op 不存在）；--script 逃生口给完整 Harness（legacy/device 需盲手势）。
+    hcls = MonkeyHarness if args.flow else Harness
+    h = hcls(args.host, args.port, timeout=args.timeout)
     try:
         h.connect(retries=5, delay=1.0)
     except HarnessError as e:
