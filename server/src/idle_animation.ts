@@ -15,15 +15,32 @@ export const SPRITE_ANIM_VERSION = 2;
 
 /**
  * 当前「打包管线」版本，与 SPRITE_ANIM_VERSION（结构版本）正交。
- * 1 = 绿边修复前的抠图；2 = 绿边去色溢修复（f365eab）后的抠图/打包。
+ * 1 = 绿边修复前的抠图；2 = 绿边去色溢修复（f365eab）后的抠图/打包；
+ * 3 = 加产 24fps 高保真档图集（hiAnimAsset/hiMeta，角色动画 LOD 用）。
  * 抠图/去绿溢/帧率/裁剪盒等打包参数变了就 +1。回填据此判断哪些 ready 记录只需从存量原片
  * 零成本 repack（而非重新买视频）——见 backfillCharacterAnimations。
+ *
+ * ★为何 v3 是 packVersion bump 而非 SPRITE_ANIM_VERSION bump：24fps 变体从**已存原片**
+ * 按不同 fps 参数重抽帧即得，零视频成本；结构（段名 idle/talking）没变。bump 结构版本会把
+ * 存量记录推进「完整重生成（买视频）」路径，白烧钱——见 backfillCharacterAnimations 路①/②。
  */
-export const SPRITE_PACK_VERSION = 2;
+export const SPRITE_PACK_VERSION = 3;
 
-/** 视频→图集的转换缝（默认真实 ffmpeg 实现；测试注入假实现以免依赖网络/ffmpeg）。 */
+/** 底座档抽帧帧率（现状：idle 平缓，够顺又省显存）。远处 / 非最近 N 的角色用它。 */
+export const LO_FPS = 8;
+/**
+ * 高保真档抽帧帧率 = 源片原生 24fps（Seedance 480p/24fps，clip_video.ts）。最近 N 个角色升到它，
+ * 帧数 ×3、显存 ×3。图集无解码开销（区别于焦点真视频 LOD 的 ≤1-2 路解码限）。
+ */
+export const HI_FPS = 24;
+
+/**
+ * 视频→图集的转换缝（默认真实 ffmpeg 实现；测试注入假实现以免依赖网络/ffmpeg）。
+ * fps 由调用方按档位传入（底座 LO_FPS / 高保真 HI_FPS）——同一批 clips 调两次产两档图集。
+ */
 export type ToSpriteSheet = (
   clips: { name: ClipName; mp4: VideoBlob }[],
+  fps: number,
 ) => Promise<{ atlas: ImageBlob; meta: SpriteSheetMeta }>;
 
 /**
@@ -37,7 +54,7 @@ export async function generateCharacterAnimation(
   adapters: ServiceAdapters,
   store: WorldStore,
   spriteHash: string,
-  toSpriteSheet: ToSpriteSheet = (clips) => videosToSpriteSheet(clips),
+  toSpriteSheet: ToSpriteSheet = (clips, fps) => videosToSpriteSheet(clips, { fps }),
   toClipOgv: ToClipOgv = mp4ToTheoraOgv,
 ): Promise<void> {
   const sprite = store.getAsset(spriteHash);
@@ -47,8 +64,11 @@ export async function generateCharacterAnimation(
     const mp4s = await Promise.all(
       CLIP_NAMES.map(async (name) => ({ name, mp4: await adapters.video.generateClip(sprite, name) })),
     );
-    const { atlas, meta } = await toSpriteSheet(mp4s);
+    // 同一批原片打两档图集：底座 8fps（远处角色）+ 高保真 24fps（最近 N，角色动画 LOD）。
+    const { atlas, meta } = await toSpriteSheet(mp4s, LO_FPS);
+    const hi = await toSpriteSheet(mp4s, HI_FPS);
     const animAsset = store.putAsset(atlas);
+    const hiAnimAsset = store.putAsset(hi.atlas);
     // 原片入库（内容寻址，重复内容天然去重）。放在图集之后：图集打不出来就没必要存原片。
     const clipVideos: Partial<Record<ClipName, string>> = {};
     for (const { name, mp4 } of mp4s) clipVideos[name] = store.putAsset(mp4);
@@ -59,6 +79,8 @@ export async function generateCharacterAnimation(
       packVersion: SPRITE_PACK_VERSION,
       clipVideos,
       clipOgv,
+      hiAnimAsset,
+      hiMeta: hi.meta,
     });
   } catch (err) {
     store.setSpriteAnimFailed(spriteHash);
@@ -73,7 +95,7 @@ export async function generateCharacterAnimation(
 export async function repackFromStoredClips(
   store: WorldStore,
   spriteHash: string,
-  toSpriteSheet: ToSpriteSheet = (clips) => videosToSpriteSheet(clips),
+  toSpriteSheet: ToSpriteSheet = (clips, fps) => videosToSpriteSheet(clips, { fps }),
   toClipOgv: ToClipOgv = mp4ToTheoraOgv,
 ): Promise<boolean> {
   const vids = store.getSpriteAnim(spriteHash)?.clipVideos;
@@ -86,14 +108,19 @@ export async function repackFromStoredClips(
     if (!blob) return false; // 记录里有 hash 但盘上没字节 —— 当缺原片处理
     clips.push({ name, mp4: blob });
   }
-  const { atlas, meta } = await toSpriteSheet(clips);
+  // 从存量原片零成本重打两档（底座 8fps + 高保真 24fps）——存量回填补 24fps 变体走这条路。
+  const { atlas, meta } = await toSpriteSheet(clips, LO_FPS);
+  const hi = await toSpriteSheet(clips, HI_FPS);
   const animAsset = store.putAsset(atlas);
+  const hiAnimAsset = store.putAsset(hi.atlas);
   const clipOgv = await pregenerateClipOgv(store, clips, toClipOgv); // 重打时也刷新 ogv 预缓存
   store.setSpriteAnimReady(spriteHash, animAsset, meta, {
     version: SPRITE_ANIM_VERSION,
     packVersion: SPRITE_PACK_VERSION,
     clipVideos: vids,
     clipOgv,
+    hiAnimAsset,
+    hiMeta: hi.meta,
   });
   return true;
 }
