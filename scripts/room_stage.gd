@@ -15,7 +15,7 @@ extends Node3D
 ## 材质复用地形贴图：地板 wood_floor.png、墙面 toy_wall.png（点点墙纸）——与旧地形-hack 同一套。
 
 const TILE := 2.0                 ## = WorldGrid.TILE_SIZE（房间格边长，米）
-const WALL_H := 4.5               ## 墙高（米）——够挡住相机看到墙外暗背景；俯角/距离在 P3 眼验微调
+const WALL_H := 3.6               ## 墙高（米）——够挡住相机看到墙外暗背景又不吃掉太多地板；俯角/距离 P3 眼验定
 const WALL_THICK := 0.3           ## 墙体厚度（米）：薄盒给墙一点实体感，内壁贴壁纸
 const BASE_H := 0.35              ## 踢脚线高度（米）
 const BASE_THICK := 0.06          ## 踢脚线凸出墙面的厚度（米）

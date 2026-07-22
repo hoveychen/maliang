@@ -84,6 +84,11 @@ const INDOOR_SCENES := ["home_interior"]
 ## 相机（P3）把 focus 钉在房间中心、RoomStage 摆在渲染原点，家具/玩家按「相对房间中心」落到房间格。
 const ROOM_N := 10
 const ROOM_ORIGIN_TILE := Vector2i(19, 19)   ## 房间格区间 [19..28]×[19..28]（含端点）；中心世界坐标 (48,48)
+## 室内收束相机（home-interior 重做 P3）：focus 钉在房间中心（不跟玩家滚动，RoomStage 摆在渲染原点，
+## 玩家按相对房间中心的最短位移在屋里走），固定俯角+距离把整间 N×N 屋框进画面。俯角比室外 god(47°)
+## 更陡（俯看进屋、看得见后墙/地板），距离据房间边长框满。数值眼验微调（P3 截图对齐动森/Pokopia）。
+const INDOOR_CAM_PITCH := 62.0    ## 室内俯角（度）——比室外陡，多露地板（家具摆在地板上）
+const INDOOR_CAM_DIST := 29.0     ## 室内轨道距离（米）——框住 10×10≈20m 见方的屋子
 const INDOOR_BG_COLOR := Color(0.12, 0.09, 0.10)      ## 墙外/天顶看到的暖暗色（读成室内不是天）
 const INDOOR_AMBIENT_COLOR := Color(1.0, 0.90, 0.78)  ## 暖色环境光
 const INDOOR_AMBIENT_ENERGY := 0.85
@@ -768,6 +773,21 @@ func _apply_indoor_render(scene_id: String) -> void:
 			room_stage.build(ROOM_N)
 		else:
 			room_stage.clear()
+	if indoor:
+		# 相机收束到整屋（P3）：立刻把 focus 钉到房间中心，免得进屋时从上个焦点滑过来；
+		# pitch/dist 由 _process 的室内焦点分支每帧维持，_cur_* 缓动过渡到位。
+		focus_logical = _room_center_logical()
+		_target_pitch = INDOOR_CAM_PITCH
+		_target_dist = INDOOR_CAM_DIST
+
+## 当前是否室内场景。
+func _is_indoor() -> bool:
+	return _scene_id in INDOOR_SCENES
+
+## 房间中心的逻辑坐标（世界单位）：区间 [origin .. origin+N-1] 的几何中心 = (origin + N/2)×TILE。
+func _room_center_logical() -> Vector2:
+	var c := (Vector2(ROOM_ORIGIN_TILE) + Vector2(float(ROOM_N), float(ROOM_N)) * 0.5) * WorldGrid.TILE_SIZE
+	return WorldGrid.wrap_pos(c)
 
 func _make_day_sky() -> Sky:
 	var noise := FastNoiseLite.new()
@@ -2272,6 +2292,13 @@ func _process(delta: float) -> void:
 		lift = dc["lift"]
 	elif _locked != null and is_instance_valid(_locked):
 		want = _find_npc_dict(_locked).get("logical", focus_logical)
+	elif _is_indoor():
+		# 室内收束（P3）：focus 钉房间中心（不跟玩家），整屋固定入镜；玩家在屋里走时按相对
+		# 房间中心的最短位移渲染，屋子（RoomStage 摆在渲染原点）稳定不滚。对话/手机/创造等
+		# 高优先分支仍照常覆盖（进屋跟村民聊天照样拉近构图）。
+		want = _room_center_logical()
+		_target_pitch = INDOOR_CAM_PITCH
+		_target_dist = INDOOR_CAM_DIST
 	elif not player.is_empty():
 		want = player["logical"]
 	var fd := WorldGrid.shortest_delta(focus_logical, want)
