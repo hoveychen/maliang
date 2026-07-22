@@ -106,6 +106,7 @@ UNIT_TESTS=(
   test_terrain_village_forest
   test_home_interior
   test_home_interior_portal
+  test_room_stage
   test_spawn_anchor
   test_terrain_load
   test_terrain_v2
