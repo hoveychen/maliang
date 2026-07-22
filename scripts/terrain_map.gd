@@ -441,6 +441,8 @@ static func _ensure_built() -> void:
 		_paint_village_forest()
 	elif _paint_scene == "oz":
 		_paint_oz()
+	elif _paint_scene == "home_interior":
+		_paint_home_interior()
 	else:
 		_paint()
 
@@ -577,6 +579,32 @@ static func _paint_oz() -> void:
 		_paint_ellipse_height(44.0, 42.0, 8.0 - 3.0 * float(lvl), 8.0 - 3.0 * float(lvl), lvl)
 	# 入口小广场(10~18,10~18,含 portal 落点 14,14)与玉米地(36,34)刻意留平——两处离两丘均 >半径，天然 h0。
 
+## 室内系统 MVP（home-interior）：玩家自己的家，一间居中的围墙房（50 格预设）。
+## 「进房子布置家具」的画布——地板铺满木地板（不露草），房间四周一圈墙 tile 抬高成四壁
+## （_emit_walls 依被抬高 tile 的类型出侧壁，T_TOY_WALL 有专属程序化墙面贴图）。
+## 家具由玩家用既有布置模式（world.gd _begin_placement → item_place）自己摆，故本函数
+## 只出空房骨架，不放任何锚点/散布（scene_compose 对 home_interior 无分支 = 空物品层）。
+## 「无天空 + 天花板 + 室内暖光」的封闭观感在 world.gd 引擎侧按场景分支实现（P3），非本函数。
+## 房间内墙净空 [17..32]×[17..32]（16×16 tile ≈ 32m 见方），墙圈 [16,16]-[33,33]，墙高 2 级。
+const HOME_WALL_MIN := 16
+const HOME_WALL_MAX := 33
+const HOME_WALL_H := 2
+static func _paint_home_interior() -> void:
+	var n := WorldGrid.GRID_TILES
+	# 地板铺满木地板（墙外区域也铺，避免看见裸草；封闭观感由 P3 天花板/相机收口）
+	_paint_rect_type(0, 0, n - 1, n - 1, T_WOOD_FLOOR)
+	# 四壁：房间边框一圈墙 tile，抬高成墙——四条边各一格厚
+	var lo := HOME_WALL_MIN
+	var hi := HOME_WALL_MAX
+	_paint_rect_type(lo, lo, hi, lo, T_TOY_WALL)   # 上墙（北）
+	_paint_rect_type(lo, hi, hi, hi, T_TOY_WALL)   # 下墙（南）
+	_paint_rect_type(lo, lo, lo, hi, T_TOY_WALL)   # 左墙（西）
+	_paint_rect_type(hi, lo, hi, hi, T_TOY_WALL)   # 右墙（东）
+	_paint_rect_height(lo, lo, hi, lo, HOME_WALL_H)
+	_paint_rect_height(lo, hi, hi, hi, HOME_WALL_H)
+	_paint_rect_height(lo, lo, lo, hi, HOME_WALL_H)
+	_paint_rect_height(hi, lo, hi, hi, HOME_WALL_H)
+
 ## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂类型（含端点）。
 static func _paint_rect_type(x0: int, z0: int, x1: int, z1: int, t: int) -> void:
 	for z in range(z0, z1 + 1):
@@ -603,6 +631,12 @@ static func _paint_ellipse_height(cx: float, cz: float, rx: float, rz: float, h:
 		for x in range(int(cx - rx), int(cx + rx) + 1):
 			if _in_ellipse(x, z, cx, cz, rx, rz):
 				_heights[_idx(Vector2i(x, z))] = h
+
+## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂高度（含端点）。
+static func _paint_rect_height(x0: int, z0: int, x1: int, z1: int, h: int) -> void:
+	for z in range(z0, z1 + 1):
+		for x in range(x0, x1 + 1):
+			_heights[_idx(Vector2i(x, z))] = h
 
 ## 沿折线涂类型：tile 中心到任一线段距离 ≤ radius（tile 单位）者涂 t。
 ## 顶点坐标可越出 [0,75)，_idx 会环面 wrap——用于画穿过接缝的小径。

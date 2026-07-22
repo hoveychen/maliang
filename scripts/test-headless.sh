@@ -104,6 +104,7 @@ UNIT_TESTS=(
   test_player_talk
   test_terrain_export
   test_terrain_village_forest
+  test_home_interior
   test_spawn_anchor
   test_terrain_load
   test_terrain_v2

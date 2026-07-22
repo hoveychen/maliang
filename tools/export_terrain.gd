@@ -13,7 +13,7 @@ const COMPOSE := preload("res://tools/scene_compose.gd")
 const HEADER_BYTES := 11
 
 ## 各场景网格边长（tile 数）——须与 server/src/terrain.ts PRESET_GRIDS 一致。
-const SCENE_GRIDS := { "village": 75, "village_forest": 100, "oz": 75 }
+const SCENE_GRIDS := { "village": 75, "village_forest": 100, "oz": 75, "home_interior": 50 }
 
 func _init() -> void:
 	var scene_id := _arg("--scene", "village")
@@ -111,6 +111,8 @@ static func build_poi_json(scene_id: String) -> Array:
 		return POIS_VF.duplicate(true)
 	if scene_id == "oz":
 		return POIS_OZ.duplicate(true)
+	if scene_id == "home_interior":
+		return []  # 室内空房：无 POI（默认分支会返回 village POI，故须显式空）
 	return build_poi_json_village()
 
 ## world.gd 的 POIS 常量 → POST /admin/scenes 的 pois 载荷（tile 由 Vector2i 摊平成 [x,y]）。
