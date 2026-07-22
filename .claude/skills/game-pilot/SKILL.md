@@ -61,8 +61,14 @@ claude mcp add maliang-pilot --scope local --env MALIANG_HARNESS_PORT=8578 \
 
 真机把端口设 `8577` 并先 `adb forward tcp:8577 tcp:8577`。注册后 `claude mcp list` 应见
 `maliang-pilot ✔ Connected`（Connected = MCP 进程握手健康，**不代表游戏已连**——先起桌面 debug 实例再驱）。
-⚠️ **注册在当前会话不生效，下一个会话才加载**（MCP 工具在会话启动时枚举）。8 工具与 CLI 子命令一一对应：
-`observe`=state+actions 一次读全、`access`/`actions`/`state`/`do`/`say`/`wait_until` 同名、`screenshot`=`shot`。细节见该目录 README。
+⚠️ **注册在当前会话不生效，下一个会话才加载**（MCP 工具在会话启动时枚举）。
+⚠️ **headless `claude -p` 默认不加载任何 MCP**（实测新 `-p` 会话连 fleet 的 MCP 都看不到）——`-p`/被 dispatch 的
+无头场景必须显式 `claude -p --mcp-config <json> --strict-mcp-config …`（json 格式见本目录 README 的 B 节）。
+交互式 TUI 会话才自动加载 local scope 注册。**验证方式**（已实测通）：起桌面实例后
+`claude -p --mcp-config <json> --dangerously-skip-permissions "用 maliang-pilot 的 observe 读状态"`——
+agent 会直接 tool-call `mcp__maliang-pilot__observe`、零 Bash/python 回退。
+8 工具与 CLI 子命令一一对应：`observe`=state+actions 一次读全、`access`/`actions`/`state`/`do`/`say`/`wait_until`
+同名、`screenshot`=`shot`。细节见该目录 README。
 
 ## 1. 循环纪律（感知→决策→动作→核对）
 
