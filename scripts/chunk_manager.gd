@@ -136,6 +136,23 @@ func _refresh_base_layer() -> void:
 var _ground_shadows := true  ## 地面斜阳椭圆贴片影（散布 + 建筑）
 var _props_shown := true     ## 会动的 SDF 物件
 
+## 室内房间舞台（home-interior 重做）：室内场景不铺无限地形——隐藏各槽的【地面+水面】mesh
+## （地板由 world.gd 的 RoomStage 真几何接管），但【保留 deco 层】，好让玩家摆的家具（走
+## item_place → 矩阵物品层 → chunk deco）照常渲染并随 update 重定位。故 update() 不跳过，
+## 只是 _skin 出的地面/水面 mesh 被置 invisible。换场景切室内/室外时由 world.gd 调用。
+var _terrain_hidden := false
+
+## 室内隐藏地面/水面 mesh（RoomStage 接管地板；家具 deco 层不动）。立即对已铺槽应用。
+func set_terrain_hidden(on: bool) -> void:
+	_terrain_hidden = on
+	for slot in _slots:
+		var tile: MeshInstance3D = slot["tile"]
+		var water: MeshInstance3D = slot["water"]
+		if tile != null:
+			tile.visible = not on
+		if water != null:
+			water.visible = not on
+
 ## 画质：地面贴片影开/关。切现有 ScatterShadows/BuildingShadows + 记住供 chunk 重铺沿用。
 ## （不能按 perf_scatter 组切——那组混了散布植被本体，会连树一起隐藏，只能按节点 name。）
 func set_ground_shadows(on: bool) -> void:
@@ -335,6 +352,7 @@ func clear_dynamic_props() -> void:
 
 func update(player_logical: Vector2) -> void:
 	_ensure_slots()  # 换到不同尺寸场景后自愈重建槽（幂等，尺寸没变零成本）
+	# 室内不 early-return：仍要重定位槽 + 铺 deco（家具）；只是 _skin 出的地面/水面 mesh 被隐藏。
 	var pending: Array = []  # 未铺设槽位 [距离, slot, wrapped]，每帧只铺最近的一块
 	# 遍历全部常驻槽（每 wrapped 区块一个），把每个摆到离焦点最近的环面镜像、按半径圆形裁剪。
 	# 不再用「以焦点为中心的 (2R+1)² 奇数窗口」——那要求 CHUNKS_PER_SIDE==2R+1（奇数）才能
@@ -372,8 +390,10 @@ func update(player_logical: Vector2) -> void:
 func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 	var tile: MeshInstance3D = slot["tile"]
 	tile.mesh = _chunk_mesh(wrapped)
+	tile.visible = not _terrain_hidden   # 室内：地板由 RoomStage 接管，隐藏 chunk 地面 mesh
 	var water: MeshInstance3D = slot["water"]
 	water.mesh = _water_mesh(wrapped)
+	water.visible = not _terrain_hidden
 
 	var deco: Node3D = slot["deco"]
 	for c in deco.get_children():
