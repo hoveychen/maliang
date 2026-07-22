@@ -789,6 +789,12 @@ func _room_center_logical() -> Vector2:
 	var c := (Vector2(ROOM_ORIGIN_TILE) + Vector2(float(ROOM_N), float(ROOM_N)) * 0.5) * WorldGrid.TILE_SIZE
 	return WorldGrid.wrap_pos(c)
 
+## 室内放置：把 tile 夹进房间地板网格 [origin .. origin+N-1]，免得摆到墙外暗 void（P4）。
+func _clamp_tile_to_room(t: Vector2i) -> Vector2i:
+	return Vector2i(
+		clampi(t.x, ROOM_ORIGIN_TILE.x, ROOM_ORIGIN_TILE.x + ROOM_N - 1),
+		clampi(t.y, ROOM_ORIGIN_TILE.y, ROOM_ORIGIN_TILE.y + ROOM_N - 1))
+
 func _make_day_sky() -> Sky:
 	var noise := FastNoiseLite.new()
 	noise.seed = 7
@@ -3257,6 +3263,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				var g := _pick_ground(event.position)
 				if g != Vector2.INF:
 					_place_tile = WorldGrid.to_tile(g)
+					if _is_indoor():
+						_place_tile = _clamp_tile_to_room(_place_tile) # 室内：夹进房间地板，别摆到墙外暗 void
 					if _place_is_edge:
 						_place_edge = _nearest_edge(g)
 					_refresh_place_ghost()
@@ -6024,6 +6032,8 @@ func _begin_placement(item_id: String) -> void:
 	else:
 		var spot := _find_item_spot(WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0))))
 		_place_tile = spot if spot.x >= 0 else WorldGrid.to_tile(WorldGrid.wrap_pos(anchor))
+	if _is_indoor():
+		_place_tile = _clamp_tile_to_room(_place_tile) # 室内：起始幽灵也夹进房间地板
 	if selected != null:
 		_exit_interaction()
 	_close_phone() # 收起手机看落位（幂等，同时退近身相机）
