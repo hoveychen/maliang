@@ -40,5 +40,22 @@
       86
     ],
     "trigger": "poi_forest_deep"
+  },
+  {
+    "aliases": [
+      "终点",
+      "起跑线",
+      "赛跑",
+      "跑道边",
+      "比赛",
+      "跑步"
+    ],
+    "name": "跑道",
+    "radius": 16.0,
+    "tile": [
+      88,
+      17
+    ],
+    "trigger": "poi_race"
   }
 ]

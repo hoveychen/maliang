@@ -1,0 +1,44 @@
+[
+  {
+    "characterId": "resident",
+    "tile": [
+      11,
+      10
+    ]
+  },
+  {
+    "characterId": "resident",
+    "tile": [
+      29,
+      11
+    ]
+  },
+  {
+    "characterId": "resident",
+    "tile": [
+      10,
+      24
+    ]
+  },
+  {
+    "characterId": "resident",
+    "tile": [
+      31,
+      22
+    ]
+  },
+  {
+    "characterId": "grandma",
+    "tile": [
+      66,
+      60
+    ]
+  },
+  {
+    "characterId": "snow",
+    "tile": [
+      30,
+      94
+    ]
+  }
+]

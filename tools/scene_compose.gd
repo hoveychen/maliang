@@ -59,6 +59,9 @@ const LANDMARKS_VF := [
 	# 布局：中央偏北一张餐桌（白雪 gate 30,82 前方）；七张单人床沿西/东/南三面围成小卧室，
 	# 空出中间给数数游戏的矮人站位（矮人降生 x25-35/y84-89，见 story_books.ts SNOW_WHITE cast）。
 	# 全为 3×3 blocking，锚点两两不重叠（已逐格核）；search:1 容许被散布挤时就近让一格。
+	# 七矮人合住小木屋（dwarf-cottage 计划）：南墙床（y90-92）外侧当背景，footprint (29-31,93-95)
+	# 与全部床/桌（y≤92）零重叠；门朝南(-y)迎孩子来路（参照外婆家 house_2 yaw0=朝+y）。室内系统另会话在做。
+	{ "item": "dwarf_cottage",   "tile": Vector2i(30, 94), "yaw": 180.0, "search": 3 },
 	{ "item": "toy_table",       "tile": Vector2i(30, 84), "yaw": 0.0,   "search": 1 },  # 矮人餐桌（碗摆桌旁）
 	{ "item": "toy_bed_single",  "tile": Vector2i(23, 84), "yaw": 90.0,  "search": 1 },  # 西墙床 1
 	{ "item": "toy_bed_single",  "tile": Vector2i(23, 88), "yaw": 90.0,  "search": 1 },  # 西墙床 2
@@ -115,6 +118,7 @@ const ITEM_SPAN := {
 	"house_0": 3, "house_1": 3, "house_2": 3, "house_3": 3,
 	"walking_hut": 3, "hop_mailbox": 3,
 	"emerald_castle": 3,
+	"dwarf_cottage": 3,  # 七矮人合住小木屋（dwarf-cottage 计划）
 	# 七矮人操场布景（s1-snow-white P7）：床/桌 3×3 与 server items.ts toy_bed_single/toy_table 同步。
 	"toy_bed_single": 3, "toy_table": 3,
 }
