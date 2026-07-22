@@ -1405,23 +1405,63 @@ export class WorldStore {
       .run(def.id, def.worldId, JSON.stringify(def));
   }
 
-  /** 物品实体定义：先查内置常量，再查该 world 的造物行。 */
-  getItemDef(worldId: string, id: string): ItemDef | undefined {
+  /**
+   * 物品实体定义：先查内置常量，再按 id 查造物行。
+   *
+   * 全局共享（items-global-shared）：物品 def 全世界共享——任何世界都能按 id 解析出任一物品的
+   * 定义（items 表 PK 是 id 单列、全局唯一，故 `WHERE id=?` 无歧义）。world_id 列退化为「创造来源」
+   * 记账，不再是解析过滤条件。`worldId` 形参保留只为兼容调用点（itemResolver 闭包签名），解析不用它。
+   * 这让「创造物品=全世界多一个物品，孩子持引用」成立，并自动修克隆场景 palette 引用造物 def
+   * 在目标世界能解析的 crux（docs/items-global-shared-design.md）。
+   */
+  getItemDef(_worldId: string, id: string): ItemDef | undefined {
     const b = getBuiltinItem(id);
     if (b) return b;
-    const row = this.#db.prepare('SELECT data FROM items WHERE id = ? AND world_id = ?').get(id, worldId) as
+    const row = this.#db.prepare('SELECT data FROM items WHERE id = ?').get(id) as
       | { data: string }
       | undefined;
     return row ? (JSON.parse(row.data) as ItemDef) : undefined;
   }
 
-  /** 该 world 的造物实体（不含内置）。 */
+  /** 该 world 的造物实体（不含内置）——按创造来源 world_id 过滤，供 debug/provenance 视图用。 */
   listWorldItems(worldId: string): ItemDef[] {
     const rows = this.#db.prepare('SELECT data FROM items WHERE world_id = ? ORDER BY id').all(worldId) as { data: string }[];
     return rows.map((r) => JSON.parse(r.data) as ItemDef);
   }
 
-  /** 地形矩阵校验用的实体解析器（内置 + 该 world 造物）。 */
+  /**
+   * 该世界「引用到」的造物实体定义（不含内置）——scene_entered/world_info 载荷用。
+   *
+   * 全局共享（items-global-shared）：物品 def 现全局解析（getItemDef 去 world 过滤），但客户端
+   * 只该拿到它要渲染/持有的那些——即本世界各场景 terrain palette 引用的 id ∪ 本世界背包里的 id，
+   * 逐个按全局注册表解析。这既让「def 全局共享」真成立（克隆场景引用的造物、未来好友共玩/作者
+   * 在 template 摆的造物都能解析并下发），又不泄漏别的世界的造物（别人的 def 虽全局可解析，但不被
+   * 本世界引用 → 不在此列 → 不下发、不渲染，见设计 §5）。内置由调用方 `[...BUILTIN_ITEMS, ...]`
+   * 前置，这里剔除以免重复。
+   */
+  listReferencedItems(worldId: string): ItemDef[] {
+    const ids = new Set<string>();
+    for (const scene of this.listScenes(worldId)) {
+      const rec = this.getSceneTerrain(worldId, scene.sceneId);
+      if (!rec) continue;
+      try {
+        for (const id of decodeTerrain(rec.bytes).palette) ids.add(id);
+      } catch {
+        /* 单个坏地形 blob 不连坐整个载荷 */
+      }
+    }
+    for (const b of this.listBags(worldId)) ids.add(b.itemId);
+    const out: ItemDef[] = [];
+    for (const id of ids) {
+      if (getBuiltinItem(id)) continue; // 内置由调用方前置，不重复
+      const def = this.getItemDef(worldId, id); // 全局解析（worldId 形参已被忽略）
+      if (def) out.push(def);
+    }
+    out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)); // 稳定顺序，缓存/测试友好
+    return out;
+  }
+
+  /** 地形矩阵校验用的实体解析器（内置 + 全局造物，见 getItemDef）。worldId 形参保留兼容。 */
   itemResolver(worldId: string): (id: string) => ItemDef | undefined {
     return (id) => this.getItemDef(worldId, id);
   }

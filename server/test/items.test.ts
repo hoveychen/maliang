@@ -6,9 +6,9 @@ import {
   creationItemDef,
 } from '../src/items.ts';
 import { fallbackSdfPropSpec } from '../src/sdf_prop.ts';
-import { argYawDeg, yawToArg, emptyTerrain, T_PATH, T_WATER, REQUIRED_GRID } from '../src/terrain.ts';
+import { argYawDeg, yawToArg, emptyTerrain, encodeTerrain, T_PATH, T_WATER, REQUIRED_GRID } from '../src/terrain.ts';
 import { WorldStore } from '../src/persistence.ts';
-import type { ItemDef } from '../src/types.ts';
+import { DEFAULT_SCENE, type ItemDef } from '../src/types.ts';
 
 const G = REQUIRED_GRID;
 const at = (x: number, y: number) => y * G + x;
@@ -192,15 +192,15 @@ test('items 表：拒绝内置 id / builtin 定义 / 幽灵世界', () => {
   assert.throws(() => s.upsertItem(creation('x', 'nope')), /world not found/);
 });
 
-test('items 表：按 world 隔离；itemResolver 内置+造物都可解析', () => {
+test('items 表：listWorldItems 按创造来源过滤；itemResolver 内置+造物都可解析', () => {
   const s = new WorldStore();
   s.createWorld('w1');
   s.createWorld('w2');
   s.upsertItem(creation('flower_xm', 'w1'));
 
+  // listWorldItems 仍按 creating world_id 过滤（provenance 视图不变）
   assert.equal(s.listWorldItems('w1').length, 1);
   assert.equal(s.listWorldItems('w2').length, 0);
-  assert.equal(s.getItemDef('w2', 'flower_xm'), undefined);
 
   const resolve = s.itemResolver('w1');
   assert.equal(resolve('flower_xm')!.name, '小明的花');
@@ -213,4 +213,77 @@ test('items 表：按 world 隔离；itemResolver 内置+造物都可解析', ()
   assert.doesNotThrow(() => validateTerrainItems(t, resolve));
   const occ = buildStaticOccupancy(t, resolve);
   assert.equal(occ[at(7, 7)], 1);
+});
+
+// ── 全局共享（items-global-shared）：def 全局解析，world_id 只作创造来源记账 ─────
+test('getItemDef 全局解析：world A 造的物品 id 在 world B 也解析出同一 def', () => {
+  const s = new WorldStore();
+  s.createWorld('wA');
+  s.createWorld('wB');
+  s.upsertItem(creation('flower_xm', 'wA'));
+
+  const fromA = s.getItemDef('wA', 'flower_xm')!;
+  const fromB = s.getItemDef('wB', 'flower_xm')!;
+  assert.deepEqual(fromB, fromA, 'B 按 id 解析出与 A 同一 def（不再被 world_id 卡住）');
+  assert.equal(fromB.worldId, 'wA', 'def 仍记创造来源 wA（provenance）');
+
+  // itemResolver（任意 worldId 闭包）都全局解析
+  assert.equal(s.itemResolver('wB')('flower_xm')!.name, '小明的花');
+
+  // crux：world-scoped 造物被 world B 的场景 palette 引用时，校验/占用能全局解出 def
+  const resolveB = s.itemResolver('wB');
+  const t = emptyTerrain();
+  t.palette = ['flower_xm'];
+  t.itemRef[at(7, 7)] = 1;
+  assert.doesNotThrow(() => validateTerrainItems(t, resolveB), 'B 引用 A 的造物 palette 校验通过');
+  assert.equal(buildStaticOccupancy(t, resolveB)[at(7, 7)], 1);
+});
+
+/** 给 world 的 DEFAULT_SCENE 装一份 palette 引用了 refs 的地形。 */
+function seedSceneWithPalette(s: WorldStore, worldId: string, refs: string[]): void {
+  s.upsertScene({
+    worldId, sceneId: DEFAULT_SCENE, name: '场景', terrainAsset: 'h',
+    gridTiles: G, terrainVersion: 1, pois: [], portals: [],
+  });
+  const t = emptyTerrain();
+  t.palette = [...refs];
+  refs.forEach((_id, i) => { t.itemRef[at(5 + i, 5)] = i + 1; });
+  s.setSceneTerrain(worldId, DEFAULT_SCENE, encodeTerrain(t), 1);
+}
+
+test('listReferencedItems：只含本世界引用到的造物（palette∪背包），不泄漏别世界造物，剔内置', () => {
+  const s = new WorldStore();
+  s.createWorld('wA');
+  s.createWorld('wB');
+  // A 造两个：flower_a（A 摆了、且 B 也引用=克隆场景 crux），secret_a（只在 A 摆，B 从不引用）
+  s.upsertItem(creation('flower_a', 'wA'));
+  s.upsertItem(creation('secret_a', 'wA'));
+  // B 造一个：rocket_b（B 摆了 + 进 B 背包）
+  s.upsertItem(creation('rocket_b', 'wB'));
+
+  // A 的场景 palette 引用 flower_a + secret_a（+ 一个内置，验证剔除）
+  seedSceneWithPalette(s, 'wA', ['flower_a', 'secret_a', 'tree_puff_a']);
+  // B 的场景 palette 引用 rocket_b + flower_a（crux：引用了 A 造的物品）
+  seedSceneWithPalette(s, 'wB', ['rocket_b', 'flower_a']);
+  s.bagAdd('wB', 'child', 'rocket_b'); // rocket_b 也在 B 背包
+
+  const aIds = s.listReferencedItems('wA').map((d) => d.id).sort();
+  assert.deepEqual(aIds, ['flower_a', 'secret_a'], 'A 引用到 flower_a+secret_a；内置 tree_puff_a 剔除');
+
+  const bIds = s.listReferencedItems('wB').map((d) => d.id).sort();
+  assert.deepEqual(bIds, ['flower_a', 'rocket_b'], 'B 引用到自己的 rocket_b + 跨世界的 flower_a(crux)');
+  assert.ok(!bIds.includes('secret_a'), '无泄漏：A 造但 B 未引用的 secret_a 不在 B 载荷');
+
+  // 引用到的 def 是全局解析出的真 def（B 拿到 flower_a 的来源仍记 wA）
+  const flowerFromB = s.listReferencedItems('wB').find((d) => d.id === 'flower_a')!;
+  assert.equal(flowerFromB.worldId, 'wA');
+  assert.equal(flowerFromB.name, '小明的花');
+});
+
+test('listReferencedItems：背包持有但未摆放的物品也在（客户端要渲染背包）', () => {
+  const s = new WorldStore();
+  s.createWorld('wA');
+  s.upsertItem(creation('bagged_only', 'wA'));
+  s.bagAdd('wA', 'child', 'bagged_only'); // 只进背包，没摆到 palette
+  assert.deepEqual(s.listReferencedItems('wA').map((d) => d.id), ['bagged_only']);
 });
