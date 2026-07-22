@@ -26,17 +26,17 @@ func _init() -> void:
 		var at_land := WorldGrid.from_tile_center(Vector2i(24, 31))
 		fails += _check("出屋落点不在家门半径内（防弹回）", World.portal_hit(vf, at_land).is_empty(), true)
 
-	# ── home_interior 侧（50 格）：南墙门洞出口回村 ─────────────────────────
+	# ── home_interior 侧（50 格）：房间前开口边缘出口回村 ───────────────────
 	WorldGrid.configure(50)
 	var hi := World.parse_server_portals(EX.build_portal_json("home_interior"))
 	fails += _check("室内解析出 1 座返回门", hi.size(), 1)
 	if not hi.is_empty():
 		fails += _check("室内门 → 村庄", hi[0]["to_scene"], "village_forest")
-		fails += _check("室内门 tile = (24,32)", hi[0]["tile"], Vector2i(24, 32))
+		fails += _check("室内门 tile = (24,28) 前开口边缘", hi[0]["tile"], Vector2i(24, 28))
 		fails += _check("室内门落点 = (24,31)", hi[0]["to_tile"], Vector2i(24, 31))
-		var at_exit := WorldGrid.from_tile_center(Vector2i(24, 32))
+		var at_exit := WorldGrid.from_tile_center(Vector2i(24, 28))
 		fails += _check("踏进出口半径命中村庄门", World.portal_hit(hi, at_exit)["to_scene"], "village_forest")
-		# 进室内的落点 (24,22) → 离出口 10 tile，不该命中（防弹回）
+		# 进室内的落点 (24,22) → 离出口 6 tile > radius 2.5，不该命中（防弹回）
 		var at_enter := WorldGrid.from_tile_center(Vector2i(24, 22))
 		fails += _check("进屋落点不在出口半径内（防弹回）", World.portal_hit(hi, at_enter).is_empty(), true)
 
