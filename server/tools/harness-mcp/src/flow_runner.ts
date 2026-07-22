@@ -15,7 +15,8 @@ export const RUNNER_PATH = path.resolve(
 
 export type RunnerOpts = { host: string; port: number };
 
-// 拼 pilot_runner 的 argv（纯函数，可单测）。mode="list" 不连游戏；mode="flow" 带 --flow/--args/--port。
+// 拼 pilot_runner 的 argv（纯函数，可单测）。mode="list" 默认带可用性(连游戏取 state 标 available)；
+// mode="flow" 带 --flow/--args/--port。
 export function buildRunnerArgs(
   mode: "list" | "flow",
   opts: RunnerOpts,
@@ -23,7 +24,8 @@ export function buildRunnerArgs(
 ): string[] {
   const argv = [RUNNER_PATH];
   if (mode === "list") {
-    argv.push("--list");
+    // 带可用性：连 opts 指定的游戏口取 state，给每条 flow 标 available{ok,reasons}（现在能不能跑）。
+    argv.push("--list", "--with-availability", "--host", opts.host, "--port", String(opts.port));
     return argv;
   }
   if (!flow?.name) throw new Error("run_flow 需要 flow name");
@@ -71,9 +73,10 @@ function spawnRunner(argv: string[], timeoutMs: number): Promise<SpawnResult> {
   });
 }
 
-// 列注册表全部 flow（子进程 --list，不连游戏）。返回 {ok, flows:[...]}。
-export async function listFlows(): Promise<Record<string, unknown>> {
-  const r = await spawnRunner(buildRunnerArgs("list", { host: "", port: 0 }), 15000);
+// 列注册表全部 flow（子进程 --list --with-availability）。连 opts 指定的游戏口取 state，
+// 给每条标 available{ok,reasons}；游戏没连上则 available.ok=null。返回 {ok, flows:[...]}。
+export async function listFlows(opts: RunnerOpts): Promise<Record<string, unknown>> {
+  const r = await spawnRunner(buildRunnerArgs("list", opts), 15000);
   return parseRunnerJson(r.stdout);
 }
 

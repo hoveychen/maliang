@@ -38,6 +38,8 @@
   .kind { font-size:10px; padding:1px 6px; border-radius:8px; border:1px solid var(--line); }
   .kind.setup { color:var(--accent); border-color:var(--accent); }
   .kind.regression { color:var(--ok); border-color:var(--ok); }
+  .flow.unavail { opacity:.5; }
+  .flow .why { color:var(--bad); font-size:10px; }
 </style>
 </head>
 <body>
@@ -141,14 +143,22 @@ function renderFlows(flows) {
   $("#fcount").textContent = flows.length;
   const box = $("#flows"); box.innerHTML = "";
   for (const f of flows) {
-    const row = document.createElement("div"); row.className = "flow";
+    // available.ok: true=可跑 / false=当前不可跑(标原因,置灰) / null=未知(游戏没连) → 不拦，让 do 时自然报
+    const av = f.available || { ok: null, reasons: [] };
+    const blocked = av.ok === false;
+    const row = document.createElement("div"); row.className = "flow" + (blocked ? " unavail" : "");
     const meta = document.createElement("div"); meta.className = "meta";
     const n = document.createElement("div"); n.className = "name";
     n.textContent = f.name + (f.depends && f.depends.length ? "  ← " + f.depends.join(",") : "");
     const d = document.createElement("div"); d.className = "desc"; d.textContent = f.desc || "";
     meta.appendChild(n); meta.appendChild(d);
+    if (blocked && av.reasons && av.reasons.length) {
+      const why = document.createElement("div"); why.className = "why"; why.textContent = "✕ " + av.reasons.join("；");
+      meta.appendChild(why);
+    }
     const kind = document.createElement("span"); kind.className = "kind " + f.kind; kind.textContent = f.kind;
     const btn = document.createElement("button"); btn.textContent = "跑";
+    btn.disabled = blocked;                       // 当前不可跑 → 禁用按钮(与 action 的 enabled 同款)
     btn.onclick = () => runFlow(f);
     row.appendChild(meta); row.appendChild(kind); row.appendChild(btn);
     box.appendChild(row);
@@ -196,6 +206,7 @@ async function observe() {
     renderActions(o.actions || []);
     const s = o.state || {};
     $("#status").textContent = (s.scene_id || "—") + " / " + (s.fsm_state || "?");
+    loadFlows();          // 随 state 刷新流程可用性（进世界后 in_world/villagers_ready 变 → 可跑态变）
     refreshShot();
   } catch (e) { $("#status").textContent = "连不上"; }
 }
@@ -207,8 +218,7 @@ $("#auto").onchange = (e) => {
   else { clearInterval(timer); timer = null; }
 };
 window.addEventListener("resize", layoutOverlay);
-loadFlows();
-observe();
+observe();   // observe() 内已 loadFlows()（带可用性）
 </script>
 </body>
 </html>

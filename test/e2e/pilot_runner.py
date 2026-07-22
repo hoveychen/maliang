@@ -90,6 +90,11 @@ def run_flow(h, name, args=None, registry_path=None):
     for fname in order:
         fdef = flows[fname]
         fargs = args if fname == name else {}       # 依赖链无参跑，仅本体传 args
+        # P6 硬 gate：本体开跑前按声明的 requires 严格判当前 state（deps 已把 provides 真建立）。
+        # 未满足即抛——把「声明的前置」变成代码 gate，不靠各 flow 手写 raise，也不靠 LLM 自觉。
+        gate = reg.evaluate_now(fdef, h.state())
+        if not gate["ok"]:
+            raise HarnessError(f"flow {fname} 前置未满足: {'; '.join(gate['reasons'])}")
         t0 = time.time()
         fn = load_run(fdef["script_path"])
         result = _call_run(fn, h, fargs)
@@ -122,6 +127,8 @@ def main():
     g.add_argument("--script", help="直接跑某个暴露 run(h) 的 .py 脚本（无 depends/参数解析）")
     g.add_argument("--flow", help="按注册名跑（解析 depends 链 + args_schema + coverage）")
     g.add_argument("--list", action="store_true", help="列出注册表全部 flow（JSON，不连游戏），供 MCP/web list_flows")
+    ap.add_argument("--with-availability", action="store_true",
+                    help="配 --list：连游戏取一份 state，给每条 flow 标 available{ok,reasons}（现在能不能跑）")
     ap.add_argument("--args", default="", help="传给本体 flow 的参数（JSON 对象，如 '{\"name\":\"小火箭\"}'）")
     ap.add_argument("--registry", default="", help="registry.json 路径（缺省用 flows/registry.json）")
     ap.add_argument("--host", default="127.0.0.1")
@@ -131,14 +138,30 @@ def main():
     ap.add_argument("--json", action="store_true", help="结果以单行 JSON 打到 stdout（供 MCP/web 子进程解析）")
     args = ap.parse_args()
 
-    # --list 不连游戏：加载校验注册表并把 flow 元数据打成 JSON（去掉 script_path 绝对路径，回包只留清单字段）。
+    # --list 默认不连游戏：加载校验注册表并把 flow 元数据打成 JSON（去掉 script_path 绝对路径）。
+    # --with-availability 时才连游戏取一份 state，给每条标 available{ok,reasons}（现在能不能跑，含依赖 provides）。
     if args.list:
         try:
             flows = reg.load_registry(args.registry or None)
         except reg.RegistryError as e:
             print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
             return 2
-        out = [{k: v for k, v in f.items() if k != "script_path"} for f in flows.values()]
+        state = None
+        if args.with_availability:
+            h = Harness(args.host, args.port, timeout=args.timeout)
+            try:
+                h.connect(retries=2, delay=0.5)
+                state = h.state()
+            except HarnessError:
+                state = None   # 游戏没连上 → available.ok=None（未知）
+            finally:
+                h.close()
+        out = []
+        for f in flows.values():
+            item = {k: v for k, v in f.items() if k != "script_path"}
+            if args.with_availability:
+                item["available"] = reg.availability(flows, f["name"], state)
+            out.append(item)
         print(json.dumps({"ok": True, "flows": out}, ensure_ascii=False))
         return 0
 

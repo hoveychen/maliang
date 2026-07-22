@@ -92,7 +92,7 @@ type Content = { type: "text"; text: string } | { type: "image"; data: string; m
 async function callTool(name: string, args: Record<string, unknown>): Promise<Content[]> {
   // 流程中心两工具经 pilot_runner 子进程跑（子进程自建 TCP 连接），不占 MCP 自己的连接。
   // list_flows 更不需要游戏在线 → 放在 ensureConnected 之前，游戏没起也能列。
-  if (name === "list_flows") return [textContent(await listFlows())];
+  if (name === "list_flows") return [textContent(await listFlows({ host: HOST, port: PORT }))];
   if (name === "run_flow") {
     const flowName = String(args.name || "");
     if (!flowName) throw new Error("run_flow 需要 name");
@@ -215,8 +215,9 @@ const TOOLS = [
   {
     name: "list_flows",
     description:
-      "列出可复用流程中心(Flow Registry)里注册的全部 flow：{name,desc,kind(setup|regression),tags,args_schema,depends}。" +
-      "跑某条链路前先 list 看有没有现成 flow 可复用，别手搓重走 onboarding/前置。",
+      "列出可复用流程中心(Flow Registry)里注册的全部 flow：{name,desc,kind(setup|regression),tags,args_schema,depends,requires,provides}" +
+      " + available{ok,reasons}(按当前游戏 state 算现在能不能跑,对齐 action 的 enabled/reason_disabled)。" +
+      "跑某条链路前先 list 看有没有现成 flow 可复用、哪条现在可跑，别手搓重走 onboarding/前置。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {

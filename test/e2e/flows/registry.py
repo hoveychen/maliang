@@ -23,6 +23,20 @@ DEFAULT_REGISTRY = Path(__file__).resolve().parent / "registry.json"
 
 VALID_KINDS = ("setup", "regression")
 
+# 可用性条件（P6）：每条是 (谓词(state)->bool, 不满足时的人话原因)。对齐 harness 的 action 模型——
+# action 带 enabled + reason_disabled，flow 带 available + reasons。全部**从 state 快照算**，不靠 LLM 判断。
+# flow 用 requires 声明「跑本体前需要哪些条件」；setup flow 用 provides 声明「跑完会建立哪些条件」。
+CONDITIONS = {
+    "in_world":        (lambda s: bool(s.get("world_id")),
+                        "不在世界(world_id 为空)——需先进世界"),
+    "online":          (lambda s: bool(s.get("ws_open")),
+                        "未连服务器(ws_open=false)——离线/世界未起"),
+    "villagers_ready": (lambda s: bool(s.get("ws_open")) and int(s.get("npc_count") or 0) >= 8,
+                        "世界未就绪(ws_open + npc>=8 未满足)——冷缓存慢填/离线"),
+    "vc_ready":        (lambda s: bool(s.get("vc_ready")),
+                        "语音未就绪(vc_ready=false)——桌面需先 inject 换 ScriptedAsr"),
+}
+
 
 class RegistryError(Exception):
     """清单加载/校验/解析出错（缺字段、未知依赖、环、未知 flow、非法入参等）。"""
@@ -67,6 +81,17 @@ def load_registry(path=None):
                  f"flow {name} 的 depends 须为字符串数组")
         tags = f.get("tags", [])
         _require(isinstance(tags, list), f"flow {name} 的 tags 须为数组")
+        # P6：requires（本体前需要的条件）/ provides（setup 跑完建立的条件）——键须是已知 CONDITIONS。
+        requires = f.get("requires", [])
+        _require(isinstance(requires, list) and all(isinstance(c, str) for c in requires),
+                 f"flow {name} 的 requires 须为字符串数组")
+        for c in requires:
+            _require(c in CONDITIONS, f"flow {name} 的 requires 含未知条件: {c}（已知: {sorted(CONDITIONS)}）")
+        provides = f.get("provides", [])
+        _require(isinstance(provides, list) and all(isinstance(c, str) for c in provides),
+                 f"flow {name} 的 provides 须为字符串数组")
+        for c in provides:
+            _require(c in CONDITIONS, f"flow {name} 的 provides 含未知条件: {c}（已知: {sorted(CONDITIONS)}）")
         flows[name] = {
             "name": name,
             "desc": f.get("desc", ""),
@@ -76,6 +101,8 @@ def load_registry(path=None):
             "script_path": str(script_path),
             "args_schema": args_schema,
             "depends": depends,
+            "requires": requires,
+            "provides": provides,
         }
 
     # depends 引用完整性：每个依赖都得是已知 flow（放到全部加载完再查，允许前向引用）。
@@ -117,6 +144,45 @@ def resolve_order(flows, name):
 
     visit(name, [])
     return order
+
+
+def evaluate_now(flowdef, state):
+    """运行时严格判：flow 的每条 requires 是否在**当前 state** 真满足。返回 {ok, reasons:[未满足的人话]}。
+
+    runner 在 deps 跑完、本体开跑前调它——deps 已把 provides 真建立进 state，故这里只认真实状态、不做乐观。
+    这就是把「声明的 requires」变成**硬 gate**（未满足抛错）的判据来源，不是散在各 flow 里手写 raise。
+    """
+    reasons = []
+    for c in flowdef.get("requires", []):
+        pred, why = CONDITIONS[c]
+        if not pred(state or {}):
+            reasons.append(why)
+    return {"ok": not reasons, "reasons": reasons}
+
+
+def availability(flows, name, state):
+    """列表/展示用判：从**当前 state** 看这条 flow「现在能不能跑」，**乐观计入其 setup 依赖会 provides 的条件**。
+
+    例：naming_e2e 在菜单态 in_world/villagers_ready 都为假，但它 depends=[enter_world]，enter_world provides
+    villagers_ready → 显示为「可跑」（跑起来 enter_world 会先把世界带起）。返回 {ok, reasons:[未满足且无依赖提供]}。
+    state 为空（游戏没连上）→ ok=None（未知），reasons 空——list 侧据此显示「未知/游戏未连」。
+    """
+    flow = get(flows, name)
+    if not state:
+        return {"ok": None, "reasons": []}
+    # 依赖闭包里 setup flow 的 provides 并集（本体自己不算——它要求的正是别人给的）。
+    provided = set()
+    for dep in resolve_order(flows, name):
+        if dep == name:
+            continue
+        if flows[dep]["kind"] == "setup":
+            provided.update(flows[dep].get("provides", []))
+    reasons = []
+    for c in flow.get("requires", []):
+        pred, why = CONDITIONS[c]
+        if not pred(state) and c not in provided:
+            reasons.append(why)
+    return {"ok": not reasons, "reasons": reasons}
 
 
 def validate_args(flowdef, args):

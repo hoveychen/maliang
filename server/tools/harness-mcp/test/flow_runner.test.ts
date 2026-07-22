@@ -2,10 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildRunnerArgs, parseRunnerJson, RUNNER_PATH } from "../src/flow_runner.ts";
 
-test("buildRunnerArgs list：只 --list，不带 --port/--flow", () => {
+test("buildRunnerArgs list：--list --with-availability + host/port（连游戏标 available）", () => {
   const a = buildRunnerArgs("list", { host: "127.0.0.1", port: 8578 });
   assert.equal(a[0], RUNNER_PATH);
-  assert.deepEqual(a.slice(1), ["--list"]);
+  assert.deepEqual(a.slice(1), ["--list", "--with-availability", "--host", "127.0.0.1", "--port", "8578"]);
 });
 
 test("buildRunnerArgs flow：带 --flow/--json/--host/--port，无参不加 --args", () => {

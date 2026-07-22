@@ -72,7 +72,7 @@ const server = http.createServer(async (req, res) => {
     }
     // Flow Registry 面（P3）：列注册流程 / 按名跑（经 pilot_runner 子进程，与 MCP/CLI 同一执行路径）。
     if (p === "/api/flows" && req.method === "GET") {
-      return sendJson(res, 200, await listFlows());   // 不连游戏也能列
+      return sendJson(res, 200, await listFlows({ host: HOST, port: PORT }));   // 带 available（连游戏取 state）
     }
     if (p === "/api/run_flow" && req.method === "POST") {
       const body = await readBody(req);
