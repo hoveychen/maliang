@@ -1,0 +1,22 @@
+{
+  "flows": [
+    {
+      "name": "enter_world",
+      "desc": "真过 menu(→onboarding)进世界;已在世界则复用跳过导航(幂等)",
+      "kind": "setup",
+      "tags": ["onboarding", "prereq"],
+      "script": "flows/enter_world.py",
+      "args_schema": {},
+      "depends": []
+    },
+    {
+      "name": "world_ready",
+      "desc": "冒烟回归:进世界后断言世界就绪(ws_open + npc>=8),证 depends 链先跑 enter_world",
+      "kind": "regression",
+      "tags": ["smoke"],
+      "script": "flows/world_ready.py",
+      "args_schema": {},
+      "depends": ["enter_world"]
+    }
+  ]
+}
