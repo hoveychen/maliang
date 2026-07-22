@@ -87,7 +87,7 @@ const POIS_OZ := [
 ]
 
 ## 「谁的家」建筑住户表（interaction-feedback B 档，POST /admin/scenes 的 homes 载荷）。
-## village_forest 的 5 栋房子（tile 与 scene_compose.gd LANDMARKS_VF 的 house_* 锚点一致）：
+## village_forest 的 6 栋房子（tile 与 scene_compose.gd LANDMARKS_VF 锚点一致：4 农舍 + 外婆家 + 七矮人小屋）：
 ## 点村舍 → 客户端 _home_near_tile 命中 → 点点飞过去说 house_locked「这是别人的家呀」。
 ## characterId 值当前【不被朗读】（α 小仙子语音纯预制、不带名字），只需非空即命中——
 ## 外婆家填 grandma，村里 4 农舍填通用 resident；β 带名字预制后再回填真实 roster id。
@@ -97,6 +97,7 @@ const HOMES_VF := [
 	{ "tile": [10, 24], "characterId": "resident" },  # house_2
 	{ "tile": [31, 22], "characterId": "resident" },  # house_3
 	{ "tile": [66, 60], "characterId": "grandma" },   # 外婆家小屋（小红帽册）
+	{ "tile": [30, 94], "characterId": "snow" },      # 七矮人合住小木屋（白雪把矮人的家当自己家收拾；dwarf-cottage 计划）
 ]
 
 ## homes 载荷 → POST /admin/scenes 的 homes。老场景（village/oz）天然无住户 → 空数组。

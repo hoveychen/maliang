@@ -54,6 +54,9 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   // 七矮人的木碗（s1-snow-white P7 布景）：数数游戏『一人一碗』的静态道具，摆在餐桌旁；
   // 纯装饰不挡路（blocking:false pathOk:true），别糊住操场也别挡引路。
   { ...builtin('dwarf_bowl', '小矮人的碗', 'sdf_res:dwarf_bowl', 1, false), pathOk: true },
+  // 白雪+七矮人合住的森林小木屋（s1-snow-white，dwarf-cottage 计划）：森林深处露天卧室外侧的
+  // 一栋可见建筑地标；span 3 同 house，挡路（室内系统由另会话接，此处只放外壳）。
+  builtin('dwarf_cottage', '矮人小屋', 'sdf_res:dwarf_cottage', 3, true),
 
   // ── 未来机器人主题（world-themes P2 打样；全 CC0：Quaternius 机器人 + Kenney Space Kit）──
   // 机器人（Quaternius，assets/scifi/robots/*.glb）
