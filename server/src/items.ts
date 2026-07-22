@@ -345,9 +345,17 @@ export function creationBuildDef(worldId: string, id: string, name: string, spec
  * 仅一次 = 天然幂等，无需标记）。id 必须都在上方 BUILTIN_ITEMS（scene_entered 恒下发定义，客户端可解析渲染）。
  */
 export const STARTER_HOME_FURNITURE: ReadonlyArray<{ id: string; count: number }> = [
+  // 卧室
   { id: 'toy_bed_single', count: 1 },
+  // 客厅（沙发 + 茶几 + 电视一组）
+  { id: 'toy_sofa', count: 1 },
+  { id: 'toy_coffee_table', count: 1 },
+  { id: 'toy_tv', count: 1 },
+  // 餐桌 + 两把椅子
   { id: 'toy_table', count: 1 },
   { id: 'toy_chair', count: 2 },
+  // 收纳与装点
+  { id: 'toy_bookcase', count: 1 },
   { id: 'toy_lamp', count: 1 },
   { id: 'toy_plant', count: 1 },
   { id: 'toy_bear', count: 1 },
