@@ -54,8 +54,12 @@ func _init() -> void:
 	fails += _check("北墙 = 墙面", TerrainMap.tile_type(Vector2i(25, 16)), TerrainMap.T_TOY_WALL)
 	fails += _check("西墙 = 墙面", TerrainMap.tile_type(Vector2i(16, 25)), TerrainMap.T_TOY_WALL)
 	fails += _check("东墙 = 墙面", TerrainMap.tile_type(Vector2i(33, 25)), TerrainMap.T_TOY_WALL)
-	fails += _check("南墙 = 墙面", TerrainMap.tile_type(Vector2i(25, 33)), TerrainMap.T_TOY_WALL)
+	fails += _check("南墙 = 墙面", TerrainMap.tile_type(Vector2i(20, 33)), TerrainMap.T_TOY_WALL)
 	fails += _check("墙角 = 墙面", TerrainMap.tile_type(Vector2i(16, 16)), TerrainMap.T_TOY_WALL)
+	# 南墙门洞（对齐出口 portal 24,32）：2 格复原成平地板
+	fails += _check("南墙门洞左 = 地板", TerrainMap.tile_type(Vector2i(24, 33)), TerrainMap.T_WOOD_FLOOR)
+	fails += _check("南墙门洞右 = 地板", TerrainMap.tile_type(Vector2i(25, 33)), TerrainMap.T_WOOD_FLOOR)
+	fails += _check("门洞高度 = 0（可走出）", TerrainMap.tile_height(Vector2i(24, 33)), 0)
 
 	# ── 高度：墙抬高、室内平地板 ───────────────────────────────────────────
 	fails += _check("北墙抬高 = 2", TerrainMap.tile_height(Vector2i(25, 16)), 2)

@@ -54,6 +54,9 @@ const LANDMARKS_VF := [
 	{ "item": "house_1", "tile": Vector2i(29, 11), "yaw": 180.0, "search": 2 },
 	{ "item": "house_2", "tile": Vector2i(10, 24), "yaw": 90.0, "search": 2 },
 	{ "item": "house_3", "tile": Vector2i(31, 22), "yaw": 270.0, "search": 2 },
+	# 玩家自己的家（home-interior P2）：村核南侧一栋，门朝南对着家门 portal (24,26)——
+	# 走近家门就进室内（home_interior 场景）。MVP 复用 house_0 外观，专属立面留后续 polish。
+	{ "item": "house_0", "tile": Vector2i(24, 24), "yaw": 0.0, "search": 1 },
 	{ "item": "house_2", "tile": Vector2i(66, 60), "yaw": 0.0, "search": 2 },  # 外婆家小屋（占位，P4 填实篱笆/门）
 	# ── 七矮人操场·卧室+餐桌布景（s1-snow-white P7，森林深处空地 poi_forest_deep 30,86 附近）──
 	# 布局：中央偏北一张餐桌（白雪 gate 30,82 前方）；七张单人床沿西/东/南三面围成小卧室，

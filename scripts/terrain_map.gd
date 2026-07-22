@@ -589,6 +589,9 @@ static func _paint_oz() -> void:
 const HOME_WALL_MIN := 16
 const HOME_WALL_MAX := 33
 const HOME_WALL_H := 2
+## 南墙门洞 2 格 [24..25]，对齐 export_terrain 的室内返回 portal (24,32) 与 VF 家门 portal。
+const HOME_DOOR_X0 := 24
+const HOME_DOOR_X1 := 25
 static func _paint_home_interior() -> void:
 	var n := WorldGrid.GRID_TILES
 	# 地板铺满木地板（墙外区域也铺，避免看见裸草；封闭观感由 P3 天花板/相机收口）
@@ -604,6 +607,9 @@ static func _paint_home_interior() -> void:
 	_paint_rect_height(lo, hi, hi, hi, HOME_WALL_H)
 	_paint_rect_height(lo, lo, lo, hi, HOME_WALL_H)
 	_paint_rect_height(hi, lo, hi, hi, HOME_WALL_H)
+	# 南墙开一处 2 格门洞（对齐出口 portal 24,32），把墙 tile 复原成平地板，读成「门」
+	_paint_rect_type(HOME_DOOR_X0, hi, HOME_DOOR_X1, hi, T_WOOD_FLOOR)
+	_paint_rect_height(HOME_DOOR_X0, hi, HOME_DOOR_X1, hi, 0)
 
 ## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂类型（含端点）。
 static func _paint_rect_type(x0: int, z0: int, x1: int, z1: int, t: int) -> void:

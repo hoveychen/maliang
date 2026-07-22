@@ -136,9 +136,19 @@ static func build_poi_json_village() -> Array:
 ## 落点都选目标场景可走 tile、且与对向 portal tile 错开 >radius（防落地即弹回；arm/disarm 见 world.gd _step_portal）。
 static func build_portal_json(scene_id: String) -> Array:
 	if scene_id == "village_forest":
-		return [{ "tile": [30, 78], "radius": 3.0, "toScene": "oz", "toTile": [14, 14] }]
+		# 森林深处那座门去 oz；村核玩家自己家门口那座门进室内（home-interior P2）。
+		# 家门口 portal (24,26) 在玩家家（LANDMARKS_VF player_home 24,24）南侧门口，radius 3 =「走近家门就进屋」；
+		# 落点 (24,22) 在室内房间中部，离室内返回门 (24,32) = 10 tile > radius（防落地即弹回）。
+		return [
+			{ "tile": [30, 78], "radius": 3.0, "toScene": "oz", "toTile": [14, 14] },
+			{ "tile": [24, 26], "radius": 3.0, "toScene": "home_interior", "toTile": [24, 22] },
+		]
 	if scene_id == "oz":
 		return [{ "tile": [16, 20], "radius": 3.0, "toScene": "village_forest", "toTile": [26, 80] }]
+	if scene_id == "home_interior":
+		# 室内南墙门洞处那座返回门 (24,32) → 回村，落点 (24,31) 在家门外院子，
+		# 离村里家门口 portal (24,26) = 5 tile > radius（防出门即被弹回屋）。
+		return [{ "tile": [24, 32], "radius": 3.0, "toScene": "village_forest", "toTile": [24, 31] }]
 	return []
 
 ## 构建指定场景的 .mltr v2 字节流。抽成静态函数供回测直接调用（test_terrain_export.gd）。
