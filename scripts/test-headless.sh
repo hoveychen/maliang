@@ -33,6 +33,7 @@ echo "== import（刷新类缓存）=="
 
 # 名字 | 额外参数（--script 之前）
 UNIT_TESTS=(
+  test_char_anim_lod
   test_sdf_math
   test_sdf_prop
   test_placeholder_specs
