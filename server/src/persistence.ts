@@ -1405,23 +1405,31 @@ export class WorldStore {
       .run(def.id, def.worldId, JSON.stringify(def));
   }
 
-  /** 物品实体定义：先查内置常量，再查该 world 的造物行。 */
-  getItemDef(worldId: string, id: string): ItemDef | undefined {
+  /**
+   * 物品实体定义：先查内置常量，再按 id 查造物行。
+   *
+   * 全局共享（items-global-shared）：物品 def 全世界共享——任何世界都能按 id 解析出任一物品的
+   * 定义（items 表 PK 是 id 单列、全局唯一，故 `WHERE id=?` 无歧义）。world_id 列退化为「创造来源」
+   * 记账，不再是解析过滤条件。`worldId` 形参保留只为兼容调用点（itemResolver 闭包签名），解析不用它。
+   * 这让「创造物品=全世界多一个物品，孩子持引用」成立，并自动修克隆场景 palette 引用造物 def
+   * 在目标世界能解析的 crux（docs/items-global-shared-design.md）。
+   */
+  getItemDef(_worldId: string, id: string): ItemDef | undefined {
     const b = getBuiltinItem(id);
     if (b) return b;
-    const row = this.#db.prepare('SELECT data FROM items WHERE id = ? AND world_id = ?').get(id, worldId) as
+    const row = this.#db.prepare('SELECT data FROM items WHERE id = ?').get(id) as
       | { data: string }
       | undefined;
     return row ? (JSON.parse(row.data) as ItemDef) : undefined;
   }
 
-  /** 该 world 的造物实体（不含内置）。 */
+  /** 该 world 的造物实体（不含内置）——按创造来源 world_id 过滤，供 debug/provenance 视图用。 */
   listWorldItems(worldId: string): ItemDef[] {
     const rows = this.#db.prepare('SELECT data FROM items WHERE world_id = ? ORDER BY id').all(worldId) as { data: string }[];
     return rows.map((r) => JSON.parse(r.data) as ItemDef);
   }
 
-  /** 地形矩阵校验用的实体解析器（内置 + 该 world 造物）。 */
+  /** 地形矩阵校验用的实体解析器（内置 + 全局造物，见 getItemDef）。worldId 形参保留兼容。 */
   itemResolver(worldId: string): (id: string) => ItemDef | undefined {
     return (id) => this.getItemDef(worldId, id);
   }
