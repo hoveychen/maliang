@@ -1429,6 +1429,38 @@ export class WorldStore {
     return rows.map((r) => JSON.parse(r.data) as ItemDef);
   }
 
+  /**
+   * 该世界「引用到」的造物实体定义（不含内置）——scene_entered/world_info 载荷用。
+   *
+   * 全局共享（items-global-shared）：物品 def 现全局解析（getItemDef 去 world 过滤），但客户端
+   * 只该拿到它要渲染/持有的那些——即本世界各场景 terrain palette 引用的 id ∪ 本世界背包里的 id，
+   * 逐个按全局注册表解析。这既让「def 全局共享」真成立（克隆场景引用的造物、未来好友共玩/作者
+   * 在 template 摆的造物都能解析并下发），又不泄漏别的世界的造物（别人的 def 虽全局可解析，但不被
+   * 本世界引用 → 不在此列 → 不下发、不渲染，见设计 §5）。内置由调用方 `[...BUILTIN_ITEMS, ...]`
+   * 前置，这里剔除以免重复。
+   */
+  listReferencedItems(worldId: string): ItemDef[] {
+    const ids = new Set<string>();
+    for (const scene of this.listScenes(worldId)) {
+      const rec = this.getSceneTerrain(worldId, scene.sceneId);
+      if (!rec) continue;
+      try {
+        for (const id of decodeTerrain(rec.bytes).palette) ids.add(id);
+      } catch {
+        /* 单个坏地形 blob 不连坐整个载荷 */
+      }
+    }
+    for (const b of this.listBags(worldId)) ids.add(b.itemId);
+    const out: ItemDef[] = [];
+    for (const id of ids) {
+      if (getBuiltinItem(id)) continue; // 内置由调用方前置，不重复
+      const def = this.getItemDef(worldId, id); // 全局解析（worldId 形参已被忽略）
+      if (def) out.push(def);
+    }
+    out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)); // 稳定顺序，缓存/测试友好
+    return out;
+  }
+
   /** 地形矩阵校验用的实体解析器（内置 + 全局造物，见 getItemDef）。worldId 形参保留兼容。 */
   itemResolver(worldId: string): (id: string) => ItemDef | undefined {
     return (id) => this.getItemDef(worldId, id);

@@ -307,7 +307,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       id: worldId,
       characters: characterListView(store, worldId),
       scenes: store.listScenes(worldId),
-      items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
+      items: [...BUILTIN_ITEMS, ...store.listReferencedItems(worldId)],
     };
   });
 
@@ -317,13 +317,15 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     const world = store.getWorld(req.params.id);
     if (!world) return reply.code(404).send({ error: 'world not found' });
     // scenes 可能为空（地形还没入库）——客户端据此回退本地确定性生成，不影响老客户端。
-    // items = 物品实体定义（内置 + 该世界造物）：矩阵 palette 引用的语义/渲染依据，
-    // 客户端凭它渲染物品层与派生占用（万物皆物品，docs/scene-item-refactor-design.md）。
+    // items = 物品实体定义（内置 + 本世界引用到的造物：各场景 palette∪背包 的 id 全局解析）：
+    // 矩阵 palette 引用的语义/渲染依据，客户端凭它渲染物品层与派生占用（万物皆物品，
+    // docs/scene-item-refactor-design.md）。全局共享后 def 按 id 全局解析，但只下发本世界引用到的
+    // （不泄漏别人的造物，见 docs/items-global-shared-design.md §5）。
     return {
       id: world.id,
       characters: characterListView(store, world.id),
       scenes: store.listScenes(world.id),
-      items: [...BUILTIN_ITEMS, ...store.listWorldItems(world.id)],
+      items: [...BUILTIN_ITEMS, ...store.listReferencedItems(world.id)],
     };
   });
 
@@ -338,7 +340,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       id: worldId,
       characters: characterListView(store, worldId),
       scenes: store.listScenes(worldId),
-      items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
+      items: [...BUILTIN_ITEMS, ...store.listReferencedItems(worldId)],
     };
   });
 
@@ -4061,8 +4063,8 @@ export async function handleWsMessage(
       sceneId,
       scene: scene ?? null,
       characters: store.listCharacters(worldId, sceneId).map((c) => projectCharacterFor(c, session.playerId)),
-      // 物品实体定义（内置+造物）：新场景矩阵 palette 的解引用依据
-      items: [...BUILTIN_ITEMS, ...store.listWorldItems(worldId)],
+      // 物品实体定义（内置 + 本世界引用到的造物，palette∪背包 全局解析）：新场景矩阵 palette 的解引用依据
+      items: [...BUILTIN_ITEMS, ...store.listReferencedItems(worldId)],
       playerPos: session.playerId ? store.getPlayerTile(worldId, sceneId, session.playerId) : undefined,
     }));
     // 换场景 = 换了一批村民；带 session 顺带算复用提示（同 world_info，有需求语境才挂）。

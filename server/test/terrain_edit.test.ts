@@ -199,18 +199,21 @@ test('GET /worlds/:wid/scenes/:sid/terrain：blob 原样 + 版本头；POST tile
   }
 });
 
-test('GET /worlds/:id：带 items（内置 + 世界造物）', async (t) => {
+test('GET /worlds/:id：带 items（内置 + 本世界引用到的造物）', async (t) => {
   const store = storeWithScene();
   store.upsertItem({
     id: 'flower_xm', worldId: 'w1', name: '小明的花', renderRef: 'sdf_inline',
     footprintW: 1, footprintH: 1, blocking: true, pathOk: false, wander: 0,
   });
+  // 全局共享后 items[]=本世界引用到的造物（palette∪背包）；真实造物流 upsertItem→bagAdd 必进背包，
+  // 这里显式进背包以被引用（storeWithScene 的 palette 只有 tree_puff_a）。
+  store.bagAdd('w1', 'child', 'flower_xm');
   const a = await buildServer({ adapters: createMockAdapters(), store });
   t.after(() => a.close());
 
   const res = await a.inject({ method: 'GET', url: '/worlds/w1' });
   const items = (res.json() as { items: ItemDef[] }).items;
-  assert.ok(items.length >= 23, '内置 22 + 造物 1');
+  assert.ok(items.length >= 23, '内置 22 + 引用到的造物 1');
   assert.ok(items.some((d) => d.id === 'tree_puff_a'));
   assert.ok(items.some((d) => d.id === 'flower_xm'));
 });
