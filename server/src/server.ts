@@ -582,6 +582,43 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return reply.send(Buffer.from(rec.bytes));
   });
 
+  // 内容包清单（content-pck-distribution P2，见 docs/content-pack-distribution-design.md）：
+  // 某世界某场景进场前需要哪些可下载内容包（.pck）。返回 { packs: [{name, hash, bytes}] }，客户端
+  // diff 已缓存/已挂载后，对缺的走 GET /assets/<hash> 下载再 load_resource_pack 挂载（P3 预热器）。
+  // 只列【已登记】的包（部署脚本 putAsset 入库过）；未打包分发的主题 / SDF props / 造物静默不列
+  // （仍烤在 APK 或运行时生成）。故过渡期只列已可下载的，客户端优雅缺失不崩。无需鉴权（客户端要用）。
+  app.get<{ Params: { wid: string; sid: string } }>('/worlds/:wid/scenes/:sid/manifest', async (req, reply) => {
+    if (!store.getScene(req.params.wid, req.params.sid)) {
+      return reply.code(404).send({ error: 'scene not found' });
+    }
+    return { packs: store.sceneManifest(req.params.wid, req.params.sid) };
+  });
+
+  // 内容包入库（content-pck-distribution P2）：部署脚本把某主题打好的 .pck 推上来，存进内容寻址
+  // 资产库（复用 putAsset / GET /assets/:hash，零新下载基建）并登记 name→{hash,bytes,keys}。
+  // keys = 该包 pack.json 的 entries 键（部署脚本读出后传入；服务端运行时读不到 assets/packs/*.json）。
+  // 与 fairy-sprite / admin/scenes 同 idiom：二进制走 base64-in-JSON（pckBase64），无需额外 body 解析器。
+  // 必须配 MALIANG_ADMIN_TOKEN。
+  app.post<{
+    Params: { name: string };
+    Body: { pckBase64?: string; keys?: string[] } | null;
+  }>('/admin/packs/:name', { bodyLimit: 64 * 1024 * 1024 }, async (req, reply) => {
+    const token = process.env.MALIANG_ADMIN_TOKEN;
+    if (!token || req.headers['x-admin-token'] !== token) {
+      return reply.code(403).send({ error: 'admin token required' });
+    }
+    const name = req.params.name.trim();
+    if (!name) return reply.code(400).send({ error: 'pack name required' });
+    const keys = (req.body?.keys ?? []).map((k) => String(k).trim()).filter(Boolean);
+    if (keys.length === 0) return reply.code(400).send({ error: 'keys required (pack.json entry keys)' });
+    const b64 = req.body?.pckBase64 ?? '';
+    if (!b64) return reply.code(400).send({ error: 'empty pckBase64' });
+    const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
+    if (bytes.length === 0) return reply.code(400).send({ error: 'empty .pck' });
+    const rec = store.registerPack(name, { bytes, mime: 'application/octet-stream' }, keys);
+    return { name, hash: rec.hash, bytes: rec.bytes, keys: rec.keys };
+  });
+
   // 管理端点：存量角色锚点回填（docs/character-anchors-design.md §2.3，retrim 先例）。
   // 扫全库有 spriteAsset 的角色，缺 anchors（或 ?force=1 全量重算）的过一遍 vision 检测
   // （失败走像素兜底，见 anchors.ts）并原地写回。vision 走钱但每角色只一次 flash 调用。

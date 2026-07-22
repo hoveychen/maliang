@@ -36,6 +36,30 @@
 - 预热器：进场景前拉 manifest → diff 已挂载/已缓存 → 下缺的 → 挂载 → 进场景；**下载在 onboarding 期就后台启动**（intro 播放时预取 village + 常用包，结束前就位，无加载墙）。
 - 地形：已走 `.mltr` 字节路径（`TerrainMap.load_from_bytes`），天然可分发；3 个 committed `.mltr` 降为 intro 离线兜底。
 
+## P2 已实现（服务端契约，2026-07-23）
+
+服务端把 .pck 当内容寻址资产入库，并新增 manifest 端点告诉客户端某场景要哪些包。P3 预热器消费这两个契约。
+
+**⚠️ 硬约束：服务端运行时读不到 `assets/packs/*.json`。** Docker 只 `COPY server/`（`server/Dockerfile`），
+`assets/packs/` 在仓库根、不进镜像。所以 renderRef→pack 的映射【不能】运行时读 pack.json，必须在
+**入库时**把每个包提供的渲染键随 .pck 一起登记进服务端注册表（部署脚本从 pack.json 读出 entries 键传入）。
+
+**注册表**（`persistence.ts`，与 assets/spriteAnims 同款文件寻址 `packs.json`，进备份、跨重启）：
+- `PackRecord = { hash, bytes, keys }`：`hash`=.pck 在资产库的内容寻址 hash（下载 URL `/assets/<hash>`）；
+  `bytes`=字节数（客户端下载预算）；`keys`=该包 pack.json 的 entries 键（renderRef 冒号后段）。
+- `registerPack(name, pck, keys)` → putAsset 入库 + 记录（幂等，同名覆盖）。`packForKey(key)` 反查所属包。
+- `sceneManifest(worldId, sceneId)`：扫场景 terrain 矩阵 palette → 每个物品 `packKeyFromRenderRef(renderRef)`
+  （`items.ts`，冒号后段；`sdf_inline`/`composed:`/`sticker:@hash` → null）→ `packForKey` → 去重。
+  **只列已登记的包**：未登记键（未打包的主题、SDF props、造物）静默跳过 → 过渡期优雅缺失，客户端不崩。
+
+**端点**：
+- `GET /worlds/:wid/scenes/:sid/manifest` → `{ packs: [{name, hash, bytes}] }`（无鉴权，客户端要用；场景不存在 404）。
+  实测：village → `[base]`（其余为 `sdf_res:`，不属任何包）；village_forest → `[base, toyroom]`（摆了 `furniture:table`/`bedSingle`）。
+- `POST /admin/packs/:name`（配 `MALIANG_ADMIN_TOKEN`）body `{ pckBase64, keys }` → 入库 + 登记。与 fairy-sprite/
+  admin/scenes 同 idiom（二进制走 base64-in-JSON，无需额外 body 解析器）。P5 部署脚本据此把全 15 包推上来。
+
+测试：`server/test/content_packs.test.ts`（用真实 `assets/terrain/*.mltr` + 真实 pack.json 键跑端到端映射）。
+
 ## 导内容包命令
 
 ```bash

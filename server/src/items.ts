@@ -343,6 +343,21 @@ export function getBuiltinItem(id: string): ItemDef | undefined {
   return BUILTIN_BY_ID.get(id);
 }
 
+/**
+ * 从 renderRef 提取内容包渲染键（冒号后段），用于反查所属内容包（content-pck-distribution P2）。
+ * 与客户端 pack_registry.gd 的「分发按冒号后段 key 查表」同源——前缀（baked:/kaykit:/city:…）
+ * 只是语义标注，pack 归属由冒号后段的 key 在各 pack.json entries 里的落点决定。
+ * 无冒号（sdf_inline）/ 冒号后为空（composed:）/ 内容寻址造物贴纸（sticker:@<hash>）→ 不属任何
+ * 打包内容包，返回 null（manifest 侧据此跳过）。
+ */
+export function packKeyFromRenderRef(renderRef: string): string | null {
+  const i = renderRef.indexOf(':');
+  if (i < 0) return null;
+  const key = renderRef.slice(i + 1);
+  if (key === '' || key.startsWith('@')) return null;
+  return key;
+}
+
 /** 实体解析器：palette id → 定义。内置查常量表，造物由调用方接 items 表。 */
 export type ItemResolver = (id: string) => ItemDef | undefined;
 
