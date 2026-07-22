@@ -4957,6 +4957,7 @@ func _on_scene_entered(data: Dictionary) -> void:
 	_unload_scene()
 	ItemCatalog.set_defs(data.get("items", [])) # 新场景可能引用没见过的造物实体
 	_prewarm_sticker_assets(data.get("items", [])) # 造贴纸:预热网络贴图
+	await _prewarm_packs(world_id, sid) # 内容包(P3):下缺的主题包并挂载,再铺地形才渲染得出主题 prop
 
 	# 地形先就位（_apply_scene changed 时会 rebuild 区块）；scene 为 null 表示该场景未入库，
 	# 保留当前地形（离线/未入库容错）。
@@ -5102,6 +5103,7 @@ func _bootstrap_apply(fetched: Dictionary) -> void:
 	var world: Dictionary = fetched.get("world", {})
 	online = true
 	world_id = String(world.get("id", "w_" + PlayerProfile.ensure_player_id())) # 缺省=自己的世界，不再回落 default
+	await _prewarm_packs(world_id, _scene_id) # 内容包(P3):初始场景的主题包先下+挂,再铺地形
 	await _load_server_terrain(world.get("scenes", []))
 	backend.url = (api.base as String).replace("http", "ws") + "/ws"
 	backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入
@@ -5761,6 +5763,30 @@ func _prewarm_sticker_assets(defs: Array) -> void:
 			fetched = true
 	if fetched and chunk_manager != null:
 		chunk_manager.rebuild() # 占位→真图，重建受影响的边缘竖片
+
+## 内容包预热（content-pck-distribution P3，docs/content-pack-distribution-design.md）：进场景【前】
+## 拉该场景的内容包清单（manifest 端点），把还没挂载的包下载到 user://packs/ 并挂载。挂载后 res://
+## 路径解析进包，随后的地形铺设/区块重建（_apply_scene / _load_server_terrain）即渲染出主题 prop。
+## 全程在切场景黑幕/loading 遮罩下进行 = 零挫败。离线或无 manifest（get_json 返回空）→ 无包可下 →
+## 直接返回，缺包由 chunk_manager 的守卫优雅跳过（不崩、世界略秃但能玩）。挂载后【不】在此重建：
+## 调用点保证紧接着就有地形铺设/重建会用上新挂载的包（见 _on_scene_entered / _bootstrap_apply）。
+func _prewarm_packs(wid: String, sid: String) -> void:
+	if api == null or wid.is_empty() or sid.is_empty():
+		return
+	var man := await api.get_json(Api.manifest_path(wid, sid))
+	var packs: Variant = man.get("packs", [])
+	if typeof(packs) != TYPE_ARRAY:
+		return
+	for p in packs:
+		if typeof(p) != TYPE_DICTIONARY:
+			continue
+		var h := String((p as Dictionary).get("hash", ""))
+		if h.is_empty() or PackMounter.is_mounted(h):
+			continue # 已挂载：不重下不重挂
+		var path := await api.fetch_pack(h) # 已缓存秒回本地路径；未缓存则下载
+		if path.is_empty():
+			continue # 下载失败（离线等）：缺包由 chunk_manager 守卫跳过，不崩
+		PackMounter.ensure_mounted(h)
 
 func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包

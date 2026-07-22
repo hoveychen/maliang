@@ -126,6 +126,7 @@ UNIT_TESTS=(
   test_position_restore
   test_webp_load
   test_asset_cache
+  test_pack_cache
   test_char_prefetch
   test_loading_progress
   test_dialog_camera
