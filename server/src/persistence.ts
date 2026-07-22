@@ -1961,18 +1961,64 @@ export class WorldStore {
    * 但点点恒在——她跨场景跟随玩家，任何场景查询都带上她（委托候选/花名册在调用点各自排除 isFairy）；
    * 不传 = 全世界所有场景（保持既有调用点行为不变）。
    */
+  /**
+   * 角色实例层 base+overlay（char-instance-overlay 路线 A，见 docs/char-instance-overlay-design.md §9）：
+   * 把 template base 花名册 ⊕ 世界 overlay 合成成一份实例（parse 后、hydrate 前）。
+   * - 两边都有（模板角色，世界已克隆/触碰过）：用世界行的可变态 + 覆盖 sceneId 为 base 的
+   *   （sceneId 是 authored-only、孩子无跨场景挪 NPC 入口 → base 权威，追平 village→village_forest）。
+   * - 仅 base 有（新故事角色 / 该世界还没克隆到）：从 base 合成一份挂到本世界 → 存在传播（新故事自动到存量世界）。
+   * - 仅世界有（孩子造物；点点与模板同 id 走"两边都有"）：用世界行原样。
+   * template 世界本身即 base：不合成，用自己的行。写路径不动——世界行照存整份，读时才合成（对齐 P3 保留 blob 的取舍）。
+   */
+  #composeCharacterInstance(
+    worldId: string,
+    base: Record<string, unknown> | undefined,
+    own: Record<string, unknown> | undefined,
+  ): Record<string, unknown> | undefined {
+    if (base && own) return { ...own, sceneId: base.sceneId ?? (own as { sceneId?: string }).sceneId };
+    if (base) return { ...base, worldId };
+    return own; // 仅世界有（孩子造物）/ 两边都无
+  }
+
   listCharacters(worldId: string, sceneId?: string): Character[] {
-    const rows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(worldId) as { data: string }[];
-    const all = rows.map((r) => this.#hydrateCharacter(JSON.parse(r.data)));
+    const ownRows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(worldId) as { data: string }[];
+    let all: Character[];
+    if (worldId === TEMPLATE_WORLD_ID) {
+      all = ownRows.map((r) => this.#hydrateCharacter(JSON.parse(r.data)));
+    } else {
+      const own = new Map<string, Record<string, unknown>>();
+      for (const r of ownRows) {
+        const o = JSON.parse(r.data) as Record<string, unknown>;
+        own.set(o.id as string, o);
+      }
+      const baseRows = this.#db.prepare('SELECT data FROM characters WHERE world_id = ?').all(TEMPLATE_WORLD_ID) as { data: string }[];
+      const composed = new Map<string, Record<string, unknown>>();
+      for (const r of baseRows) {
+        const b = JSON.parse(r.data) as Record<string, unknown>;
+        const id = b.id as string;
+        composed.set(id, this.#composeCharacterInstance(worldId, b, own.get(id))!);
+      }
+      for (const [id, o] of own) if (!composed.has(id)) composed.set(id, o); // 世界独有（孩子造物）
+      all = [...composed.values()].map((o) => this.#hydrateCharacter(o));
+    }
     if (sceneId === undefined) return all;
     return all.filter((c) => c.isFairy || (c.sceneId ?? DEFAULT_SCENE) === sceneId);
   }
 
   getCharacter(worldId: string, characterId: string): Character | undefined {
-    const row = this.#db
+    const ownRow = this.#db
       .prepare('SELECT data FROM characters WHERE id = ? AND world_id = ?')
       .get(characterId, worldId) as { data: string } | undefined;
-    return row ? this.#hydrateCharacter(JSON.parse(row.data)) : undefined;
+    if (worldId === TEMPLATE_WORLD_ID) return ownRow ? this.#hydrateCharacter(JSON.parse(ownRow.data)) : undefined;
+    const baseRow = this.#db
+      .prepare('SELECT data FROM characters WHERE id = ? AND world_id = ?')
+      .get(characterId, TEMPLATE_WORLD_ID) as { data: string } | undefined;
+    const inst = this.#composeCharacterInstance(
+      worldId,
+      baseRow ? (JSON.parse(baseRow.data) as Record<string, unknown>) : undefined,
+      ownRow ? (JSON.parse(ownRow.data) as Record<string, unknown>) : undefined,
+    );
+    return inst ? this.#hydrateCharacter(inst) : undefined;
   }
 
   /**
