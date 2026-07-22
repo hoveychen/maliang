@@ -3709,9 +3709,9 @@ func _stop_video_heroes() -> void:
 ## _char_lod 强引用持有；leave → 切回底座 8fps 图集（并丢引用）。切换保留角色当前世界高度与
 ## 相位（node.visible_height() + 存的 anim_phase），观感不跳。
 ##
-## ⚠️显存：api._tex_mem 缓存永不驱逐，故 hi 图集一旦经 fetch_texture 拉过就常驻，_char_lod
-## 丢引用**并不**真回收显存——LOD 当前只保证「近处角色播 24fps」，不保证峰值显存受 N 限。
-## 让它真受限（hi 图集走非缓存拉取，或 _tex_mem 加 LRU）属 P4 显存核算，老板闸门后再定。
+## 显存受最近 N 限：hi 图集走 cache_in_mem=false 拉取（_raise_char_hi），不进永不驱逐的
+## _tex_mem——只有 CharAnimLod 强引用池 + 当前节点持有它。leave 时 _char_lod 丢引用 +
+## _lower_char_lo 把节点切回 lo，hi 图集即无人引用→显存回收，峰值 ≈ N×hi。
 func _step_char_lod(delta: float) -> void:
 	if not online or player.is_empty() or npcs.is_empty():
 		return
@@ -3760,7 +3760,9 @@ func _raise_char_hi(id: String, node: PaperCharacter, phase: float) -> void:
 	var hi_hash := String(info.get("hi", ""))
 	if hi_hash.is_empty():
 		return  # 该角色还没有 24fps 变体 → 维持底座档
-	var tex := await api.fetch_texture(hi_hash, true)  # 图集走显存块压缩
+	# gpu_compress=true（显存块压缩）+ cache_in_mem=false（不进永不驱逐的 _tex_mem）：
+	# 让 CharAnimLod 强引用池成为 hi 图集的唯一持有者，跌出最近 N 集丢引用即回收显存。
+	var tex := await api.fetch_texture(hi_hash, true, false)
 	if tex == null or not is_instance_valid(node):
 		return
 	if not _char_lod.is_hi(id) or node.is_video_lod():
