@@ -74,10 +74,10 @@ const OUTDOOR_AMBIENT_COLOR := Color(0.62, 0.70, 0.92) ## 冷调环境光（Poko
 const OUTDOOR_AMBIENT_ENERGY := 0.64
 const OUTDOOR_SUN_COLOR := Color(1.0, 0.94, 0.80)  ## 暖阳
 const OUTDOOR_SUN_ENERGY := 1.45
-## 室内场景（home-interior）封闭观感（home-interior P3，唯一引擎侧改动）：无天空（纯暖暗背景，
-## 抬头/墙外不再看到天）、无雾、暖色环境光、太阳压暗当作窗/灯的柔光。进出室内在 _apply_scene_env
-## 按 _scene_id 切换/还原；相机是俯视 3/4 角，四壁（2 级=4m）遮住远处地板，BG_COLOR + 暖光即成封闭室内，
-## 故不额外铺天花板 mesh（会撞浮动原点且相机看不到顶）。
+## 室内场景（home-interior）封闭观感：无天空（纯暖暗背景，抬头/墙外不再看到天）、无雾、暖色环境光、
+## 太阳压暗当作窗/灯的柔光。进出室内在 _apply_scene_env 按 _scene_id 切换/还原。屋子几何（地板/三面墙/
+## 前开口）由 RoomStage 真几何渲染（scripts/room_stage.gd）、地形 chunk 隐藏（_apply_indoor_render）、
+## 相机收束框整屋（_update_camera 室内分支）；暗顶靠 INDOOR_BG_COLOR 收（墙升到暗背景，相机从墙上方俯看）。
 const INDOOR_SCENES := ["home_interior"]
 ## 室内房间舞台（home-interior 重做）：房间边长 N（tile 数，眼验在 8/10/12 取值）与其在 50 网格里的
 ## 左上角 tile。网格必须 25 整除故 home_interior 仍是 50，房间只占其中 N×N 一小块，其余地形隐藏。
