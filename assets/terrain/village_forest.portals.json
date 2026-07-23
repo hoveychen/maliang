@@ -10,5 +10,29 @@
       14,
       14
     ]
+  },
+  {
+    "radius": 3.0,
+    "tile": [
+      24,
+      26
+    ],
+    "toScene": "home_interior",
+    "toTile": [
+      24,
+      22
+    ]
+  },
+  {
+    "radius": 2.5,
+    "tile": [
+      30,
+      92
+    ],
+    "toScene": "snow_interior",
+    "toTile": [
+      24,
+      22
+    ]
   }
 ]

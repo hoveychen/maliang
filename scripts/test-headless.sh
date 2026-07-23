@@ -108,6 +108,7 @@ UNIT_TESTS=(
   test_terrain_village_forest
   test_home_interior
   test_home_interior_portal
+  test_snow_interior
   test_room_stage
   test_room_render_branch
   test_spawn_anchor
