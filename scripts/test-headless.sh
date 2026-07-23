@@ -122,6 +122,7 @@ UNIT_TESTS=(
   test_terrain_layers
   test_terrain_deco
   test_sticker_edges
+  test_wall_decor
   test_sticker_asset_render
   test_character_anchors
   test_self_stickers

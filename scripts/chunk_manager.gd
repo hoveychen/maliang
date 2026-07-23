@@ -54,6 +54,9 @@ const STICKER_OUT := 0.05  ## 沿法线外移，防与台阶立面/崖壁 z-figh
 ## 边缘中点偏移（半 tile，N/E/S/W 顺序=TerrainMap.EDGE_*）与竖片朝外 yaw。
 const EDGE_OFFSETS: Array[Vector2] = [Vector2(0, -0.5), Vector2(0.5, 0), Vector2(0, 0.5), Vector2(-0.5, 0)]
 const EDGE_YAWS: Array[float] = [180.0, 90.0, 0.0, 270.0]
+## 壁挂物（home-wall-decor，docs/home-wall-decor-design.md）：室内房间周界墙边的贴纸不贴地，
+## 抬到墙高竖直挂在墙面上、面朝屋内。竖片中心对齐墙高一半（WALL_H*0.5），底边由此下推半高。
+const WALL_STICKER_CENTER := RoomStage.WALL_H * 0.5  ## 壁挂竖片中心离地高（米）：钉在墙面中段
 
 ## slot 数组，每项 { root:Node3D, tile:MeshInstance3D, water:MeshInstance3D, deco:Node3D, wrapped:Vector2i }
 var _slots: Array = []
@@ -142,6 +145,12 @@ var _props_shown := true     ## 会动的 SDF 物件
 ## 只是 _skin 出的地面/水面 mesh 被置 invisible。换场景切室内/室外时由 world.gd 调用。
 var _terrain_hidden := false
 
+## 房间周界（home-wall-decor）：室内 RoomStage 的房间格区间 [origin .. origin+n-1]²。
+## _room_n<=0 = 无房间（室外或未设），壁挂判定恒 false，边缘贴纸一律走室外贴地路径。
+## 由 world.gd 进室内 build 房间时 set_room_bounds，出室内不必清（_terrain_hidden 门控）。
+var _room_origin := Vector2i.ZERO
+var _room_n := 0
+
 ## 室内隐藏地面/水面 mesh（RoomStage 接管地板；家具 deco 层不动）。立即对已铺槽应用。
 func set_terrain_hidden(on: bool) -> void:
 	_terrain_hidden = on
@@ -152,6 +161,43 @@ func set_terrain_hidden(on: bool) -> void:
 			tile.visible = not on
 		if water != null:
 			water.visible = not on
+
+## 设置室内房间周界（world.gd 进室内 build 房间时调）。壁挂贴纸据此判「墙边」抬墙高。
+func set_room_bounds(origin: Vector2i, n: int) -> void:
+	_room_origin = origin
+	_room_n = n
+
+## 该 tile 边是否房间周界墙边（室内壁挂判定）：后墙=y==min 的 N 边、左墙=x==min 的 W 边、
+## 右墙=x==max 的 E 边；前墙（y==max 的 S 边）不建、不算墙。纯函数，供渲染与测试共用。
+static func is_room_wall_edge(gt: Vector2i, side: int, origin: Vector2i, n: int) -> bool:
+	if n <= 0:
+		return false
+	var maxx := origin.x + n - 1
+	var maxy := origin.y + n - 1
+	if gt.y == origin.y and side == 0:      # EDGE_N：后墙
+		return gt.x >= origin.x and gt.x <= maxx
+	if gt.x == origin.x and side == 3:      # EDGE_W：左墙
+		return gt.y >= origin.y and gt.y <= maxy
+	if gt.x == maxx and side == 1:          # EDGE_E：右墙
+		return gt.y >= origin.y and gt.y <= maxy
+	return false
+
+## 边缘贴纸相对 tile 中心的位姿：{off: Vector3(dx,y,dz), yaw: float}。
+## 室内房间周界墙边 → 抬到墙高、面朝屋内（yaw+180）、沿法线内移半点防穿墙 z-fight；
+## 其余（室外或室内非墙边）→ 贴地朝外（STICKER_LIFT + 外移，原行为）。
+static func edge_sticker_pose(side: int, gt: Vector2i, indoor: bool, origin: Vector2i, n: int) -> Dictionary:
+	var off: Vector2 = EDGE_OFFSETS[side] * WorldGrid.TILE_SIZE
+	if indoor and is_room_wall_edge(gt, side, origin, n):
+		var inward := -off.normalized() * STICKER_OUT   # 从墙面往屋内挪一点，别 z-fight 墙
+		return {
+			"off": Vector3(off.x + inward.x, WALL_STICKER_CENTER - STICKER_H * 0.5, off.y + inward.y),
+			"yaw": fmod(EDGE_YAWS[side] + 180.0, 360.0),   # 面朝屋内（原朝外，翻 180）
+		}
+	var out_n := off.normalized() * STICKER_OUT
+	return {
+		"off": Vector3(off.x + out_n.x, STICKER_LIFT, off.y + out_n.y),
+		"yaw": EDGE_YAWS[side],
+	}
 
 ## 画质：地面贴片影开/关。切现有 ScatterShadows/BuildingShadows + 记住供 chunk 重铺沿用。
 ## （不能按 perf_scatter 组切——那组混了散布植被本体，会连树一起隐藏，只能按节点 name。）
@@ -475,10 +521,10 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 				# skey 以 '@' 打头 = 造贴纸的网络资产哈希(sticker:@<hash>),合法;否则须是打包贴纸。
 				if not skey.begins_with("@") and PackRegistry.category(skey) != "sticker":
 					continue # 未注册/未来的墙篱笆类边缘物走独立分支
-				var off: Vector2 = EDGE_OFFSETS[side] * WorldGrid.TILE_SIZE
-				var out_n := off.normalized() * STICKER_OUT
-				var spos := _tile_local(ti, wrapped) + Vector3(off.x + out_n.x, STICKER_LIFT, off.y + out_n.y)
-				_batch(batches, "sticker:" + skey, spos, 1.0, EDGE_YAWS[side])
+				# 位姿走纯函数 edge_sticker_pose：室内周界墙边抬墙高面朝屋内，其余贴地朝外。
+				var pose := edge_sticker_pose(side, gt, _terrain_hidden, _room_origin, _room_n)
+				var spos := _tile_local(ti, wrapped) + (pose["off"] as Vector3)
+				_batch(batches, "sticker:" + skey, spos, 1.0, pose["yaw"])
 	_flush_batches(deco, batches)
 	_flush_shadows(deco, batches)
 	_flush_building_shadows(deco, building_shadows)

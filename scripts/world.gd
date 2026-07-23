@@ -778,6 +778,8 @@ func _apply_indoor_render(scene_id: String) -> void:
 	var indoor := scene_id in INDOOR_SCENES
 	if chunk_manager != null:
 		chunk_manager.set_terrain_hidden(indoor)
+		# 壁挂物：室内把房间周界告诉 chunk_manager，周界墙边贴纸抬墙高（home-wall-decor P1）。
+		chunk_manager.set_room_bounds(ROOM_ORIGIN_TILE, ROOM_N if indoor else 0)
 	if room_stage != null:
 		if indoor:
 			room_stage.build(ROOM_N)
