@@ -3505,6 +3505,12 @@ func _entrance_portal_near(tile: Vector2i) -> Dictionary:
 			best = p
 	return best
 
+## 玩家跨图长走的 A* 搜索上限（远高于 NPC 默认 1500）：玩家点远处/走进远传送门/跟点点引路到
+## 远景都是合法长路，100 格大图上一条 60+ tile 的森林长路 A* 要探 ~2000 节点，1500 会认输返空、
+## 玩家退化直线滑动撞障不动（house-interiors 真机 snow 走不到的真因）。8000 覆盖 100×100 最长合法路
+## 且仍有界（病态不可达目标最多探 8000 就认输，且在 worker 线程、不阻塞帧）。
+const PLAYER_PATH_MAX_ITER := 8000
+
 ## 玩家移动指令：新点击替换旧指令（寻路 waypoint 队列 + Mover 规则由执行器统一处理）。
 func _move_player_to(target: Vector2, arrive := 0.0) -> void:
 	_cancel_player_move()
@@ -3512,6 +3518,7 @@ func _move_player_to(target: Vector2, arrive := 0.0) -> void:
 	ex.setup(player, {
 		"commands": [{ "type": "move_to", "params": { "target": [target.x, target.y], "arrive": arrive } }],
 		"loop": false,
+		"plan_max_iter": PLAYER_PATH_MAX_ITER,
 	})
 	_player_executor = ex
 	_executors.append(ex)

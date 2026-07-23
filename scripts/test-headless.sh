@@ -111,6 +111,7 @@ UNIT_TESTS=(
   test_snow_interior
   test_oz_castle_interior
   test_villager_interiors
+  test_player_pathfind_range
   test_room_stage
   test_room_render_branch
   test_spawn_anchor
