@@ -12,10 +12,12 @@ func _init() -> void:
 	var fails := 0
 	var w := World.new()
 
-	# 进室内：相机切到 INDOOR 收束值，focus 钉房间中心。
+	# 进室内：相机切到 INDOOR 俯角 + 按房间尺寸算出的框满距离（非写死），focus 钉房间中心。
 	w._apply_indoor_render("home_interior")
+	var want_dist := w._indoor_cam_dist_for(World.room_n_for("home_interior"))
 	fails += _check("进室内俯角=INDOOR", w._target_pitch, World.INDOOR_CAM_PITCH)
-	fails += _check("进室内距离=INDOOR", w._target_dist, World.INDOOR_CAM_DIST)
+	fails += _check("进室内距离=按尺寸框满", w._target_dist, want_dist)
+	fails += _check("室内距离>0（真算出来了）", w._indoor_cam_dist > 0.0, true)
 
 	# 出室内（走 portal 回村，非对话退出）：必须复位到室外默认，否则镜头卡在室内视角。
 	w._apply_indoor_render("village_forest")
