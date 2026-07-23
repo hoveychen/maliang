@@ -1,11 +1,11 @@
 {
   "_comment": "侏罗纪时代主题资产包（world-themes 补遗第 12 主题，2026-07-12）。全 node 类恐龙。全 CC0：Quaternius Animated Dinosaur Bundle（poly.pizza，无需署名），来源见 assets/dino/SOURCES.txt。地面可搭配 P1 tile 地基（草地/沙地），无恐龙专属地形。scale=0.24 统一倍数（实测节点变换后 AABB×0.24，保留戏剧性体型差：迅猛龙≈3m、霸王龙≈5.4m、腕龙≈12m 长），真机手感微调留后续。恐龙 glb 带动画，作静态节点摆放（同 scifi 机器人）。物种按 AABB 形状匹配（最长=腕龙/最高=霸王龙/最小=迅猛龙/最宽=三角龙）。",
   "entries": {
-    "trex":        { "category": "node", "path": "res://assets/dino/dino_a.glb", "scale": 0.24 },
-    "raptor":      { "category": "node", "path": "res://assets/dino/dino_b.glb", "scale": 0.24 },
-    "triceratops": { "category": "node", "path": "res://assets/dino/dino_c.glb", "scale": 0.24 },
-    "parasaur":    { "category": "node", "path": "res://assets/dino/dino_d.glb", "scale": 0.24 },
-    "stego":       { "category": "node", "path": "res://assets/dino/dino_e.glb", "scale": 0.24 },
-    "apato":       { "category": "node", "path": "res://assets/dino/dino_f.glb", "scale": 0.24 }
+    "trex":        { "category": "node", "path": "res://assets/dino/dino_a.glb" },
+    "raptor":      { "category": "node", "path": "res://assets/dino/dino_b.glb" },
+    "triceratops": { "category": "node", "path": "res://assets/dino/dino_c.glb" },
+    "parasaur":    { "category": "node", "path": "res://assets/dino/dino_d.glb" },
+    "stego":       { "category": "node", "path": "res://assets/dino/dino_e.glb" },
+    "apato":       { "category": "node", "path": "res://assets/dino/dino_f.glb" }
   }
 }

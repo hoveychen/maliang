@@ -1,17 +1,17 @@
 {
   "_comment": "中世纪王国主题（world-themes P4）。全 node 类，全 CC0：KayKit Medieval Hexagon Pack（军事建筑，蓝色变体）+ KayKit Medieval Builder Pack（城防件，自包含 glb），来源见 assets/medieval/SOURCES.txt。scale=7.0 与小镇一致（两包 KayKit 原生尺度相近，塔楼~2u）。城堡 footprint 5×5，其余 3×3；真机手感微调留 P5。",
   "entries": {
-    "building_castle_blue":         { "category": "node", "path": "res://assets/medieval/hexagon/building_castle_blue.gltf",         "scale": 7.0 },
-    "building_barracks_blue":       { "category": "node", "path": "res://assets/medieval/hexagon/building_barracks_blue.gltf",       "scale": 7.0 },
-    "building_archeryrange_blue":   { "category": "node", "path": "res://assets/medieval/hexagon/building_archeryrange_blue.gltf",   "scale": 7.0 },
-    "building_tower_A_blue":        { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_A_blue.gltf",        "scale": 7.0 },
-    "building_tower_B_blue":        { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_B_blue.gltf",        "scale": 7.0 },
-    "building_tower_base_blue":     { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_base_blue.gltf",     "scale": 7.0 },
-    "building_tower_catapult_blue": { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_catapult_blue.gltf", "scale": 7.0 },
-    "wall_gate":        { "category": "node", "path": "res://assets/medieval/builder/wall_gate.glb",        "scale": 7.0 },
-    "wall_gate_closed": { "category": "node", "path": "res://assets/medieval/builder/wall_gate_closed.glb", "scale": 7.0 },
-    "wall_straight":    { "category": "node", "path": "res://assets/medieval/builder/wall_straight.glb",    "scale": 7.0 },
-    "wall_corner":      { "category": "node", "path": "res://assets/medieval/builder/wall_corner.glb",      "scale": 7.0 },
-    "watchtower":       { "category": "node", "path": "res://assets/medieval/builder/watchtower.glb",       "scale": 7.0 }
+    "building_castle_blue":         { "category": "node", "path": "res://assets/medieval/hexagon/building_castle_blue.gltf" },
+    "building_barracks_blue":       { "category": "node", "path": "res://assets/medieval/hexagon/building_barracks_blue.gltf" },
+    "building_archeryrange_blue":   { "category": "node", "path": "res://assets/medieval/hexagon/building_archeryrange_blue.gltf" },
+    "building_tower_A_blue":        { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_A_blue.gltf" },
+    "building_tower_B_blue":        { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_B_blue.gltf" },
+    "building_tower_base_blue":     { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_base_blue.gltf" },
+    "building_tower_catapult_blue": { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_catapult_blue.gltf" },
+    "wall_gate":        { "category": "node", "path": "res://assets/medieval/builder/wall_gate.glb" },
+    "wall_gate_closed": { "category": "node", "path": "res://assets/medieval/builder/wall_gate_closed.glb" },
+    "wall_straight":    { "category": "node", "path": "res://assets/medieval/builder/wall_straight.glb" },
+    "wall_corner":      { "category": "node", "path": "res://assets/medieval/builder/wall_corner.glb" },
+    "watchtower":       { "category": "node", "path": "res://assets/medieval/builder/watchtower.glb" }
   }
 }

@@ -1,5 +1,5 @@
 {
-  "_comment": "默认村庄资产包（world-themes P3 从 chunk_manager.gd 的 BAKED_MESHES/KAYKIT_SCATTER/KAYKIT_NODES 常量表迁出）。key = renderRef 冒号后段；category=baked(烘焙 mesh,MultiMesh 合批) / scatter(KayKit 场景剥 mesh 合批) / node(独立节点建筑,带 scale)。全 CC0。",
+  "_comment": "默认村庄资产包（world-themes P3 从 chunk_manager.gd 的 BAKED_MESHES/KAYKIT_SCATTER/KAYKIT_NODES 常量表迁出）。key = renderRef 冒号后段；category=baked(烘焙 mesh,MultiMesh 合批) / scatter(KayKit 场景剥 mesh 合批) / node(独立节点建筑,fit_scale 归一)。全 CC0。",
   "entries": {
     "tree_puff_a": { "category": "baked", "path": "res://assets/sdf_props/baked/tree_puff_a.res" },
     "tree_puff_b": { "category": "baked", "path": "res://assets/sdf_props/baked/tree_puff_b.res" },
@@ -12,11 +12,11 @@
     "tuft_0": { "category": "scatter", "path": "res://assets/kaykit/forest/Grass_1_A_Color1.gltf" },
     "tuft_1": { "category": "scatter", "path": "res://assets/kaykit/forest/Grass_2_A_Color1.gltf" },
 
-    "house_0":  { "category": "node", "path": "res://assets/kaykit/hexagon/building_home_A_blue.gltf",   "scale": 7.0 },
-    "house_1":  { "category": "node", "path": "res://assets/kaykit/hexagon/building_home_A_red.gltf",    "scale": 7.0 },
-    "house_2":  { "category": "node", "path": "res://assets/kaykit/hexagon/building_home_B_yellow.gltf", "scale": 7.0 },
-    "house_3":  { "category": "node", "path": "res://assets/kaykit/hexagon/building_home_B_green.gltf",  "scale": 7.0 },
-    "well":     { "category": "node", "path": "res://assets/kaykit/hexagon/building_well_blue.gltf",     "scale": 4.5 },
-    "windmill": { "category": "node", "path": "res://assets/kaykit/hexagon/building_windmill_red.gltf",  "scale": 7.0 }
+    "house_0":  { "category": "node", "path": "res://assets/kaykit/hexagon/building_home_A_blue.gltf" },
+    "house_1":  { "category": "node", "path": "res://assets/kaykit/hexagon/building_home_A_red.gltf" },
+    "house_2":  { "category": "node", "path": "res://assets/kaykit/hexagon/building_home_B_yellow.gltf" },
+    "house_3":  { "category": "node", "path": "res://assets/kaykit/hexagon/building_home_B_green.gltf" },
+    "well":     { "category": "node", "path": "res://assets/kaykit/hexagon/building_well_blue.gltf" },
+    "windmill": { "category": "node", "path": "res://assets/kaykit/hexagon/building_windmill_red.gltf" }
   }
 }

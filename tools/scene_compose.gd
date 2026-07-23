@@ -81,11 +81,12 @@ const SDF_PROPS_VF := [
 	# 七矮人的碗（原烘在户外操场，house-interiors 已移进 snow_interior 室内餐桌旁，见 SNOW_INTERIOR_FURNITURE）。
 ]
 
-## 第一季册 5《绿野仙踪》独立场景（oz，75 格）的手工地标：翡翠城 = 黄砖路尽头的翡翠城堡
-## （span-3 emerald_castle 立在翡翠广场北缘草地上，广场/黄砖路留给铁皮人 56,54 与小朋友）。
-## 坐标见 docs/season-1-outline.md §4。P4 起用专属奥兹 prop（emerald_castle 替原 3 座 house）。
+## 第一季册 5《绿野仙踪》独立场景（oz，75 格）的手工地标：翡翠城 = 黄砖路尽头的翡翠城堡。
+## tile-dimensional：emerald_castle footprint 由 span-3 提到真实 7×7（分档表「城堡类 7×7」），
+## 锚点从 (58,50) 南移到台地中央 (58,53)——7×7 全落 height-3 台地（x[55,61]×y[50,56] 已核平），
+## 南侧 y57..60 留给铁皮人与小朋友的广场；门朝南(+y)迎黄砖路。坐标见 docs/season-1-outline.md §4。
 const LANDMARKS_OZ := [
-	{ "item": "emerald_castle", "tile": Vector2i(58, 50), "yaw": 180.0, "search": 3 },  # 翡翠城堡：黄砖路尽头、广场北缘（门朝南迎路）
+	{ "item": "emerald_castle", "tile": Vector2i(58, 53), "yaw": 180.0, "search": 3 },  # 翡翠城堡(7×7)：翡翠台地中央、门朝南、南留广场
 ]
 
 ## oz 的 SDF 可动物件：黄砖路两处路牌（入口 + 玉米地岔口，呼应「找回家的路」）+ 玉米地一支风车点缀。
@@ -158,22 +159,16 @@ const VILLAGER_INTERIOR_IDS := [
 	"villager_home_3_interior", "villager_home_4_interior", "grandma_interior",
 ]
 
-## 内置物品的占地/压路语义（与 server items.ts BUILTIN_ITEMS 必须同步；
-## P4 起客户端渲染层也从这里取 footprint——单一副本，别在别处再抄）。
-## 内置物品占地（W×H tile，与 server items.ts footprintW/H 同步）。非方形家具（床/沙发）W≠H；
-## 未列的默认 1×1。奇数边锚点居中、偶数边 NW 锚点（见 _place_anchor，与 server footprintOrigin 对齐）。
-const ITEM_FOOTPRINT := {
-	"well": Vector2i(3, 3), "windmill": Vector2i(3, 3),
-	"house_0": Vector2i(3, 3), "house_1": Vector2i(3, 3), "house_2": Vector2i(3, 3), "house_3": Vector2i(3, 3),
-	"walking_hut": Vector2i(3, 3), "hop_mailbox": Vector2i(3, 3),
-	"emerald_castle": Vector2i(3, 3),
-	"dwarf_cottage": Vector2i(3, 3),  # 七矮人合住小木屋（dwarf-cottage 计划）
-	# 室内家具真实比例（interior-camera-and-size，与 server items.ts 同步）：床 1×2、桌 2×2、沙发 2×1。
-	# 其余家具（椅/书架/灯/盆栽/熊/茶几/电视）1×1，走默认，不必列。
-	"toy_bed_single": Vector2i(1, 2), "toy_bed_bunk": Vector2i(1, 2),
-	"toy_table": Vector2i(2, 2), "toy_sofa": Vector2i(2, 1),
-}
-const ITEM_PATH_OK := { "well": true }
+## footprint / pathOk 语义的【单一真相】= builtin_items.json（server BUILTIN_ITEMS 对拍副本，
+## 经 ItemCatalog 读取）。tile-dimensional P5：删掉本文件曾经的 ITEM_FOOTPRINT/ITEM_PATH_OK 手工副本
+## ——它在 P2 分档后漂移过（well/windmill 分档缩到 2×2、这份副本仍是旧 3×3），改读下发 def 杜绝再漂。
+## _place_anchor 从 ItemCatalog.get_def(id) 取 footprintW/H 与 pathOk。
+##
+## CLIENT_PLACE_ON_PATH：compose 放置层【专属】的「可落在路/黄砖上」放行，语义不同于 server 的碰撞 pathOk。
+## emerald_castle：server pathOk=false（城堡不是可穿行路面，且 server buildStaticOccupancy 本就只拒 T_PATH、
+## 不拒黄砖），但翡翠城堡刻意立在翡翠黄砖【广场】上（Emerald City 铺装城）；compose 的 prop_area_ok 把
+## 黄砖当「路」一律排除以保明路，故这里对城堡单独放行，让它能落在广场。（若将来更多地标要立在铺装广场上再加。）
+const CLIENT_PLACE_ON_PATH := { "emerald_castle": true }
 
 ## 散布判定结果 → 物品 id（变体由外观 hash 选，与运行时 _skin 同款算式）。
 const DECO_NONE := 0
@@ -298,7 +293,9 @@ static func yaw_to_arg(deg: float) -> int:
 ## 找不到空位就放弃（确定性，不摆歪）。
 static func _place_anchor(item_ref: PackedByteArray, item_arg: PackedByteArray, palette: PackedStringArray, entry: Dictionary) -> void:
 	var id: String = entry["item"]
-	var fp: Vector2i = ITEM_FOOTPRINT.get(id, Vector2i.ONE)
+	ItemCatalog.ensure_builtin()  # 单一真相：footprint/pathOk 从下发 def（离线兜底 builtin_items.json）取，不再抄副本
+	var def := ItemCatalog.get_def(id)
+	var fp := Vector2i(int(def.get("footprintW", 1)), int(def.get("footprintH", 1)))
 	var yaw := float(entry["yaw"])
 	# 朝向旋转后的 footprint（90°/270° 交换 W/H，与 server rotatedFootprint 一致）。
 	var quadrant := roundi(fposmod(yaw, 360.0) / 90.0) % 4
@@ -306,7 +303,7 @@ static func _place_anchor(item_ref: PackedByteArray, item_arg: PackedByteArray, 
 		fp = Vector2i(fp.y, fp.x)
 	# 锚点展开原点（奇数居中、偶数 NW；与 server footprintOrigin: x-((w-1)>>1) 对齐）。
 	var reserve := Vector2i((fp.x - 1) >> 1, (fp.y - 1) >> 1)
-	var path_ok: bool = ITEM_PATH_OK.get(id, false)
+	var path_ok: bool = bool(def.get("pathOk", false)) or CLIENT_PLACE_ON_PATH.has(id)
 	var n := WorldGrid.GRID_TILES
 	for r in range(int(entry["search"]) + 1):
 		for t in _ring(entry["tile"], r):
@@ -367,8 +364,8 @@ static func _deco_kind_oz(gt: Vector2i) -> int:
 		if posmod(gt.x + gt.y, 2) == 0 and roll < 55:
 			return DECO_CORN
 		return DECO_TUFT if roll < 30 else DECO_NONE
-	# 翡翠城广场周边（56,54 半径 8）：整洁疏树
-	if _tor_dist(gt, Vector2i(56, 54)) <= 8.0:
+	# 翡翠城广场周边（城堡 7×7 中央 58,53 起南侧广场，半径 9 罩住城堡+广场）：整洁疏树
+	if _tor_dist(gt, Vector2i(58, 55)) <= 9.0:
 		if roll < 6:
 			return DECO_TREE
 		return DECO_TUFT if roll < 16 else DECO_NONE

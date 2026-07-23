@@ -3,7 +3,7 @@ extends SceneTree
 ## oz 无户外家具 → 摆一套新 authored 家具（复用 toy_*）。断言：
 ## - 网格 50、纯平木地板（*_interior 走 _paint_home_interior）
 ## - authored 家具进物品层：沙发/书架/灯/桌/2椅/2盆栽 = 8 件，锚点全落房间 [19..30]²
-## - oz 侧多一座进城堡门 (58,53)→oz_castle_interior；室内返回门 (24,30)→oz (58,56) 防弹回
+## - oz 侧多一座进城堡门 (58,57)→oz_castle_interior；室内返回门 (24,30)→oz (58,60) 防弹回
 ## - 空 POI / 空住户
 ## 运行: godot --headless --script res://test/test_oz_castle_interior.gd
 const EX := preload("res://tools/export_terrain.gd")
@@ -52,8 +52,8 @@ func _init() -> void:
 			castle_door = p
 	fails += _check("oz 有进城堡的门", not castle_door.is_empty(), true)
 	if not castle_door.is_empty():
-		fails += _check("城堡门 tile = (58,53)", castle_door["tile"], Vector2i(58, 53))
-		var at_castle := WorldGrid.from_tile_center(Vector2i(58, 53))
+		fails += _check("城堡门 tile = (58,57)", castle_door["tile"], Vector2i(58, 57))
+		var at_castle := WorldGrid.from_tile_center(Vector2i(58, 57))
 		fails += _check("踏进城堡门半径命中室内", World.portal_hit(oz, at_castle)["to_scene"], "oz_castle_interior")
 
 	WorldGrid.configure(50)
@@ -62,7 +62,7 @@ func _init() -> void:
 	if not inside.is_empty():
 		fails += _check("返回门 → oz", inside[0]["to_scene"], "oz")
 		fails += _check("返回门 tile = 前开口边缘中线", inside[0]["tile"], World.room_front_tile("oz_castle_interior"))
-		fails += _check("返回门落点 = (58,56)", inside[0]["to_tile"], Vector2i(58, 56))
+		fails += _check("返回门落点 = (58,60)", inside[0]["to_tile"], Vector2i(58, 60))
 		var at_enter := WorldGrid.from_tile_center(World.room_back_landing("oz_castle_interior"))
 		fails += _check("进屋落点不在返回门半径内（防弹回）", World.portal_hit(inside, at_enter).is_empty(), true)
 

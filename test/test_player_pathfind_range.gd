@@ -13,7 +13,7 @@ const EX := preload("res://tools/export_terrain.gd")
 const World := preload("res://scripts/world.gd")
 # 阻挡物 span（tuft/well/bowl pathOk 不挡）——与 chunk_manager 静态占用一致。
 const SPAN := {"house_0":3,"house_1":3,"house_2":3,"house_3":3,"windmill":3,"walking_hut":3,"hop_mailbox":3,
-	"emerald_castle":3,"dwarf_cottage":3,"toy_bed_single":3,"toy_table":3,"toy_sofa":3}
+	"emerald_castle":7,"dwarf_cottage":3,"toy_bed_single":3,"toy_table":3,"toy_sofa":3}
 const PATHOK := {"well":true,"dwarf_bowl":true,"tuft_0":true,"tuft_1":true}
 
 func _init() -> void:

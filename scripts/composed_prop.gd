@@ -16,7 +16,7 @@ extends Node3D
 ## 「最结实的家」与 M2 尾声叙事分量不匹配（老板拍板放大一档）。5.0 ≈ 2.5 格高，
 ## 与村里 3D 建筑相称；占地随之升 3×3（服务端 creationBuildDef，只影响新落成）。
 ## 拼装台预览不吃这个尺寸（world._raise_build_preview 缩回 PREVIEW_HEIGHT，别挡问题卡）。
-const HEIGHT := 5.0
+const HEIGHT := 2.5 * WorldGrid.TILE_SIZE  # 造物世界高度=2.5 tile×TILE_SIZE(=5.0)
 ## 拼装台预览的观感高度（米）：落地尺寸放大后预览保持原 3m 档。
 const PREVIEW_HEIGHT := 3.0
 ## 零件逐层前移（米）防 z-fight，按拼入顺序叠。

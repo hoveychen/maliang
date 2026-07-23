@@ -1,12 +1,12 @@
 {
   "_comment": "海底主题资产包（world-themes P5 半覆盖主题）。全 node 类海洋生物。全 CC0：Quaternius Animated Fish（poly.pizza，无需署名），来源见 assets/underwater/SOURCES.txt。地面走 T_SAND(沙地)+T_WATER(水体)——tile 地基 P1 已就位。scale=0.25 统一倍数（实测 glb 节点变换后 AABB×0.25：小鱼≈2m、鲨鱼≈4m、鲸/鲼/海豚≈2.5~3m，保留真实相对体型），真机手感微调留后续。",
   "entries": {
-    "dolphin": { "category": "node", "path": "res://assets/underwater/dolphin.glb", "scale": 0.25 },
-    "shark":   { "category": "node", "path": "res://assets/underwater/shark.glb",   "scale": 0.25 },
-    "whale":   { "category": "node", "path": "res://assets/underwater/whale.glb",   "scale": 0.25 },
-    "manta":   { "category": "node", "path": "res://assets/underwater/manta.glb",   "scale": 0.25 },
-    "fish_a":  { "category": "node", "path": "res://assets/underwater/fish_a.glb",  "scale": 0.25 },
-    "fish_b":  { "category": "node", "path": "res://assets/underwater/fish_b.glb",  "scale": 0.25 },
-    "fish_c":  { "category": "node", "path": "res://assets/underwater/fish_c.glb",  "scale": 0.25 }
+    "dolphin": { "category": "node", "path": "res://assets/underwater/dolphin.glb" },
+    "shark":   { "category": "node", "path": "res://assets/underwater/shark.glb" },
+    "whale":   { "category": "node", "path": "res://assets/underwater/whale.glb" },
+    "manta":   { "category": "node", "path": "res://assets/underwater/manta.glb" },
+    "fish_a":  { "category": "node", "path": "res://assets/underwater/fish_a.glb" },
+    "fish_b":  { "category": "node", "path": "res://assets/underwater/fish_b.glb" },
+    "fish_c":  { "category": "node", "path": "res://assets/underwater/fish_c.glb" }
   }
 }
