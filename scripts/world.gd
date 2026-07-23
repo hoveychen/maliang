@@ -1303,7 +1303,13 @@ func _update_fairy(delta: float) -> void:
 	# 所以只能在这里把「对话中」这一支提到 POI 之前。
 	# 顺手丢弃进行中的 POI：那个提醒点是进对话前算的，聊完早已过时；触发词未被 try_play 消耗，
 	# 离开对话后 _check_poi 会按当时位置重新提醒。
-	if selected == fairy.get("node"):
+	if not _fairy_intro.is_empty():
+		# intro 编排注入的目标最高优先（建造演出期点点由 IntroDirector 全权驱动，selected 恒 null）：
+		# 果断飞到画角色的位置、悬停、朝向注视点，挥笔表演走 paper_action（她不出声，旁白归 IntroNarrator）。
+		target = _fairy_intro["point"]
+		speed_min = 14.0
+		_step_fairy_intro(fairy)
+	elif selected == fairy.get("node"):
 		_fairy_poi = {}
 		target = fairy["logical"] # 对话中：停在原地听小朋友说话（仍轻微浮动）
 	elif not _fairy_guide.is_empty():
@@ -1348,6 +1354,20 @@ func _step_fairy_poi(delta: float, fairy: Dictionary, target: Vector2) -> void:
 		_fairy_poi["hold"] = float(_fairy_poi["hold"]) - delta
 		if float(_fairy_poi["hold"]) <= 0.0:
 			_fairy_poi = {}
+
+## intro 编排推进：飞到注入点即算到位（置 arrived=true），到位后朝向 face 注视点（若给）。
+## 不出声——建造演出的旁白由 IntroNarrator 独占（见 _update_fairy 的 _intro_active 静音门）。
+## 到位后位移几乎归零，_update_paper_motion 不会按速度覆盖 paper_face，故这里设的朝向能稳住。
+func _step_fairy_intro(fairy: Dictionary) -> void:
+	var target: Vector2 = _fairy_intro["point"]
+	if WorldGrid.shortest_delta(fairy["logical"], target).length() > 0.6:
+		return
+	_fairy_intro["arrived"] = true
+	var face: Variant = _fairy_intro.get("face", Vector2.INF)
+	if typeof(face) == TYPE_VECTOR2 and face != Vector2.INF:
+		var d := WorldGrid.shortest_delta(fairy["logical"], face)
+		if absf(d.x) > 0.05:
+			fairy["paper_face"] = 0.0 if d.x >= 0.0 else PI
 
 # ── 引路（fairy-guide）────────────────────────────────────────────────────────
 # 她飞在前面领、小朋友自己走。不碰 BehaviorExecutor（她根本不吃移动脚本），也不动玩家的 avatar
@@ -3137,6 +3157,13 @@ func _update_action_anim(n: Dictionary, node: PaperCharacter, delta: float) -> v
 static func _hold_env(k: float, up: float, down: float) -> float:
 	return smoothstep(0.0, up, k) * (1.0 - smoothstep(down, 1.0, k))
 
+## easeOutBack：x∈[0,1]，从 0 升到 1，尾段先冲过 1 再回落（弹性回弹）。登场弹出（pop_in）用。
+static func _ease_out_back(x: float) -> float:
+	const C1 := 1.70158
+	const C3 := C1 + 1.0
+	var xm := x - 1.0
+	return 1.0 + C3 * xm * xm * xm + C1 * xm * xm
+
 ## 纯函数（可单测）：动作在 t 时刻的演出偏移。26 种纸片动作的动画数学单一来源。
 ## 返回 { "rot": Vector3 加性欧拉角, "y": float 加性抬升, "scale": Vector3 绝对值（ONE=不动）,
 ## "motion": Vector2(flutter, curl) 仅在覆盖 shader 纸形变时存在,
@@ -3205,6 +3232,9 @@ static func action_pose(action: String, t: float, dur: float) -> Dictionary:
 		"puff": # 挺胸鼓气：反向 curl 朝相机鼓起 + 微胀
 			motion = Vector2(0.0, -0.55 * e)
 			sc = Vector3.ONE * (1.0 + 0.06 * e)
+		# —— 登场弹出（intro「点点画出来」）——
+		"pop_in": # 从 0 弹到 1：easeOutBack 尾段轻微 overshoot 回弹，像被画笔「蹦」出来
+			sc = Vector3.ONE * _ease_out_back(k)
 		# —— squash & stretch ——
 		"bounce": # 弹弹球三连跳：落地压扁、腾空拉长（首末淡入淡出防起收突跳）
 			var s := absf(sin(k * PI * 3.0))
@@ -5536,9 +5566,63 @@ func _bootstrap_apply(fetched: Dictionary) -> void:
 var _intro: IntroDirector = null
 var _intro_active := false
 
+## intro 编排注入的点点目标（P2，IntroDirector 驱动）：{"point": Vector2, "face": Vector2(INF=不改朝向),
+## "arrived": bool}。非空即在 _update_fairy 里最高优先驱动点点飞过去悬停（覆盖漂移跟随）。
+var _fairy_intro: Dictionary = {}
+
 ## 当前是否处于「建造小世界」intro 前置阶段（loading/其它模块可据此调整揭幕节奏）。
 func intro_active() -> bool:
 	return _intro_active
+
+## ── intro 点点编排接口（P2，IntroDirector 用）──────────────────────────────
+## 点点不会走路（CLAUDE.md 铁律），但飞/悬停/挥笔/表情/定格都行。建造演出里让她飞到「画角色」的位置、
+## 悬停、朝向注视点，挥笔表演走 paper_action（她不出声，旁白归 IntroNarrator）。注入式目标，覆盖漂移跟随。
+
+## 让点点飞到某逻辑点并悬停；face_point 非 INF 时到位后朝向它。到位判定见 intro_fairy_arrived()。
+func intro_fairy_fly_to(point: Vector2, face_point: Vector2 = Vector2.INF) -> void:
+	_fairy_intro = { "point": WorldGrid.wrap_pos(point), "face": face_point, "arrived": false }
+
+## 点点是否已飞到 intro 目标点（未在编排中则 false）。
+func intro_fairy_arrived() -> bool:
+	return not _fairy_intro.is_empty() and bool(_fairy_intro.get("arrived", false))
+
+## 让点点做一个纸片动作（挥笔=wave 等，见 BehaviorExecutor.ACTION_DUR）。paper_action 对点点有效
+## （_update_action_anim 不检查 is_fairy）。
+func intro_fairy_act(action: String) -> void:
+	var fairy := _find_fairy()
+	if fairy.is_empty():
+		return
+	fairy["paper_action"] = action
+	fairy["paper_action_t"] = 0.0
+
+## 释放 intro 编排：点点回到漂移跟随（转正/skip 时调，幂等）。
+func intro_fairy_release() -> void:
+	_fairy_intro = {}
+
+## intro 编排：在指定逻辑点生一个【具名种子村民】（复用 VillagerAssets.SEED 的 name/图集/meta），
+## 缩放弹出登场（paper_action pop_in），返回其逻辑坐标。id=demo_<slug>（本地专属，与 _setup_npcs 同款
+## → 转正视觉可对齐、_LOCAL_ONLY_IDS 绝不上报），【常驻不 despawn】——bench_despawn_load 只清 bench_ 前缀。
+## 不自动 wander（登场即定格挥手打招呼，之后由调用方按需起漫游）。与 _setup_npcs 同款 setup：先 critter
+## 占位跑通归一尺寸，再切 seed 图集动画。
+func intro_spawn_seed(idx: int, logical: Vector2) -> Vector2:
+	var seed_list: Array = VillagerAssets.SEED
+	if seed_list.is_empty():
+		return WorldGrid.wrap_pos(logical)
+	var v: Dictionary = seed_list[idx % seed_list.size()]
+	var lg := WorldGrid.wrap_pos(logical)
+	var npc := PaperCharacter.new()
+	add_child(npc)
+	npc.setup(critter_tex, Color.WHITE, String(v["name"]))
+	var atlas := load(String(v["atlas"])) as Texture2D
+	var phase := float(idx) * 1.3  # 错开动画相位，避免整齐同帧的机械感
+	if atlas != null:
+		npc.play_anim(atlas, v["meta"], VillagerAssets.WORLD_HEIGHT, phase)
+	npc.scale = Vector3.ONE * 0.001  # 登场前先缩到近 0，pop_in 首帧不闪原尺寸
+	var did := "demo_%s" % String(v["slug"])
+	npcs.append({ "node": npc, "logical": lg, "id": did, "anim_phase": phase,
+		"paper_action": "pop_in", "paper_action_t": 0.0 })
+	OccupancyMap.char_register(did, lg, 2)
+	return lg
 
 ## benchmark 全程（Benchmark _ready/finish 开关）：锁玩家移动输入（相机/主角不动，防小朋友测试时
 ## 拖动世界干扰负载）+ 仙子注魔定格（含闭嘴，语音让位注魔旁白）。村民【不】冻结——见 _step_executors：

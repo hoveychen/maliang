@@ -213,6 +213,7 @@ run_test test_visual_dialog_anim   --fixed-fps 10 --quit-after 40
 run_test test_npc_idle_anim        --fixed-fps 10 --quit-after 80
 run_test test_villager_assets      --fixed-fps 10 --quit-after 40
 run_test_village test_bootstrap_split      --fixed-fps 10 --quit-after 60
+run_test test_intro_capabilities   --fixed-fps 10 --quit-after 120
 run_test test_intro_director       --fixed-fps 10 --quit-after 600
 run_test test_intro_tutorial       --fixed-fps 10 --quit-after 1200
 run_test test_intro_skip           --fixed-fps 10 --quit-after 60

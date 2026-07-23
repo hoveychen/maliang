@@ -33,6 +33,8 @@ const ACTION_DUR := {
 	# 折纸（shader 折痕机关：折痕×2/风琴折/揉皱）
 	"fold": 1.8, "bow_fold": 1.6, "corner_wink": 1.4,
 	"paper_plane": 2.4, "accordion": 1.8, "crumple_ball": 2.0,
+	# 登场弹出（intro「画出来」：scale 0→1 弹性回弹）——见 world.action_pose "pop_in"
+	"pop_in": 0.7,
 }
 const CHAT_DUR := 6.0 ## chat_with 到达后的聊天演出时长（world.gd 气泡驱动按同一常量收尾）
 
