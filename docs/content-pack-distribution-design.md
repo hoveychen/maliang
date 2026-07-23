@@ -68,3 +68,47 @@
 ```
 
 预设见 `export_presets.cfg` 的 `CityPack`（P1 样板）。P5 泛化到全主题时，主包（Android/macOS/iOS）改用 `export_filter="exclude"` 列出全部被分发资产。
+
+## P5 已实现（泛化打包 + 非场景内容包下载机制，2026-07-23）
+
+**范围（老板拍板「安全全量 ≈120M」）：** 分发 14 主题模型 + 5 册故事语音 + 物品念名语音 + bgm（除
+carefree）。**保持硬地板**（各需独立高风险重构，留后续子 plan）：
+- `assets/textures/terrain`（42M）——49 层入单个 `Texture2DArray` 启动全量加载（`terrain_textures.gd`
+  `build_texture_array()`），排除任一层则整个数组构建失败、全局地形渲染崩。拆它要重构地形层索引契约。
+- `assets/fonts`（25M）——默认 CJK 主题字体（`project.godot theme/custom_font`），不 subset 直接分发→
+  无网首启全屏豆腐块。subset 需专门工具链。
+- `bgm_carefree.wav`（26M）——菜单 `_ready` 即起播（`menu.gd:60`），硬地板。
+
+**打包（单一真相来源）：** `scripts/gen-content-pack-presets.py` 从 `assets/packs/*/pack.json` + 目录扫描
+生成 `export_presets.cfg` 的 21 个内容包预设 + 主包 `export_filter="exclude"` 排除列表（519 文件），
+并输出 `build/packs/registry.json`（pack→{keys, export_path}）。`scripts/build-content-packs.sh` 逐包
+`--export-pack`，`tools/verify_pack.gd` 挂载校验。要点：
+- **主题包按整资产目录枚举资源**（glb/gltf/png/jpg/webp），与主包排除【对称】——杜绝外挂贴图漏排
+  （roman 36M png 源、导入压缩后 22M 已验证进包）。gltf 的 .bin 几何由 Godot 导入烘进 .scn，源 .bin
+  无需单列。
+- **共享目录零冗余**：`assets/medieval`（medieval_town/kingdom/roman 共用）、`assets/furniture`
+  （kitchen/toyroom 共用）——整目录打进各包，但**内容寻址天然去重**：同目录 → 同 .pck 字节 → 同 hash，
+  服务端只存一份、客户端只下一次（实测 medieval_town/kingdom 同 hash `6d07739…`）。
+- **故事册 lines.json**（非资源文件）走各故事包的 `include_filter` 显式打进包；主包 `exclude_filter`
+  剔除 `assets/voice/story_*/lines.json`——未挂载时该册目录整体缺失 → `story_voice.gd _story_voice_dirs`
+  不列 → `has_line=false` → 调用方回落 clientTts（优雅降级，零客户端改动）。
+
+**非场景内容包下载机制（voice/bgm 不进场景 palette）：**
+- 服务端 `GET /packs` → 全部已登记包 `name→{hash,bytes}`（`sceneManifest` 只列场景摆放引用的主题包）。
+  `POST /admin/packs/:name` 放宽允许空 keys（voice/bgm 无渲染键）。
+- 客户端 `api.gd fetch_packs_index()` 拉 `/packs`；`world._prefetch_content_packs()` intro 期后台按包名
+  预取 `bgm`+`voice_*`（会话级闸 + 内容寻址永久缓存），接在 `IntroDirector._prefetch_packs_bg` 的
+  `_prewarm_packs` 之后。best-effort：拉不到不影响主线。
+- **各加载点优雅降级**（缺包 = 未下载/未挂载）：story 语音走 `has_line`→TTS；item 念名走
+  `ResourceLoader.exists`→edge_tts；**bgm 段缺失守卫**（`game_audio.gd _poll_bgm_load`，test-first
+  `test_bgm_missing_step`）——修复前任一段 load 失败即 clear 全部→无任何 BGM（含 carefree）；改为跳过
+  失败段只播成功段，carefree 照放。
+
+**入库：** `scripts/register-content-packs.py <server-base>` 从 registry.json 读 keys、base64 POST 全 21 包。
+本地实测：21/21 入库、`GET /packs` 返回 21。prod 部署等老板。
+
+**⚠️ 未验（编辑器局限 + APK 硬坎）：** 「缺包→下载→挂载→prop 出现」完整离线闭环**只能在导出包上真验**
+——编辑器 `res://` 是完整文件系统、所有资产都在、包永不「缺失」。且 APK 导出必须在主 checkout（worktree
+缺 gitignored ASR→静默丢）。故 APK 体积前后对比 + 全链离线眼验 = **merge 回 main 后在主 checkout 导出**
+时做（老板拍板此顺序）。worktree 内已验尽机制件：打包构建+校验、服务端 register+/packs、客户端预取+
+bgm 守卫 test-first、headless 套件。
