@@ -19,9 +19,12 @@ uniform float vertex_color_mix : hint_range(0.0, 1.0) = 0.0;
 // —— 纸艺化（折纸/手工纸模风）——
 // 四个旋钮默认 0 = 观感与旧版一致；BendMat 在 MALIANG_PAPERCRAFT=1 时统一开启。
 // 全部是 ALU 运算，无新增纹理采样（grain 是程序化噪声，量产可换 CC0 实拍纸纹）。
+// paper_edge（折痕白描）已停用——白线在圆滖低多边形上断成白点、观感不好，老板拍板删掉；
+// 值在 BendMat.PAPER_PROPS / chunk_manager.PAPER_GROUND 里置 0，下面的分支永不进。保留代码
+// 是为将来若要「硬边切口线」可再启（届时需换成屏空间描边 pass，逐三角 fwidth 治不好白点）。
 uniform float paper_facet : hint_range(0.0, 1.0) = 0.0;  // 折面化法线：光照按面片跳变
 uniform float paper_bands : hint_range(0.0, 8.0) = 0.0;  // >0.5 时光照量化成 N 档（卡纸明暗）
-uniform float paper_edge : hint_range(0.0, 1.0) = 0.0;   // 折痕白描：几何棱线+轮廓描白（纸模签名）
+uniform float paper_edge : hint_range(0.0, 1.0) = 0.0;   // 折痕白描：已停用（见上）
 uniform float paper_grain : hint_range(0.0, 1.0) = 0.0;  // 纸纤维颗粒强度
 uniform float paper_tone : hint_range(0.0, 1.0) = 0.0;   // 卡纸色调：轻去饱和+提亮
 
@@ -76,8 +79,8 @@ void fragment() {
 		ALBEDO *= mix(1.0, 0.78 + 0.44 * g, paper_grain);
 	}
 	if (paper_edge > 0.001) {
-		// fresnel 对方盒几何几乎无效（可见面不处掠射角）；纸模的白边长在折痕上——
-		// 用屏幕空间法线突变（fwidth）检测几何棱线与轮廓，描卡纸切口白。
+		// 折痕白描（已停用，paper_edge 恒 0）：fwidth 检测折痕描白，在圆滖低多边形上强弱不均、
+		// 断成白点，观感不好——见 git 历史的量化尝试。保留分支备将来换描边 pass。
 		float crease = clamp((length(fwidth(NORMAL)) - 0.10) * 3.0, 0.0, 1.0);
 		ALBEDO = mix(ALBEDO, vec3(0.96, 0.94, 0.90), crease * paper_edge);
 	}
