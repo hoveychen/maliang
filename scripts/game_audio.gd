@@ -164,18 +164,21 @@ func start_bgm(step_paths: Array = BGM_STEPS, start_step: int = -1) -> void:
 func _poll_bgm_load() -> void:
 	if _bgm_want.is_empty():
 		return
+	# 先确认没有段还在加载中（整体等齐再组装），失败段不提前 return——见下。
 	for path in _bgm_want:
-		match ResourceLoader.load_threaded_get_status(path):
-			ResourceLoader.THREAD_LOAD_IN_PROGRESS:
-				return  # 还有段在加载，整体等齐
-			ResourceLoader.THREAD_LOAD_FAILED, ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
-				push_warning("GameAudio: BGM 线程加载失败 %s" % path)
-				_bgm_want.clear()
-				return
-	# 全部 LOADED
+		if ResourceLoader.load_threaded_get_status(path) == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+			return
+	# 全部已定（LOADED / FAILED / INVALID）。只收成功段——某段缺失【不连坐】其余段
+	# （content-pck-distribution P5：cheery/happy 改为可分发内容包，carefree 留主包；设备未下载
+	# 那两段时 load 失败，但 carefree 等主包内的段仍应照常轮播）。全失败才无 BGM（优雅静默，不崩）。
 	_steps.clear()
 	for path in _bgm_want:
-		_steps.append(ResourceLoader.load_threaded_get(path))
+		if ResourceLoader.load_threaded_get_status(path) == ResourceLoader.THREAD_LOAD_LOADED:
+			var s: Variant = ResourceLoader.load_threaded_get(path)
+			if s != null:
+				_steps.append(s)
+		else:
+			push_warning("GameAudio: BGM 段缺失/加载失败，跳过 %s" % path)
 	_bgm_want.clear()
 	if _steps.is_empty():
 		return

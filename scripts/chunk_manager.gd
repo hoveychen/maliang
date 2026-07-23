@@ -988,6 +988,8 @@ func _batch(batches: Dictionary, key: String, pos: Vector3, scale_f: float, yaw_
 func _flush_batches(parent: Node3D, batches: Dictionary) -> void:
 	for key: String in batches:
 		var info := _scatter_kind(key)
+		if info.is_empty() or info.get("mesh") == null:
+			continue # 内容包未挂载(content-pck-distribution P3)：跳过该散布种类，缺包不崩
 		var arr: Array = batches[key]
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -1030,7 +1032,10 @@ func _shadow_xforms(batches: Dictionary) -> Array[Transform3D]:
 	for key: String in batches:
 		if not (key.begins_with("tree_puff") or key == "bush_puff"):
 			continue  # 石/草太矮太碎，不铺影
-		var aabb: AABB = _scatter_kind(key)["mesh"].get_aabb()
+		var kind := _scatter_kind(key)
+		if kind.is_empty() or kind.get("mesh") == null:
+			continue # 内容包未挂载(content-pck-distribution P3)：无 mesh 不铺影，缺包不崩
+		var aabb: AABB = kind["mesh"].get_aabb()
 		var base_r := maxf(aabb.size.x, aabb.size.z) * 0.5 * SHADOW_RADIUS_FACTOR
 		var base_h := aabb.size.y
 		for t: Transform3D in batches[key]:
@@ -1155,11 +1160,23 @@ func _scatter_kind(key: String) -> Dictionary:
 		# 草地装饰散布（Pokopia 化 P6）：程序化低模 mesh + 烘焙布景共享顶点色材质
 		info = { "mesh": TerrainDeco.mesh(key), "mat": SdfStaticBaker.material() }
 	elif PackRegistry.category(key) == "baked":
-		info = { "mesh": PackRegistry.load_resource(key), "mat": SdfStaticBaker.material() }
+		# 内容包(.pck)分发(content-pck-distribution P3)：包未挂载时 load_resource 返回 null。
+		# 返回空 {} 让上层跳过该散布种类，不塞进 _scatter_kinds 缓存（PackRegistry 对 null 亦不缓存），
+		# 待预热器挂载包后重铺 chunk 即自然恢复。缺包不崩 = 零挫败离线兜底。
+		var mesh_res: Resource = PackRegistry.load_resource(key)
+		if mesh_res == null:
+			return {}
+		info = { "mesh": mesh_res, "mat": SdfStaticBaker.material() }
 	else:  # scatter：KayKit 场景剥出 mesh + bend 包裹材质
 		var scene: PackedScene = PackRegistry.load_resource(key)
+		if scene == null:
+			return {} # 见上：包未挂载优雅跳过，不缓存
 		var inst := scene.instantiate()
-		var mi: MeshInstance3D = inst.find_children("*", "MeshInstance3D", true, false)[0]
+		var mis := inst.find_children("*", "MeshInstance3D", true, false)
+		if mis.is_empty():
+			inst.free()
+			return {}
+		var mi: MeshInstance3D = mis[0]
 		info = { "mesh": mi.mesh, "mat": BendMat.wrap_material(mi.get_active_material(0)) }
 		inst.free()
 	_scatter_kinds[key] = info

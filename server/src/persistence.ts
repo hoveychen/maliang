@@ -6,7 +6,7 @@ import type { ActiveTask, ChatTurn, Character, CharacterDef, CharacterInstanceRe
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { coerceRelationship, deriveFamiliarity } from './social.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
-import { creationItemDef, getBuiltinItem, STARTER_HOME_FURNITURE } from './items.ts';
+import { creationItemDef, getBuiltinItem, packKeyFromRenderRef, STARTER_HOME_FURNITURE } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
 import { decodeTerrain, encodeTerrain, type Terrain } from './terrain.ts';
 import { composeTerrain, diffTerrain, deserializeOverlay, serializeOverlay } from './terrain_overlay.ts';
@@ -219,6 +219,8 @@ export interface BackupManifest {
     items: number;
     assets: number;
     spriteAnims: number;
+    /** content-pck-distribution P2：已登记内容包数（缺省 = 老备份无此字段）。 */
+    packs?: number;
   };
 }
 
@@ -267,6 +269,23 @@ export interface SpriteAnimRecord {
    * 源片内容寻址不变），不必每次对话都重转。见 clip_video.ts / docs/video-hero-lod-design.md。
    */
   clipOgv?: Partial<Record<ClipName, string>>;
+}
+
+/**
+ * 内容包（.pck）注册记录（content-pck-distribution P2，见 docs/content-pack-distribution-design.md）。
+ * 一个内容包 = 一批静态资产（glb/贴图）打成 Godot .pck，客户端下载后运行时挂载即用。.pck 本体走
+ * 内容寻址资产库（putAsset / GET /assets/:hash）分发，本记录只存元数据：
+ * - hash：.pck 在资产库里的内容寻址 hash（= 下载 URL /assets/<hash>）。
+ * - bytes：.pck 字节数（客户端下载进度 / 预算用）。
+ * - keys：本包 pack.json 声明的渲染键列表（renderRef 冒号后段）。服务端运行时【读不到】
+ *   assets/packs/*.json（Docker 只 COPY server/），故 renderRef→pack 的映射必须在入库时随 .pck
+ *   一起登记进来（部署脚本从 pack.json 读出 entries 键传入）。manifest 端点据此反查「某场景摆放的
+ *   物品属于哪些包」。
+ */
+export interface PackRecord {
+  hash: string;
+  bytes: number;
+  keys: string[];
 }
 
 /** scenes 表的一行（列名 snake_case；terrain blob 单独走 getSceneTerrain，不在此）。 */
@@ -345,6 +364,9 @@ export class WorldStore {
   readonly #cacheBudget: number;
   // 立绘 hash → idle 动画记录（sprite_anims.json 持久化，跨重启保留）
   readonly #spriteAnims = new Map<string, SpriteAnimRecord>();
+  // 内容包名 → 注册记录（packs.json 持久化）；#keyToPack 是其派生反查索引（渲染键 → 包名）。
+  readonly #packs = new Map<string, PackRecord>();
+  readonly #keyToPack = new Map<string, string>();
   // 世界地点名清单（POI，客户端 world_info 上报）：纯内存，客户端每次连上重发，不持久化
   readonly #locations = new Map<string, string[]>();
 
@@ -379,6 +401,7 @@ export class WorldStore {
       this.#migrateFairyPersona(); // 存量仙子改名换人设（小神仙 → 点点，神笔的笔灵）
       this.#loadAssets();
       this.#loadSpriteAnims();
+      this.#loadPacks(); // 依赖 assets 已加载（孤儿登记过滤要查 #assetMime）
       this.#migrateSceneTerrainBlobs(); // 依赖 assets 已加载（从内容寻址库搬 blob）
       this.#migrateScenesDropAuthoredFields(); // base+overlay P2：清存量世界冗余的 pois/portals/homes 拷贝（读走 template base）
       this.#migratePropsToItems(); // 依赖场景矩阵已就位（placed 物件要写进矩阵）
@@ -522,6 +545,8 @@ export class WorldStore {
     this.#assetCache.clear();
     this.#cacheBytes = 0;
     this.#spriteAnims.clear();
+    this.#packs.clear();
+    this.#keyToPack.clear();
     this.#locations.clear();
     this.#open();
   }
@@ -564,6 +589,13 @@ export class WorldStore {
     for (const [hash, rec] of this.#spriteAnims) anims[hash] = rec;
     writeFileSync(join(stagingDir, 'sprite_anims.json'), JSON.stringify(anims));
 
+    // packs.json：内容包登记（name → {hash,bytes,keys}）。.pck 字节本体随 assets/ 已一并入包
+    // （内容寻址、只增不改）；此处只落元数据。备份可选文件，不进 backup.ts 的 REQUIRED_ENTRIES，
+    // 老备份（无 packs.json）仍可恢复，#loadPacks 缺文件优雅跳过。
+    const packs: Record<string, PackRecord> = {};
+    for (const [name, rec] of this.#packs) packs[name] = rec;
+    writeFileSync(join(stagingDir, 'packs.json'), JSON.stringify(packs));
+
     const manifest: BackupManifest = {
       version: BACKUP_VERSION,
       createdAt: Date.now(),
@@ -575,6 +607,7 @@ export class WorldStore {
         items: this.#count('items'),
         assets: this.#assetMime.size,
         spriteAnims: this.#spriteAnims.size,
+        packs: this.#packs.size,
       },
     };
     writeFileSync(join(stagingDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
@@ -910,6 +943,36 @@ export class WorldStore {
     const obj: Record<string, SpriteAnimRecord> = {};
     for (const [hash, rec] of this.#spriteAnims) obj[hash] = rec;
     writeFileSync(join(this.#dir, 'sprite_anims.json'), JSON.stringify(obj));
+  }
+
+  /**
+   * 内容包登记从 packs.json 读回（content-pck-distribution P2；与 assets/spriteAnims 同款
+   * 文件寻址，不进 DB）。孤儿过滤：登记指向的 .pck hash 若不在 #assetMime（盘上无对应资产）则跳过，
+   * 免得 manifest 端点吐出一个下载即 404 的包。故须在 #loadAssets 之后调用。
+   */
+  #loadPacks(): void {
+    const pf = join(this.#dir as string, 'packs.json');
+    if (!existsSync(pf)) return;
+    const obj = JSON.parse(readFileSync(pf, 'utf8')) as Record<string, PackRecord>;
+    for (const name of Object.keys(obj)) {
+      const rec = obj[name]!;
+      if (this.#assetMime.has(rec.hash)) this.#packs.set(name, rec);
+    }
+    this.#rebuildKeyIndex();
+  }
+
+  #persistPacks(): void {
+    if (this.#dir === null) return;
+    mkdirSync(this.#dir, { recursive: true });
+    const obj: Record<string, PackRecord> = {};
+    for (const [name, rec] of this.#packs) obj[name] = rec;
+    writeFileSync(join(this.#dir, 'packs.json'), JSON.stringify(obj));
+  }
+
+  /** 从 #packs 重建渲染键 → 包名反查索引。同键多包时按插入序后者胜（与客户端 PackRegistry 一致）。 */
+  #rebuildKeyIndex(): void {
+    this.#keyToPack.clear();
+    for (const [name, rec] of this.#packs) for (const k of rec.keys) this.#keyToPack.set(k, name);
   }
 
   /**
@@ -2505,6 +2568,75 @@ export class WorldStore {
     const blob: ImageBlob = { bytes: new Uint8Array(readFileSync(p)), mime };
     this.#cachePut(hash, blob);
     return blob;
+  }
+
+  // ── 内容包（.pck）注册表（content-pck-distribution P2）────────────────────────────
+
+  /**
+   * 登记一个内容包：把 .pck 字节存进内容寻址资产库（putAsset），记录 hash + 大小 + 它提供的渲染键。
+   * 幂等——同名包重复登记覆盖旧记录（新版本 .pck 内容变、hash 变；旧 hash 的资产内容寻址不动，GC 另议）。
+   * keys 来自该包 pack.json 的 entries 键（部署脚本读出后传入；服务端运行时读不到 pack.json）。
+   */
+  registerPack(name: string, pck: ImageBlob, keys: string[]): PackRecord {
+    const hash = this.putAsset(pck);
+    const rec: PackRecord = { hash, bytes: pck.bytes.length, keys: [...keys] };
+    this.#packs.set(name, rec);
+    this.#rebuildKeyIndex();
+    this.#persistPacks();
+    return rec;
+  }
+
+  /** 取某内容包的登记记录（未登记返回 undefined）。 */
+  getPack(name: string): PackRecord | undefined {
+    return this.#packs.get(name);
+  }
+
+  /** 全部已登记内容包（name → 记录），name 稳定排序（缓存/测试友好）。 */
+  listPacks(): { name: string; rec: PackRecord }[] {
+    return [...this.#packs.entries()]
+      .map(([name, rec]) => ({ name, rec }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  }
+
+  /** 反查某渲染键属于哪个已登记内容包（无 → undefined）。 */
+  packForKey(key: string): string | undefined {
+    return this.#keyToPack.get(key);
+  }
+
+  /**
+   * 某场景需要哪些内容包（content-pck-distribution P2 的 manifest 核心）：扫场景地形矩阵 palette
+   * 里摆放的物品 → 各自 renderRef 冒号后段 key → packForKey 反查所属【已登记】包，去重。返回每个包的
+   * name + .pck 下载 hash + 字节数，客户端进场景前据此对缺的包走 GET /assets/<hash> 下载再挂载。
+   *
+   * 只返回【已登记】的包：未登记的键（尚未打包分发的主题、SDF props sdf_res:/sdf_inline、造物
+   * composed:/sticker:@<hash>）静默跳过——它们要么仍烤在 APK 里、要么运行时生成，manifest 不负责。
+   * 故过渡期（只登记了部分包）manifest 只列已可下载的，客户端优雅缺失不崩。
+   */
+  sceneManifest(worldId: string, sceneId: string): { name: string; hash: string; bytes: number }[] {
+    const rec = this.getSceneTerrain(worldId, sceneId);
+    if (!rec) return [];
+    let palette: string[];
+    try {
+      palette = decodeTerrain(rec.bytes).palette;
+    } catch {
+      return []; // 坏地形 blob 不连坐（与 listReferencedItems 同哲学）
+    }
+    const names = new Set<string>();
+    for (const id of palette) {
+      const def = this.getItemDef(worldId, id); // 内置 + 全局造物（worldId 形参已被忽略）
+      if (!def) continue;
+      const key = packKeyFromRenderRef(def.renderRef);
+      if (!key) continue;
+      const pack = this.#keyToPack.get(key);
+      if (pack) names.add(pack);
+    }
+    const out: { name: string; hash: string; bytes: number }[] = [];
+    for (const name of names) {
+      const p = this.#packs.get(name)!;
+      out.push({ name, hash: p.hash, bytes: p.bytes });
+    }
+    out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return out;
   }
 
   /** 取某立绘的 idle 动画记录（无则 undefined，客户端据此保留静态或轮询）。 */

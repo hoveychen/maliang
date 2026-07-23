@@ -5128,6 +5128,7 @@ func _on_scene_entered(data: Dictionary) -> void:
 	_unload_scene()
 	ItemCatalog.set_defs(data.get("items", [])) # 新场景可能引用没见过的造物实体
 	_prewarm_sticker_assets(data.get("items", [])) # 造贴纸:预热网络贴图
+	await _prewarm_packs(world_id, sid) # 内容包(P3):下缺的主题包并挂载,再铺地形才渲染得出主题 prop
 
 	# 地形先就位（_apply_scene changed 时会 rebuild 区块）；scene 为 null 表示该场景未入库，
 	# 保留当前地形（离线/未入库容错）。
@@ -5275,6 +5276,7 @@ func _bootstrap_apply(fetched: Dictionary) -> void:
 	var world: Dictionary = fetched.get("world", {})
 	online = true
 	world_id = String(world.get("id", "w_" + PlayerProfile.ensure_player_id())) # 缺省=自己的世界，不再回落 default
+	await _prewarm_packs(world_id, _scene_id) # 内容包(P3):初始场景的主题包先下+挂,再铺地形
 	await _load_server_terrain(world.get("scenes", []))
 	backend.url = (api.base as String).replace("http", "ws") + "/ws"
 	backend.player_id = PlayerProfile.ensure_player_id() # 设备端稳定 UUID，_send 统一注入
@@ -5935,6 +5937,71 @@ func _prewarm_sticker_assets(defs: Array) -> void:
 			fetched = true
 	if fetched and chunk_manager != null:
 		chunk_manager.rebuild() # 占位→真图，重建受影响的边缘竖片
+
+## 内容包预热（content-pck-distribution P3，docs/content-pack-distribution-design.md）：进场景【前】
+## 拉该场景的内容包清单（manifest 端点），把还没挂载的包下载到 user://packs/ 并挂载。挂载后 res://
+## 路径解析进包，随后的地形铺设/区块重建（_apply_scene / _load_server_terrain）即渲染出主题 prop。
+## 全程在切场景黑幕/loading 遮罩下进行 = 零挫败。离线或无 manifest（get_json 返回空）→ 无包可下 →
+## 直接返回，缺包由 chunk_manager 的守卫优雅跳过（不崩、世界略秃但能玩）。
+##
+## rebuild_after：挂载了【新】包后是否主动重铺区块。
+## - false（默认，P3 进场景前【同步】调用）：不重建，随后的地形铺设/_apply_scene 会带着新包渲染。
+## - true（P4 intro 期【后台】预取）：场景可能已铺好（intro 转正在前），挂新包后主动 rebuild 补出 prop。
+func _prewarm_packs(wid: String, sid: String, rebuild_after := false) -> void:
+	if api == null or wid.is_empty() or sid.is_empty():
+		return
+	var man := await api.get_json(Api.manifest_path(wid, sid))
+	var packs: Variant = man.get("packs", [])
+	if typeof(packs) != TYPE_ARRAY:
+		return
+	var mounted_any := false
+	var any_failed := false
+	for p in packs:
+		if typeof(p) != TYPE_DICTIONARY:
+			continue
+		var h := String((p as Dictionary).get("hash", ""))
+		if h.is_empty() or PackMounter.is_mounted(h):
+			continue # 已挂载：不重下不重挂（故到达 ensure_mounted = 确属新挂载）
+		var path := await api.fetch_pack(h) # 已缓存秒回本地路径；未缓存则下载
+		if path.is_empty():
+			any_failed = true # 下载失败（离线等）：缺包由 chunk_manager 守卫跳过，不崩
+			continue
+		if PackMounter.ensure_mounted(h):
+			mounted_any = true
+	if rebuild_after and mounted_any and chunk_manager != null:
+		chunk_manager.rebuild() # 后台预取：新包到位，重铺让主题 prop 补出来（load_resource 现能解析）
+	# 优雅提示需联网（content-pck-distribution P4）：本场景【确实需要】某内容包却下不下来（离线）时，
+	# 一次性温和告知——孩子仍能玩（base 烤在包内 + chunk 守卫跳过缺包），联网后内容更丰富。触发点精准：
+	# manifest 列出包才会走到这（pre-P5 服务端无包登记→manifest 空→永不误触），故这条不会在"啥都不缺"时乱弹。
+	if any_failed and not _pack_offline_hinted:
+		_pack_offline_hinted = true
+		stage_hud_toast("联网后能看到更多好玩的东西哦~")
+
+## 内容包离线提示的一次性闸（content-pck-distribution P4）：避免每次进场景都弹，一个会话提示一次即可。
+var _pack_offline_hinted := false
+
+## 非场景内容包后台预取（content-pck-distribution P5）：voice/bgm 不进场景 palette、不由
+## _prewarm_packs（manifest 驱动）覆盖，故 intro 期单独按包名从 GET /packs 拉。best-effort：
+## 拉不到不影响主线——story/item 语音缺失走 file_exists 兜底回落 live TTS，bgm 缺段由
+## _poll_bgm_load 跳过（carefree 留主包照放）。故不弹离线提示、不重铺区块（内容包不含地形 prop）。
+## 内容寻址永久缓存：下过一次即永久离线可用。一会话跑一次即可（_content_packs_prefetched 闸）。
+var _content_packs_prefetched := false
+
+func _prefetch_content_packs() -> void:
+	if api == null or _content_packs_prefetched:
+		return
+	_content_packs_prefetched = true
+	var index := await api.fetch_packs_index()
+	for name in index:
+		var n := String(name)
+		if n != "bgm" and not n.begins_with("voice_"):
+			continue # 主题模型包走场景 manifest（_prewarm_packs），这里只管非场景内容包
+		var h := String((index[name] as Dictionary).get("hash", ""))
+		if h.is_empty() or PackMounter.is_mounted(h):
+			continue
+		var path := await api.fetch_pack(h) # 已缓存秒回；未缓存则下载（弱网失败返回空，跳过）
+		if not path.is_empty():
+			PackMounter.ensure_mounted(h)
 
 func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包

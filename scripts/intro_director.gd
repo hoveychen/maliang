@@ -94,6 +94,10 @@ func _run() -> void:
 
 	# ② 后台预取（建造演出期间跑）：只落缓存/数据，不动场景。
 	_fetch_bg()
+	# ②' 内容包后台预取（content-pck-distribution P4）：与建造演出并行，fetch 一出 world_id 就
+	# fire-and-forget 下初始场景要的主题 .pck 并挂载。intro 演出十几秒足够下完，转正 apply 时包已
+	# 就位 → 无加载墙。不 await（不阻塞演出/旁白）；离线（fetch 空/world_id 缺）→ 跳过，转正走离线兜底。
+	_prefetch_packs_bg()
 
 	# ③ 建造演出：旁白 + 注魔段(benchmark) + （首次）教学。可被 skip 打断。
 	await _show_intro()
@@ -339,6 +343,26 @@ func _fetch_bg() -> void:
 	var res: Variant = await _world.call("_bootstrap_fetch")
 	_fetched = res if typeof(res) == TYPE_DICTIONARY else {}
 	_fetch_done = true
+
+## 内容包后台预取（content-pck-distribution P4，fire-and-forget）：等 _fetch_bg 出 world_id →
+## 调 world._prewarm_packs 下初始场景的主题 .pck 并挂载。与建造演出并行、不阻塞旁白。
+## rebuild_after=true：转正 apply 可能已在此协程之前铺完场景（intro 很短/被 skip 时），挂新包后
+## 主动重铺补出 prop；正常时机（演出还在放、apply 未跑）挂载后重铺的是 intro 场景，无害。
+## 离线/无 world_id（fetch 空）→ 跳过；到 FETCH_TIMEOUT_SEC 仍无 fetch → 放弃（转正走离线兜底）。
+func _prefetch_packs_bg() -> void:
+	var waited := 0.0
+	while not _fetch_done and waited < FETCH_TIMEOUT_SEC:
+		await get_tree().create_timer(POLL_SEC).timeout
+		waited += POLL_SEC
+	if not is_instance_valid(_world):
+		return
+	var w: Variant = _fetched.get("world", {})
+	var wid := String((w as Dictionary).get("id", "")) if typeof(w) == TYPE_DICTIONARY else ""
+	if wid.is_empty():
+		return # 离线/无世界：无包可预取，转正走离线兜底
+	await _world.call("_prewarm_packs", wid, String(_world.get("_scene_id")), true)
+	# 非场景内容包（voice/bgm，P5）：进场景后台补拉——不卡主线，best-effort（缺失各有兜底）。
+	await _world.call("_prefetch_content_packs")
 
 ## 等 fetch 完成或到超时（弱网兜底）；skip 时也顶多等到 fetch 完（转正需要素材）——
 ## 但若 skip 且 fetch 未完，仍走超时兜底避免卡住。

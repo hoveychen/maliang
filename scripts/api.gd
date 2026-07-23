@@ -222,6 +222,71 @@ func fetch_bytes(asset_hash: String) -> PackedByteArray:
 	_cache_write(asset_hash, buf) # 落盘供下次免下载
 	return buf
 
+# ── 内容包(.pck)分发（content-pck-distribution P3）────────────────────────────────
+#
+# .pck 与其它资产同走内容寻址 GET /assets/<hash>，但缓存到【独立】目录 user://packs/（文件名
+# <hash>.pck），因为它不是解码进内存的图片/字节，而是要交给 ProjectSettings.load_resource_pack
+# 按【文件路径】挂载（见 PackMounter）。分发 ≠ 在线：下载落盘后永久本地、启动即挂载，不重下。
+
+const PACKS_DIR := "user://packs"
+
+## hash → 本地 .pck 缓存路径（user://packs/<hash>.pck）。纯函数，供 PackMounter 挂载与单测。
+static func pack_cache_path(pack_hash: String) -> String:
+	return PACKS_DIR.path_join(pack_hash + ".pck")
+
+## 纯函数：拼某世界某场景的内容包清单请求路径（供单测断言端点，不起真网）。
+static func manifest_path(world_id: String, scene_id: String) -> String:
+	return "/worlds/%s/scenes/%s/manifest" % [world_id.uri_encode(), scene_id.uri_encode()]
+
+## 全部已登记内容包索引：GET /packs → { name: { "hash":..., "bytes":... } }（content-pck-distribution P5）。
+## sceneManifest 只列场景摆放引用的包；voice/bgm 等非场景内容包不进 palette，客户端据此按包名解析 hash
+## 后台预取（world._prefetch_content_packs）。失败/离线返回空 Dictionary（调用方best-effort，不崩）。
+func fetch_packs_index() -> Dictionary:
+	var res := await get_json("/packs")
+	var out: Dictionary = {}
+	var packs: Variant = res.get("packs", [])
+	if typeof(packs) != TYPE_ARRAY:
+		return out
+	for p in packs:
+		if typeof(p) != TYPE_DICTIONARY:
+			continue
+		var name := String((p as Dictionary).get("name", ""))
+		var h := String((p as Dictionary).get("hash", ""))
+		if not name.is_empty() and not h.is_empty():
+			out[name] = {"hash": h, "bytes": int((p as Dictionary).get("bytes", 0))}
+	return out
+
+## 确保某内容包 .pck 已落盘到 user://packs/：已缓存直接返回路径（内容寻址，永不失效）；
+## 未缓存则 GET /assets/<hash> 下载写盘。成功返回本地路径，失败（空 hash / 下载失败）返回 ""。
+## 只负责“拿到文件”，挂载由 PackMounter 做（下载后调用方 PackMounter.ensure_mounted(hash)）。
+func fetch_pack(pack_hash: String) -> String:
+	if pack_hash.is_empty():
+		return ""
+	var path := pack_cache_path(pack_hash)
+	if FileAccess.file_exists(path):
+		return path # 已缓存，免下载
+	var http := HTTPRequest.new()
+	add_child(http)
+	var err := http.request(base + "/assets/" + pack_hash)
+	if err != OK:
+		http.queue_free()
+		return ""
+	var res: Array = await http.request_completed
+	http.queue_free()
+	if int(res[1]) != 200:
+		return ""
+	var buf := res[3] as PackedByteArray
+	if buf.is_empty():
+		return ""
+	if not DirAccess.dir_exists_absolute(PACKS_DIR):
+		DirAccess.make_dir_recursive_absolute(PACKS_DIR)
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		return ""
+	f.store_buffer(buf)
+	f.close()
+	return path
+
 ## 拉取场景地形矩阵（v2 blob）。返回 { bytes: PackedByteArray, version: int }；
 ## 失败 bytes 为空。version 已知（scene.terrainVersion）时按 (world,scene,version)
 ## 磁盘缓存；version<=0（patch 版本对不上后的全量重拉）时跳缓存直连，
