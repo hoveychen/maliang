@@ -1,17 +1,25 @@
 {
   "voice": "zh-CN-YunxiaNeural",
   "lines": [
-    { "id": "intro_open_1", "text": "欢迎来到精灵世界！点点来啦，我们一起把这个世界画出来吧！" },
-    { "id": "intro_build_1", "text": "看呀，大地慢慢长出来啦，小树也一棵一棵冒出来咯！" },
-    { "id": "intro_build_2", "text": "小房子一间一间盖好啦，这里马上就要热闹起来咯！" },
+    { "id": "intro_open_1", "text": "欢迎来到精灵世界！点点来啦！快看好哦——点点要用神笔，把你的好朋友们一个一个画出来！" },
+
+    { "id": "intro_draw_rabbit", "text": "点点先画一只小兔子……嘿，变！哇，是最爱蹦蹦跳的舞舞兔！" },
+    { "id": "greet_rabbit", "voice": "zh-CN-XiaoyiNeural", "text": "嗨嗨！一起蹦蹦跳，好不好呀？" },
+
+    { "id": "intro_draw_fox", "text": "再画一个……你看，围着小围巾的灵狐跑出来啦！" },
+    { "id": "greet_fox", "voice": "zh-CN-YunxiNeural", "text": "你好呀！我们做好朋友吧！" },
+
+    { "id": "intro_draw_deer", "text": "还有戴着花环的小鹿——花环小鹿也来跟你玩咯！" },
+    { "id": "greet_deer", "voice": "zh-CN-XiaoxiaoNeural", "text": "你好～很高兴见到你哦！" },
+
+    { "id": "intro_ready_1", "text": "好朋友们都画好啦！这个小世界，现在就交给你咯——我们一起去玩吧！" },
+
     { "id": "intro_magic_1", "text": "现在点点要画一个大魔法，让整个世界变得又清楚又漂亮，你要看好哦！" },
-    { "id": "intro_partner_1", "text": "叮——小伙伴们也来啦！快看，他们从亮晶晶的光团里蹦出来咯！" },
     { "id": "intro_walk_ask", "text": "小朋友，用手指点一点前面的地面，我们一起走过去看看吧！" },
     { "id": "intro_walk_ok", "text": "哇，你会走路啦，走得真好！" },
-    { "id": "intro_near_ask", "text": "那边有个小伙伴呢，我们再走近一点，跟他打个招呼吧！" },
-    { "id": "intro_near_ok", "text": "你看，小伙伴朝你挥手啦，他好开心呀！" },
+    { "id": "intro_near_ask", "text": "那边有个小伙伴呢，我们再走近一点，跟它打个招呼吧！" },
+    { "id": "intro_near_ok", "text": "你看，小伙伴朝你挥手啦，它好开心呀！" },
     { "id": "intro_talk_ask", "text": "话筒亮起来的时候，就可以对着它说话啦。来，跟点点说句话试试看！" },
-    { "id": "intro_talk_ok", "text": "点点听到你的声音啦，你的声音真好听！" },
-    { "id": "intro_ready_1", "text": "世界准备好啦！接下来就交给你咯，我们一起去玩吧！" }
+    { "id": "intro_talk_ok", "text": "点点听到你的声音啦，你的声音真好听！" }
   ]
 }
