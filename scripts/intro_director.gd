@@ -108,6 +108,12 @@ func _run() -> void:
 		await _world.call("_bootstrap_apply", _fetched)
 		_world.set("_player_restore_pending", false)
 
+	# ④' 全量预下载门（world-full-predownload-gate P3）：转正后若该世界内容包还没全挂上（首启弱网），
+	# 上专属下载页挡住、下完才放行；已全挂（缓存命中）秒过、不出页。传 ""——world.world_id 已由上面的
+	# _bootstrap_apply 置好，gate 回落读它。离线/无世界（world_id 空）→ gate 内部直接返回不挡。
+	if is_instance_valid(_world):
+		await _world.call("_run_predownload_gate", "")
+
 	# ⑤ 记住 intro 已看过（下次不再演教学）。
 	PlayerProfile.mark_intro_seen()
 	_done = true

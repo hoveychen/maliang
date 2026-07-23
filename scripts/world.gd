@@ -5279,6 +5279,10 @@ func _filter_boot_characters(all: Array) -> Array:
 func _bootstrap() -> void:
 	var fetched := await _bootstrap_fetch()
 	await _bootstrap_apply(fetched)
+	# 全量预下载门（world-full-predownload-gate P3）：非 intro 路径（返回用户）也补一道门——
+	# 揭幕后若内容包还没全挂（新设备首进），出下载页挡住、下完才放行；缓存命中秒过不出页。
+	# intro 路径不走 _bootstrap（intro_director 单独调 fetch/apply + gate），故这里只作用于非 intro。
+	await _run_predownload_gate(world_id)
 
 ## 拉取半段：get_world + 实体定义就位 + 角色素材并发预取。**只落缓存/内存与数据，不动场景任何节点**
 ## （ItemCatalog.set_defs 是纯数据、_prefetch_characters 只写 asset 缓存）——故 intro 可后台跑这段而
@@ -6057,6 +6061,27 @@ func _prefetch_content_packs(wid := "") -> void:
 	# game_audio 由 _setup_audio 无条件先建，intro 路径也在（best-effort：无则跳过）。
 	if game_audio != null:
 		game_audio.refresh_content_bgm()
+
+## 全量预下载门（world-full-predownload-gate P3）：intro 结束 / 返回用户进世界后调用。若该世界要用的
+## 内容包还没全挂上（首启弱网）→ 起【专属下载页】挡在已揭幕的世界之上，下完才 await 返回（放行）；
+## 已全挂（缓存命中/秒下完）→ 不出页秒进（二次启动）。离线/无 PackMounter → 不挡（各守卫跳过缺包）。
+func _run_predownload_gate(wid := "") -> void:
+	var use_wid := wid if not wid.is_empty() else world_id
+	var pm := get_node_or_null(^"/root/PackMounter")
+	if api == null or pm == null:
+		return
+	if _predownload == null:
+		_predownload = WorldPredownload.new()
+	_prefetch_content_packs(use_wid) # 起首轮下载（intro 路径可能已起；一次性闸 + run 自守，重复安全）
+	if _predownload.all_mounted:
+		return # 缓存命中/已下完：不出下载页
+	var gate := DownloadGate.new()
+	gate.name = "DownloadGate"
+	add_child(gate)
+	gate.begin(_predownload, func() -> void: _predownload.run(api, pm, use_wid))
+	await gate.done
+	if game_audio != null:
+		game_audio.refresh_content_bgm() # 重试轮里补挂的 bgm 段并进轮播（幂等）
 
 func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包
