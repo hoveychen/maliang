@@ -287,6 +287,11 @@ if ! python3 "$ROOT/test/e2e/test_harness_delta.py" >/dev/null 2>&1; then
   echo "-- test_harness_delta FAILED"
   fails=$((fails + 1))
 fi
+echo "== test_declarative_flow (python) =="
+if ! python3 "$ROOT/test/e2e/test_declarative_flow.py" >/dev/null 2>&1; then
+  echo "-- test_declarative_flow FAILED"
+  fails=$((fails + 1))
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then

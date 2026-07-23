@@ -19,13 +19,14 @@
 流程引擎（复用中心，与 MCP list_flows/run_flow 同一执行路径、同一注册表）：
   pilot_cli.py list-flows                  # 列可复用流程(Flow Registry)，JSON
   pilot_cli.py run-flow enter_world [--args '{"name":"小火箭"}']   # 按名跑(先跑 depends 链,带 coverage)
-  pilot_cli.py run-script test/e2e/pilot_example.py               # 逃生口：跑 run(h) 脚本(完整 Harness,legacy/device 手势只在这)
+  pilot_cli.py save-as-flow <trace目录> --name rec_demo [--depends enter_world]  # 录制的 trace 存成声明式 flow
 
 ★ 跑完整链路（造物起名/对话/引路…）前先 `list-flows` 看有没有现成 flow，别手搓重走前置；
   observe/state 的回包也会带 flows_hint 提醒这一点。
 
-legacy 盲坐标/设备/调试子命令（tap/drag/click/teleport/phone/scene/talk-*/pick/accept/inject/
-reset-* …）**已从 CLI 砍掉**——curated 能力经 `do <action_id>`，其余只经 `run-script`+完整 Harness SDK。
+驱动面只认**定义词汇**：感知(state/access/actions/observe) + 动作 `do <action_id>` + say/wait/inject。
+盲坐标/手势/god op（tap/drag/teleport/scene/pick…）与任意脚本逃生口(`run-script`)**已整个退役**——
+可复现序列走 flow：命令式(flows/*.py 的 run(h))或声明式(数据 steps，见 save-as-flow)，二者都调不到 legacy。
 
 所有子命令支持 --trace DIR：命令+应答追加到 DIR/trace.jsonl（跨调用累积，audit/回放用）。
 退出码：应答 ok=true → 0，否则 1（用法/加载错 → 2）。
@@ -39,7 +40,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from harness import Harness, MonkeyHarness, HarnessError, diff_state  # noqa: E402
+from harness import MonkeyHarness, HarnessError, diff_state  # noqa: E402
 
 FLOWS_DIR = Path(__file__).parent / "flows"
 sys.path.insert(0, str(FLOWS_DIR))
@@ -98,12 +99,82 @@ def _call_run(fn, h, args):
     return fn(h)
 
 
-def run_script(h, script_path, args=None):
-    """跑单个脚本（不解析 registry）。返回 (result, dt)。抛错交给调用方。"""
-    fn = load_run(script_path)
-    t0 = time.time()
-    result = _call_run(fn, h, args or {})
-    return result, time.time() - t0
+def run_steps(h, steps, args=None):
+    """跑声明式 flow：逐条 {op:do/say/wait/inject} 调 MonkeyHarness（玩家 SDK）。
+
+    op 只认定义词汇——非法 op（含任何 legacy 盲坐标动作）在 registry 加载期已被 _validate_steps 拒，
+    故这里到不了 else 分支（保留兜底以防被绕过调用）。返回 {status, steps:[每步简报], failed_at?}。
+    """
+    done = []
+    for i, s in enumerate(steps):
+        op = s["op"]
+        if op == "do":
+            r = h.do(s["action"], **s.get("args", {}))
+        elif op == "say":
+            r = h.say(s["text"])
+        elif op == "wait":
+            r = h.wait_server(s["conds"], timeout=s.get("timeout", 40.0))
+        elif op == "inject":
+            r = h.inject()
+        else:
+            raise HarnessError(f"声明式步骤未知 op: {op!r}（registry 应已校验，不该到这）")
+        ok = bool(r.get("ok", True)) if isinstance(r, dict) else True
+        done.append({"i": i, "op": op, "ok": ok})
+        # wait 没等到（matched=false）视作 flow 失败——别默默往下跑。
+        if op == "wait" and isinstance(r, dict) and not r.get("matched", True):
+            return {"status": "wait_timeout", "steps": done, "failed_at": i}
+    return {"status": "ok", "steps": done}
+
+
+# ── record → save-as-flow：把录制的 trace 序列化成声明式 flow ────────────────
+# do/say/wait/inject → 步骤；感知读操作丢弃；其余（legacy 盲坐标/god op）→ 拒（不许入声明式 flow）。
+_TRACE_STEP_OPS = {"do", "say", "wait", "inject"}
+_TRACE_READONLY_OPS = {"state", "access", "actions", "ui", "observe", "screencap"}
+
+
+def steps_from_trace(records):
+    """从 trace 记录 [{cmd:{op,...},reply}, ...] 抽声明式 steps（纯函数，可单测）。
+
+    感知读操作丢弃（不驱动状态）；do/say/wait/inject 转成步骤；遇任何 legacy/未知 op 抛 ValueError
+    ——这就是「录制里混进盲坐标动作就存不成 flow」的当场暴露点，与声明式格式的 no-leak 保证同源。"""
+    steps = []
+    for rec in records:
+        cmd = rec.get("cmd") if isinstance(rec, dict) else None
+        if not isinstance(cmd, dict):
+            continue
+        op = cmd.get("op")
+        if op in _TRACE_READONLY_OPS:
+            continue
+        if op not in _TRACE_STEP_OPS:
+            raise ValueError(f"trace 含非定义动作 op={op!r}——不能存成声明式 flow"
+                             f"（legacy 盲坐标/god op 已禁，只认 {sorted(_TRACE_STEP_OPS)}）")
+        if op == "do":
+            step = {"op": "do", "action": cmd["action"]}
+            if cmd.get("args"):
+                step["args"] = cmd["args"]
+        elif op == "say":
+            step = {"op": "say", "text": cmd["text"]}
+        elif op == "wait":
+            step = {"op": "wait", "conds": cmd["conds"]}
+            if "timeout" in cmd:
+                step["timeout"] = cmd["timeout"]
+        else:  # inject
+            step = {"op": "inject"}
+        steps.append(step)
+    return steps
+
+
+def _read_trace(trace_in):
+    """读 trace.jsonl（传目录则取其中的 trace.jsonl）→ 记录列表。"""
+    p = Path(trace_in)
+    if p.is_dir():
+        p = p / "trace.jsonl"
+    recs = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            recs.append(json.loads(line))
+    return recs
 
 
 def run_flow(h, name, args=None, registry_path=None):
@@ -124,8 +195,11 @@ def run_flow(h, name, args=None, registry_path=None):
         if not gate["ok"]:
             raise HarnessError(f"flow {fname} 前置未满足: {'; '.join(gate['reasons'])}")
         t0 = time.time()
-        fn = load_run(fdef["script_path"])
-        result = _call_run(fn, h, fargs)
+        if fdef.get("steps") is not None:
+            result = run_steps(h, fdef["steps"], fargs)          # 声明式：逐条数据步骤
+        else:
+            fn = load_run(fdef["script_path"])                   # 命令式：run(h) 脚本
+            result = _call_run(fn, h, fargs)
         dt = round(time.time() - t0, 2)
         status = result.get("status") if isinstance(result, dict) and result.get("status") else "ok"
         ran.append({"name": fname, "kind": fdef["kind"], "status": status, "dt": dt, "result": result})
@@ -164,7 +238,11 @@ def _cmd_list_flows(args):
             h.close()
     items = []
     for f in flows.values():
-        item = {k: v for k, v in f.items() if k != "script_path"}
+        # steps 数组不整份塞进列表（噪音）——只标 declarative + 步数；script_path 也不外露。
+        item = {k: v for k, v in f.items() if k not in ("script_path", "steps")}
+        if f.get("steps") is not None:
+            item["declarative"] = True
+            item["n_steps"] = len(f["steps"])
         if args.with_availability:
             item["available"] = reg.availability(flows, f["name"], state)
         items.append(item)
@@ -203,27 +281,43 @@ def _cmd_run_flow(args):
         h.close()
 
 
-def _cmd_run_script(args):
+def _cmd_save_as_flow(args):
+    """离线：读 trace → 抽声明式 steps → 追加注册进 registry.json（写前整份校验，坏就不落盘）。"""
     try:
-        script_args = _parse_args_json(args.args)
-    except (json.JSONDecodeError, ValueError) as e:
-        return out_machine({"ok": False, "error": f"--args 不合法: {e}"})
-    name = Path(args.path).stem
-    # --script 逃生口给完整 Harness（legacy/device 手势只在这条路可写）。
-    h = Harness(args.host, args.port, timeout=args.timeout)
+        records = _read_trace(args.trace_in)
+    except OSError as e:
+        return out_machine({"ok": False, "error": f"读 trace 失败: {e}"})
     try:
-        h.connect(retries=5, delay=1.0)
-    except HarnessError as e:
-        return out_machine({"ok": False, "flow": name, "error": f"连不上: {e}"})
-    if args.trace:
-        h.start_trace(args.trace)
+        steps = steps_from_trace(records)
+    except ValueError as e:
+        return out_machine({"ok": False, "error": str(e)})
+    if not steps:
+        return out_machine({"ok": False, "error": "trace 里没有可保存的动作步骤(do/say/wait/inject)"})
+
+    reg_path = Path(args.registry) if args.registry else (FLOWS_DIR / "registry.json")
+    raw = json.loads(reg_path.read_text(encoding="utf-8"))
+    names = {f.get("name") for f in raw.get("flows", [])}
+    if args.name in names:
+        return out_machine({"ok": False, "error": f"flow 名已存在: {args.name}（换名或先删）"})
+
+    flow = {"name": args.name, "desc": args.desc or f"录制回放:{args.name}",
+            "kind": "regression", "tags": ["recorded"], "steps": steps}
+    depends = [d.strip() for d in args.depends.split(",") if d.strip()] if args.depends else []
+    if depends:
+        flow["depends"] = depends
+    raw.setdefault("flows", []).append(flow)
+
+    # 写前用 registry 校验整份（新 flow 的 steps + depends 引用完整性）——坏就不落盘。
+    tmp = reg_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     try:
-        result, dt = run_script(h, args.path, script_args)
-        return out_machine({"ok": True, "flow": name, "result": result, "duration": round(dt, 2)})
-    except (HarnessError, AssertionError) as e:
-        return out_machine({"ok": False, "flow": name, "error": str(e)})
-    finally:
-        h.close()
+        reg.load_registry(str(tmp))
+    except reg.RegistryError as e:
+        tmp.unlink(missing_ok=True)
+        return out_machine({"ok": False, "error": f"生成的 flow 校验失败: {e}"})
+    tmp.replace(reg_path)
+    return out_machine({"ok": True, "flow": args.name, "steps": len(steps),
+                        "registry": str(reg_path)})
 
 
 def main():
@@ -270,9 +364,13 @@ def main():
     p.add_argument("name")
     p.add_argument("--args", default="", help="传给本体 flow 的参数（JSON 对象）")
     p.add_argument("--registry", default="")
-    p = sub.add_parser("run-script")
-    p.add_argument("path", help="暴露 run(h) 的 .py（逃生口，完整 Harness）")
-    p.add_argument("--args", default="", help="传给 run(h,**args) 的参数（JSON 对象）")
+    p = sub.add_parser("save-as-flow",
+                       help="把录制的 trace 存成声明式 flow（含 legacy 动作会被拒）")
+    p.add_argument("trace_in", help="trace.jsonl 文件或其所在目录")
+    p.add_argument("--name", required=True, help="新 flow 名（注册进 registry.json）")
+    p.add_argument("--desc", default="")
+    p.add_argument("--depends", default="", help="前置 flow 名，逗号分隔（如 enter_world）")
+    p.add_argument("--registry", default="")
 
     args = ap.parse_args()
 
@@ -281,8 +379,8 @@ def main():
         return _cmd_list_flows(args)
     if args.cmd == "run-flow":
         return _cmd_run_flow(args)
-    if args.cmd == "run-script":
-        return _cmd_run_script(args)
+    if args.cmd == "save-as-flow":
+        return _cmd_save_as_flow(args)
 
     # 感知/动作：curated 玩家 SDK，无 god op。
     h = MonkeyHarness(args.host, args.port, timeout=args.timeout)

@@ -1,5 +1,11 @@
 # game-pilot 可复用流程中心（Flow Registry）设计
 
+> ⚠️ **部分超越（2026-07-23，harness-declarative-flows）**：本文记录的是初版设计。后续词汇收口把
+> `run-script`（任意脚本逃生口）与 `Harness(MonkeyHarness)` legacy/god 子类**整个退役**——驱动面只剩
+> `MonkeyHarness` 定义词汇；flow 现有两类：命令式 `flows/*.py`（`run(h)`）+ **声明式数据 flow**（`steps`，
+> 由 `save-as-flow` 从录制的 trace 序列化，格式硬保证不含 legacy）。下文凡提 run-script/完整 Harness 逃生口
+> 均已不适用；以 [SKILL.md](../.claude/skills/game-pilot/SKILL.md) 为准。
+>
 > 状态：**已获批（2026-07-22）**。三项岔路老板已拍板（见 §4）：A1=maliang-local；A2=MCP 子进程调 pilot_runner；A3=**一步到位**（含参数化 args_schema + flow 依赖）。审阅盘的是下面 §2 的需求清单（每条标注来源），不是散文。
 > 关联：[game-pilot SKILL](../.claude/skills/game-pilot/SKILL.md)、harness-mcp（`server/tools/harness-mcp`）、
 > `test/e2e/`（现有 `run(h)` 脚本 + `pilot_runner.py`）。

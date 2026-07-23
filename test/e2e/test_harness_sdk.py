@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from harness import Harness, HarnessError  # noqa: E402
+from harness import MonkeyHarness, HarnessError  # noqa: E402
 
 FAKE_JPG = b"\xff\xd8\xff\xe0FAKEJPEG\xff\xd9"
 
@@ -76,7 +76,7 @@ def main():
     threading.Thread(target=fake_server, args=(srv, states), daemon=True).start()
 
     tdir = tempfile.mkdtemp(prefix="harness_sdk_")
-    h = Harness(port=port, timeout=3.0)
+    h = MonkeyHarness(port=port, timeout=3.0)
     h.connect(retries=3, delay=0.1)
     h.start_trace(tdir)
 
@@ -101,22 +101,18 @@ def main():
     check("observe 有 ui", len(ob["ui"]), 1)
     check("observe 有截图", os.path.exists(ob.get("shot", "")), True)
 
-    print("[手势：慢回包不超时（读超时按 ms 放宽）]")
-    r = h.drag(0, 0, 100, 0, ms=200)  # 假服务端睡 0.3s 才回
-    check("drag done", r.get("done"), True)
-
     print("[trace 录制：命令+应答落 jsonl，b64 只记长度]")
     h.close()
     lines = [json.loads(x) for x in open(os.path.join(tdir, "trace.jsonl"), encoding="utf-8")]
     cmds = [x["cmd"]["op"] for x in lines if "cmd" in x]
-    check("trace 含全部命令", {"state", "ui", "screencap", "drag"} <= set(cmds), True)
+    check("trace 含全部命令", {"state", "ui", "screencap"} <= set(cmds), True)
     caps = [x for x in lines if "cmd" in x and x["cmd"]["op"] == "screencap"]
     check("trace 截图 b64 被瘦身", caps[0]["reply"]["jpg_b64"].startswith("<b64:"), True)
     shots = [x for x in lines if "shot" in x]
     check("trace 记截图路径", len(shots) >= 1, True)
 
     print("[超时路径：wait_state 报 HarnessError]")
-    h2 = Harness(port=port, timeout=1.0)
+    h2 = MonkeyHarness(port=port, timeout=1.0)
     try:
         h2.connect(retries=1, delay=0.1)
         # 假服务端只收一个连接，这里连不上属预期——两种都算过

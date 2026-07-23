@@ -65,7 +65,7 @@ debug 构建 + 文件/env 标志（如 `user://asr_harness` 或 `MALIANG_ASR_HAR
 ### 4.3 TCP 命令服务器（`scripts/debug_cmd_server.gd`，仅 debug）
 `world._ready` 里 `OS.is_debug_build()` 才 `add_child`。`TCPServer.listen(8577, "127.0.0.1")`，每帧 `poll`，收 JSON 行 → 路由（见 §2.1）。命令解析拆成**纯函数** `parse_command(line)`（与 IO 分离），headless 单测覆盖合法/非法全路径。`say` 只把 PCM 喂进 `_vc`，到底录不录仍由真实 `should_capture` 门禁决定（§3.2，门禁本身是被测对象）。
 
-### 4.4 e2e 脚本（`test/e2e/naming_e2e.py`）
+### 4.4 e2e 脚本（`test/e2e/flows/naming_e2e.py`）
 `adb forward tcp:8577` →（可选 `--launch` 起 App）→ 连命令口 → `inject` 换 ScriptedAsr → 发命令序列（`say` 造物意图 → 轮询 `state` 等 `_naming_item` 置位 → `say` 名字 →（确认模式）`accept` → 轮询 `state` 等 `_naming_item` 回空）→ 各步 `screencap`。服务端 `nameVoiceAsset` 落库另核（debug 物品页 / muveectl curl）。桌面 debug 可 `--host 127.0.0.1` 直连不走 adb。
 
 TCP 线路本身（socket 收发 + inject handshake + state 往返 + 坏输入回错误）由 `test/test_harness_wire.gd` 在本机 headless 用真 `StreamPeerTCP` 客户端跑通——真机联调前先 de-risk 管线。

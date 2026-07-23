@@ -5,9 +5,9 @@
 JSON 命令、回一行 JSON 应答；手势类命令（drag/swipe/long_press/pinch）在手势完成时才回包。
 
 三种接入：
-  桌面 debug 实例   Harness()（直连 127.0.0.1:8577；多实例并存用 MALIANG_HARNESS_PORT 换口）
-  Android 真机      setup_forward() 后 Harness()（adb forward 把设备口映到本机）
-  桌面自起实例      launch_desktop(port=8578) 起 Godot debug 进程再 Harness(port=8578)
+  桌面 debug 实例   MonkeyHarness()（直连 127.0.0.1:8577；多实例并存用 MALIANG_HARNESS_PORT 换口）
+  Android 真机      setup_forward() 后 MonkeyHarness()（adb forward 把设备口映到本机）
+  桌面自起实例      launch_desktop(port=8578) 起 Godot debug 进程再 MonkeyHarness(port=8578)
 
 感知三件套（AI 驱动主路）：
   h.state()          结构化快照（fsm_state/mic_open/player_pos/wallet/bag_items/npcs/手机/摆放…）
@@ -332,93 +332,12 @@ class MonkeyHarness:
         return False
 
 
-class Harness(MonkeyHarness):
-    """完整 harness = 玩家 SDK(MonkeyHarness) **+ legacy/debug op**：盲坐标手势(tap/drag/swipe/long_press/pinch)、
-    直触 handler(pick/accept/replay/retry/talk_fairy/talk_npc/click_ui/phone/pickup)、瞬移/切场/摄影/清冷却
-    (teleport/scene/photo/reset_budget)。
-
-    给 **`--script` 逃生口**与真机/摄影脚本用（那些确实需要盲坐标或调试后门）。**注册 flow 走 MonkeyHarness、
-    这些方法在它上面根本不存在**——诚实是类结构层面的，不靠运行时拦截。`from harness import Harness` 照旧拿到全集。
-    """
-
-    # ── 语音/对话 legacy（直接改 VC 子模式/直触对话，绕真 tap）──
-    def pick(self, option_id):
-        return self.send({"op": "pick", "optionId": option_id})
-
-    def accept(self):
-        return self.send({"op": "accept"})
-
-    def replay(self):
-        return self.send({"op": "replay"})
-
-    def retry(self):
-        return self.send({"op": "retry"})
-
-    def talk_fairy(self):
-        return self.send({"op": "talk_fairy"})
-
-    def talk_npc(self):
-        return self.send({"op": "talk_npc"})
-
-    # ── 触屏/手势（LEGACY 盲坐标层，对齐 Playwright §3.1）──
-    # ⚠️ 盲坐标 tap/drag/swipe/long_press/pinch 全部【跳过 actionability】(不查可见/遮挡/enabled)，
-    #    打不中会被当点地面把玩家支使走。**新脚本走 access→actions→do()**：按 id 寻址、真输入执行、
-    #    落定才回包。这些保留只为极少数没有可寻址元素的场景（纯坐标手势）与 back-compat。
-    def tap(self, x, y):
-        return self.send({"op": "tap", "x": x, "y": y})
-
-    def drag(self, x1, y1, x2, y2, ms=400):
-        return self.send({"op": "drag", "x1": x1, "y1": y1, "x2": x2, "y2": y2, "ms": ms},
-                         timeout=self.timeout + ms / 1000.0)
-
-    def swipe(self, x1, y1, x2, y2, ms=250):
-        return self.send({"op": "swipe", "x1": x1, "y1": y1, "x2": x2, "y2": y2, "ms": ms},
-                         timeout=self.timeout + ms / 1000.0)
-
-    def long_press(self, x, y, ms=700):
-        return self.send({"op": "long_press", "x": x, "y": y, "ms": ms},
-                         timeout=self.timeout + ms / 1000.0)
-
-    def pinch(self, x, y, scale=0.5, ms=400, dist=80):
-        return self.send({"op": "pinch", "x": x, "y": y, "scale": scale, "ms": ms, "dist": dist},
-                         timeout=self.timeout + ms / 1000.0)
-
-    # ── 语义动作 ──
-    def click_ui(self, text=None, path=None):
-        """LEGACY（§3.1/§3.2）：BaseButton 命中走 pressed.emit() 会【穿透遮罩】（假绿灯老坑），
-        且 text 多命中现在报 ambiguous（strict）。**新脚本用 do('press:btn:<path>')**（真触屏、遮罩正确吞）。"""
-        cmd = {"op": "click_ui"}
-        if text:
-            cmd["text"] = text
-        if path:
-            cmd["path"] = path
-        return self.send(cmd)
-
-    def phone(self, action, app_id=None):
-        cmd = {"op": "phone", "action": action}
-        if app_id:
-            cmd["id"] = app_id
-        return self.send(cmd)
-
-    def pickup(self, tile_x, tile_y, edge_side=-1):
-        return self.send({"op": "pickup", "tileX": tile_x, "tileY": tile_y, "edgeSide": edge_side})
-
-    def teleport(self, tile_x=None, tile_y=None, near=False):
-        """⚠️ DEBUG-ONLY 瞬移（§3.6）：**会污染 e2e 有效性**——瞬移作弊替代真走路，本该验证「孩子真的走到了」
-        却跳过寻路/引路。仅供摄影找机位/测试 setup。常规导航用 do('walk:poi:…')/do('enter_portal:…')（真走）。"""
-        cmd = {"op": "teleport", "near": near}
-        if tile_x is not None:
-            cmd.update({"tileX": tile_x, "tileY": tile_y})
-        return self.send(cmd)
-
-    def scene(self, scene_id):
-        return self.send({"op": "scene", "id": scene_id})
-
-    def photo(self, **kwargs):
-        return self.send({"op": "photo", **kwargs})
-
-    def reset_budget(self):
-        return self.send({"op": "reset_budget"})
+# ── legacy/debug 子类已删（harness-declarative-flows P4：词汇收口）──────────────
+# 曾有 Harness(MonkeyHarness) 提供盲坐标手势(tap/drag/swipe/long_press/pinch)、直触 handler
+# (pick/accept/click_ui/phone/pickup/talk_*)、god op(teleport/scene/photo/reset_budget)，
+# 只服务已删的 `run-script` 逃生口。现在驱动面只剩 MonkeyHarness 的定义词汇——任何 flow
+# （命令式或声明式）都调不到 legacy，「不泄漏非定义词汇的动作」是类结构层面的保证。
+# 需要盲坐标/god op 的老脚本一并退役；导航走 do('walk:…')/do('enter_portal:…') 真走。
 
 
 # ── Android 真机 ──

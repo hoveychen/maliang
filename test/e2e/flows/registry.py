@@ -10,7 +10,8 @@ MCP（P2）/ serve_web（P3）/ CLI（pilot_cli）三个入口都经这里解析
     desc         一句话描述
     kind         setup（前置夹具）| regression（被测流程）
     tags         检索标签
-    script       相对 test/e2e/ 的脚本路径，暴露 run(h,**args)
+    script       命令式 flow：相对 test/e2e/ 的 .py 路径，暴露 run(h,**args)（带逻辑用）
+    steps        声明式 flow：数据步骤数组 [{op:do/say/wait/inject,…}]（录制序列化而来，与 script 二选一）
     args_schema  {argName: "类型/说明"}；run_flow 按此校验+传入（值是描述串，非严格 JSON Schema）
     depends      前置 flow 名列表；runner 先按拓扑序跑完 depends 再跑本体
 """
@@ -22,6 +23,38 @@ E2E_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REGISTRY = Path(__file__).resolve().parent / "registry.json"
 
 VALID_KINDS = ("setup", "regression")
+
+# 声明式 flow 的合法步骤 op → 该 op 必需的字段。**只认定义词汇**（curated 动作 + 必要控制），
+# 盲坐标/手势/god op（tap/drag/scene/phone/teleport/pick…）**结构上进不来**——这就是「不泄漏非定义
+# 词汇的动作」由格式硬保证、不靠人自觉的地方（对齐四铁律「写进数据模型」）。executor 见 pilot_cli.run_steps。
+DECLARATIVE_OPS = {
+    "do":     ("action",),   # h.do(action, **args)——真输入执行一个 action_id
+    "say":    ("text",),     # h.say(text)
+    "wait":   ("conds",),    # h.wait_server(conds, timeout)
+    "inject": (),            # h.inject()——换 ScriptedAsr（说话前置控制，非玩家动作）
+}
+
+
+def _validate_steps(name, steps):
+    """声明式 flow 的 steps 校验（纯函数）：非空列表、每步 op ∈ DECLARATIVE_OPS、必需字段齐、类型对。
+    非法 op（含任何 legacy 盲坐标动作）在此 fail-fast——声明式 flow 结构上装不下非定义词汇。"""
+    _require(isinstance(steps, list) and steps, f"flow {name} 的 steps 须为非空数组")
+    for j, s in enumerate(steps):
+        _require(isinstance(s, dict), f"flow {name} steps[{j}] 不是对象")
+        op = s.get("op")
+        _require(op in DECLARATIVE_OPS,
+                 f"flow {name} steps[{j}] 的 op 非法: {op!r}（只认 {sorted(DECLARATIVE_OPS)}"
+                 f"——盲坐标/legacy 动作不可入声明式 flow）")
+        for req in DECLARATIVE_OPS[op]:
+            _require(req in s, f"flow {name} steps[{j}]({op}) 缺字段 {req}")
+        if op == "do":
+            _require(isinstance(s["action"], str) and s["action"],
+                     f"flow {name} steps[{j}] do.action 须为非空字符串")
+        elif op == "say":
+            _require(isinstance(s["text"], str), f"flow {name} steps[{j}] say.text 须为字符串")
+        elif op == "wait":
+            _require(isinstance(s["conds"], list) and s["conds"],
+                     f"flow {name} steps[{j}] wait.conds 须为非空数组")
 
 # 可用性条件（P6）：每条是 (谓词(state)->bool, 不满足时的人话原因)。对齐 harness 的 action 模型——
 # action 带 enabled + reason_disabled，flow 带 available + reasons。全部**从 state 快照算**，不靠 LLM 判断。
@@ -70,10 +103,19 @@ def load_registry(path=None):
         _require(name not in flows, f"flow 名重复: {name}")
         kind = f.get("kind", "regression")
         _require(kind in VALID_KINDS, f"flow {name} 的 kind 非法: {kind}（须 {VALID_KINDS}）")
+        # flow 二选一：script（命令式 .py，带逻辑，暴露 run(h)）或 steps（声明式数据，录制序列化而来）。
         script = f.get("script")
-        _require(isinstance(script, str) and script, f"flow {name} 缺 script")
-        script_path = (E2E_ROOT / script).resolve()
-        _require(script_path.exists(), f"flow {name} 的 script 不存在: {script_path}")
+        steps = f.get("steps")
+        _require((script is None) != (steps is None),
+                 f"flow {name} 须恰好有 script 或 steps 之一"
+                 f"（script=命令式 .py 带 run(h)；steps=声明式数据步骤）")
+        script_path = None
+        if script is not None:
+            _require(isinstance(script, str) and script, f"flow {name} 的 script 须为非空字符串")
+            script_path = str((E2E_ROOT / script).resolve())
+            _require(Path(script_path).exists(), f"flow {name} 的 script 不存在: {script_path}")
+        else:
+            _validate_steps(name, steps)
         args_schema = f.get("args_schema", {})
         _require(isinstance(args_schema, dict), f"flow {name} 的 args_schema 须为对象")
         depends = f.get("depends", [])
@@ -98,7 +140,8 @@ def load_registry(path=None):
             "kind": kind,
             "tags": tags,
             "script": script,
-            "script_path": str(script_path),
+            "script_path": script_path,
+            "steps": steps,
             "args_schema": args_schema,
             "depends": depends,
             "requires": requires,
