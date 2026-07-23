@@ -136,6 +136,25 @@ const OZ_CASTLE_INTERIOR_FURNITURE := [
 	{ "item": "toy_plant",    "tile": Vector2i(28, 29), "yaw": 270.0, "search": 1 },  # 前-右盆栽
 ]
 
+## 村民农舍 + 外婆家室内共用的一套 cozy 小客厅家具（house-interiors P3 量产，克制——「所有房子都可进」
+## 的默认补充，非老板明点）。5 栋房子室内内容一致（只是各自返回门通向不同的村里门口），故一套即可。
+## 房间 [19..30]²；床后-左、餐桌+两椅居中、书架后-右、盆栽点缀；留后排 (24,22) 落地点 + 到前门走道。
+const VILLAGER_HOME_FURNITURE := [
+	{ "item": "toy_bed_single", "tile": Vector2i(20, 20), "yaw": 180.0, "search": 1 },  # 后-左床
+	{ "item": "toy_bookcase",   "tile": Vector2i(28, 20), "yaw": 270.0, "search": 1 },  # 后-右书架
+	{ "item": "toy_table",      "tile": Vector2i(24, 25), "yaw": 0.0,   "search": 1 },  # 中央餐桌
+	{ "item": "toy_chair",      "tile": Vector2i(21, 25), "yaw": 90.0,  "search": 1 },  # 桌左椅
+	{ "item": "toy_chair",      "tile": Vector2i(27, 25), "yaw": 270.0, "search": 1 },  # 桌右椅
+	{ "item": "toy_plant",      "tile": Vector2i(28, 29), "yaw": 270.0, "search": 1 },  # 前-右盆栽
+]
+
+## 用 VILLAGER_HOME_FURNITURE 的室内场景 id（4 农舍 + 外婆家）。与 export_terrain.gd VILLAGER_PORTALS
+## 的 key 一一对应（那边管门、这边管家具）。
+const VILLAGER_INTERIOR_IDS := [
+	"villager_home_1_interior", "villager_home_2_interior",
+	"villager_home_3_interior", "villager_home_4_interior", "grandma_interior",
+]
+
 ## 内置物品的占地/压路语义（与 server items.ts BUILTIN_ITEMS 必须同步；
 ## P4 起客户端渲染层也从这里取 footprint——单一副本，别在别处再抄）。
 const ITEM_SPAN := {
@@ -197,6 +216,10 @@ static func compose(scene_id: String) -> Dictionary:
 			_place_anchor(item_ref, item_arg, palette, f)
 	elif scene_id == "oz_castle_interior":
 		for f in OZ_CASTLE_INTERIOR_FURNITURE:
+			_place_anchor(item_ref, item_arg, palette, f)
+	elif scene_id in VILLAGER_INTERIOR_IDS:
+		# 4 农舍 + 外婆家室内：共用一套 cozy 家具（内容一致）。
+		for f in VILLAGER_HOME_FURNITURE:
 			_place_anchor(item_ref, item_arg, palette, f)
 
 	# ── 分区散布：全图行主序逐 tile 判定（草丛不占位，其余 1×1 占地）──
