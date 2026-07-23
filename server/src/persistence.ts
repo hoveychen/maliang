@@ -406,6 +406,7 @@ export class WorldStore {
       this.#migrateScenesDropAuthoredFields(); // base+overlay P2：清存量世界冗余的 pois/portals/homes 拷贝（读走 template base）
       this.#migratePropsToItems(); // 依赖场景矩阵已就位（placed 物件要写进矩阵）
       this.#migrateScenesToOverlay(); // base+overlay P3：存量世界全量 blob → overlay（在 props 迁移之后，overlay 才含 placed 物件）
+      this.#migrateCreationOutlineOff(); // 存量孩子造物去黑边（在 props→items 迁移之后，新迁入的造物行也覆盖到）
     }
   }
 
@@ -476,6 +477,33 @@ export class WorldStore {
         // 顺手清掉历史残留：她拿到 move_to/deliver_message 也兑现不了（effectiveAbilities 恒剔除）。
         abilities: (Array.isArray(def.abilities) ? def.abilities : []).filter((a) => !LOCOMOTION_ABILITIES.includes(a)),
       });
+    }
+  }
+
+  /**
+   * 存量孩子造物去黑边：把 items 表里 renderRef=='sdf_inline' 的造物 spec.outline 归 0
+   * （老板 2026-07-23 拍板）。服务端新造物已由 sanitizeSdfPropSpec 硬置 0，但存量行的 data JSON
+   * 里仍存着旧的 0.04——客户端读 spec.outline>0 会挂 inverted-hull 黑边描边 pass。迁移后存量造物
+   * 重进世界即无边（与会动 builtin prop / 新造物同口径的折纸/光滑观感）。
+   *
+   * 幂等：只改 spec.outline>0 的行、置 0，第二次开库无行可迁（outline 已全 0）。直接 UPDATE data
+   * 而非走 upsertItem——存量行已合法，无需再过 world 存在/内置冲突校验。renderRef=='composed:' 的
+   * 积木造物 spec 是零件树、无 SdfProp 式 outline 字段，不受影响（按 renderRef 精确过滤）。
+   */
+  #migrateCreationOutlineOff(): void {
+    const rows = this.#db.prepare('SELECT id, data FROM items').all() as { id: string; data: string }[];
+    const upd = this.#db.prepare('UPDATE items SET data = ? WHERE id = ?');
+    for (const r of rows) {
+      try {
+        const def = JSON.parse(r.data) as ItemDef;
+        if (def.renderRef !== 'sdf_inline') continue;
+        const spec = def.spec as import('./sdf_prop.ts').SdfPropSpec | undefined;
+        if (!spec || typeof spec.outline !== 'number' || spec.outline <= 0) continue;
+        spec.outline = 0;
+        upd.run(JSON.stringify(def), r.id);
+      } catch {
+        /* 坏 data JSON：跳过，迁移绝不因单行崩掉开库 */
+      }
     }
   }
 
