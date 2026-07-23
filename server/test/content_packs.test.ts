@@ -12,7 +12,8 @@ import { packKeyFromRenderRef } from '../src/items.ts';
 /**
  * 内容包分发（content-pck-distribution P2）：服务端 .pck 入库 + manifest 端点。
  * 见 docs/content-pack-distribution-design.md。核心验收：village 场景 manifest 只需 base 包，
- * village_forest 需 base + toyroom（因摆了 furniture:table / furniture:bedSingle）——用【真实】
+ * snow_interior 需 base + toyroom（室内摆了 furniture:table / furniture:bedSingle；house-interiors P1
+ * 把白雪家具从 village_forest 户外移进该室内，故村森林现只需 base）——用【真实】
  * 打包 .mltr 矩阵 + 真实 pack.json 键跑通「场景摆放物品 → 反查所属内容包」的端到端映射。
  */
 
@@ -119,7 +120,33 @@ test('GET manifest：village 只需 base 包（其余为 sdf_res:，不属任何
   assert.ok(body.packs[0]!.hash.length > 0);
 });
 
-test('GET manifest：village_forest 需 base + toyroom（摆了 furniture:table / bedSingle）', async (t) => {
+test('GET manifest：snow_interior 需 base + toyroom（室内摆了 furniture:table / bedSingle）', async (t) => {
+  // house-interiors P1：白雪户外家具从 village_forest 移进 snow_interior 室内，故「需 toyroom 包」的
+  // 场景从 village_forest 变成 snow_interior（村森林现只剩 base 引用，见下一条）。
+  const store = new WorldStore();
+  store.createWorld('w1');
+  store.registerPack('base', { bytes: new Uint8Array([1]), mime: 'application/octet-stream' }, packKeys('base'));
+  store.registerPack('toyroom', { bytes: new Uint8Array([2, 2]), mime: 'application/octet-stream' }, packKeys('toyroom'));
+  const a = await app(store);
+  t.after(() => a.close());
+  process.env.MALIANG_ADMIN_TOKEN = 'sesame';
+  try {
+    await a.inject({
+      method: 'POST', url: '/admin/scenes', headers: { 'x-admin-token': 'sesame' },
+      payload: { worldId: 'w1', sceneId: 'snow_interior', name: '七矮人小屋', terrainBase64: mltrB64('snow_interior') },
+    });
+  } finally {
+    delete process.env.MALIANG_ADMIN_TOKEN;
+  }
+  const res = await a.inject({ method: 'GET', url: '/worlds/w1/scenes/snow_interior/manifest' });
+  assert.equal(res.statusCode, 200);
+  const body = res.json() as { packs: { name: string }[] };
+  // 室内地板纯平、无散布层 → 不引用任何 base 包物品；家具全是 furniture:* → 只需 toyroom
+  // （碗是 sdf_res 内置，不属任何内容包）。manifest 只下发被引用的包，故这里没有 base。
+  assert.deepEqual(body.packs.map((p) => p.name), ['toyroom'], '室内只引用 toyroom 家具，无 base 引用');
+});
+
+test('GET manifest：village_forest 户外家具移走后只需 base（house-interiors P1）', async (t) => {
   const store = new WorldStore();
   store.createWorld('w1');
   store.registerPack('base', { bytes: new Uint8Array([1]), mime: 'application/octet-stream' }, packKeys('base'));
@@ -138,7 +165,7 @@ test('GET manifest：village_forest 需 base + toyroom（摆了 furniture:table 
   const res = await a.inject({ method: 'GET', url: '/worlds/w1/scenes/village_forest/manifest' });
   assert.equal(res.statusCode, 200);
   const body = res.json() as { packs: { name: string }[] };
-  assert.deepEqual(body.packs.map((p) => p.name), ['base', 'toyroom'], '排序稳定 base<toyroom');
+  assert.deepEqual(body.packs.map((p) => p.name), ['base'], '户外床/桌已移进 snow_interior，村森林不再引用 toyroom');
 });
 
 test('GET manifest：未登记包的场景 → 空清单（过渡期优雅缺失，客户端不崩）', async (t) => {

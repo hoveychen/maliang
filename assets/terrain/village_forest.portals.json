@@ -10,5 +10,89 @@
       14,
       14
     ]
+  },
+  {
+    "radius": 3.0,
+    "tile": [
+      24,
+      26
+    ],
+    "toScene": "home_interior",
+    "toTile": [
+      24,
+      22
+    ]
+  },
+  {
+    "radius": 2.5,
+    "tile": [
+      30,
+      92
+    ],
+    "toScene": "snow_interior",
+    "toTile": [
+      24,
+      22
+    ]
+  },
+  {
+    "radius": 2.5,
+    "tile": [
+      13,
+      8
+    ],
+    "toScene": "villager_home_1_interior",
+    "toTile": [
+      24,
+      22
+    ]
+  },
+  {
+    "radius": 2.5,
+    "tile": [
+      27,
+      9
+    ],
+    "toScene": "villager_home_2_interior",
+    "toTile": [
+      24,
+      22
+    ]
+  },
+  {
+    "radius": 2.5,
+    "tile": [
+      9,
+      22
+    ],
+    "toScene": "villager_home_3_interior",
+    "toTile": [
+      24,
+      22
+    ]
+  },
+  {
+    "radius": 2.5,
+    "tile": [
+      30,
+      20
+    ],
+    "toScene": "villager_home_4_interior",
+    "toTile": [
+      24,
+      22
+    ]
+  },
+  {
+    "radius": 2.5,
+    "tile": [
+      64,
+      58
+    ],
+    "toScene": "grandma_interior",
+    "toTile": [
+      24,
+      22
+    ]
   }
 ]

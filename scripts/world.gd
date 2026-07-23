@@ -78,17 +78,22 @@ const OUTDOOR_SUN_ENERGY := 1.45
 ## 太阳压暗当作窗/灯的柔光。进出室内在 _apply_scene_env 按 _scene_id 切换/还原。屋子几何（地板/三面墙/
 ## 前开口）由 RoomStage 真几何渲染（scripts/room_stage.gd）、地形 chunk 隐藏（_apply_indoor_render）、
 ## 相机收束框整屋（_update_camera 室内分支）；暗顶靠 INDOOR_BG_COLOR 收（墙升到暗背景，相机从墙上方俯看）。
-const INDOOR_SCENES := ["home_interior"]
-## 室内房间舞台（home-interior 重做）：房间边长 N（tile 数，眼验在 8/10/12 取值）与其在 50 网格里的
-## 左上角 tile。网格必须 25 整除故 home_interior 仍是 50，房间只占其中 N×N 一小块，其余地形隐藏。
+## 室内场景判定改用命名约定（house-interiors 计划）：所有室内场景 id 以 `_interior` 结尾
+## （home_interior / snow_interior / oz_castle_interior / house_0_interior …），故不必维护一份
+## 显式清单——加一个新室内只需给它起个 `*_interior` 的名字。判定见 _scene_is_indoor()。
+## （旧版 const INDOOR_SCENES := ["home_interior"] 已退役；home_interior 也满足后缀约定。）
+## 室内房间舞台（home-interior 重做）：房间边长 N（tile 数）与其在 50 网格里的左上角 tile。
+## 网格必须 25 整除故室内一律 50，房间只占其中 N×N 一小块，其余地形隐藏。所有室内共用同一套
+## 房间几何（N=12 @ (19,19)，区间 [19..30]²）——七矮人 7 张 span-3 床+餐桌要摆得下、还留出
+## 过道/落地点/前门，10×10 太挤，12×12 从容（house-interiors P1 由内容逼定，非想象需求）。
 ## 相机（P3）把 focus 钉在房间中心、RoomStage 摆在渲染原点，家具/玩家按「相对房间中心」落到房间格。
-const ROOM_N := 10
-const ROOM_ORIGIN_TILE := Vector2i(19, 19)   ## 房间格区间 [19..28]×[19..28]（含端点）；中心世界坐标 (48,48)
+const ROOM_N := 12
+const ROOM_ORIGIN_TILE := Vector2i(19, 19)   ## 房间格区间 [19..30]×[19..30]（含端点）；中心世界坐标 (50,50)
 ## 室内收束相机（home-interior 重做 P3）：focus 钉在房间中心（不跟玩家滚动，RoomStage 摆在渲染原点，
 ## 玩家按相对房间中心的最短位移在屋里走），固定俯角+距离把整间 N×N 屋框进画面。俯角比室外 god(47°)
 ## 更陡（俯看进屋、看得见后墙/地板），距离据房间边长框满。数值眼验微调（P3 截图对齐动森/Pokopia）。
 const INDOOR_CAM_PITCH := 62.0    ## 室内俯角（度）——比室外陡，多露地板（家具摆在地板上）
-const INDOOR_CAM_DIST := 29.0     ## 室内轨道距离（米）——框住 10×10≈20m 见方的屋子
+const INDOOR_CAM_DIST := 35.0     ## 室内轨道距离（米）——框住 12×12≈24m 见方的屋子（随 ROOM_N 按比例提）
 const INDOOR_BG_COLOR := Color(0.12, 0.09, 0.10)      ## 墙外/天顶看到的暖暗色（读成室内不是天）
 const INDOOR_AMBIENT_COLOR := Color(1.0, 0.90, 0.78)  ## 暖色环境光
 const INDOOR_AMBIENT_ENERGY := 0.85
@@ -754,7 +759,7 @@ func _step_sky(delta: float) -> void:
 ## 室内 = 无天空(BG_COLOR 暖暗) + 无雾 + 暖色环境光 + 太阳压暗；室外 = 还原 BG_SKY + 冷环境光 +
 ## 暖阳，fog 依画质档（用户可能关了雾）。boot 与 _on_scene_entered 两处调用，覆盖首进与走 portal 换场景。
 func _apply_scene_env(scene_id: String) -> void:
-	var indoor := scene_id in INDOOR_SCENES
+	var indoor := _scene_is_indoor(scene_id)
 	if _env != null:
 		if indoor:
 			_env.background_mode = Environment.BG_COLOR
@@ -775,7 +780,7 @@ func _apply_scene_env(scene_id: String) -> void:
 ## 出室内显地形 + 拆 RoomStage。boot 与 _on_scene_entered 两处调用（随 _apply_scene_env 一起），
 ## 覆盖首进与走 portal 换场景。相机收束到整屋在 P3（这里只管几何显隐）。
 func _apply_indoor_render(scene_id: String) -> void:
-	var indoor := scene_id in INDOOR_SCENES
+	var indoor := _scene_is_indoor(scene_id)
 	if chunk_manager != null:
 		chunk_manager.set_terrain_hidden(indoor)
 		# 壁挂物：室内把房间周界告诉 chunk_manager，周界墙边贴纸抬墙高（home-wall-decor P1）。
@@ -794,7 +799,12 @@ func _apply_indoor_render(scene_id: String) -> void:
 
 ## 当前是否室内场景。
 func _is_indoor() -> bool:
-	return _scene_id in INDOOR_SCENES
+	return _scene_is_indoor(_scene_id)
+
+## 场景 id 是否室内：命名约定 `*_interior`（house-interiors 计划——加新室内只需起对名字，
+## 不必改这里）。所有室内共用 ROOM_N/ROOM_ORIGIN_TILE 房间几何。
+func _scene_is_indoor(sid: String) -> bool:
+	return sid.ends_with("_interior")
 
 ## 房间中心的逻辑坐标（世界单位）：区间 [origin .. origin+N-1] 的几何中心 = (origin + N/2)×TILE。
 func _room_center_logical() -> Vector2:
@@ -3444,10 +3454,19 @@ func _tap_pick(screen_pos: Vector2) -> void:
 func _try_explain_building(ground: Vector2) -> bool:
 	if not OccupancyMap.static_at(ground):
 		return false
+	var tile := WorldGrid.to_tile(ground)
+	# 可进的房子（门口有通往室内的 portal）：点它 = 走过去进屋——朝门口走，踏进门口半径由既有
+	# _step_portal 切场景（house-interiors 计划，与「所有房子都可进」一致）。不解释、不动点点。
+	var door := _entrance_portal_near(tile)
+	if not door.is_empty():
+		var d: Vector2 = WorldGrid.from_tile_center(door["tile"] as Vector2i)
+		_show_tap_marker(d)
+		_move_player_to(d)
+		return true
+	# 不可进建筑（井/风车/尚无室内的房子）→ 点点飞过去解释。点点忙（引路/对话中）则不接管。
 	var fairy := _find_fairy()
 	if fairy.is_empty() or not _fairy_guide.is_empty() or selected == fairy.get("node"):
 		return false
-	var tile := WorldGrid.to_tile(ground)
 	# 复用 _fairy_poi「飞过去→说台词→停留→回来」机制（见 _update_fairy 的 POI 分支 / _step_fairy_poi）。
 	_fairy_poi = {
 		"point": WorldGrid.from_tile_center(tile),
@@ -3468,6 +3487,23 @@ func _home_near_tile(tile: Vector2i) -> bool:
 		if WorldGrid.shortest_delta(c, WorldGrid.from_tile_center(htile as Vector2i)).length() <= HOME_MATCH_R * WorldGrid.TILE_SIZE:
 			return true
 	return false
+
+## 被点建筑附近是否有一座通往室内的传送门（enterable house 的门口）。有 → 返回该 portal
+## 供「点房子 = 走过去进屋」；没有 → {}（井/风车、尚无室内的房子走点点解释）。门 tile 常在房子
+## 锚点外侧一两格，故按世界距离容差匹配。只认 to_scene 以 `_interior` 结尾的门（跨村↔oz 的门不算）。
+const ENTER_PORTAL_MATCH_R := 4.0  ## tile 容差半径（被点建筑边缘到门口 tile）
+func _entrance_portal_near(tile: Vector2i) -> Dictionary:
+	var c := WorldGrid.from_tile_center(tile)
+	var best := {}
+	var best_d := INF
+	for p in _portals:
+		if not String(p.get("to_scene", "")).ends_with("_interior"):
+			continue
+		var pd := WorldGrid.shortest_delta(c, WorldGrid.from_tile_center(p["tile"] as Vector2i)).length()
+		if pd <= ENTER_PORTAL_MATCH_R * WorldGrid.TILE_SIZE and pd < best_d:
+			best_d = pd
+			best = p
+	return best
 
 ## 玩家移动指令：新点击替换旧指令（寻路 waypoint 队列 + Mover 规则由执行器统一处理）。
 func _move_player_to(target: Vector2, arrive := 0.0) -> void:
@@ -4556,7 +4592,10 @@ static func parse_server_portals(list: Variant) -> Array:
 			continue
 		var tile := Vector2i(int((t as Array)[0]), int((t as Array)[1]))
 		var to_tile := Vector2i(int((tt as Array)[0]), int((tt as Array)[1]))
-		if not WorldGrid.is_valid_tile(tile) or not WorldGrid.is_valid_tile(to_tile):
+		# tile 是本场景坐标 → 必须落在当前网格内；to_tile 是【目标场景】坐标（目标网格可能更大，
+		# 如室内 50 → 村庄 100 的 (30,89)），故只校验非负、不拿当前网格夹它（否则大目标场景的
+		# 落点会被误当越界丢弃——home_interior 靠落点恰 <50 侥幸没触发，snow_interior 的 y=89 会）。
+		if not WorldGrid.is_valid_tile(tile) or to_tile.x < 0 or to_tile.y < 0:
 			continue
 		var radius := float(d.get("radius", 3.0))
 		if radius <= 0.0:

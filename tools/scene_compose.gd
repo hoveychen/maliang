@@ -58,21 +58,10 @@ const LANDMARKS_VF := [
 	# 走近家门就进室内（home_interior 场景）。MVP 复用 house_0 外观，专属立面留后续 polish。
 	{ "item": "house_0", "tile": Vector2i(24, 24), "yaw": 0.0, "search": 1 },
 	{ "item": "house_2", "tile": Vector2i(66, 60), "yaw": 0.0, "search": 2 },  # 外婆家小屋（占位，P4 填实篱笆/门）
-	# ── 七矮人操场·卧室+餐桌布景（s1-snow-white P7，森林深处空地 poi_forest_deep 30,86 附近）──
-	# 布局：中央偏北一张餐桌（白雪 gate 30,82 前方）；七张单人床沿西/东/南三面围成小卧室，
-	# 空出中间给数数游戏的矮人站位（矮人降生 x25-35/y84-89，见 story_books.ts SNOW_WHITE cast）。
-	# 全为 3×3 blocking，锚点两两不重叠（已逐格核）；search:1 容许被散布挤时就近让一格。
-	# 七矮人合住小木屋（dwarf-cottage 计划）：南墙床（y90-92）外侧当背景，footprint (29-31,93-95)
-	# 与全部床/桌（y≤92）零重叠；门朝南(-y)迎孩子来路（参照外婆家 house_2 yaw0=朝+y）。室内系统另会话在做。
+	# 七矮人合住小木屋 dwarf_cottage（house-interiors：现在【可进】）：footprint (29-31,93-95)，
+	# 门朝北(-y)迎操场来路。原来烘在户外操场的餐桌 + 七张床已移进 snow_interior 室内（SNOW_INTERIOR_FURNITURE），
+	# 户外操场只留矮人站位（数数游戏 tap 的是矮人本身，非碗/床——见 story_snow_count）+ 进门 portal (30,92)。
 	{ "item": "dwarf_cottage",   "tile": Vector2i(30, 94), "yaw": 180.0, "search": 3 },
-	{ "item": "toy_table",       "tile": Vector2i(30, 84), "yaw": 0.0,   "search": 1 },  # 矮人餐桌（碗摆桌旁）
-	{ "item": "toy_bed_single",  "tile": Vector2i(23, 84), "yaw": 90.0,  "search": 1 },  # 西墙床 1
-	{ "item": "toy_bed_single",  "tile": Vector2i(23, 88), "yaw": 90.0,  "search": 1 },  # 西墙床 2
-	{ "item": "toy_bed_single",  "tile": Vector2i(37, 86), "yaw": 270.0, "search": 1 },  # 东墙床
-	{ "item": "toy_bed_single",  "tile": Vector2i(24, 91), "yaw": 180.0, "search": 1 },  # 南墙床 1
-	{ "item": "toy_bed_single",  "tile": Vector2i(28, 91), "yaw": 180.0, "search": 1 },  # 南墙床 2
-	{ "item": "toy_bed_single",  "tile": Vector2i(32, 91), "yaw": 180.0, "search": 1 },  # 南墙床 3
-	{ "item": "toy_bed_single",  "tile": Vector2i(36, 91), "yaw": 180.0, "search": 1 },  # 南墙床 4
 ]
 
 ## village_forest 的 SDF 可动物件：村北林口一块路牌，指向森林；东缘跑道的赛跑小旗
@@ -89,15 +78,7 @@ const SDF_PROPS_VF := [
 	# 沿途加油旗（东侧草带）
 	{ "item": "race_flag", "tile": Vector2i(90, 38), "yaw": 250.0, "search": 2 },
 	{ "item": "race_flag", "tile": Vector2i(90, 56), "yaw": 250.0, "search": 2 },
-	# ── 七矮人的碗（s1-snow-white P7）：一矮人一碗，摆在各自降生位前方一格（呼应数数游戏『一人一碗』）──
-	# 碗 1×1 不挡路（pathOk），不占矮人站位、不落 3×3 床/桌 footprint（已逐格核）。
-	{ "item": "dwarf_bowl", "tile": Vector2i(30, 87), "yaw": 0.0, "search": 1 },  # 博士 doc(30,86) 前
-	{ "item": "dwarf_bowl", "tile": Vector2i(27, 85), "yaw": 0.0, "search": 1 },  # 乐乐 happy(27,84) 前
-	{ "item": "dwarf_bowl", "tile": Vector2i(33, 85), "yaw": 0.0, "search": 1 },  # 困困 sleepy(33,84) 前
-	{ "item": "dwarf_bowl", "tile": Vector2i(25, 86), "yaw": 0.0, "search": 1 },  # 羞羞 bashful(25,87) 前
-	{ "item": "dwarf_bowl", "tile": Vector2i(35, 86), "yaw": 0.0, "search": 1 },  # 喷嚏 sneezy(35,87) 前
-	{ "item": "dwarf_bowl", "tile": Vector2i(28, 88), "yaw": 0.0, "search": 1 },  # 老顽固 grumpy(28,89) 前
-	{ "item": "dwarf_bowl", "tile": Vector2i(32, 88), "yaw": 0.0, "search": 1 },  # 迷糊 goofy(32,89) 前
+	# 七矮人的碗（原烘在户外操场，house-interiors 已移进 snow_interior 室内餐桌旁，见 SNOW_INTERIOR_FURNITURE）。
 ]
 
 ## 第一季册 5《绿野仙踪》独立场景（oz，75 格）的手工地标：翡翠城 = 黄砖路尽头的翡翠城堡
@@ -114,6 +95,66 @@ const SDF_PROPS_OZ := [
 	{ "item": "pinwheel", "tile": Vector2i(33, 30), "yaw": 200.0, "search": 2 },
 ]
 
+## 七矮人小屋室内（snow_interior，house-interiors P1）——原来烘在户外操场的白雪家具搬进来。
+## 房间 [19..30]×[19..30]（N=12 @ (19,19)，见 world.gd ROOM_*），前开口 = 南墙(max y=30)不建、朝相机。
+## 七张单人床沿后/左/右三面墙排开（各床 span-3 footprint 逐格核不重叠），中央一张餐桌，桌前一排七个碗
+## （呼应「一人一碗」）。刻意留：后排中线 (24,22) 落地点（进门站位）+ 中线到前门 (24,30) 一条经 x22 的走道。
+## 坐标全为房间内 tile；室内地板全平（_paint_home_interior），任意 tile 可摆。
+const SNOW_INTERIOR_FURNITURE := [
+	# 七张床（span-3，锚点=中心 tile）：后墙 3 + 左墙 2 + 右墙 2
+	{ "item": "toy_bed_single", "tile": Vector2i(20, 20), "yaw": 180.0, "search": 1 },  # 后-左
+	{ "item": "toy_bed_single", "tile": Vector2i(24, 20), "yaw": 180.0, "search": 1 },  # 后-中
+	{ "item": "toy_bed_single", "tile": Vector2i(29, 20), "yaw": 180.0, "search": 1 },  # 后-右
+	{ "item": "toy_bed_single", "tile": Vector2i(20, 24), "yaw": 90.0,  "search": 1 },  # 左-中
+	{ "item": "toy_bed_single", "tile": Vector2i(20, 28), "yaw": 90.0,  "search": 1 },  # 左-前
+	{ "item": "toy_bed_single", "tile": Vector2i(29, 24), "yaw": 270.0, "search": 1 },  # 右-中
+	{ "item": "toy_bed_single", "tile": Vector2i(29, 28), "yaw": 270.0, "search": 1 },  # 右-前
+	# 餐桌（span-3）居中
+	{ "item": "toy_table",      "tile": Vector2i(24, 25), "yaw": 0.0,   "search": 1 },
+	# 七个碗（span-1，pathOk 不挡路）：桌前一排
+	{ "item": "dwarf_bowl", "tile": Vector2i(22, 27), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(23, 27), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(24, 27), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(25, 27), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(26, 27), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(23, 28), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(25, 28), "yaw": 0.0, "search": 1 },
+]
+
+## 翡翠城堡室内（oz_castle_interior，house-interiors P2）——oz 无现成户外家具，摆一套新 authored 家具
+## （复用 toy_* 通用家具，非新 SDF 资产：奥兹魔法师的「王座厅」小客厅）。房间 [19..30]²（同室内几何）。
+## 后墙中央一张沙发当「王座」，中央茶几+两椅，角落书架/落地灯/盆栽点缀；克制，别塞满。
+## 留：后排中线 (24,22) 落地点 + 中线到前门 (24,30) 走道（茶几居中让开中线两侧）。
+const OZ_CASTLE_INTERIOR_FURNITURE := [
+	{ "item": "toy_sofa",     "tile": Vector2i(24, 20), "yaw": 180.0, "search": 1 },  # 王座（后墙中央）
+	{ "item": "toy_bookcase", "tile": Vector2i(20, 20), "yaw": 90.0,  "search": 1 },  # 后-左角书架
+	{ "item": "toy_lamp",     "tile": Vector2i(28, 20), "yaw": 270.0, "search": 1 },  # 后-右角落地灯
+	{ "item": "toy_table",    "tile": Vector2i(24, 25), "yaw": 0.0,   "search": 1 },  # 中央茶几
+	{ "item": "toy_chair",    "tile": Vector2i(21, 25), "yaw": 90.0,  "search": 1 },  # 茶几左椅
+	{ "item": "toy_chair",    "tile": Vector2i(27, 25), "yaw": 270.0, "search": 1 },  # 茶几右椅
+	{ "item": "toy_plant",    "tile": Vector2i(20, 29), "yaw": 90.0,  "search": 1 },  # 前-左盆栽
+	{ "item": "toy_plant",    "tile": Vector2i(28, 29), "yaw": 270.0, "search": 1 },  # 前-右盆栽
+]
+
+## 村民农舍 + 外婆家室内共用的一套 cozy 小客厅家具（house-interiors P3 量产，克制——「所有房子都可进」
+## 的默认补充，非老板明点）。5 栋房子室内内容一致（只是各自返回门通向不同的村里门口），故一套即可。
+## 房间 [19..30]²；床后-左、餐桌+两椅居中、书架后-右、盆栽点缀；留后排 (24,22) 落地点 + 到前门走道。
+const VILLAGER_HOME_FURNITURE := [
+	{ "item": "toy_bed_single", "tile": Vector2i(20, 20), "yaw": 180.0, "search": 1 },  # 后-左床
+	{ "item": "toy_bookcase",   "tile": Vector2i(28, 20), "yaw": 270.0, "search": 1 },  # 后-右书架
+	{ "item": "toy_table",      "tile": Vector2i(24, 25), "yaw": 0.0,   "search": 1 },  # 中央餐桌
+	{ "item": "toy_chair",      "tile": Vector2i(21, 25), "yaw": 90.0,  "search": 1 },  # 桌左椅
+	{ "item": "toy_chair",      "tile": Vector2i(27, 25), "yaw": 270.0, "search": 1 },  # 桌右椅
+	{ "item": "toy_plant",      "tile": Vector2i(28, 29), "yaw": 270.0, "search": 1 },  # 前-右盆栽
+]
+
+## 用 VILLAGER_HOME_FURNITURE 的室内场景 id（4 农舍 + 外婆家）。与 export_terrain.gd VILLAGER_PORTALS
+## 的 key 一一对应（那边管门、这边管家具）。
+const VILLAGER_INTERIOR_IDS := [
+	"villager_home_1_interior", "villager_home_2_interior",
+	"villager_home_3_interior", "villager_home_4_interior", "grandma_interior",
+]
+
 ## 内置物品的占地/压路语义（与 server items.ts BUILTIN_ITEMS 必须同步；
 ## P4 起客户端渲染层也从这里取 footprint——单一副本，别在别处再抄）。
 const ITEM_SPAN := {
@@ -122,8 +163,9 @@ const ITEM_SPAN := {
 	"walking_hut": 3, "hop_mailbox": 3,
 	"emerald_castle": 3,
 	"dwarf_cottage": 3,  # 七矮人合住小木屋（dwarf-cottage 计划）
-	# 七矮人操场布景（s1-snow-white P7）：床/桌 3×3 与 server items.ts toy_bed_single/toy_table 同步。
-	"toy_bed_single": 3, "toy_table": 3,
+	# 室内家具 3×3（house-interiors，与 server items.ts 的 span 同步）：床/桌/沙发。
+	# 其余家具（椅/书架/灯/盆栽/熊/茶几/电视）span 1，走默认，不必列。
+	"toy_bed_single": 3, "toy_table": 3, "toy_sofa": 3,
 }
 const ITEM_PATH_OK := { "well": true }
 
@@ -168,6 +210,17 @@ static func compose(scene_id: String) -> Dictionary:
 			_place_anchor(item_ref, item_arg, palette, lm)
 		for sp in SDF_PROPS_OZ:
 			_place_anchor(item_ref, item_arg, palette, sp)
+	elif scene_id == "snow_interior":
+		# 室内 authored 家具（床/桌/碗），全在房间 tile 内；无散布层（室内不长树/草）。
+		for f in SNOW_INTERIOR_FURNITURE:
+			_place_anchor(item_ref, item_arg, palette, f)
+	elif scene_id == "oz_castle_interior":
+		for f in OZ_CASTLE_INTERIOR_FURNITURE:
+			_place_anchor(item_ref, item_arg, palette, f)
+	elif scene_id in VILLAGER_INTERIOR_IDS:
+		# 4 农舍 + 外婆家室内：共用一套 cozy 家具（内容一致）。
+		for f in VILLAGER_HOME_FURNITURE:
+			_place_anchor(item_ref, item_arg, palette, f)
 
 	# ── 分区散布：全图行主序逐 tile 判定（草丛不占位，其余 1×1 占地）──
 	for y in range(n):

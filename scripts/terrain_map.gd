@@ -441,8 +441,8 @@ static func _ensure_built() -> void:
 		_paint_village_forest()
 	elif _paint_scene == "oz":
 		_paint_oz()
-	elif _paint_scene == "home_interior":
-		_paint_home_interior()
+	elif _paint_scene.ends_with("_interior"):
+		_paint_home_interior()  # 所有室内（home_interior/snow_interior/…）= 同一张纯平木地板
 	else:
 		_paint()
 

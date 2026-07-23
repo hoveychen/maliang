@@ -16,7 +16,7 @@ func _init() -> void:
 	ItemCatalog.ensure_builtin()
 
 	var origin := Vector2i(19, 19)  # = world.gd ROOM_ORIGIN_TILE
-	var n := 10                     # = world.gd ROOM_N → tiles [19..28]
+	var n := 12                     # = world.gd ROOM_N → tiles [19..30]（house-interiors 由 10 提到 12）
 
 	# ── is_room_wall_edge：三面墙 = 真 ─────────────────────────────────────
 	_check("后墙：y==min 的 N 边",
@@ -24,13 +24,13 @@ func _init() -> void:
 	_check("左墙：x==min 的 W 边",
 		ChunkManager.is_room_wall_edge(Vector2i(19, 23), TerrainMap.EDGE_W, origin, n), true)
 	_check("右墙：x==max 的 E 边",
-		ChunkManager.is_room_wall_edge(Vector2i(28, 23), TerrainMap.EDGE_E, origin, n), true)
+		ChunkManager.is_room_wall_edge(Vector2i(30, 23), TerrainMap.EDGE_E, origin, n), true)
 	_check("后墙沿整行都算（角点）",
 		ChunkManager.is_room_wall_edge(Vector2i(19, 19), TerrainMap.EDGE_N, origin, n), true)
 
 	# ── is_room_wall_edge：前墙（不建）/内部/错边/室外 = 假 ─────────────────
 	_check("前墙 y==max 的 S 边不算墙（前墙不建）",
-		ChunkManager.is_room_wall_edge(Vector2i(23, 28), TerrainMap.EDGE_S, origin, n), false)
+		ChunkManager.is_room_wall_edge(Vector2i(23, 30), TerrainMap.EDGE_S, origin, n), false)
 	_check("内部 tile 的边不算墙",
 		ChunkManager.is_room_wall_edge(Vector2i(23, 23), TerrainMap.EDGE_N, origin, n), false)
 	_check("后墙行但取错边（S）不算",
@@ -46,7 +46,7 @@ func _init() -> void:
 	var left := ChunkManager.edge_sticker_pose(TerrainMap.EDGE_W, Vector2i(19, 23), true, origin, n)
 	_approx("左墙贴纸抬到墙高中段", (left["off"] as Vector3).y, wall_center)
 	_check("左墙贴纸面朝屋内（+x，yaw=90）", left["yaw"], 90.0)
-	var right := ChunkManager.edge_sticker_pose(TerrainMap.EDGE_E, Vector2i(28, 23), true, origin, n)
+	var right := ChunkManager.edge_sticker_pose(TerrainMap.EDGE_E, Vector2i(30, 23), true, origin, n)
 	_check("右墙贴纸面朝屋内（-x，yaw=270）", right["yaw"], 270.0)
 	# 墙边贴纸沿法线内移（往屋内），不外移进墙：后墙 z 从 -1（边）挪到 -0.95
 	_check("后墙贴纸内移防穿墙（z 略大于边 -1）",
