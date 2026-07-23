@@ -51,6 +51,21 @@ func _init() -> void:
 	fails += _check_f("visualTiles 2×2 → 3.6（footprint 1×1 的两倍视觉）",
 		PackRegistry.fit_scale(_ab(1, 1, 1), 2, 2), 3.6)
 
+	# P4b：真实 emerald_castle baked mesh 的 SDF tile 计价（守 chunk_manager._spawn_static_sdf 缩放不回归）。
+	# 原生水平 ~2.1 tile，footprint/visualTiles 7×7 → fit_scale 等比放大填满 → 视觉 ~6.3 tile 宽（fill0.9）、
+	# 高按比例自然延伸 ~12.7 tile 的宏伟高塔（老板 2026-07-23 定「宏伟高塔·仅城堡+造物」）。装饰 1×1 SDF 不缩放。
+	var castle_mesh := load("res://assets/sdf_props/baked/emerald_castle.res") as Mesh
+	if castle_mesh != null:
+		var cab: AABB = castle_mesh.get_aabb()
+		var csc := PackRegistry.fit_scale(cab, 7, 7)
+		var wtiles := cab.size.x * csc / WorldGrid.TILE_SIZE
+		fails += _check_true("emerald_castle 填 7×7 → 视觉 ~6.3 tile 宽（宏伟高塔）", wtiles > 6.0 and wtiles < 6.6)
+		# 装饰对照：1×1 footprint 的 sdf_res gate 关闭（visual_tiles=1×1，_spawn_static_sdf 不缩放）。
+		var dvt := PackRegistry.visual_tiles({"footprintW": 1, "footprintH": 1})
+		fails += _check_true("装饰 1×1 SDF gate 关闭（不 tile 计价）", not (dvt.x > 1.0 or dvt.y > 1.0))
+	else:
+		printerr("  ✗ emerald_castle baked mesh 缺失（P4b 无法验证）"); fails += 1
+
 	print("test_tile_dimensional: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
 
@@ -67,4 +82,10 @@ func _check_v(name: String, got: Vector2, want: Vector2) -> int:
 	if got.is_equal_approx(want):
 		return 0
 	printerr("  ✗ %s: got %v, want %v" % [name, got, want])
+	return 1
+
+func _check_true(name: String, ok: bool) -> int:
+	if ok:
+		return 0
+	printerr("  ✗ %s: got false, want true" % name)
 	return 1

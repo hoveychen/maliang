@@ -547,11 +547,21 @@ func _spawn_static_sdf(parent: Node3D, def: Dictionary, rref: String, pos: Vecto
 				mi.set_meta("baked_sdf", true)  # 标记：预烘焙的 SDF 物件（test_matrix_skin 据此计入 SDF 节点而非建筑）
 				mi.position = pos
 				mi.rotation_degrees = Vector3(0.0, yaw, 0.0)
+				# tile 计价（全量纲化）：视觉水平占格 > 1 的 sdf_res（如 emerald_castle 7×7）等比缩放填满
+				# footprint×tile，与 node 路径 fit_scale 同哲学（高度按资产比例自然延伸）；装饰 1×1 SDF
+				# （village_sign/传送门/魔法熔炉等）vt=1×1 走 else 保持原生 scale=1 不动。baked mesh 原点贴地
+				# （SDF 布景恒 lowest=0），等比从原点缩放底边仍钉地面。
+				var ab := mesh.get_aabb()
+				var sc := 1.0
+				var vt := PackRegistry.visual_tiles(def)
+				if vt.x > 1.0 or vt.y > 1.0:
+					sc = PackRegistry.fit_scale(ab, vt.x, vt.y)
+					mi.scale = Vector3.ONE * sc
 				mi.visible = _props_shown
 				parent.add_child(mi)
-				# 脚下暗斑与运行时 bake_and_swap._swap 同款（半径公式一致），预烘焙路径也补上免得掉影。
-				var ab := mesh.get_aabb()
-				BlobShadow.attach(mi, clampf(maxf(ab.size.x, ab.size.z) * 0.4, 0.4, 2.2), true)
+				# 脚下暗斑与运行时 bake_and_swap._swap 同款（半径公式一致），预烘焙路径也补上免得掉影；
+				# 半径按缩放后水平尺寸算（大城堡影子跟着放大）。
+				BlobShadow.attach(mi, clampf(maxf(ab.size.x, ab.size.z) * sc * 0.4, 0.4, 2.2), true)
 				return
 	var prop: SdfProp
 	if rref == "sdf_inline":
@@ -567,6 +577,8 @@ func _spawn_static_sdf(parent: Node3D, def: Dictionary, rref: String, pos: Vecto
 	prop.rotation_degrees = Vector3(0.0, yaw, 0.0)
 	prop.visible = _props_shown  # 沿用画质开关态（chunk 重铺不打回默认）
 	parent.add_child(prop)
+	# 注：live SDF 路径暂不做 tile 计价——当前所有 footprint>1 的 sdf_res（emerald_castle）都走上面的
+	# baked 分支；会 wander 的 SDF（语音造物）全是 1×1，无需缩放。将来若加"会动的大 SDF 地标"再补此处。
 	prop.enable_wander(float(def.get("wander", 0.0)), seed_v)
 	# 真静止造物（loco.none∧无spin∧无head∧无ropes）：异步烘焙成零成本静态 mesh 换掉 live，
 	# 省掉每帧逐顶点吸附（成本主轴）。会动的造物 bake_and_swap 内部判非静止即原样保留 live。
