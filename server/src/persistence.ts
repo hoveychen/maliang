@@ -2683,6 +2683,40 @@ export class WorldStore {
     return out;
   }
 
+  /**
+   * 某世界【全量预下载门】要下的所有内容包（world-full-predownload-gate P1，单一真相源：客户端
+   * 进世界前拉一次此清单，不逐场景累加）。并集三部分，去重：
+   *   ① 该世界【所有场景】manifest 的并集（用到的主题包；roman 等没摆就不下）。
+   *   ② 核心包 bgm / voice_items / build_parts / stickers（拼装零件、贴纸、念名、背景乐——玩法必用
+   *      但不一定摆进场景 palette，故无条件强制并入）。
+   *   ③ 在场故事角色对应册的语音包 voice_story_<bookId>（listCharacters 扫 storyRole.bookId 去重；
+   *      没有故事角色的世界不下任何 story 语音）。
+   * 与 sceneManifest 同哲学：只返回【已登记】的包，未登记的名字（过渡期尚未打包分发的核心包/册）
+   * 静默跳过——客户端优雅缺失不崩。返回 name + .pck hash + 字节，按 name 稳定排序。
+   */
+  worldPacks(worldId: string): { name: string; hash: string; bytes: number }[] {
+    const names = new Set<string>();
+    // ① 所有场景 manifest 并集
+    for (const scene of this.listScenes(worldId)) {
+      for (const p of this.sceneManifest(worldId, scene.sceneId)) names.add(p.name);
+    }
+    // ② 核心包（无条件）
+    for (const core of ['bgm', 'voice_items', 'build_parts', 'stickers']) names.add(core);
+    // ③ 在场故事角色对应册的语音包
+    for (const c of this.listCharacters(worldId)) {
+      const bookId = c.storyRole?.bookId;
+      if (bookId) names.add('voice_story_' + bookId);
+    }
+    const out: { name: string; hash: string; bytes: number }[] = [];
+    for (const name of names) {
+      const p = this.#packs.get(name);
+      if (!p) continue; // 未登记：过渡期/无该核心包 → 静默跳过（与 sceneManifest 一致）
+      out.push({ name, hash: p.hash, bytes: p.bytes });
+    }
+    out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return out;
+  }
+
   /** 取某立绘的 idle 动画记录（无则 undefined，客户端据此保留静态或轮询）。 */
   getSpriteAnim(spriteHash: string): SpriteAnimRecord | undefined {
     return this.#spriteAnims.get(spriteHash);
