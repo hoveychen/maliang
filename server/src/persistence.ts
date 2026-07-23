@@ -1741,7 +1741,15 @@ export class WorldStore {
     const row = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? AND scene_id = ?`).get(worldId, sceneId) as
       | SceneRow
       | undefined;
-    if (!row) return undefined;
+    if (!row) {
+      // 存量世界缺该场景【自己的行】：若 template 有，以 template 行为准回退（新场景零迁移——
+      // 与 listScenes 的 union 对齐，terrain/manifest 等单场景端点也能取到 template 独有场景）。
+      if (worldId === TEMPLATE_WORLD_ID) return undefined;
+      const trow = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? AND scene_id = ?`).get(TEMPLATE_WORLD_ID, sceneId) as
+        | SceneRow
+        | undefined;
+      return trow ? this.#rowToScene(trow) : undefined;
+    }
     // template 世界本身即 base，用自己的行；其余世界作者字段 + 地形版本取自 template base。
     const base = worldId === TEMPLATE_WORLD_ID ? undefined : this.#baseSceneMeta(sceneId);
     return this.#rowToScene(row, base);
@@ -1750,15 +1758,17 @@ export class WorldStore {
   listScenes(worldId: string): Scene[] {
     const rows = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ? ORDER BY scene_id`).all(worldId) as unknown as SceneRow[];
     if (worldId === TEMPLATE_WORLD_ID) return rows.map((r) => this.#rowToScene(r));
-    // 批量取 template base 元数据建映射（按 scene_id），避免逐场景 N+1 查询；缺失场景 base=undefined 回退自身行。
-    const bases = new Map(
-      (
-        this.#db.prepare('SELECT scene_id, pois, portals, homes, terrain_version FROM scenes WHERE world_id = ?').all(TEMPLATE_WORLD_ID) as unknown as (SceneBaseMeta & {
-          scene_id: string;
-        })[]
-      ).map((b) => [b.scene_id, b] as const),
-    );
-    return rows.map((r) => this.#rowToScene(r, bases.get(r.scene_id)));
+    // template 全量行一次取回（SCENE_COLS 不含 blob，轻量）：一份数据两用——
+    //   ① 同名场景的 base 元数据覆盖（SceneRow ⊇ SceneBaseMeta，结构兼容）；
+    //   ② 世界【自己没有】的 template 独有场景并进列表。加进 template 的新场景（如各室内）由此零迁移
+    //      出现在存量世界，进门客户端拿得到 grid/地形/门；否则只叠加同名 meta，新场景本体缺失=进门破房间。
+    const templateRows = this.#db.prepare(`SELECT ${SCENE_COLS} FROM scenes WHERE world_id = ?`).all(TEMPLATE_WORLD_ID) as unknown as SceneRow[];
+    const bases = new Map(templateRows.map((t) => [t.scene_id, t] as const));
+    const ownIds = new Set(rows.map((r) => r.scene_id));
+    const own = rows.map((r) => this.#rowToScene(r, bases.get(r.scene_id)));
+    // template 独有场景：以 template 行本身为准呈现（无世界 overlay），供存量世界进入。
+    const extra = templateRows.filter((t) => !ownIds.has(t.scene_id)).map((t) => this.#rowToScene(t));
+    return [...own, ...extra].sort((a, b) => (a.sceneId < b.sceneId ? -1 : a.sceneId > b.sceneId ? 1 : 0));
   }
 
   /**
@@ -1853,7 +1863,13 @@ export class WorldStore {
       .get(worldId, sceneId) as
       | { terrain: Uint8Array | null; terrain_version: number; terrain_overlay: string | null; overlay_edit_count: number }
       | undefined;
-    if (!row) return undefined;
+    if (!row) {
+      // 存量世界缺该场景【自己的行】：回退 template base 地形（与 getScene/listScenes union 对齐——
+      // 新加进 template 的场景零迁移，其地形/物品引用在存量世界也解析得到）。
+      if (worldId === TEMPLATE_WORLD_ID) return undefined;
+      const base = this.#baseTerrain(sceneId);
+      return base ? { bytes: encodeTerrain(base.terrain), version: base.version } : undefined;
+    }
     if (worldId !== TEMPLATE_WORLD_ID && row.terrain_overlay !== null) {
       const base = this.#baseTerrain(sceneId);
       if (base) {
