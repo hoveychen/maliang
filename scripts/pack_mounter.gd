@@ -18,6 +18,11 @@ const PACKS_DIR := "user://packs"
 
 ## 已挂载的包 hash 集合（hash → true）。进程级、跨场景常驻。
 var _mounted: Dictionary = {}
+## 已挂载的包【名】集合（pack 名 → true）。按 hash 挂载时由调用方带上名字记账，
+## 供各降级守卫「按包名」判断该内容包资源现在能否安全 load——见 is_pack_mounted / pack_available。
+## 内容寻址分发按 hash 记账（去重），但守卫拿到的是包名（PackRegistry 的 pack 字段 / bgm / voice_items），
+## 故并存一张名字账（启动扫挂载 _mount_cached 只见 hash 无名，名字由 world 后续 _prewarm/_prefetch 补记）。
+var _mounted_names: Dictionary = {}
 
 func _ready() -> void:
 	_mount_cached()
@@ -34,10 +39,13 @@ func _mount_cached() -> void:
 
 ## 确保某 hash 对应的 .pck 已挂载（幂等）。文件在 user://packs/<hash>.pck。
 ## 成功 / 已挂载返回 true；文件不存在或挂载失败返回 false（调用方据此决定是否先 fetch_pack 下载）。
-func ensure_mounted(pack_hash: String) -> bool:
+## pack_name 非空时（调用方从 manifest/index 拿到包名）：挂载成功 / 已挂载即把名字记进 _mounted_names，
+## 供守卫按名查询（is_pack_mounted）。失败不记名（离线/缺文件时 pack_available 应仍回 false）。
+func ensure_mounted(pack_hash: String, pack_name := "") -> bool:
 	if pack_hash.is_empty():
 		return false
 	if _mounted.has(pack_hash):
+		note_mounted_name(pack_name) # 已挂载：补记名字（启动期 _mount_cached 只见 hash 无名，这里补上）
 		return true
 	var path := PACKS_DIR.path_join(pack_hash + ".pck")
 	if not FileAccess.file_exists(path):
@@ -46,8 +54,29 @@ func ensure_mounted(pack_hash: String) -> bool:
 		push_warning("[packs] 挂载失败: %s" % path)
 		return false
 	_mounted[pack_hash] = true
+	note_mounted_name(pack_name)
 	return true
 
-## 某包是否已挂载（预热器 diff 用：已挂的不重下不重挂）。
+## 记录某【包名】已挂载（供 is_pack_mounted 按名查）。空名 no-op。
+## 用于「hash 已挂但当时没带名字」的补记（world._prewarm/_prefetch 对 is_mounted(h) 命中的包调用）。
+func note_mounted_name(pack_name: String) -> void:
+	if not pack_name.is_empty():
+		_mounted_names[pack_name] = true
+
+## 某包是否已挂载（按 hash；预热器 diff 用：已挂的不重下不重挂）。
 func is_mounted(pack_hash: String) -> bool:
 	return _mounted.has(pack_hash)
+
+## 某内容包（按【名】）是否已挂载。各降级守卫据此判断：该包资源现在能否安全 load。
+## 未挂载时【绝不】能碰 ResourceLoader.load/exists/threaded_request——未挂就碰会污染 ResourceCache，
+## 之后即便挂上包 load 也永远返回 null（只有重启才自愈）。真根因见记忆
+## content-pck-android-load-stage-failure（2026-07-23 华为真机 CACHE_IGNORE 对照铁证）。
+func is_pack_mounted(pack_name: String) -> bool:
+	return not pack_name.is_empty() and _mounted_names.has(pack_name)
+
+## 某内容包资源现在能否安全 load。编辑器/headless（从项目目录跑）：res:// 即完整源、无内容包挂载一说，
+## 恒 true——故 headless 回测照常渲染打包 prop / 播 bgm，不受挂载守卫影响。导出包里：必须该包已挂载。
+func pack_available(pack_name: String) -> bool:
+	if OS.has_feature("editor"):
+		return true
+	return is_pack_mounted(pack_name)

@@ -42,6 +42,13 @@ const BGM_STEPS := [
 	"res://assets/audio/bgm/bgm_cheery_monday.wav",  # 明快俏皮（~78s）
 	"res://assets/audio/bgm/bgm_happy_boy.wav",      # 暖调收尾主题（~52s）
 ]
+# BGM 段 → 所属内容包（content-pck-distribution）。carefree 留主包（不在此表）；cheery/happy 打进
+# "bgm" 内容包（.pck）。start_bgm 只对「其内容包已挂载」的段发 threaded_request——未挂就请求会污染
+# ResourceCache（真根因见记忆 content-pck-android-load-stage-failure），挂载后 refresh_content_bgm 补上。
+const BGM_STEP_PACK := {
+	"res://assets/audio/bgm/bgm_cheery_monday.wav": "bgm",
+	"res://assets/audio/bgm/bgm_happy_boy.wav": "bgm",
+}
 
 const SFX_POOL := 4
 const SFX_GAP := 0.08          # 同名音效最小间隔，防连点刷屏
@@ -60,6 +67,8 @@ var _music_a: AudioStreamPlayer
 var _music_b: AudioStreamPlayer
 var _steps: Array = []         # 当前 BGM 段列表(AudioStream)
 var _bgm_want: Array = []       # 待线程加载的 BGM 段路径(全部就绪才起播)；空=无待加载
+var _bgm_intent: Array = []     # 完整 BGM 意图(含内容包未挂而暂被跳过的段)；供 refresh_content_bgm 补上
+var _bgm_active_count := 0      # 上次起播实际纳入的段数(=可加载段数)；refresh 据此判断有无新增(避免无谓重启打断)
 var _bgm_start := -1           # 起播段号：-1=随机(见文件头)；>=0=指定(测试用，确定性)
 var step_index := -1           # 当前段序号(-1=未播)
 var _active_is_a := true       # 正在出声的是 a 还是 b
@@ -154,11 +163,35 @@ func _pick_sfx_player() -> AudioStreamPlayer:
 # 线程加载：请求所有段在 worker 线程加载，全部就绪后由 _poll_bgm_load 起播——
 # 菜单 _ready 起播 68s BGM WAV 不再同步卡帧（此前 ~68s WAV 同步 load 是入场一跳）。
 func start_bgm(step_paths: Array = BGM_STEPS, start_step: int = -1) -> void:
-	stop_bgm()
-	_bgm_want = step_paths.duplicate()
+	_bgm_intent = step_paths.duplicate() # 完整意图：供内容包挂载后 refresh_content_bgm 补上被跳过的段
 	_bgm_start = start_step
+	_start_loadable_bgm()
+
+## 起播「当前可 load」的段（内容包未挂的段跳过——见 BGM_STEP_PACK 注释，未挂就 threaded_request 会污染缓存）。
+func _start_loadable_bgm() -> void:
+	stop_bgm()
+	_bgm_want = _loadable_bgm_steps()
+	_bgm_active_count = _bgm_want.size() # 记下本次纳入的段数（_poll 起播后会清空 _bgm_want，故单独记账）
 	for path in _bgm_want:
 		ResourceLoader.load_threaded_request(path)
+
+## 从意图里筛出现在能安全加载的段：主包段（不在 BGM_STEP_PACK）恒收；内容包段须其包已挂载。
+func _loadable_bgm_steps() -> Array:
+	var pm := get_node_or_null(^"/root/PackMounter")
+	var out: Array = []
+	for path in _bgm_intent:
+		var pack := String(BGM_STEP_PACK.get(path, ""))
+		if pack.is_empty() or (pm != null and pm.pack_available(pack)):
+			out.append(path)
+	return out
+
+## 内容包（bgm）挂载后调用（world._prefetch_content_packs 收尾）：若意图里有之前跳过、现已可载的段，
+## 重启 BGM 把它们纳入轮播。无新增则不动（不打断正在放的段）。
+func refresh_content_bgm() -> void:
+	if _bgm_intent.is_empty():
+		return
+	if _loadable_bgm_steps().size() > _bgm_active_count:
+		_start_loadable_bgm()
 
 ## BGM 段线程加载轮询：全部就绪才组装 _steps 并起播（生产单段=等这一条 WAV）。
 func _poll_bgm_load() -> void:
