@@ -441,6 +441,8 @@ static func _ensure_built() -> void:
 		_paint_village_forest()
 	elif _paint_scene == "oz":
 		_paint_oz()
+	elif _paint_scene == "home_interior":
+		_paint_home_interior()
 	else:
 		_paint()
 
@@ -577,6 +579,17 @@ static func _paint_oz() -> void:
 		_paint_ellipse_height(44.0, 42.0, 8.0 - 3.0 * float(lvl), 8.0 - 3.0 * float(lvl), lvl)
 	# 入口小广场(10~18,10~18,含 portal 落点 14,14)与玉米地(36,34)刻意留平——两处离两丘均 >半径，天然 h0。
 
+## 室内系统（home-interior）：玩家自己的家（50 格预设，房间只占其中一小块，见 world.gd ROOM_*）。
+## 家具由玩家用既有布置模式（world.gd _begin_placement → item_place）自己摆；本函数只出空房地板，
+## 不放锚点/散布（scene_compose 对 home_interior 无分支 = 空物品层）。「无天空+暖光」封闭观感见 world.gd。
+## 室内重做：地貌简化成纯平地板（全格木地板、高度 0）——房间的墙/地几何由客户端 RoomStage
+## 真几何渲染（scripts/room_stage.gd），不再靠抬地形块假装墙、掏实心躲露地（旧 hack 已否决）。
+## 地形字节此处只承载「放置/占用坐标系」：全平地板 = 处处可走、可摆，房间边界由 RoomStage 楼板网格
+## 与室内收束相机（world.gd）共同框定，玩家看不到也走不到房间外。
+static func _paint_home_interior() -> void:
+	var n := WorldGrid.GRID_TILES
+	_paint_rect_type(0, 0, n - 1, n - 1, T_WOOD_FLOOR)  # 纯平木地板（高度/水深已在 reset 清零）
+
 ## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂类型（含端点）。
 static func _paint_rect_type(x0: int, z0: int, x1: int, z1: int, t: int) -> void:
 	for z in range(z0, z1 + 1):
@@ -603,6 +616,12 @@ static func _paint_ellipse_height(cx: float, cz: float, rx: float, rz: float, h:
 		for x in range(int(cx - rx), int(cx + rx) + 1):
 			if _in_ellipse(x, z, cx, cz, rx, rz):
 				_heights[_idx(Vector2i(x, z))] = h
+
+## 矩形 tile 区域 [x0..x1]×[z0..z1] 涂高度（含端点）。
+static func _paint_rect_height(x0: int, z0: int, x1: int, z1: int, h: int) -> void:
+	for z in range(z0, z1 + 1):
+		for x in range(x0, x1 + 1):
+			_heights[_idx(Vector2i(x, z))] = h
 
 ## 沿折线涂类型：tile 中心到任一线段距离 ≤ radius（tile 单位）者涂 t。
 ## 顶点坐标可越出 [0,75)，_idx 会环面 wrap——用于画穿过接缝的小径。

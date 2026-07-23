@@ -82,6 +82,7 @@ UNIT_TESTS=(
   test_task_chip_portrait
   test_anim_clip_pick
   test_atlas_compress
+  test_tex_mem_cache
   test_player_profile
   test_my_world_api
   test_bootstrap_world_select
@@ -105,6 +106,10 @@ UNIT_TESTS=(
   test_player_talk
   test_terrain_export
   test_terrain_village_forest
+  test_home_interior
+  test_home_interior_portal
+  test_room_stage
+  test_room_render_branch
   test_spawn_anchor
   test_terrain_load
   test_terrain_v2
@@ -117,6 +122,7 @@ UNIT_TESTS=(
   test_terrain_layers
   test_terrain_deco
   test_sticker_edges
+  test_wall_decor
   test_sticker_asset_render
   test_character_anchors
   test_self_stickers
@@ -186,6 +192,7 @@ run_test test_visual_fairy_poi     --fixed-fps 10 --quit-after 130
 run_test test_visual_fairy_poi_hold --fixed-fps 10 --quit-after 90
 run_test_village test_visual_camera_height --fixed-fps 10 --quit-after 80
 run_test test_visual_sky           --fixed-fps 10 --quit-after 40
+run_test test_visual_home_env      --fixed-fps 10 --quit-after 40
 run_test test_visual_paper         --fixed-fps 10 --quit-after 110
 run_test test_visual_hold_move     --fixed-fps 10 --quit-after 90
 run_test_village test_visual_sdf           --fixed-fps 10 --quit-after 140

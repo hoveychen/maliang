@@ -85,18 +85,18 @@ test('POST /admin/sprite-anim/:hash/generate: 已 ready 默认跳过，force=tru
     assert.equal(calls, 0, '已 ready 不应重生成');
     assert.equal(store.getSpriteAnim(sprite)?.animAsset, 'existing');
 
-    // force=true → 重生成，animAsset 换新
+    // force=true → 重生成，animAsset 换新。一次生成打两档图集（底座 8fps + 高保真 24fps）→ 两次 seam 调用。
     const forced = await app.inject({ method: 'POST', url: `${url}?force=true`, headers: auth });
     assert.equal(forced.json().triggered, true);
     await waitSettled(store, sprite);
-    assert.equal(calls, 1);
+    assert.equal(calls, 2, '一次生成两档图集 → 打包器调两次');
     assert.notEqual(store.getSpriteAnim(sprite)?.animAsset, 'existing', 'force 应换新图集');
 
     // pending 时（force 与否）都不打断：手工置 pending 再打
     store.setSpriteAnimPending(sprite);
     const busy = await app.inject({ method: 'POST', url: `${url}?force=true`, headers: auth });
     assert.deepEqual(busy.json(), { spriteHash: sprite, status: 'pending', triggered: false });
-    assert.equal(calls, 1, 'pending 中不应再触发');
+    assert.equal(calls, 2, 'pending 中不应再触发');
   } finally {
     delete process.env.MALIANG_ADMIN_TOKEN;
     await app.close();

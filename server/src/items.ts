@@ -337,6 +337,30 @@ export function creationBuildDef(worldId: string, id: string, name: string, spec
   };
 }
 
+/**
+ * 室内系统 MVP（home-interior）：新玩家世界首建时发放的「预置家具起始包」——进自己家（home_interior
+ * 场景）就能从背包挑家具走布置模式摆。复用已有 toyroom 家具（Kenney Furniture Kit，上方 themed
+ * ['toyroom']），不新造 item（Rule 6）；MVP 只发一套起始家具，不建家具经济/不卖/不靠造物，
+ * 第二个用例再谈扩充。发放点见 persistence.getOrCreateMyWorld 世界首建分支（一玩家一世界、创建
+ * 仅一次 = 天然幂等，无需标记）。id 必须都在上方 BUILTIN_ITEMS（scene_entered 恒下发定义，客户端可解析渲染）。
+ */
+export const STARTER_HOME_FURNITURE: ReadonlyArray<{ id: string; count: number }> = [
+  // 卧室
+  { id: 'toy_bed_single', count: 1 },
+  // 客厅（沙发 + 茶几 + 电视一组）
+  { id: 'toy_sofa', count: 1 },
+  { id: 'toy_coffee_table', count: 1 },
+  { id: 'toy_tv', count: 1 },
+  // 餐桌 + 两把椅子
+  { id: 'toy_table', count: 1 },
+  { id: 'toy_chair', count: 2 },
+  // 收纳与装点
+  { id: 'toy_bookcase', count: 1 },
+  { id: 'toy_lamp', count: 1 },
+  { id: 'toy_plant', count: 1 },
+  { id: 'toy_bear', count: 1 },
+];
+
 const BUILTIN_BY_ID = new Map(BUILTIN_ITEMS.map((d) => [d.id, d]));
 
 export function getBuiltinItem(id: string): ItemDef | undefined {

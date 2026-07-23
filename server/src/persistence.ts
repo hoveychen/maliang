@@ -6,7 +6,7 @@ import type { ActiveTask, ChatTurn, Character, CharacterDef, CharacterInstanceRe
 import { ANON_PLAYER, DEFAULT_SCENE, FAIRY_NAME, FAIRY_PERSONALITY, INITIAL_FLOWERS, LOCOMOTION_ABILITIES, MAX_FLOWERS, STAMPS_PER_FLOWER } from './types.ts';
 import { coerceRelationship, deriveFamiliarity } from './social.ts';
 import { FAIRY_VOICE } from './voice_catalog.ts';
-import { creationItemDef, getBuiltinItem, packKeyFromRenderRef } from './items.ts';
+import { creationItemDef, getBuiltinItem, packKeyFromRenderRef, STARTER_HOME_FURNITURE } from './items.ts';
 import { applyTileEdits } from './terrain_edit.ts';
 import { decodeTerrain, encodeTerrain, type Terrain } from './terrain.ts';
 import { composeTerrain, diffTerrain, deserializeOverlay, serializeOverlay } from './terrain_overlay.ts';
@@ -232,6 +232,16 @@ export interface SpriteAnimRecord {
   status: 'pending' | 'ready' | 'failed';
   animAsset?: string;
   meta?: SpriteSheetMeta;
+  /**
+   * 高保真档图集资产 hash（24fps 变体）+ 其 meta。缺省 = 只有底座档（8fps，animAsset/meta）。
+   *
+   * 角色动画 LOD（CharAnimLod + world._step_char_lod）把最近 N 个角色升到高保真档：
+   * 底座档抽帧 8fps（够顺又省显存），高保真档抽满源片原生 24fps（帧数 ×3，显存 ×3）。
+   * 两张图集从**同一批已存原片**零成本 repack 出来（不同 fps 参数），不必再买视频——所以
+   * 加这对字段是「打包管线」变化（SPRITE_PACK_VERSION bump），回填走 repackFromStoredClips。
+   */
+  hiAnimAsset?: string;
+  hiMeta?: SpriteSheetMeta;
   /**
    * 图集「结构」版本。缺省 = 1 = 单段 idle（本字段上线前的老记录）；2 = 三段 idle/moving/talking。
    * 结构变化（新增段）要重新向 Seedance 买视频才能补，回填走完整重生成。见 backfillCharacterAnimations。
@@ -1268,6 +1278,9 @@ export class WorldStore {
       return worldId;
     }
     this.#buildWorldFromTemplate(worldId, makeFairy);
+    // 室内系统 MVP（home-interior）：新世界首建即给玩家背包发一套预置家具起始包（进自己家就能摆）。
+    // 一玩家一世界、此创建分支仅首访跑一次（已存在世界走上面 #worldExists 早返回）→ 天然幂等，不重发。
+    for (const f of STARTER_HOME_FURNITURE) this.bagAdd(worldId, playerId, f.id, f.count);
     return worldId;
   }
 
@@ -2649,6 +2662,8 @@ export class WorldStore {
       packVersion?: number;
       clipVideos?: Partial<Record<ClipName, string>>;
       clipOgv?: Partial<Record<ClipName, string>>;
+      hiAnimAsset?: string;
+      hiMeta?: SpriteSheetMeta;
     },
   ): void {
     this.#spriteAnims.set(spriteHash, { status: 'ready', animAsset, meta, ...extra });
