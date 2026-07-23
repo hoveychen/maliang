@@ -43,6 +43,7 @@ UNIT_TESTS=(
   test_terrain_atlas
   test_scifi_items
   test_pack_registry
+  test_world_predownload
   test_item_thumbnailer
   test_item_3d_viewer
   test_autotile

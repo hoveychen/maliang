@@ -238,22 +238,27 @@ static func pack_cache_path(pack_hash: String) -> String:
 static func manifest_path(world_id: String, scene_id: String) -> String:
 	return "/worlds/%s/scenes/%s/manifest" % [world_id.uri_encode(), scene_id.uri_encode()]
 
-## 全部已登记内容包索引：GET /packs → { name: { "hash":..., "bytes":... } }（content-pck-distribution P5）。
-## sceneManifest 只列场景摆放引用的包；voice/bgm 等非场景内容包不进 palette，客户端据此按包名解析 hash
-## 后台预取（world._prefetch_content_packs）。失败/离线返回空 Dictionary（调用方best-effort，不崩）。
-func fetch_packs_index() -> Dictionary:
-	var res := await get_json("/packs")
-	var out: Dictionary = {}
+## 某世界【全量预下载门】清单：GET /worlds/:wid/packs → [{name,hash,bytes}]（world-full-predownload-gate P1）。
+## 服务端已算好并集（所有场景 manifest ∪ 核心包 bgm/voice_items/build_parts/stickers ∪ 在场故事册
+## voice_story_*）并去重，客户端进世界前据此一次拉齐、逐包下载挂载再放行（world_predownload 编排器）。
+## 失败/离线/未知世界返回空 Array（调用方兜底：离线各守卫跳过缺包，联网后自愈）。
+func fetch_world_packs(world_id: String) -> Array:
+	if world_id.is_empty():
+		return []
+	var res := await get_json("/worlds/%s/packs" % world_id.uri_encode())
 	var packs: Variant = res.get("packs", [])
 	if typeof(packs) != TYPE_ARRAY:
-		return out
+		return []
+	var out: Array = []
 	for p in packs:
 		if typeof(p) != TYPE_DICTIONARY:
 			continue
-		var name := String((p as Dictionary).get("name", ""))
-		var h := String((p as Dictionary).get("hash", ""))
-		if not name.is_empty() and not h.is_empty():
-			out[name] = {"hash": h, "bytes": int((p as Dictionary).get("bytes", 0))}
+		var d := p as Dictionary
+		var name := String(d.get("name", ""))
+		var h := String(d.get("hash", ""))
+		if name.is_empty() or h.is_empty():
+			continue
+		out.append({"name": name, "hash": h, "bytes": int(d.get("bytes", 0))})
 	return out
 
 ## 确保某内容包 .pck 已落盘到 user://packs/：已缓存直接返回路径（内容寻址，永不失效）；
