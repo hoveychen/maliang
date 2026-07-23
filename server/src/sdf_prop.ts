@@ -239,7 +239,10 @@ export function validateSdfPropSpec(raw: unknown): SdfPropValidation {
       name,
       palette,
       blend: num(r.blend, 0.25, 0.05, 0.6),
-      outline: num(r.outline, 0.04, 0, 0.12),
+      // 造物永不带黑边描边：客户端 outline:0 → 无 inverted-hull 描边 pass，走折纸/光滑，
+      // 与会动 builtin prop 同口径（老板 2026-07-23 拍板去黑边）。存量造物由
+      // #migrateCreationOutlineOff 回填。此处硬置 0（不读 r.outline），杜绝 LLM 偶发带边。
+      outline: 0,
       parts,
       locomotion,
       ropes,
@@ -254,7 +257,7 @@ export function fallbackSdfPropSpec(name: string): SdfPropSpec {
     name,
     palette: ['#e8b04b', '#f4ead4'],
     blend: 0.26,
-    outline: 0.04,
+    outline: 0, // 兜底造物同样无黑边（见 sanitizeSdfPropSpec 注释）
     parts: [
       { shape: 'box', pos: [0, 0.55, 0], size: [0.7, 0.6, 0.6], color: 0 },
       { shape: 'sphere', pos: [0, 1.0, 0.15], r: 0.2, color: 1, blend: 0.15 },
