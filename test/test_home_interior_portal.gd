@@ -13,7 +13,8 @@ func _init() -> void:
 	# ── village_forest 侧（100 格）：家门口那座门进室内 ──────────────────────
 	WorldGrid.configure(100)
 	var vf := World.parse_server_portals(EX.build_portal_json("village_forest"))
-	fails += _check("VF 解析出 3 座门（oz + 玩家家室内 + 七矮人小屋室内）", vf.size(), 3)
+	# oz + 玩家家 + 七矮人小屋 + 4 农舍 + 外婆家 = 8（村民农舍/外婆家进门 P3 加，详见 test_villager_interiors）。
+	fails += _check("VF 解析出 8 座门", vf.size(), 8)
 	var home_door := _find(vf, "home_interior")
 	fails += _check("VF 有进玩家家室内的门", not home_door.is_empty(), true)
 	if not home_door.is_empty():
