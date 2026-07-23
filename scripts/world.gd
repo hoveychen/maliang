@@ -5954,19 +5954,25 @@ func _prewarm_packs(wid: String, sid: String, rebuild_after := false) -> void:
 	var packs: Variant = man.get("packs", [])
 	if typeof(packs) != TYPE_ARRAY:
 		return
+	# PackMounter 是无 class_name 的 autoload——按节点路径取（照 chunk_manager 取 SdfBakeSwap 的先例），
+	# 别用裸全局名：裸名只在运行时解析，脚本被 preload 编译（如 test_tts_prebuffer 取静态函数）时
+	# 全局名尚未注册 → 编译报 "Identifier not found: PackMounter"，连坐整个 world.gd 编不过。
+	var pm := get_node_or_null(^"/root/PackMounter")
+	if pm == null:
+		return
 	var mounted_any := false
 	var any_failed := false
 	for p in packs:
 		if typeof(p) != TYPE_DICTIONARY:
 			continue
 		var h := String((p as Dictionary).get("hash", ""))
-		if h.is_empty() or PackMounter.is_mounted(h):
+		if h.is_empty() or pm.is_mounted(h):
 			continue # 已挂载：不重下不重挂（故到达 ensure_mounted = 确属新挂载）
 		var path := await api.fetch_pack(h) # 已缓存秒回本地路径；未缓存则下载
 		if path.is_empty():
 			any_failed = true # 下载失败（离线等）：缺包由 chunk_manager 守卫跳过，不崩
 			continue
-		if PackMounter.ensure_mounted(h):
+		if pm.ensure_mounted(h):
 			mounted_any = true
 	if rebuild_after and mounted_any and chunk_manager != null:
 		chunk_manager.rebuild() # 后台预取：新包到位，重铺让主题 prop 补出来（load_resource 现能解析）
@@ -5991,17 +5997,20 @@ func _prefetch_content_packs() -> void:
 	if api == null or _content_packs_prefetched:
 		return
 	_content_packs_prefetched = true
+	var pm := get_node_or_null(^"/root/PackMounter") # 无 class_name autoload，按节点路径取（见 _prewarm_packs 注释）
+	if pm == null:
+		return
 	var index := await api.fetch_packs_index()
 	for name in index:
 		var n := String(name)
 		if n != "bgm" and not n.begins_with("voice_"):
 			continue # 主题模型包走场景 manifest（_prewarm_packs），这里只管非场景内容包
 		var h := String((index[name] as Dictionary).get("hash", ""))
-		if h.is_empty() or PackMounter.is_mounted(h):
+		if h.is_empty() or pm.is_mounted(h):
 			continue
 		var path := await api.fetch_pack(h) # 已缓存秒回；未缓存则下载（弱网失败返回空，跳过）
 		if not path.is_empty():
-			PackMounter.ensure_mounted(h)
+			pm.ensure_mounted(h)
 
 func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包
