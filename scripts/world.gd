@@ -153,6 +153,11 @@ var _hop_from := Vector2.ZERO      ## 小跳起点 logical
 var _hop_t := -1.0                 ## 玩家小跳已播秒数（<0=不在跳，见 _step_hop）
 var camera: Camera3D
 var _indoor_cam_dist := 0.0   ## 当前室内框满全屋的轨道距离（进室内按房间尺寸算出，缓存供每帧维持）
+## 调试 tile 网格线浮层：看清房间/家具占了几格、床是否真在墙内。debug 构建按 G 键切，或
+## 启动设 MALIANG_DEBUG_GRID=1（截图用）。绿线=tile 边界；红框=室内房间周界（[origin..origin+N-1]）。
+const DEBUG_GRID_RADIUS := 14   ## 焦点两侧各画几格（覆盖整间室内 + 一圈余量）
+var _tile_grid: MeshInstance3D
+var _show_tile_grid := false
 var photo_cam := {}   ## 摄影机位覆盖（debug photo 命令，menu 相册拍摄）：非空时 _update_camera 改用 {pitch,yaw,dist,lift}
 var chunk_manager: ChunkManager
 var room_stage: RoomStage    ## 室内房间舞台（home-interior 重做）：室内场景隐地形、由它渲屋子；室外为空
@@ -936,6 +941,69 @@ func _setup_camera() -> void:
 	add_child(camera)
 	_update_camera()
 
+## 调试 tile 网格线浮层（G 键 / MALIANG_DEBUG_GRID）：绿线画 tile 边界、红框标室内房间周界，
+## 一眼看清房间/家具各占几格、床是否真在墙内。渲染原点 = focus_logical，故 world 坐标 w 渲染在 w-focus。
+## 焦点邻域局部作图（不管环面 wrap，室内房间远离网格边界，无 wrap 问题）。关时早返回、零成本。
+func _update_tile_grid() -> void:
+	if not _show_tile_grid:
+		if _tile_grid != null:
+			_tile_grid.visible = false
+		return
+	if _tile_grid == null:
+		_tile_grid = MeshInstance3D.new()
+		_tile_grid.name = "DebugTileGrid"
+		_tile_grid.mesh = ImmediateMesh.new()
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.vertex_color_use_as_albedo = true
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.no_depth_test = true   # 线画在地板/家具之上，不被遮挡
+		_tile_grid.material_override = m
+		_tile_grid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_tile_grid)
+	_tile_grid.visible = true
+	var im := _tile_grid.mesh as ImmediateMesh
+	im.clear_surfaces()
+	var ts := WorldGrid.TILE_SIZE
+	var r := DEBUG_GRID_RADIUS
+	var y := _cur_focus_y + 0.06
+	var ft := WorldGrid.to_tile(focus_logical)
+	var col := Color(0.15, 0.85, 0.35, 0.55)
+	im.surface_begin(Mesh.PRIMITIVE_LINES)
+	# 竖线（const world x = k*ts）：k 从 ft.x-r 到 ft.x+r，覆盖 z 同范围
+	var z_lo := float(ft.y - r) * ts - focus_logical.y
+	var z_hi := float(ft.y + r) * ts - focus_logical.y
+	for k in range(ft.x - r, ft.x + r + 1):
+		var rx := float(k) * ts - focus_logical.x
+		im.surface_set_color(col)
+		im.surface_add_vertex(Vector3(rx, y, z_lo))
+		im.surface_set_color(col)
+		im.surface_add_vertex(Vector3(rx, y, z_hi))
+	var x_lo := float(ft.x - r) * ts - focus_logical.x
+	var x_hi := float(ft.x + r) * ts - focus_logical.x
+	for k in range(ft.y - r, ft.y + r + 1):
+		var rz := float(k) * ts - focus_logical.y
+		im.surface_set_color(col)
+		im.surface_add_vertex(Vector3(x_lo, y, rz))
+		im.surface_set_color(col)
+		im.surface_add_vertex(Vector3(x_hi, y, rz))
+	# 室内：红框标房间周界（tiles [origin..origin+N-1] → 边界在 origin*ts .. (origin+N)*ts）。
+	if _is_indoor():
+		var n := _room_n()
+		var cr := Color(1.0, 0.25, 0.25, 0.95)
+		var bx0 := float(ROOM_ORIGIN_TILE.x) * ts - focus_logical.x
+		var bx1 := float(ROOM_ORIGIN_TILE.x + n) * ts - focus_logical.x
+		var bz0 := float(ROOM_ORIGIN_TILE.y) * ts - focus_logical.y
+		var bz1 := float(ROOM_ORIGIN_TILE.y + n) * ts - focus_logical.y
+		var yy := y + 0.03
+		var corners := [Vector3(bx0, yy, bz0), Vector3(bx1, yy, bz0), Vector3(bx1, yy, bz1), Vector3(bx0, yy, bz1)]
+		for i in range(4):
+			im.surface_set_color(cr)
+			im.surface_add_vertex(corners[i])
+			im.surface_set_color(cr)
+			im.surface_add_vertex(corners[(i + 1) % 4])
+	im.surface_end()
+
 ## 相机固定在渲染原点上方、看向原点；平移靠改 focus_logical（世界相对滚动），
 ## 角度(pitch)/距离(dist) 由 god/lock 目标缓动得到。
 ## 焦点随 focus 所在 tile 的台阶高度整体抬升（_cur_focus_y），否则上高阶地形后角色出画。
@@ -1676,6 +1744,8 @@ func _setup_hud() -> void:
 	# 调试性能浮层：右上角常显 FPS + CPU/GPU 分项耗时（GPU 时间需显式打开测量；
 	# 部分安卓驱动不支持 GPU 时间戳会读到 0，届时用「总帧时 - CPU」反推）
 	if OS.is_debug_build():
+		# 调试 tile 网格：截图排查用 MALIANG_DEBUG_GRID=1 预开；运行时按 G 切换（见 _unhandled_input）。
+		_show_tile_grid = OS.get_environment("MALIANG_DEBUG_GRID") == "1"
 		perf_label = Label.new()
 		perf_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 		perf_label.offset_left = -430.0
@@ -2433,6 +2503,7 @@ func _process(delta: float) -> void:
 	_update_camera()
 	tp = _prof_lap(tp, "cam")
 	chunk_manager.update(focus_logical)
+	_update_tile_grid()     # 调试 tile 网格线（关时零成本早返回）
 	tp = _prof_lap(tp, "chunk")
 	_step_remote_actors(delta) # 多人复制：先按缓冲推进被复制 NPC/远端副本的 logical，再统一渲染
 	_reposition_npcs(delta)
@@ -3344,6 +3415,12 @@ func _update_hud() -> void:
 	]
 
 func _unhandled_input(event: InputEvent) -> void:
+	# 调试：G 键切 tile 网格线浮层（仅 debug 构建）。放最前，任何态都能切，方便随时排查。
+	if OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo \
+			and (event as InputEventKey).keycode == KEY_G:
+		_show_tile_grid = not _show_tile_grid
+		get_viewport().set_input_as_handled()
+		return
 	# benchmark 采样期：吞掉一切玩家输入（点击移动/手势/缩放），玩家不动→相机不动→可复现帧。
 	# 注：将来若把「家长长按跳过 intro」接到输入，须让它绕过这道门（否则采样期跳不了）。
 	if _bench_freeze:
