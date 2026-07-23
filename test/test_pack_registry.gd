@@ -51,7 +51,9 @@ func _init() -> void:
 		var res: Variant = PackRegistry.load_resource(key)
 		fails += _check("%s 资源可 load" % rref, 1 if res is Resource else 0, 1)
 		if cat == "node":
-			fails += _check("%s scale>0" % rref, 1 if PackRegistry.scale(key) > 0.0 else 0, 1)
+			# 全量纲化：node 视觉走 fit_scale_for（visualTiles×原始AABB 派生，取代 pack.json 裸 scale）；
+			# 须产出正的有限缩放（真实资产 → raw_aabb 有效 → fit>0；退化时回落 1.0 仍 >0）。
+			fails += _check("%s fit_scale_for>0" % rref, 1 if PackRegistry.fit_scale_for(key, d) > 0.0 else 0, 1)
 			if res is PackedScene:
 				var inst: Node = (res as PackedScene).instantiate()
 				fails += _check("%s 可实例化为 Node3D" % rref, 1 if inst is Node3D else 0, 1)

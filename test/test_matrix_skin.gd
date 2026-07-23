@@ -24,8 +24,9 @@ func _init() -> void:
 	# ── 派生占用 ───────────────────────────────────────────────────────────
 	var well := Vector2i(37, 37)
 	fails += _check("矩阵里水井在广场", TerrainMap.tile_item_id(well), "well")
+	# 全量纲化：水井 小设施 2×2（NW 锚点，footprintOrigin 偶数边不居中）→ 占 (37,37)(38,37)(37,38)(38,38)。
 	fails += _check("水井锚点被占", OccupancyMap.is_free_rect(OccupancyMap.tile_to_cell(well), 2, 2), false)
-	fails += _check("水井 footprint 角被占", OccupancyMap.is_free_rect(OccupancyMap.tile_to_cell(well - Vector2i(1, 1)), 2, 2), false)
+	fails += _check("水井 footprint SE 角被占(2×2 向 S/E 展开)", OccupancyMap.is_free_rect(OccupancyMap.tile_to_cell(well + Vector2i(1, 1)), 2, 2), false)
 	fails += _check("footprint 外不受井影响+广场留空", OccupancyMap.is_free_rect(OccupancyMap.tile_to_cell(well + Vector2i(2, 2)), 2, 2), true)
 
 	# 统计矩阵物品分类数（合批散布 / 建筑节点 / SDF 物件），顺便验证草丛不占位、树占位

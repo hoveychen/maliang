@@ -35,8 +35,8 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   builtin('house_1', '红顶民居', 'kaykit:house_1', 3, true),
   builtin('house_2', '黄顶民居', 'kaykit:house_2', 3, true),
   builtin('house_3', '绿顶民居', 'kaykit:house_3', 3, true),
-  { ...builtin('well', '水井', 'kaykit:well', 3, true), pathOk: true }, // 地标特批压路（坐镇广场）
-  builtin('windmill', '风车', 'kaykit:windmill', 3, true),
+  { ...builtin('well', '水井', 'kaykit:well', 2, true), pathOk: true }, // 小设施 2×2；地标特批压路（坐镇广场）
+  builtin('windmill', '风车', 'kaykit:windmill', 2, true),                // 小设施 2×2
   // SDF 可动物件（打包内 spec，wander 为围绕锚点的游走半径）
   { ...builtin('walking_hut', '走路小屋', 'sdf_res:walking_hut', 3, true), wander: 1.6 },
   { ...builtin('hop_mailbox', '蹦跳信箱', 'sdf_res:hop_mailbox', 3, true), wander: 1.2 },
@@ -50,7 +50,7 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   { ...builtin('race_flag', '赛跑小旗', 'sdf_res:race_flag', 1, false), pathOk: true },
   // 绿野仙踪（s1-oz）专属布景 prop
   builtin('corn_stalk', '玉米秆', 'sdf_res:corn_stalk', 1, true),
-  builtin('emerald_castle', '翡翠城堡', 'sdf_res:emerald_castle', 3, true), // 黄砖路尽头的地标（span 3 同 house）
+  builtin('emerald_castle', '翡翠城堡', 'sdf_res:emerald_castle', 7, true), // 城堡类 7×7 地标（SDF，视觉对齐见 P4）
   // 七矮人的木碗（s1-snow-white P7 布景）：数数游戏『一人一碗』的静态道具，摆在餐桌旁；
   // 纯装饰不挡路（blocking:false pathOk:true），别糊住操场也别挡引路。
   { ...builtin('dwarf_bowl', '小矮人的碗', 'sdf_res:dwarf_bowl', 1, false), pathOk: true },
@@ -99,11 +99,11 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('city_shop_e', '临街商铺·戊', 'city:building-e', 3, true, ['city']),
   themed('city_shop_f', '临街商铺·己', 'city:building-f', 3, true, ['city']),
   themed('city_shop_g', '临街商铺·庚', 'city:building-g', 3, true, ['city']),
-  themed('city_tower_a', '高楼·甲', 'city:building-skyscraper-a', 3, true, ['city']),
-  themed('city_tower_b', '高楼·乙', 'city:building-skyscraper-b', 3, true, ['city']),
-  themed('city_tower_c', '高楼·丙', 'city:building-skyscraper-c', 3, true, ['city']),
-  themed('city_tower_d', '高楼·丁', 'city:building-skyscraper-d', 3, true, ['city']),
-  themed('city_tower_e', '高楼·戊', 'city:building-skyscraper-e', 3, true, ['city']),
+  themed('city_tower_a', '高楼·甲', 'city:building-skyscraper-a', 5, true, ['city']),  // 高楼=大公建 5×5
+  themed('city_tower_b', '高楼·乙', 'city:building-skyscraper-b', 5, true, ['city']),
+  themed('city_tower_c', '高楼·丙', 'city:building-skyscraper-c', 5, true, ['city']),
+  themed('city_tower_d', '高楼·丁', 'city:building-skyscraper-d', 5, true, ['city']),
+  themed('city_tower_e', '高楼·戊', 'city:building-skyscraper-e', 5, true, ['city']),
 
   // ── 厨房主题（world-themes P4；全 CC0：同 Kenney Furniture Kit 的厨电子集）──
   // renderRef 'kitchen:<Kenney 原名>' → 客户端 assets/packs/kitchen/pack.json（node 类）
@@ -125,18 +125,18 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('mv_home_a', '民居·甲', 'medieval:building_home_A_blue', 3, true, ['medieval_town']),
   themed('mv_home_b', '民居·乙', 'medieval:building_home_B_blue', 3, true, ['medieval_town']),
   themed('mv_blacksmith', '铁匠铺', 'medieval:building_blacksmith_blue', 3, true, ['medieval_town']),
-  themed('mv_market', '集市', 'medieval:building_market_blue', 3, true, ['medieval_town']),
-  themed('mv_tavern', '酒馆', 'medieval:building_tavern_blue', 3, true, ['medieval_town']),
-  themed('mv_church', '教堂', 'medieval:building_church_blue', 3, true, ['medieval_town']),
-  themed('mv_windmill', '风车', 'medieval:building_windmill_blue', 3, true, ['medieval_town']),
-  themed('mv_watermill', '水车', 'medieval:building_watermill_blue', 3, true, ['medieval_town']),
+  themed('mv_market', '集市', 'medieval:building_market_blue', 5, true, ['medieval_town']),   // 大公建 5×5
+  themed('mv_tavern', '酒馆', 'medieval:building_tavern_blue', 5, true, ['medieval_town']),   // 大公建 5×5
+  themed('mv_church', '教堂', 'medieval:building_church_blue', 5, true, ['medieval_town']),   // 大公建 5×5
+  themed('mv_windmill', '风车', 'medieval:building_windmill_blue', 2, true, ['medieval_town']), // 小设施 2×2
+  themed('mv_watermill', '水车', 'medieval:building_watermill_blue', 3, true, ['medieval_town']), // 普通建筑 3×3
   themed('mv_lumbermill', '伐木场', 'medieval:building_lumbermill_blue', 3, true, ['medieval_town']),
   themed('mv_mine', '矿场', 'medieval:building_mine_blue', 3, true, ['medieval_town']),
-  themed('mv_well', '水井', 'medieval:building_well_blue', 3, true, ['medieval_town']),
+  themed('mv_well', '水井', 'medieval:building_well_blue', 2, true, ['medieval_town']),          // 小设施 2×2
 
   // ── 中世纪王国主题（world-themes P4；全 CC0：KayKit Medieval Hexagon 军事 + Medieval Builder 城防）──
-  themed('mk_castle', '城堡', 'medieval:building_castle_blue', 5, true, ['medieval_kingdom']),
-  themed('mk_barracks', '兵营', 'medieval:building_barracks_blue', 3, true, ['medieval_kingdom']),
+  themed('mk_castle', '城堡', 'medieval:building_castle_blue', 7, true, ['medieval_kingdom']),   // 城堡类 7×7
+  themed('mk_barracks', '兵营', 'medieval:building_barracks_blue', 5, true, ['medieval_kingdom']), // 大公建 5×5
   themed('mk_archery', '箭馆', 'medieval:building_archeryrange_blue', 3, true, ['medieval_kingdom']),
   themed('mk_tower_a', '塔楼·甲', 'medieval:building_tower_A_blue', 3, true, ['medieval_kingdom']),
   themed('mk_tower_b', '塔楼·乙', 'medieval:building_tower_B_blue', 3, true, ['medieval_kingdom']),
@@ -146,14 +146,14 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('mk_gate_closed', '闭合城门', 'medieval:wall_gate_closed', 3, true, ['medieval_kingdom']),
   themed('mk_wall', '城墙', 'medieval:wall_straight', 3, true, ['medieval_kingdom']),
   themed('mk_wall_corner', '城墙拐角', 'medieval:wall_corner', 3, true, ['medieval_kingdom']),
-  themed('mk_watchtower', '瞭望塔', 'medieval:watchtower', 3, true, ['medieval_kingdom']),
+  themed('mk_watchtower', '瞭望塔', 'medieval:watchtower', 2, true, ['medieval_kingdom']),   // 小设施 2×2
 
   // ── 海底主题（world-themes P5 半覆盖；全 CC0：Quaternius Animated Fish）──
   // renderRef 'underwater:<key>' → 客户端 assets/packs/underwater/pack.json（node 类）。
   // 地面走 P1 tile 地基 T_SAND(沙地)+T_WATER(水体)。小鱼 1×1，大型生物 3×3。
   themed('sea_fish_a', '小鱼·甲', 'underwater:fish_a', 1, true, ['underwater']),
   themed('sea_fish_b', '小鱼·乙', 'underwater:fish_b', 1, true, ['underwater']),
-  themed('sea_fish_c', '热带鱼', 'underwater:fish_c', 3, true, ['underwater']),
+  themed('sea_fish_c', '热带鱼', 'underwater:fish_c', 1, true, ['underwater']),  // 生物小（鱼）1×1
   themed('sea_dolphin', '海豚', 'underwater:dolphin', 3, true, ['underwater']),
   themed('sea_whale', '鲸鱼', 'underwater:whale', 3, true, ['underwater']),
   themed('sea_manta', '蝠鲼', 'underwater:manta', 3, true, ['underwater']),
@@ -164,10 +164,11 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   // 地面走 P1 tile 地基 T_SNOW(雪地)。雪堆非阻挡点缀（pathOk 无关，blocking=false）。
   themed('snow_snowman', '雪人', 'winter:snowman', 3, true, ['winter']),
   themed('snow_snowman_hat', '戴帽雪人', 'winter:snowman_hat', 3, true, ['winter']),
-  themed('snow_tree_a', '雪松·甲', 'winter:tree_snow_a', 3, true, ['winter']),
-  themed('snow_tree_b', '雪松·乙', 'winter:tree_snow_b', 3, true, ['winter']),
-  themed('snow_tree_c', '雪松·丙', 'winter:tree_snow_c', 3, true, ['winter']),
-  themed('snow_tree_lit', '装饰雪树', 'winter:tree_decorated_snow', 3, true, ['winter']),
+  // 雪松是树：地基 1×1（小地基密植出茂密雪林、可穿行），visualTiles 2×2 让树冠视觉超地基交叠邻树。
+  { ...themed('snow_tree_a', '雪松·甲', 'winter:tree_snow_a', 1, true, ['winter']), visualTilesW: 2, visualTilesH: 2 },
+  { ...themed('snow_tree_b', '雪松·乙', 'winter:tree_snow_b', 1, true, ['winter']), visualTilesW: 2, visualTilesH: 2 },
+  { ...themed('snow_tree_c', '雪松·丙', 'winter:tree_snow_c', 1, true, ['winter']), visualTilesW: 2, visualTilesH: 2 },
+  { ...themed('snow_tree_lit', '装饰雪树', 'winter:tree_decorated_snow', 1, true, ['winter']), visualTilesW: 2, visualTilesH: 2 },
   themed('snow_reindeer', '驯鹿', 'winter:reindeer', 3, true, ['winter']),
   themed('snow_sled', '雪橇', 'winter:sled', 3, true, ['winter']),
   themed('snow_pile', '雪堆', 'winter:snow_pile', 1, false, ['winter']),
@@ -198,11 +199,11 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   themed('roman_arch', '拱门', 'roman:roman_arch', 3, true, ['roman']),
   themed('roman_wall', '石墙', 'roman:roman_wall', 3, true, ['roman']),
   themed('roman_wall_corner', '石墙拐角', 'roman:roman_wall_corner', 3, true, ['roman']),
-  themed('roman_watchtower', '哨塔', 'roman:roman_watchtower', 3, true, ['roman']),
+  themed('roman_watchtower', '哨塔', 'roman:roman_watchtower', 2, true, ['roman']),   // 小设施（瞭望/哨塔）2×2
   themed('roman_tower', '石塔', 'roman:roman_tower', 3, true, ['roman']),
   themed('roman_tower_b', '瞭望石塔', 'roman:roman_tower_b', 3, true, ['roman']),
   themed('roman_column_base', '石柱基', 'roman:roman_column_base', 3, true, ['roman']),
-  themed('roman_fort', '罗马要塞', 'roman:roman_fort', 5, true, ['roman']),
+  themed('roman_fort', '罗马要塞', 'roman:roman_fort', 7, true, ['roman']),   // 城堡类 7×7
 
   // ── 中国古代主题（world-themes P6 硬缺口；CC-BY+CC0 东方古建散件拼凑）──
   // 老板拍板：无 CC0 中式包（CS Studio 禁再分发），用 poly.pizza CC-BY/CC0 散件

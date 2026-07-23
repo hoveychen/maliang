@@ -258,10 +258,10 @@ func _make_node(def: Dictionary, rref: String, key: String, cat: String) -> Node
 		if resrc == null:
 			return null
 		if resrc is PackedScene:
-			# node 建筑（及各主题散件）按 pack 声明的 scale 实例化——原始模型尺度差异极大
-			# （如宝塔 8605 单位、scale 0.0007），不缩放会撑爆 AABB 冲出远裁面渲成空白。
+			# node 建筑（及各主题散件）走 fit_scale_for 归一——原始模型尺度差异极大
+			# （如宝塔 8605 单位），fit_scale 按 visualTiles×tile 把它压回地基尺度，不撑爆远裁面。
 			var inst := (resrc as PackedScene).instantiate() as Node3D
-			var nsc := PackRegistry.scale(key)
+			var nsc := PackRegistry.fit_scale_for(key, def)  # 全量纲化：视觉由 visualTiles×原始AABB 派生（fit_scale 归一极端单位资产，取代 pack.json 裸 scale）
 			inst.scale = Vector3(nsc, nsc, nsc)
 			return inst
 		if resrc is Mesh:
@@ -270,7 +270,7 @@ func _make_node(def: Dictionary, rref: String, key: String, cat: String) -> Node
 			var mi := MeshInstance3D.new()
 			mi.mesh = resrc
 			mi.material_override = SdfStaticBaker.material()
-			var sc := PackRegistry.scale(key)
+			var sc := PackRegistry.fit_scale_for(key, def)  # baked mesh 非 PackedScene → 回落 1.0
 			mi.scale = Vector3(sc, sc, sc)
 			return mi
 		return null

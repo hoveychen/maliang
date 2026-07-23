@@ -3,63 +3,51 @@
   "entries": {
     "bear": {
       "category": "node",
-      "path": "res://assets/furniture/bear.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/bear.glb"
     },
     "bedSingle": {
       "category": "node",
-      "path": "res://assets/furniture/bedSingle.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/bedSingle.glb"
     },
     "bedBunk": {
       "category": "node",
-      "path": "res://assets/furniture/bedBunk.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/bedBunk.glb"
     },
     "bookcaseOpen": {
       "category": "node",
-      "path": "res://assets/furniture/bookcaseOpen.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/bookcaseOpen.glb"
     },
     "loungeSofa": {
       "category": "node",
-      "path": "res://assets/furniture/loungeSofa.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/loungeSofa.glb"
     },
     "chairRounded": {
       "category": "node",
-      "path": "res://assets/furniture/chairRounded.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/chairRounded.glb"
     },
     "table": {
       "category": "node",
-      "path": "res://assets/furniture/table.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/table.glb"
     },
     "tableCoffee": {
       "category": "node",
-      "path": "res://assets/furniture/tableCoffee.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/tableCoffee.glb"
     },
     "lampRoundFloor": {
       "category": "node",
-      "path": "res://assets/furniture/lampRoundFloor.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/lampRoundFloor.glb"
     },
     "pottedPlant": {
       "category": "node",
-      "path": "res://assets/furniture/pottedPlant.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/pottedPlant.glb"
     },
     "televisionModern": {
       "category": "node",
-      "path": "res://assets/furniture/televisionModern.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/televisionModern.glb"
     },
     "cardboardBoxOpen": {
       "category": "node",
-      "path": "res://assets/furniture/cardboardBoxOpen.glb",
-      "scale": 2.5
+      "path": "res://assets/furniture/cardboardBoxOpen.glb"
     }
   }
 }

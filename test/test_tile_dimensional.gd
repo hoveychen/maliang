@@ -38,6 +38,19 @@ func _init() -> void:
 	fails += _check_f("空 AABB 降级 → 1.0",
 		PackRegistry.fit_scale(_ab(0, 0, 0), 3, 3), 1.0)
 
+	# visual_tiles：视觉水平占格由 def 派生。缺省回落 footprint；显式 visualTiles 生效；下限 1。
+	fails += _check_v("visual_tiles 缺省=footprint",
+		PackRegistry.visual_tiles({"footprintW": 2, "footprintH": 3}), Vector2(2, 3))
+	fails += _check_v("visual_tiles 显式 > footprint（树冠超地基）",
+		PackRegistry.visual_tiles({"footprintW": 1, "footprintH": 1, "visualTilesW": 2, "visualTilesH": 2}), Vector2(2, 2))
+	fails += _check_v("visual_tiles 空 def → 下限 1×1",
+		PackRegistry.visual_tiles({}), Vector2(1, 1))
+
+	# 视觉外延语义：visualTiles=2 的资产比 footprint=1 视觉更大（fit_scale 按 visualTiles 派生）。
+	# 单位立方按 visual 2×2 填 → min(4/1,4/1)=4 ×0.9=3.6，是 footprint 1×1(=1.8) 的 2 倍。
+	fails += _check_f("visualTiles 2×2 → 3.6（footprint 1×1 的两倍视觉）",
+		PackRegistry.fit_scale(_ab(1, 1, 1), 2, 2), 3.6)
+
 	print("test_tile_dimensional: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)
 	quit(fails)
 
@@ -48,4 +61,10 @@ func _check_f(name: String, got: float, want: float) -> int:
 	if absf(got - want) < 1e-4:
 		return 0
 	printerr("  ✗ %s: got %f, want %f" % [name, got, want])
+	return 1
+
+func _check_v(name: String, got: Vector2, want: Vector2) -> int:
+	if got.is_equal_approx(want):
+		return 0
+	printerr("  ✗ %s: got %v, want %v" % [name, got, want])
 	return 1

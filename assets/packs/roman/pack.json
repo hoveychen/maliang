@@ -1,13 +1,13 @@
 {
   "_comment": "罗马主题资产包（world-themes P6 主题）。全 node 类。2026-07-12 去重复：原先 7 件复用 medieval 的 glb（与中世纪王国缩略图字节相同、观感不分家），现换成 Sketchfab 上真正的罗马风低多边形（作者 alexferrart3D 的神殿/凯旋门/灯塔/公寓 + wolfgar74 的罗马墙/柱），全 CC-BY 4.0、已在 assets/roman/SOURCES.txt 署名。scale 为按各 glb 真实 AABB 测算的首版目测值（Godot _node_aabb 量得，目标：墙≈3m、拱门≈5m、塔/建筑≈6-7m、柱≈4m），真机手感微调留后续。注意：roman_tower（→ medieval building_tower_A_blue）不在本次去重复范围（其渲染唯一、非重复簇），保留复用不动。key 仍 roman_ 前缀（renderRef 全局唯一）。",
   "entries": {
-    "roman_arch":        { "category": "node", "path": "res://assets/roman/roman_arch.glb",         "scale": 6.81 },
-    "roman_wall":        { "category": "node", "path": "res://assets/roman/roman_wall.glb",          "scale": 0.012 },
-    "roman_wall_corner": { "category": "node", "path": "res://assets/roman/roman_wall_corner.glb",   "scale": 0.012 },
-    "roman_watchtower":  { "category": "node", "path": "res://assets/roman/roman_watchtower.glb",    "scale": 3.64 },
-    "roman_tower":       { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_A_blue.gltf", "scale": 7.0 },
-    "roman_tower_b":     { "category": "node", "path": "res://assets/roman/roman_tower_b.glb",        "scale": 5.90 },
-    "roman_column_base": { "category": "node", "path": "res://assets/roman/roman_column_base.glb",    "scale": 0.008 },
-    "roman_fort":        { "category": "node", "path": "res://assets/roman/roman_fort.glb",           "scale": 7.92 }
+    "roman_arch":        { "category": "node", "path": "res://assets/roman/roman_arch.glb" },
+    "roman_wall":        { "category": "node", "path": "res://assets/roman/roman_wall.glb" },
+    "roman_wall_corner": { "category": "node", "path": "res://assets/roman/roman_wall_corner.glb" },
+    "roman_watchtower":  { "category": "node", "path": "res://assets/roman/roman_watchtower.glb" },
+    "roman_tower":       { "category": "node", "path": "res://assets/medieval/hexagon/building_tower_A_blue.gltf" },
+    "roman_tower_b":     { "category": "node", "path": "res://assets/roman/roman_tower_b.glb" },
+    "roman_column_base": { "category": "node", "path": "res://assets/roman/roman_column_base.glb" },
+    "roman_fort":        { "category": "node", "path": "res://assets/roman/roman_fort.glb" }
   }
 }

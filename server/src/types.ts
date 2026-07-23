@@ -352,9 +352,21 @@ export interface ItemDef {
    *   'composed:'  → 组合物零件树（结构见 build_blueprints.ts，积木式造物 B1）
    */
   spec?: import('./sdf_prop.ts').SdfPropSpec | import('./build_blueprints.ts').ComposedSpec;
-  /** 占地（tile），锚点居中展开（奇数边）；1×1 / 3×3。 */
+  /**
+   * 地基占地（tile）= 水平碰撞占格 = 尺寸唯一真相，锚点居中展开（奇数边按中心、偶数边按 NW）。
+   * TILE_SIZE=2m，故 3×3=6m×6m。城堡 7×7 / 大公建 5×5 / 普通建筑 3×3 / 小设施 2×2 /
+   * 生物大 3×3·小 1×1 / 树 1×1（小地基密植出茂密森林，树冠靠视觉外延交叠邻树）。
+   */
   footprintW: number;
   footprintH: number;
+  /**
+   * 视觉水平占格（tile），缺省 = footprint。可 > footprint 让视觉外延超出地基（树冠超地基交叠邻树）。
+   * 客户端 node 类视觉缩放 fit_scale 按 visualTiles 派生（碰撞仍走 footprint）；高度 Y 由资产原始长宽比
+   * uniform 自然延伸，不独立声明。全量纲化根治：视觉≠地基分离但地基名副其实（见 tile-dimensional-system）。
+   * baked/scatter 类（棉花糖树/石/草丛）走 _jitter_scale 不读此字段。
+   */
+  visualTilesW?: number;
+  visualTilesH?: number;
   /** false = 可穿行纯点缀（草丛），不参与占用。 */
   blocking: boolean;
   /** 允许压在路面上（水井坐镇广场）。 */

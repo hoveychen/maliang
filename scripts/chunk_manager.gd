@@ -483,11 +483,9 @@ func _skin(slot: Dictionary, wrapped: Vector2i) -> void:
 			elif cat == "node":
 				var scene: PackedScene = PackRegistry.load_resource(key)
 				if scene != null:
-					# 全量纲化：视觉缩放由 footprint(tile) × 资产原始 AABB 派生，不再读 pack.json 裸倍数。
-					# footprint 即尺寸唯一真相（严格视觉=碰撞）。raw_aabb 取不到时 fit_scale 回落 1.0 不崩。
-					var fp_w := float(def.get("footprintW", 1))
-					var fp_h := float(def.get("footprintH", 1))
-					var sc := PackRegistry.fit_scale(PackRegistry.raw_aabb(key), fp_w, fp_h)
+					# 全量纲化：视觉缩放由 visualTiles(缺省 footprint) × 资产原始 AABB 派生，不再读 pack.json 裸倍数。
+					# 地基名副其实（碰撞走 footprint），视觉可超地基（树冠交叠）。raw_aabb 取不到时回落 1.0 不崩。
+					var sc := PackRegistry.fit_scale_for(key, def)
 					var inst := _spawn(deco, scene, pos, sc, yaw)
 					var ext := _visual_extent(inst, sc)
 					building_shadows.append([inst.position, ext.x, ext.y])

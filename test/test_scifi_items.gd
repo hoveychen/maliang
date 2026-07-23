@@ -39,7 +39,7 @@ func _init() -> void:
 			fails += 1
 			continue
 		fails += _check("scifi:%s 分类为 node" % key, 1 if PackRegistry.category(key) == "node" else 0, 1)
-		fails += _check("scifi:%s scale>0" % key, 1 if PackRegistry.scale(key) > 0.0 else 0, 1)
+		fails += _check("scifi:%s fit_scale_for>0" % key, 1 if PackRegistry.fit_scale_for(key, d) > 0.0 else 0, 1)
 		var scene: Variant = PackRegistry.load_resource(key)
 		fails += _check("scifi:%s 是 PackedScene" % key, 1 if scene is PackedScene else 0, 1)
 		if scene is PackedScene:

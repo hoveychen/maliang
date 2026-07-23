@@ -29,7 +29,6 @@ test('creationItemDef: big 造物 footprint 3×3(+1环), small/medium 保持 1×
 // ── 内置 seed ────────────────────────────────────────────────────────────
 
 // 真实比例家具（interior-camera-and-size）：非方形/偶数 footprint，NW 锚点展开（见 footprintOrigin）。
-// 其余内置物品仍守奇数边居中锚点。
 const NON_SQUARE_FURNITURE: Record<string, [number, number]> = {
   toy_bed_single: [1, 2],
   toy_bed_bunk: [1, 2],
@@ -37,22 +36,43 @@ const NON_SQUARE_FURNITURE: Record<string, [number, number]> = {
   toy_table: [2, 2],
 };
 
-test('内置 seed：id 唯一、footprint 奇数边（非方形家具除外）、语义与旧硬编码表对齐', () => {
+test('内置 seed：id 唯一、footprint 分档合法（正整数，偶数走 NW 锚点）、语义与旧硬编码表对齐', () => {
   const ids = BUILTIN_ITEMS.map((d) => d.id);
   assert.equal(new Set(ids).size, ids.length, 'id 不重复');
+  // 全量纲化：footprint=地基=尺寸唯一真相。奇数边居中锚点、偶数边（2×2 小设施/非方形家具）NW 锚点，
+  // 两者 footprintOrigin 都支持——故不再强制奇数边，只守正整数。visualTilesW/H 若存在须 ≥ footprint。
   for (const d of BUILTIN_ITEMS) {
     assert.equal(d.worldId, null, `${d.id} 是全局内置`);
     const rect = NON_SQUARE_FURNITURE[d.id];
     if (rect) {
       assert.deepEqual([d.footprintW, d.footprintH], rect, `${d.id} 真实比例 footprint`);
     } else {
-      assert.equal(d.footprintW % 2, 1, `${d.id} footprint 奇数边（锚点居中）`);
-      assert.equal(d.footprintH % 2, 1);
+      assert.ok(Number.isInteger(d.footprintW) && d.footprintW >= 1, `${d.id} footprintW 正整数`);
+      assert.ok(Number.isInteger(d.footprintH) && d.footprintH >= 1, `${d.id} footprintH 正整数`);
     }
+    if (d.visualTilesW !== undefined) assert.ok(d.visualTilesW >= d.footprintW, `${d.id} 视觉宽 ≥ 地基宽`);
+    if (d.visualTilesH !== undefined) assert.ok(d.visualTilesH >= d.footprintH, `${d.id} 视觉高 ≥ 地基高`);
   }
+  // 分档抽查（老板 2026-07-23 拍板的 footprint 分档表）
+  assert.equal(getBuiltinItem('mk_castle')!.footprintW, 7, '城堡类 7×7');
+  assert.equal(getBuiltinItem('roman_fort')!.footprintW, 7, '罗马要塞 7×7');
+  assert.equal(getBuiltinItem('city_tower_a')!.footprintW, 5, '高楼 5×5');
+  assert.equal(getBuiltinItem('mv_church')!.footprintW, 5, '教堂 5×5');
+  assert.equal(getBuiltinItem('mk_barracks')!.footprintW, 5, '兵营 5×5');
+  assert.equal(getBuiltinItem('house_0')!.footprintW, 3, '民居 3×3');
+  assert.equal(getBuiltinItem('well')!.footprintW, 2, '水井 小设施 2×2');
+  assert.equal(getBuiltinItem('windmill')!.footprintW, 2, '风车 小设施 2×2');
+  assert.equal(getBuiltinItem('mk_watchtower')!.footprintW, 2, '瞭望塔 小设施 2×2');
+  assert.equal(getBuiltinItem('sea_fish_a')!.footprintW, 1, '小鱼 1×1');
+  // 树：小地基密植（1×1），视觉靠 visualTiles 外延交叠树冠
+  assert.equal(getBuiltinItem('snow_tree_a')!.footprintW, 1, '雪松地基 1×1');
+  assert.deepEqual(
+    [getBuiltinItem('snow_tree_a')!.visualTilesW, getBuiltinItem('snow_tree_a')!.visualTilesH],
+    [2, 2],
+    '雪松树冠视觉 2×2 超地基',
+  );
   // 语义抽查（迁自 chunk_manager.gd 的 LANDMARKS/SDF_PROPS/散布）
   assert.equal(getBuiltinItem('well')!.pathOk, true, '水井特批压路');
-  assert.equal(getBuiltinItem('house_0')!.footprintW, 3, '民居 3×3（旧 reserve=1）');
   assert.equal(getBuiltinItem('tuft_0')!.blocking, false, '草丛可穿行');
   assert.equal(getBuiltinItem('walking_hut')!.wander, 1.6);
   assert.equal(getBuiltinItem('hop_mailbox')!.wander, 1.2);
@@ -221,7 +241,7 @@ test('items 表：listWorldItems 按创造来源过滤；itemResolver 内置+造
 
   const resolve = s.itemResolver('w1');
   assert.equal(resolve('flower_xm')!.name, '小明的花');
-  assert.equal(resolve('windmill')!.footprintW, 3);
+  assert.equal(resolve('windmill')!.footprintW, 2);
 
   // 造物实体作为 palette 项参与校验
   const t = emptyTerrain();

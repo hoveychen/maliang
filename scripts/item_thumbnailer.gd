@@ -283,14 +283,14 @@ static func _make_node(def: Dictionary, rref: String, key: String, cat: String) 
 			return null
 		if resrc is PackedScene:
 			var inst := (resrc as PackedScene).instantiate() as Node3D
-			var nsc := PackRegistry.scale(key)
+			var nsc := PackRegistry.fit_scale_for(key, def)  # 全量纲化：视觉由 visualTiles×原始AABB 派生（取代 pack.json 裸 scale）
 			inst.scale = Vector3(nsc, nsc, nsc)
 			return inst
 		if resrc is Mesh:
 			var mi := MeshInstance3D.new()
 			mi.mesh = resrc
 			mi.material_override = SdfStaticBaker.material()
-			var sc := PackRegistry.scale(key)
+			var sc := PackRegistry.fit_scale_for(key, def)  # baked mesh 非 PackedScene → 回落 1.0（同旧行为）
 			mi.scale = Vector3(sc, sc, sc)
 			return mi
 		return null

@@ -1,17 +1,17 @@
 {
   "_comment": "冰雪世界主题资产包（world-themes P5 半覆盖主题）。全 node 类雪景布景。全 CC0：Kenney Holiday Kit（Creative Commons Zero，署名非强制），来源见 assets/winter/SOURCES.txt。地面走 T_SNOW(雪地)——tile 地基 P1 已就位。scale=2.8 统一倍数（实测 AABB×2.8：雪松≈5.4m 与 6.5m 民居同量级、雪人≈3m、礼物盒≈1.4m，保留真实相对比例；原始超大的 rocks-large 与重复的 sled-long 未选用以保 uniform 一致），真机手感微调留后续。",
   "entries": {
-    "snowman":             { "category": "node", "path": "res://assets/winter/snowman.glb",             "scale": 2.8 },
-    "snowman_hat":         { "category": "node", "path": "res://assets/winter/snowman-hat.glb",         "scale": 2.8 },
-    "tree_snow_a":         { "category": "node", "path": "res://assets/winter/tree-snow-a.glb",         "scale": 2.8 },
-    "tree_snow_b":         { "category": "node", "path": "res://assets/winter/tree-snow-b.glb",         "scale": 2.8 },
-    "tree_snow_c":         { "category": "node", "path": "res://assets/winter/tree-snow-c.glb",         "scale": 2.8 },
-    "tree_decorated_snow": { "category": "node", "path": "res://assets/winter/tree-decorated-snow.glb", "scale": 2.8 },
-    "reindeer":            { "category": "node", "path": "res://assets/winter/reindeer.glb",            "scale": 2.8 },
-    "sled":                { "category": "node", "path": "res://assets/winter/sled.glb",                "scale": 2.8 },
-    "snow_pile":           { "category": "node", "path": "res://assets/winter/snow-pile.glb",           "scale": 2.8 },
-    "present_a":           { "category": "node", "path": "res://assets/winter/present-a-cube.glb",       "scale": 2.8 },
-    "present_b":           { "category": "node", "path": "res://assets/winter/present-b-round.glb",      "scale": 2.8 },
-    "nutcracker":          { "category": "node", "path": "res://assets/winter/nutcracker.glb",          "scale": 2.8 }
+    "snowman":             { "category": "node", "path": "res://assets/winter/snowman.glb" },
+    "snowman_hat":         { "category": "node", "path": "res://assets/winter/snowman-hat.glb" },
+    "tree_snow_a":         { "category": "node", "path": "res://assets/winter/tree-snow-a.glb" },
+    "tree_snow_b":         { "category": "node", "path": "res://assets/winter/tree-snow-b.glb" },
+    "tree_snow_c":         { "category": "node", "path": "res://assets/winter/tree-snow-c.glb" },
+    "tree_decorated_snow": { "category": "node", "path": "res://assets/winter/tree-decorated-snow.glb" },
+    "reindeer":            { "category": "node", "path": "res://assets/winter/reindeer.glb" },
+    "sled":                { "category": "node", "path": "res://assets/winter/sled.glb" },
+    "snow_pile":           { "category": "node", "path": "res://assets/winter/snow-pile.glb" },
+    "present_a":           { "category": "node", "path": "res://assets/winter/present-a-cube.glb" },
+    "present_b":           { "category": "node", "path": "res://assets/winter/present-b-round.glb" },
+    "nutcracker":          { "category": "node", "path": "res://assets/winter/nutcracker.glb" }
   }
 }

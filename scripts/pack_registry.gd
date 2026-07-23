@@ -7,10 +7,11 @@ extends RefCounted
 ## 建「渲染键 → 绑定」注册表；资源在**运行时 load()**（非 preload）按需载入 + 缓存。
 ## 「加主题包 = 丢个 assets/packs/<pack>/ 目录 + index.json 加一行」，零 GDScript 改动。
 ##
-## 绑定字段：{ category: "baked"|"scatter"|"node", path: "res://…", scale: float, pack: String }
-## - baked   烘焙 ArrayMesh(.res)，chunk_manager 收进 MultiMesh 合批（散布）。
-## - scatter KayKit 场景(.gltf)，剥出 mesh 后同样 MultiMesh 合批（散布）。
-## - node    独立节点建筑/角色(.gltf/.glb)，按 scale 实例化（附椭圆阴影）。
+## 绑定字段：{ category: "baked"|"scatter"|"node", path: "res://…", pack: String }（纯路径注册表，
+## 全量纲化后无 scale——node 视觉由 fit_scale_for(visualTiles×原始AABB) 派生，见 tile-dimensional-system）。
+## - baked   烘焙 ArrayMesh(.res)，chunk_manager 收进 MultiMesh 合批（散布，_jitter_scale 抖动）。
+## - scatter KayKit 场景(.gltf)，剥出 mesh 后同样 MultiMesh 合批（散布，_jitter_scale 抖动）。
+## - node    独立节点建筑/角色(.gltf/.glb)，fit_scale_for 归一实例化（附椭圆阴影）。
 ## renderRef 里冒号前缀（baked:/kaykit:/scifi:…）只是语义标注，分发按冒号后段 key 查本表。
 
 const INDEX_PATH := "res://assets/packs/index.json"
@@ -70,7 +71,6 @@ static func _load_pack(pack_name: String) -> void:
 		_entries[String(key)] = {
 			"category": cat,
 			"path": rpath,
-			"scale": float(ed.get("scale", 1.0)),
 			"pack": pack_name,
 		}
 
@@ -90,13 +90,6 @@ static func has(key: String) -> bool:
 static func category(key: String) -> String:
 	ensure_loaded()
 	return String(_entries.get(key, {}).get("category", ""))
-
-## 实例化/合批缩放（node 建筑；baked/scatter 的散布抖动缩放另由 chunk_manager._jitter_scale 定）。
-## 【全量纲化过渡期保留】pack.json 的手调裸倍数——node 类视觉现由 fit_scale(按 footprint 派生)
-## 取代（见 tile-dimensional-system）；此函数仅剩 raw_aabb 取不到时的降级兜底/散布类沿用。
-static func scale(key: String) -> float:
-	ensure_loaded()
-	return float(_entries.get(key, {}).get("scale", 1.0))
 
 ## 资产原始（scale=1）AABB，跨轴累积各 MeshInstance3D 的 mesh AABB（按其相对场景根的变换，
 ## 而非 chunk_manager._visual_extent 那个忽略子节点偏移的近似——派生缩放要求精确）。实例化一次量得
@@ -145,6 +138,20 @@ static func fit_scale(ab: AABB, fp_w: float, fp_h: float, fill := 0.9) -> float:
 		return 1.0
 	var tile := WorldGrid.TILE_SIZE
 	return fill * minf(fp_w * tile / ab.size.x, fp_h * tile / ab.size.z)
+
+## 实体 def 的视觉水平占格（tile）：visualTilesW/H 缺省回落 footprintW/H。可 > footprint 让视觉外延
+## 超出地基（树冠超地基交叠邻树）；碰撞另走 footprint。纯函数（不碰资源），headless 可测。
+static func visual_tiles(def: Dictionary) -> Vector2:
+	var vw := float(def.get("visualTilesW", def.get("footprintW", 1)))
+	var vh := float(def.get("visualTilesH", def.get("footprintH", 1)))
+	return Vector2(maxf(vw, 1.0), maxf(vh, 1.0))
+
+## node 类视觉缩放的唯一入口：按实体 def 的 visualTiles(缺省 footprint) × 资产原始 AABB 派生等比缩放。
+## chunk_manager 世界渲染 / item_thumbnailer 缩略图 / item_icon_capture 图标三处共用，单一真相。
+## raw_aabb 取不到（未挂载/baked mesh 非 PackedScene）时 fit_scale 回落 1.0，相机自动按 AABB 取景不受影响。
+static func fit_scale_for(key: String, def: Dictionary, fill := 0.9) -> float:
+	var vt := visual_tiles(def)
+	return fit_scale(raw_aabb(key), vt.x, vt.y, fill)
 
 ## 该渲染键所属资产包名（pack.json 所在目录名，如 "base"/"toyroom"/"stickers"）。未注册返回 ""。
 ## "base" = 主包内（打进 APK，恒在）；其余 = 可分发内容包（.pck，须挂载后才在 res:// 里）。
