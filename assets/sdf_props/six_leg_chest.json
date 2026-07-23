@@ -6,7 +6,7 @@
     "#3f3a36"
   ],
   "blend": 0.24,
-  "outline": 0.042,
+  "outline": 0.0,
   "parts": [
     {
       "shape": "box",

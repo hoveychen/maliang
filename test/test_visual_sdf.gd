@@ -69,7 +69,10 @@ func _structural() -> void:
 		var mat := p.material_override as ShaderMaterial
 		_check("%s 主材质是 blend-shell" % p.name,
 			mat != null and mat.shader.resource_path.ends_with("sdf_blend_shell.gdshader"), true)
-		_check("%s 挂了描边 next_pass" % p.name, (mat.next_pass as ShaderMaterial) != null, true)
+		# 描边 next_pass 与 spec 的 outline 一致：会动 prop 现多为纸艺去黑边（outline:0，无 next_pass），
+		# 有黑边的（outline>0 且描边档开着）才挂 pass。与内容调参解耦，不再一刀切要求。
+		var want_outline: bool = float(p.config.get("outline", 0.0)) > 0.0 and SdfProp._outline_enabled
+		_check("%s 描边 next_pass 与 spec 一致" % p.name, (mat.next_pass as ShaderMaterial) != null, want_outline)
 		var pos: PackedVector4Array = mat.get_shader_parameter("prim_pos")
 		_check("%s uniform 与基本体数一致" % p.name, pos.size(), p.prims.size())
 		var arr := p.mesh.surface_get_arrays(0)

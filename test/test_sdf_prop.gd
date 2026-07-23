@@ -105,7 +105,12 @@ func _init() -> void:
 	fails += _check("cone_between top", SdfMath.prim_dist(cn, Vector3(0, 1, 0)), -0.1)
 
 	# ---- SdfProp 节点组装 ----
-	var prop := SdfProp.from_json_file("res://assets/sdf_props/walking_hut.json")
+	# walking_hut 随内容改为 outline:0（纸艺去黑边，与树同款），这里强制 outline>0
+	# 单独验证描边 pass 的引擎路径（材质创建 + uniform 同步），与内容调参解耦。
+	var hut_data: Dictionary = JSON.parse_string(
+		FileAccess.get_file_as_string("res://assets/sdf_props/walking_hut.json"))
+	hut_data["outline"] = 0.04
+	var prop := SdfProp.from_spec(hut_data)
 	fails += _check("prop created", prop != null, true)
 	if prop != null:
 		fails += _check("prop mesh built", prop.mesh != null, true)

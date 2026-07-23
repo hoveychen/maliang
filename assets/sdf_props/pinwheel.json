@@ -2,7 +2,7 @@
   "name": "pinwheel",
   "palette": ["#e8574b", "#f2c14e", "#6e4a32", "#f4ead4"],
   "blend": 0.1,
-  "outline": 0.035,
+  "outline": 0.0,
   "color_k": 0.07,
   "parts": [
     {"shape": "capsule", "pos": [0, 0.62, 0], "r": 0.05, "len": 1.05, "color": 2, "blend": 0.06},
