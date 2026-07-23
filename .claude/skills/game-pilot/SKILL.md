@@ -114,7 +114,7 @@ python3 test/e2e/pilot_cli.py run-flow enter_world [--args '{"name":"小火箭"}
 3. **SubViewport（手机屏）内元素**：`access` 回包里 `viewport != "root"` 的元素照样有稳定 id、用 `do press:btn:<path>` 点中（真投影/回退 handler）；纯滑动翻页这类手势若 `actions` 里没有，需要就把它做成一个 action_id（不再有盲坐标逃生口）。
 4. **说话有门禁**：`say` 回 `fed:false/gate_closed` = 对方在说话或没开麦。先 `wait --key speaking --falsy`（对方 TTS 放完）再重说；反复 say 会堆积 ASR 队列。看 `state.fsm_state`/`mic_open` 判断当下能不能说。
 5. **`say` 自动补 `inject`**（后台 say 发现 ASR 不是 ScriptedAsr 会先自动切换，不必手动 inject）；但仍须**进世界后**才说（menu/标题页无 active VoiceCapture，say 会报错）。onboarding 页有 VC，可以说。
-6. 连测被 45min 冷却门拦住 → 目前**没有绕过的 reset 入口**（`reset_budget` god-op 随 legacy 子类退役）：等冷却过或换新档案。⚠️若回归常撞冷却，应把「重置冷却」做成一个**定义好的测试控制 op**（像 `inject` 那样进 MonkeyHarness），而不是恢复 god 逃生口。
+6. 连测被 45min 冷却门拦住 → `pilot_cli.py reset-budget`（`h.reset_budget()` 是 MonkeyHarness 上的**定义测试控制 op**，与 `inject` 同类：显式、有限、不绕过 gameplay，非 god 逃生口）。
 7. **等状态、别卡时长（action-based）**：动作触发的动画/异步用**状态谓词**等它落定，不要 `sleep <固定秒数>` 硬赌——`wait --key speaking --falsy`（等对方说完，真 `speaking` 位，比墙钟猜稳）、`wait --key <字段> --truthy|--falsy`（如 `--key phone_settling --falsy`、`--key transitioning --falsy`）、或本身就阻塞到落定的命令（`do`）。卡 sleep 的脚本会在动画参数一改就整批 flake。
 8. **落定失败先看 `settle_reason`**：`do` 异步动作超时回包带 `settled:false` + `settle_reason{predicate,note,读数,waited_sec}`——说清「为什么没落定」（没走到/没进对话/场景没变/造物没推进），照它排查别瞎猜。`do press:btn:<path>` 用精确 path 消歧。
 

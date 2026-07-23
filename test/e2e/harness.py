@@ -158,10 +158,16 @@ class MonkeyHarness:
             print(f"  ⚠ 命令返回错误: {resp}", file=sys.stderr)
         return resp
 
-    # ── 语音/对话 ──
+    # ── 测试控制 op（非玩家动作：不是 do 那种游戏内交互，是驱动测试用的显式控制，与盲坐标 god op 无关）──
     def inject(self):
         return self.send({"op": "inject"})
 
+    def reset_budget(self):
+        """清掉 45min 游玩时长冷却门（玩满→冷却模态挡住造物/交互），供连测不被拦。
+        与 inject 同类的**定义测试控制 op**——显式、有限、不绕过 gameplay，故留在 MonkeyHarness（不是已退役的 god 逃生口）。"""
+        return self.send({"op": "reset_budget"})
+
+    # ── 语音/对话 ──
     def say(self, text):
         return self.send({"op": "say", "text": text})
 

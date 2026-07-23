@@ -354,6 +354,7 @@ def main():
     p = sub.add_parser("shot")
     p.add_argument("--out", default="")
     p.add_argument("--max-dim", type=int, default=960)
+    sub.add_parser("reset-budget", help="清 45min 游玩冷却门（定义测试控制 op，连测不被拦）")
 
     # ── 流程引擎（复用中心，与 MCP list_flows/run_flow 同一注册表/执行路径）──────
     p = sub.add_parser("list-flows")
@@ -428,6 +429,8 @@ def main():
         if c == "shot":
             path = h.screenshot(path=args.out or None, max_dim=args.max_dim)
             return out({"ok": True, "shot": path})
+        if c == "reset-budget":
+            return out(h.reset_budget())
         return out({"ok": False, "error": f"未知子命令: {c}"})
     except HarnessError as e:
         return out({"ok": False, "error": str(e)})

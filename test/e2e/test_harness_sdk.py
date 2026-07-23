@@ -86,6 +86,9 @@ def main():
     u = h.ui(texts=True)
     check("ui elements", u["elements"][0]["text"], "确认")
 
+    print("[reset_budget：定义测试控制 op 在 MonkeyHarness 上]")
+    check("reset_budget 通", h.reset_budget().get("ok"), True)
+
     print("[wait_state 谓词轮询]")
     got = h.wait_state(lambda s: (s.get("npc_count") or 0) >= 8, "npc≥8", timeout=5.0, poll=0.1)
     check("wait_state 命中第二帧", got.get("ws_open"), True)
