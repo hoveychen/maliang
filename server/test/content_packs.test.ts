@@ -225,22 +225,55 @@ test('POST /admin/packs/:name：入库后 .pck 可从 /assets/:hash 取回，man
   }
 });
 
-test('POST /admin/packs/:name：缺 keys / 空 body 校验', async (t) => {
+test('POST /admin/packs/:name：空 keys 允许（非场景内容包）/ 空 body 拒绝', async (t) => {
   const store = new WorldStore();
   const a = await app(store);
   t.after(() => a.close());
   process.env.MALIANG_ADMIN_TOKEN = 'sesame';
   try {
+    // P5：voice/bgm 等非场景包无渲染键——空 keys 现被接受（靠 GET /packs 按名解析，不进 sceneManifest）。
     const noKeys = await a.inject({
-      method: 'POST', url: '/admin/packs/base', headers: { 'x-admin-token': 'sesame' },
+      method: 'POST', url: '/admin/packs/bgm', headers: { 'x-admin-token': 'sesame' },
       payload: { pckBase64: Buffer.from([1]).toString('base64'), keys: [] },
     });
-    assert.equal(noKeys.statusCode, 400);
+    assert.equal(noKeys.statusCode, 200);
+    assert.deepEqual((noKeys.json() as { keys: string[] }).keys, []);
+    // 空 body（无 pckBase64）仍拒绝。
     const noBody = await a.inject({
       method: 'POST', url: '/admin/packs/base', headers: { 'x-admin-token': 'sesame' },
       payload: { keys: ['well'] },
     });
     assert.equal(noBody.statusCode, 400);
+  } finally {
+    delete process.env.MALIANG_ADMIN_TOKEN;
+  }
+});
+
+test('GET /packs：列出全部已登记包（含无键的非场景内容包）供客户端按名解析', async (t) => {
+  const store = new WorldStore();
+  const a = await app(store);
+  t.after(() => a.close());
+  process.env.MALIANG_ADMIN_TOKEN = 'sesame';
+  try {
+    // 一个有键的主题包 + 一个无键的 voice 包
+    const city = await a.inject({
+      method: 'POST', url: '/admin/packs/city', headers: { 'x-admin-token': 'sesame' },
+      payload: { pckBase64: Buffer.from([1, 2, 3]).toString('base64'), keys: ['building-a'] },
+    });
+    const vi = await a.inject({
+      method: 'POST', url: '/admin/packs/voice_items', headers: { 'x-admin-token': 'sesame' },
+      payload: { pckBase64: Buffer.from([4, 5]).toString('base64'), keys: [] },
+    });
+    assert.equal(city.statusCode, 200);
+    assert.equal(vi.statusCode, 200);
+    const res = await a.inject({ method: 'GET', url: '/packs' });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { packs: { name: string; hash: string; bytes: number }[] };
+    const byName = new Map(body.packs.map((p) => [p.name, p]));
+    assert.ok(byName.has('city'));
+    assert.ok(byName.has('voice_items')); // 无键包也在 /packs 里，客户端按名取 hash
+    assert.equal(byName.get('voice_items')!.bytes, 2);
+    assert.equal(byName.get('city')!.hash, (city.json() as { hash: string }).hash);
   } finally {
     delete process.env.MALIANG_ADMIN_TOKEN;
   }

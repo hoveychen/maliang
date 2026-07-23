@@ -594,6 +594,13 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { packs: store.sceneManifest(req.params.wid, req.params.sid) };
   });
 
+  // 全部已登记内容包 name→{hash,bytes}（content-pck-distribution P5）。sceneManifest 只列场景
+  // 摆放物品引用到的包；voice/bgm 等【非场景】内容包不进场景 palette，客户端 intro 期按包名从这里
+  // 解析 hash 后台预取（api.gd fetch_packs_index + PackMounter.ensure_pack_by_name）。无需鉴权。
+  app.get('/packs', async () => {
+    return { packs: store.listPacks().map(({ name, rec }) => ({ name, hash: rec.hash, bytes: rec.bytes })) };
+  });
+
   // 内容包入库（content-pck-distribution P2）：部署脚本把某主题打好的 .pck 推上来，存进内容寻址
   // 资产库（复用 putAsset / GET /assets/:hash，零新下载基建）并登记 name→{hash,bytes,keys}。
   // keys = 该包 pack.json 的 entries 键（部署脚本读出后传入；服务端运行时读不到 assets/packs/*.json）。
@@ -609,8 +616,9 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     }
     const name = req.params.name.trim();
     if (!name) return reply.code(400).send({ error: 'pack name required' });
+    // keys 允许为空：主题模型包传 pack.json entries 键（供 sceneManifest 反查）；voice/bgm 等
+    // 【非场景】内容包无渲染键，靠 GET /packs 按包名解析（content-pck-distribution P5）。
     const keys = (req.body?.keys ?? []).map((k) => String(k).trim()).filter(Boolean);
-    if (keys.length === 0) return reply.code(400).send({ error: 'keys required (pack.json entry keys)' });
     const b64 = req.body?.pckBase64 ?? '';
     if (!b64) return reply.code(400).send({ error: 'empty pckBase64' });
     const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
