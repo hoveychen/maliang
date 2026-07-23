@@ -5806,6 +5806,29 @@ func _prewarm_packs(wid: String, sid: String, rebuild_after := false) -> void:
 ## 内容包离线提示的一次性闸（content-pck-distribution P4）：避免每次进场景都弹，一个会话提示一次即可。
 var _pack_offline_hinted := false
 
+## 非场景内容包后台预取（content-pck-distribution P5）：voice/bgm 不进场景 palette、不由
+## _prewarm_packs（manifest 驱动）覆盖，故 intro 期单独按包名从 GET /packs 拉。best-effort：
+## 拉不到不影响主线——story/item 语音缺失走 file_exists 兜底回落 live TTS，bgm 缺段由
+## _poll_bgm_load 跳过（carefree 留主包照放）。故不弹离线提示、不重铺区块（内容包不含地形 prop）。
+## 内容寻址永久缓存：下过一次即永久离线可用。一会话跑一次即可（_content_packs_prefetched 闸）。
+var _content_packs_prefetched := false
+
+func _prefetch_content_packs() -> void:
+	if api == null or _content_packs_prefetched:
+		return
+	_content_packs_prefetched = true
+	var index := await api.fetch_packs_index()
+	for name in index:
+		var n := String(name)
+		if n != "bgm" and not n.begins_with("voice_"):
+			continue # 主题模型包走场景 manifest（_prewarm_packs），这里只管非场景内容包
+		var h := String((index[name] as Dictionary).get("hash", ""))
+		if h.is_empty() or PackMounter.is_mounted(h):
+			continue
+		var path := await api.fetch_pack(h) # 已缓存秒回；未缓存则下载（弱网失败返回空，跳过）
+		if not path.is_empty():
+			PackMounter.ensure_mounted(h)
+
 func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包
 	_apply_bag(data.get("bag"))

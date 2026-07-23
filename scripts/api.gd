@@ -238,6 +238,24 @@ static func pack_cache_path(pack_hash: String) -> String:
 static func manifest_path(world_id: String, scene_id: String) -> String:
 	return "/worlds/%s/scenes/%s/manifest" % [world_id.uri_encode(), scene_id.uri_encode()]
 
+## 全部已登记内容包索引：GET /packs → { name: { "hash":..., "bytes":... } }（content-pck-distribution P5）。
+## sceneManifest 只列场景摆放引用的包；voice/bgm 等非场景内容包不进 palette，客户端据此按包名解析 hash
+## 后台预取（world._prefetch_content_packs）。失败/离线返回空 Dictionary（调用方best-effort，不崩）。
+func fetch_packs_index() -> Dictionary:
+	var res := await get_json("/packs")
+	var out: Dictionary = {}
+	var packs: Variant = res.get("packs", [])
+	if typeof(packs) != TYPE_ARRAY:
+		return out
+	for p in packs:
+		if typeof(p) != TYPE_DICTIONARY:
+			continue
+		var name := String((p as Dictionary).get("name", ""))
+		var h := String((p as Dictionary).get("hash", ""))
+		if not name.is_empty() and not h.is_empty():
+			out[name] = {"hash": h, "bytes": int((p as Dictionary).get("bytes", 0))}
+	return out
+
 ## 确保某内容包 .pck 已落盘到 user://packs/：已缓存直接返回路径（内容寻址，永不失效）；
 ## 未缓存则 GET /assets/<hash> 下载写盘。成功返回本地路径，失败（空 hash / 下载失败）返回 ""。
 ## 只负责“拿到文件”，挂载由 PackMounter 做（下载后调用方 PackMounter.ensure_mounted(hash)）。
