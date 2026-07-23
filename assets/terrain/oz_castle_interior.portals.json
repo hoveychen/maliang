@@ -2,8 +2,8 @@
   {
     "radius": 2.5,
     "tile": [
-      24,
-      30
+      22,
+      26
     ],
     "toScene": "oz",
     "toTile": [

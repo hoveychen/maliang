@@ -1,17 +1,65 @@
 {
   "_comment": "玩具房间主题（world-themes P4）。全 node 类家具。全 CC0：Kenney Furniture Kit，来源见 assets/furniture/SOURCES.txt。scale=3.5 统一倍数（实测 AABB×3.5：床≈3.9m/椅≈1.6m，与 6.5m 民居同一放大量级、保留家具真实相对比例），真机手感微调留 P5。注意：渲染键全局唯一，'table'/'chair' 等通用名后续厨房主题接入时须去重（rename 一方）。",
   "entries": {
-    "bear":             { "category": "node", "path": "res://assets/furniture/bear.glb",             "scale": 3.5 },
-    "bedSingle":        { "category": "node", "path": "res://assets/furniture/bedSingle.glb",        "scale": 3.5 },
-    "bedBunk":          { "category": "node", "path": "res://assets/furniture/bedBunk.glb",          "scale": 3.5 },
-    "bookcaseOpen":     { "category": "node", "path": "res://assets/furniture/bookcaseOpen.glb",     "scale": 3.5 },
-    "loungeSofa":       { "category": "node", "path": "res://assets/furniture/loungeSofa.glb",       "scale": 3.5 },
-    "chairRounded":     { "category": "node", "path": "res://assets/furniture/chairRounded.glb",     "scale": 3.5 },
-    "table":            { "category": "node", "path": "res://assets/furniture/table.glb",            "scale": 3.5 },
-    "tableCoffee":      { "category": "node", "path": "res://assets/furniture/tableCoffee.glb",      "scale": 3.5 },
-    "lampRoundFloor":   { "category": "node", "path": "res://assets/furniture/lampRoundFloor.glb",   "scale": 3.5 },
-    "pottedPlant":      { "category": "node", "path": "res://assets/furniture/pottedPlant.glb",      "scale": 3.5 },
-    "televisionModern": { "category": "node", "path": "res://assets/furniture/televisionModern.glb", "scale": 3.5 },
-    "cardboardBoxOpen": { "category": "node", "path": "res://assets/furniture/cardboardBoxOpen.glb", "scale": 3.5 }
+    "bear": {
+      "category": "node",
+      "path": "res://assets/furniture/bear.glb",
+      "scale": 2.5
+    },
+    "bedSingle": {
+      "category": "node",
+      "path": "res://assets/furniture/bedSingle.glb",
+      "scale": 2.5
+    },
+    "bedBunk": {
+      "category": "node",
+      "path": "res://assets/furniture/bedBunk.glb",
+      "scale": 2.5
+    },
+    "bookcaseOpen": {
+      "category": "node",
+      "path": "res://assets/furniture/bookcaseOpen.glb",
+      "scale": 2.5
+    },
+    "loungeSofa": {
+      "category": "node",
+      "path": "res://assets/furniture/loungeSofa.glb",
+      "scale": 2.5
+    },
+    "chairRounded": {
+      "category": "node",
+      "path": "res://assets/furniture/chairRounded.glb",
+      "scale": 2.5
+    },
+    "table": {
+      "category": "node",
+      "path": "res://assets/furniture/table.glb",
+      "scale": 2.5
+    },
+    "tableCoffee": {
+      "category": "node",
+      "path": "res://assets/furniture/tableCoffee.glb",
+      "scale": 2.5
+    },
+    "lampRoundFloor": {
+      "category": "node",
+      "path": "res://assets/furniture/lampRoundFloor.glb",
+      "scale": 2.5
+    },
+    "pottedPlant": {
+      "category": "node",
+      "path": "res://assets/furniture/pottedPlant.glb",
+      "scale": 2.5
+    },
+    "televisionModern": {
+      "category": "node",
+      "path": "res://assets/furniture/televisionModern.glb",
+      "scale": 2.5
+    },
+    "cardboardBoxOpen": {
+      "category": "node",
+      "path": "res://assets/furniture/cardboardBoxOpen.glb",
+      "scale": 2.5
+    }
   }
 }

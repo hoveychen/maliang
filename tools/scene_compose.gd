@@ -100,54 +100,55 @@ const SDF_PROPS_OZ := [
 ## 七张单人床沿后/左/右三面墙排开（各床 span-3 footprint 逐格核不重叠），中央一张餐桌，桌前一排七个碗
 ## （呼应「一人一碗」）。刻意留：后排中线 (24,22) 落地点（进门站位）+ 中线到前门 (24,30) 一条经 x22 的走道。
 ## 坐标全为房间内 tile；室内地板全平（_paint_home_interior），任意 tile 可摆。
+## 房间 8×8 [19..26]²（interior-camera-and-size：真实比例 1×2 床后七张排得下、房间从 12×12 缩到 8×8）。
+## 七张床（1×2）：后墙 4 + 中段左/右/中 3；中央偏右餐桌（2×2）；桌前后一排七个碗。留 (22,22) 落地点 +
+## 中线到前门 (22,26) 走道（碗 pathOk 不挡路）。坐标逐格核过不出 [19..26]、不压落地点。
 const SNOW_INTERIOR_FURNITURE := [
-	# 七张床（span-3，锚点=中心 tile）：后墙 3 + 左墙 2 + 右墙 2
-	{ "item": "toy_bed_single", "tile": Vector2i(20, 20), "yaw": 180.0, "search": 1 },  # 后-左
-	{ "item": "toy_bed_single", "tile": Vector2i(24, 20), "yaw": 180.0, "search": 1 },  # 后-中
-	{ "item": "toy_bed_single", "tile": Vector2i(29, 20), "yaw": 180.0, "search": 1 },  # 后-右
-	{ "item": "toy_bed_single", "tile": Vector2i(20, 24), "yaw": 90.0,  "search": 1 },  # 左-中
-	{ "item": "toy_bed_single", "tile": Vector2i(20, 28), "yaw": 90.0,  "search": 1 },  # 左-前
-	{ "item": "toy_bed_single", "tile": Vector2i(29, 24), "yaw": 270.0, "search": 1 },  # 右-中
-	{ "item": "toy_bed_single", "tile": Vector2i(29, 28), "yaw": 270.0, "search": 1 },  # 右-前
-	# 餐桌（span-3）居中
-	{ "item": "toy_table",      "tile": Vector2i(24, 25), "yaw": 0.0,   "search": 1 },
-	# 七个碗（span-1，pathOk 不挡路）：桌前一排
-	{ "item": "dwarf_bowl", "tile": Vector2i(22, 27), "yaw": 0.0, "search": 1 },
-	{ "item": "dwarf_bowl", "tile": Vector2i(23, 27), "yaw": 0.0, "search": 1 },
-	{ "item": "dwarf_bowl", "tile": Vector2i(24, 27), "yaw": 0.0, "search": 1 },
-	{ "item": "dwarf_bowl", "tile": Vector2i(25, 27), "yaw": 0.0, "search": 1 },
-	{ "item": "dwarf_bowl", "tile": Vector2i(26, 27), "yaw": 0.0, "search": 1 },
-	{ "item": "dwarf_bowl", "tile": Vector2i(23, 28), "yaw": 0.0, "search": 1 },
-	{ "item": "dwarf_bowl", "tile": Vector2i(25, 28), "yaw": 0.0, "search": 1 },
+	# 七张床（1×2，yaw0 头靠后墙、脚朝前）：后排四张 + 中段三张
+	{ "item": "toy_bed_single", "tile": Vector2i(19, 19), "yaw": 0.0, "search": 2 },  # 后排 1
+	{ "item": "toy_bed_single", "tile": Vector2i(21, 19), "yaw": 0.0, "search": 2 },  # 后排 2
+	{ "item": "toy_bed_single", "tile": Vector2i(23, 19), "yaw": 0.0, "search": 2 },  # 后排 3
+	{ "item": "toy_bed_single", "tile": Vector2i(25, 19), "yaw": 0.0, "search": 2 },  # 后排 4
+	{ "item": "toy_bed_single", "tile": Vector2i(19, 22), "yaw": 0.0, "search": 2 },  # 中段左
+	{ "item": "toy_bed_single", "tile": Vector2i(21, 22), "yaw": 0.0, "search": 2 },  # 中段中
+	{ "item": "toy_bed_single", "tile": Vector2i(25, 22), "yaw": 0.0, "search": 2 },  # 中段右
+	# 餐桌（2×2）中央偏右
+	{ "item": "toy_table",      "tile": Vector2i(23, 22), "yaw": 0.0, "search": 2 },  # [23,24]×[22,23]
+	# 七个碗（1×1，pathOk 不挡路）：桌前一排
+	{ "item": "dwarf_bowl", "tile": Vector2i(20, 24), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(21, 24), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(22, 24), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(23, 24), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(24, 24), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(21, 25), "yaw": 0.0, "search": 1 },
+	{ "item": "dwarf_bowl", "tile": Vector2i(23, 25), "yaw": 0.0, "search": 1 },
 ]
 
 ## 翡翠城堡室内（oz_castle_interior，house-interiors P2）——oz 无现成户外家具，摆一套新 authored 家具
 ## （复用 toy_* 通用家具，非新 SDF 资产：奥兹魔法师的「王座厅」小客厅）。房间 [19..30]²（同室内几何）。
 ## 后墙中央一张沙发当「王座」，中央茶几+两椅，角落书架/落地灯/盆栽点缀；克制，别塞满。
 ## 留：后排中线 (24,22) 落地点 + 中线到前门 (24,30) 走道（茶几居中让开中线两侧）。
+## 房间 8×8 [19..26]²（interior-camera-and-size：真实比例家具后翡翠城堡王座厅缩到 8×8）。
+## 后墙中央沙发(2×1)当王座，两角书架/落地灯，中央偏左茶几(2×2)+盆栽点缀。留 (22,22) 落地点 +
+## 中线到前门 (22,26) 走道（茶几让开中线）。
 const OZ_CASTLE_INTERIOR_FURNITURE := [
-	{ "item": "toy_sofa",     "tile": Vector2i(24, 20), "yaw": 180.0, "search": 1 },  # 王座（后墙中央）
-	{ "item": "toy_bookcase", "tile": Vector2i(20, 20), "yaw": 90.0,  "search": 1 },  # 后-左角书架
-	{ "item": "toy_lamp",     "tile": Vector2i(28, 20), "yaw": 270.0, "search": 1 },  # 后-右角落地灯
-	{ "item": "toy_table",    "tile": Vector2i(24, 25), "yaw": 0.0,   "search": 1 },  # 中央茶几
-	{ "item": "toy_chair",    "tile": Vector2i(21, 25), "yaw": 90.0,  "search": 1 },  # 茶几左椅
-	{ "item": "toy_chair",    "tile": Vector2i(27, 25), "yaw": 270.0, "search": 1 },  # 茶几右椅
-	{ "item": "toy_plant",    "tile": Vector2i(20, 29), "yaw": 90.0,  "search": 1 },  # 前-左盆栽
-	{ "item": "toy_plant",    "tile": Vector2i(28, 29), "yaw": 270.0, "search": 1 },  # 前-右盆栽
+	{ "item": "toy_sofa",     "tile": Vector2i(21, 19), "yaw": 0.0,   "search": 2 },  # 王座 2×1 → (21,19)(22,19) 后墙中央
+	{ "item": "toy_bookcase", "tile": Vector2i(19, 19), "yaw": 90.0,  "search": 2 },  # 后-左角书架
+	{ "item": "toy_lamp",     "tile": Vector2i(25, 19), "yaw": 270.0, "search": 2 },  # 后-右角落地灯
+	{ "item": "toy_table",    "tile": Vector2i(20, 24), "yaw": 0.0,   "search": 2 },  # 茶几 2×2 → [20,21]×[24,25]（让开中线走道）
+	{ "item": "toy_plant",    "tile": Vector2i(25, 25), "yaw": 270.0, "search": 2 },  # 前-右盆栽
 ]
 
 ## 村民农舍 + 外婆家室内共用的一套 cozy 小客厅家具（house-interiors P3 量产，克制——「所有房子都可进」
 ## 的默认补充，非老板明点）。5 栋房子室内内容一致（只是各自返回门通向不同的村里门口），故一套即可。
-## 房间 9×9 [19..27]²（interior-camera-and-size：普通人家缩到温馨 9×9）；床后-左、餐桌+两椅居中偏前、
-## 书架后-右、盆栽前-右点缀。刻意留：后排中线 (23,22) 落地点（进门站位）清空 + 绕过餐桌到前门 (23,27) 的路。
-## 坐标全在房间内、span-3 家具 footprint 逐格核过不出界、不压落地点。
+## 房间 6×6 [19..24]²（interior-camera-and-size：真实比例家具后温馨 6×6=12m）；床(1×2)后-左、
+## 餐桌(2×2)后-右、椅居中、盆栽前-右点缀。刻意留：后排中线 (21,22) 落地点清空 + 到前门 (21,24) 走道。
+## 坐标全在房间内、footprint 逐格核过不出界、不压落地点。
 const VILLAGER_HOME_FURNITURE := [
-	{ "item": "toy_bed_single", "tile": Vector2i(20, 20), "yaw": 180.0, "search": 1 },  # 后-左床（span3 [19..21]²）
-	{ "item": "toy_bookcase",   "tile": Vector2i(26, 20), "yaw": 270.0, "search": 1 },  # 后-右书架
-	{ "item": "toy_table",      "tile": Vector2i(23, 24), "yaw": 0.0,   "search": 1 },  # 中央餐桌（span3 [22..24]×[23..25]）
-	{ "item": "toy_chair",      "tile": Vector2i(21, 24), "yaw": 90.0,  "search": 1 },  # 桌左椅
-	{ "item": "toy_chair",      "tile": Vector2i(25, 24), "yaw": 270.0, "search": 1 },  # 桌右椅
-	{ "item": "toy_plant",      "tile": Vector2i(26, 26), "yaw": 270.0, "search": 1 },  # 前-右盆栽
+	{ "item": "toy_bed_single", "tile": Vector2i(19, 19), "yaw": 0.0,   "search": 1 },  # 后-左床 1×2 → (19,19)(19,20)
+	{ "item": "toy_table",      "tile": Vector2i(22, 19), "yaw": 0.0,   "search": 1 },  # 后-右桌 2×2 → [22,23]×[19,20]
+	{ "item": "toy_chair",      "tile": Vector2i(21, 20), "yaw": 90.0,  "search": 1 },  # 桌左椅
+	{ "item": "toy_plant",      "tile": Vector2i(23, 23), "yaw": 270.0, "search": 1 },  # 前-右盆栽
 ]
 
 ## 用 VILLAGER_HOME_FURNITURE 的室内场景 id（4 农舍 + 外婆家）。与 export_terrain.gd VILLAGER_PORTALS

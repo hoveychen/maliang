@@ -87,8 +87,8 @@ const OUTDOOR_SUN_ENERGY := 1.45
 ## （room_n_for）：普通人家/农舍/外婆家用温馨的 9×9（不空旷），七矮人小屋/翡翠城堡因家具多保留 12×12。
 ## 都以 (19,19) 为左上角 → 区间 [19..19+N-1]²；返回门/进屋落点/家具中线均按 N 派生（见静态 helper）。
 ## 相机把 focus 钉在房间中心、RoomStage 摆在渲染原点，家具/玩家按「相对房间中心」落到房间格。
-const ROOM_N_COZY := 9      ## 普通人家/农舍/外婆家：温馨小屋（一套小客厅家具摆得下、不空旷）
-const ROOM_N_LARGE := 12    ## 需容大量家具的大屋：七矮人小屋(7 张 span-3 床+餐桌)、翡翠城堡王座厅
+const ROOM_N_COZY := 6      ## 普通人家/农舍/外婆家：温馨小屋（真实比例家具后 6×6=12m 就够摆一套小客厅）
+const ROOM_N_LARGE := 8     ## 稍大室内：七矮人小屋(7 张 1×2 床+餐桌)、翡翠城堡王座厅
 const LARGE_INTERIOR_IDS := ["snow_interior", "oz_castle_interior"]  ## 保留 12×12 的室内 id（其余室内 = 9×9）
 const ROOM_ORIGIN_TILE := Vector2i(19, 19)   ## 房间格左上角；区间 [19..19+N-1]²（含端点）
 const ROOM_BACK_INSET := 3   ## 进屋落点距后墙的行数（后排站位，离前门远，防落地即弹回）
@@ -862,32 +862,46 @@ func _clamp_tile_to_room(t: Vector2i) -> Vector2i:
 		clampi(t.y, ROOM_ORIGIN_TILE.y, ROOM_ORIGIN_TILE.y + n - 1))
 
 ## 室内框满全屋的最近轨道距离（米）：相机在 focus 上方 (0, sin·D, cos·D)（pitch 为仰角），看向 focus。
-## 房间地板 [-half,half]²、后墙(-z)高 WALL_H、前(+z)开口。竖直方向最靠边的两点：前地板近沿(y=0,z=+half)
-## 与后墙顶(y=WALL_H,z=-half)。二分求「两点都恰好落进竖直 FOV」的最小 D，再乘余量。横向靠横屏更宽的
-## 水平 FOV 天然容纳（平板横屏，竖直 FOV 恒定为约束方；竖屏另说，本游戏横屏）。
+## 房间是盒子 [-half,half]²×[0,WALL_H]、前(+z)墙开口。二分求「盒子 8 个角都落进相机视锥（竖直 + 水平
+## 两轴）」的最小 D 再乘余量。必须同时管水平：前排两角离相机最近、横向张角最大，只框竖直会把前角切出画。
+## 水平 FOV 由竖直 FOV × 长宽比得出（KEEP_HEIGHT）；用保守的 4:3（平板最窄）算，宽屏自然多留边不切角。
+const INDOOR_ASPECT := 4.0 / 3.0   ## 框图用的保守长宽比（iPad 4:3 最窄；更宽屏只会多留边、不切角）
 func _indoor_cam_dist_for(n: int) -> float:
 	var half := float(n) * WorldGrid.TILE_SIZE * 0.5
 	var wall := RoomStage.WALL_H
 	var pitch := deg_to_rad(INDOOR_CAM_PITCH)
-	var half_fov := deg_to_rad(CAM_FOV_DEG * 0.5)
+	var tan_v := tan(deg_to_rad(CAM_FOV_DEG * 0.5))
+	var tan_h := tan_v * INDOOR_ASPECT
+	# 盒子 8 角（前墙开口，但把前上两角也当 WALL_H 高一起框，保守留顶）。
+	var corners: Array[Vector3] = []
+	for sx in [-half, half]:
+		for sz in [-half, half]:
+			for sy in [0.0, wall]:
+				corners.append(Vector3(sx, sy, sz))
 	var lo := 5.0
-	var hi := 300.0
+	var hi := 400.0
 	for _i in range(48):   # 二分收敛到 <0.01m
 		var mid := (lo + hi) * 0.5
-		if _room_fits_vertically(mid, pitch, half, wall, half_fov):
+		if _room_fits(mid, pitch, corners, tan_h, tan_v):
 			hi = mid
 		else:
 			lo = mid
 	return hi * INDOOR_FIT_MARGIN
 
-## 给定轨道距离，房间竖直极点是否都落进竖直半 FOV（在 y-z 平面判角）。
-func _room_fits_vertically(dist: float, pitch: float, half: float, wall: float, half_fov: float) -> bool:
-	var cam := Vector2(sin(pitch) * dist, cos(pitch) * dist)   # (y, z)
-	var look := (Vector2.ZERO - cam).normalized()              # 看向 focus(原点)
-	var front_bottom := Vector2(0.0, half) - cam               # 前地板近沿
-	var back_top := Vector2(wall, -half) - cam                 # 后墙顶
-	return absf(look.angle_to(front_bottom)) <= half_fov \
-		and absf(look.angle_to(back_top)) <= half_fov
+## 给定轨道距离，房间盒子 8 角是否都落进相机视锥（竖直 + 水平两轴）。
+func _room_fits(dist: float, pitch: float, corners: Array[Vector3], tan_h: float, tan_v: float) -> bool:
+	var cam := Vector3(0.0, sin(pitch) * dist, cos(pitch) * dist)
+	var forward := (-cam).normalized()                          # 看向 focus(原点)
+	var right := forward.cross(Vector3.UP).normalized()
+	var up := right.cross(forward).normalized()
+	for p in corners:
+		var rel := p - cam
+		var zc := rel.dot(forward)                              # 视深（正=在相机前方）
+		if zc <= 0.01:
+			return false
+		if absf(rel.dot(right)) > tan_h * zc or absf(rel.dot(up)) > tan_v * zc:
+			return false
+	return true
 
 func _make_day_sky() -> Sky:
 	var noise := FastNoiseLite.new()
