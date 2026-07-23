@@ -39,6 +39,7 @@ UNIT_TESTS=(
   test_placeholder_specs
   test_sdf_animator
   test_world_grid
+  test_transition_fade
   test_terrain_map
   test_terrain_atlas
   test_scifi_items

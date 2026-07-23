@@ -4863,12 +4863,18 @@ func _update_portal_markers() -> void:
 		_place_portal_node(node as Node3D, m["logical"], 0.0)
 
 ## 过场黑幕推进：淡入 → 全黑后才发 enter_scene → 卸旧载新 → 区块铺完 → 淡出。
+## 把过场遮罩不透明度 cur 朝 target 推进一个 step，抵达即钉住 target。
+## 用 move_toward 而非手写 ±step：后者在 cur==target 时（loading 页停在全遮挡等区块/内容包铺完）
+## 仍每帧减一个 step、下帧再加回，令 _fade_a 在 target↔(target-step) 逐帧抖动 → 遮罩不透明度脉动
+## → 画面亮度快速闪烁（真机 30fps 实测 175↔186 每帧，见换场景闪烁定位）。move_toward 抵达目标即停。
+static func fade_advance(cur: float, target: float, step: float) -> float:
+	return clampf(move_toward(cur, target, step), 0.0, 1.0)
+
 func _step_transition(delta: float) -> void:
 	if not _transitioning and _fade_a <= 0.0:
 		return
 	_transition_t += delta
-	var step := delta / FADE_TIME
-	_fade_a = clampf(_fade_a + (step if _fade_target > _fade_a else -step), 0.0, 1.0)
+	_fade_a = fade_advance(_fade_a, _fade_target, delta / FADE_TIME)
 	if _fade_rect != null:
 		_fade_rect.visible = _fade_a > 0.001
 		_fade_rect.modulate.a = _fade_a
