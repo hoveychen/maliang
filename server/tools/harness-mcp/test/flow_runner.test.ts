@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildRunnerArgs, parseRunnerJson, RUNNER_PATH } from "../src/flow_runner.ts";
+import { buildRunnerArgs, parseRunnerJson, compactFlows, RUNNER_PATH } from "../src/flow_runner.ts";
 
 test("buildRunnerArgs list：--list --with-availability + host/port（连游戏标 available）", () => {
   const a = buildRunnerArgs("list", { host: "127.0.0.1", port: 8578 });
@@ -44,4 +44,26 @@ test("parseRunnerJson：多行 JSON 时取最后一个对象", () => {
 
 test("parseRunnerJson：无任何 JSON 行抛错", () => {
   assert.throws(() => parseRunnerJson("just logs\nno json here\n"), /未输出可解析 JSON/);
+});
+
+test("compactFlows：抽出 name/kind/desc 并把 available.ok 归一成 true/false/null", () => {
+  const list = {
+    ok: true,
+    flows: [
+      { name: "enter_world", kind: "setup", desc: "进世界", available: { ok: true, reasons: [] } },
+      { name: "naming_e2e", kind: "regression", desc: "造物起名", available: { ok: false, reasons: ["世界未就绪"] } },
+      { name: "no_avail", kind: "setup", available: { ok: null } },
+    ],
+  };
+  assert.deepEqual(compactFlows(list), [
+    { name: "enter_world", kind: "setup", available: true, desc: "进世界" },
+    { name: "naming_e2e", kind: "regression", available: false, desc: "造物起名" },
+    { name: "no_avail", kind: "setup", available: null, desc: undefined },
+  ]);
+});
+
+test("compactFlows：缺 flows 字段 / null 入参 → 空数组（绝不让 observe 挂）", () => {
+  assert.deepEqual(compactFlows(null), []);
+  assert.deepEqual(compactFlows({}), []);
+  assert.deepEqual(compactFlows({ flows: "oops" as unknown as [] }), []);
 });
