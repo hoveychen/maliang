@@ -92,7 +92,17 @@ func _tick() -> void:
 		return # CONNECTING：等握手完成
 
 	match _step:
-		0: # inject handshake：换 ScriptedAsr（真机不推 user:// 标志的入口）
+		0: # say 未先 inject：_do_say 应自动补 inject，而非报「asr 不是 ScriptedAsr」（P1，say 自动 inject）
+			if not _sent:
+				_send({"op": "say", "text": "自动注入测试"}); _sent = true; return
+			var line := _recv_line()
+			if line.is_empty(): return
+			print("[线路：say 未先 inject 自动补]")
+			var r := _parse(line)
+			# 关键：ok==true（不是 asr-不是-ScriptedAsr 的错误）证明 say 自动补了 inject。
+			_fails += _check("say 未先 inject 也 ok", r.get("ok"), true)
+			_advance()
+		1: # inject handshake：换 ScriptedAsr（真机不推 user:// 标志的入口；此刻 say 已自动切过，幂等）
 			if not _sent:
 				_send({"op": "inject"}); _sent = true; return
 			var line := _recv_line()
@@ -103,7 +113,7 @@ func _tick() -> void:
 			_fails += _check("inject injected", r.get("injected"), true)
 			_fails += _check("inject 后 ready", r.get("ready"), true)
 			_advance()
-		1: # state 快照往返
+		2: # state 快照往返
 			if not _sent:
 				_send({"op": "state"}); _sent = true; return
 			var line := _recv_line()
@@ -113,7 +123,7 @@ func _tick() -> void:
 			_fails += _check("state ok", r.get("ok"), true)
 			_fails += _check("state 带 vc_ready", r.get("vc_ready"), true)
 			_advance()
-		2: # 坏输入被拒（错误也回一行）
+		3: # 坏输入被拒（错误也回一行）
 			if not _sent:
 				_client.put_data("this is not json\n".to_utf8_buffer()); _sent = true; return
 			var line := _recv_line()
