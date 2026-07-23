@@ -13,8 +13,8 @@ const COMPOSE := preload("res://tools/scene_compose.gd")
 const HEADER_BYTES := 11
 
 ## 各场景网格边长（tile 数）——须与 server/src/terrain.ts PRESET_GRIDS 一致。
-## 室内一律 50 格（house-interiors：home_interior 玩家家 + snow_interior 七矮人小屋 + …）。
-const SCENE_GRIDS := { "village": 75, "village_forest": 100, "oz": 75, "home_interior": 50, "snow_interior": 50 }
+## 室内一律 50 格（house-interiors：home_interior 玩家家 + snow_interior 七矮人小屋 + oz_castle_interior 翡翠城堡 + …）。
+const SCENE_GRIDS := { "village": 75, "village_forest": 100, "oz": 75, "home_interior": 50, "snow_interior": 50, "oz_castle_interior": 50 }
 
 func _init() -> void:
 	var scene_id := _arg("--scene", "village")
@@ -149,7 +149,17 @@ static func build_portal_json(scene_id: String) -> Array:
 			{ "tile": [30, 92], "radius": 2.5, "toScene": "snow_interior", "toTile": [24, 22] },
 		]
 	if scene_id == "oz":
-		return [{ "tile": [16, 20], "radius": 3.0, "toScene": "village_forest", "toTile": [26, 80] }]
+		# 原路回村 + 翡翠城堡进门（house-interiors P2）。城堡 emerald_castle 锚点 (58,50) footprint
+		# [57-59,49-51]、门朝南(+y)迎黄砖路广场（poi_emerald 58,56）；进门 portal (58,53) 在门前广场一格，
+		# radius 2.5；落点 (24,22) = 室内后排，离室内返回门 (24,30) = 8 > 2.5（防弹回）。
+		return [
+			{ "tile": [16, 20], "radius": 3.0, "toScene": "village_forest", "toTile": [26, 80] },
+			{ "tile": [58, 53], "radius": 2.5, "toScene": "oz_castle_interior", "toTile": [24, 22] },
+		]
+	if scene_id == "oz_castle_interior":
+		# 翡翠城堡室内：返回门放在前开口边缘 (24,30)（房间 [19..30]）。
+		# 落点 (58,56) 在广场（poi_emerald），离城堡进门 (58,53) = 3 > 2.5（防出门即弹回）。
+		return [{ "tile": [24, 30], "radius": 2.5, "toScene": "oz", "toTile": [58, 56] }]
 	if scene_id == "home_interior":
 		# 室内重做：返回门放在房间【前开口边缘】(24,30)——前墙不建（朝相机那面开着，见 RoomStage），
 		# 房间 [19..30]（ROOM_N=12），前开口 = max y = 30。走向前开口 = 走出家门。radius 2.5 是前门中央的门口范围；

@@ -121,6 +121,21 @@ const SNOW_INTERIOR_FURNITURE := [
 	{ "item": "dwarf_bowl", "tile": Vector2i(25, 28), "yaw": 0.0, "search": 1 },
 ]
 
+## 翡翠城堡室内（oz_castle_interior，house-interiors P2）——oz 无现成户外家具，摆一套新 authored 家具
+## （复用 toy_* 通用家具，非新 SDF 资产：奥兹魔法师的「王座厅」小客厅）。房间 [19..30]²（同室内几何）。
+## 后墙中央一张沙发当「王座」，中央茶几+两椅，角落书架/落地灯/盆栽点缀；克制，别塞满。
+## 留：后排中线 (24,22) 落地点 + 中线到前门 (24,30) 走道（茶几居中让开中线两侧）。
+const OZ_CASTLE_INTERIOR_FURNITURE := [
+	{ "item": "toy_sofa",     "tile": Vector2i(24, 20), "yaw": 180.0, "search": 1 },  # 王座（后墙中央）
+	{ "item": "toy_bookcase", "tile": Vector2i(20, 20), "yaw": 90.0,  "search": 1 },  # 后-左角书架
+	{ "item": "toy_lamp",     "tile": Vector2i(28, 20), "yaw": 270.0, "search": 1 },  # 后-右角落地灯
+	{ "item": "toy_table",    "tile": Vector2i(24, 25), "yaw": 0.0,   "search": 1 },  # 中央茶几
+	{ "item": "toy_chair",    "tile": Vector2i(21, 25), "yaw": 90.0,  "search": 1 },  # 茶几左椅
+	{ "item": "toy_chair",    "tile": Vector2i(27, 25), "yaw": 270.0, "search": 1 },  # 茶几右椅
+	{ "item": "toy_plant",    "tile": Vector2i(20, 29), "yaw": 90.0,  "search": 1 },  # 前-左盆栽
+	{ "item": "toy_plant",    "tile": Vector2i(28, 29), "yaw": 270.0, "search": 1 },  # 前-右盆栽
+]
+
 ## 内置物品的占地/压路语义（与 server items.ts BUILTIN_ITEMS 必须同步；
 ## P4 起客户端渲染层也从这里取 footprint——单一副本，别在别处再抄）。
 const ITEM_SPAN := {
@@ -129,8 +144,9 @@ const ITEM_SPAN := {
 	"walking_hut": 3, "hop_mailbox": 3,
 	"emerald_castle": 3,
 	"dwarf_cottage": 3,  # 七矮人合住小木屋（dwarf-cottage 计划）
-	# 七矮人操场布景（s1-snow-white P7）：床/桌 3×3 与 server items.ts toy_bed_single/toy_table 同步。
-	"toy_bed_single": 3, "toy_table": 3,
+	# 室内家具 3×3（house-interiors，与 server items.ts 的 span 同步）：床/桌/沙发。
+	# 其余家具（椅/书架/灯/盆栽/熊/茶几/电视）span 1，走默认，不必列。
+	"toy_bed_single": 3, "toy_table": 3, "toy_sofa": 3,
 }
 const ITEM_PATH_OK := { "well": true }
 
@@ -178,6 +194,9 @@ static func compose(scene_id: String) -> Dictionary:
 	elif scene_id == "snow_interior":
 		# 室内 authored 家具（床/桌/碗），全在房间 tile 内；无散布层（室内不长树/草）。
 		for f in SNOW_INTERIOR_FURNITURE:
+			_place_anchor(item_ref, item_arg, palette, f)
+	elif scene_id == "oz_castle_interior":
+		for f in OZ_CASTLE_INTERIOR_FURNITURE:
 			_place_anchor(item_ref, item_arg, palette, f)
 
 	# ── 分区散布：全图行主序逐 tile 判定（草丛不占位，其余 1×1 占地）──
