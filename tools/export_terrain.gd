@@ -104,7 +104,7 @@ const POIS_VF := [
 ## 互动是 task:deliver（对象是角色不是地点），POI 只供点点引路提示 / 「去翡翠城」地点名解析。
 const POIS_OZ := [
 	{ "tile": [36, 34], "radius": 14.0, "trigger": "poi_cornfield", "name": "玉米地", "aliases": ["稻草人", "玉米田"] },
-	{ "tile": [58, 56], "radius": 14.0, "trigger": "poi_emerald", "name": "翡翠城", "aliases": ["绿城", "城堡", "铁皮人家"] },
+	{ "tile": [58, 59], "radius": 14.0, "trigger": "poi_emerald", "name": "翡翠城", "aliases": ["绿城", "城堡", "铁皮人家"] },
 ]
 
 ## 「谁的家」建筑住户表（interaction-feedback B 档，POST /admin/scenes 的 homes 载荷）。
@@ -185,17 +185,17 @@ static func build_portal_json(scene_id: String) -> Array:
 				"toScene": interior_id, "toTile": _land(interior_id) })
 		return vf_portals
 	if scene_id == "oz":
-		# 原路回村 + 翡翠城堡进门（house-interiors P2）。城堡 emerald_castle 锚点 (58,50) footprint
-		# [57-59,49-51]、门朝南(+y)迎黄砖路广场（poi_emerald 58,56）；进门 portal (58,53) 在门前广场一格，
+		# 原路回村 + 翡翠城堡进门（tile-dimensional 重排）。城堡 emerald_castle 锚点 (58,53) 7×7 footprint
+		# [55-61,50-56]、门朝南(+y)迎南侧广场（poi_emerald 58,59）；进门 portal (58,57) 在城堡南墙前一格，
 		# radius 2.5；落点 (24,22) = 室内后排，离室内返回门 (24,30) = 8 > 2.5（防弹回）。
 		return [
 			{ "tile": [16, 20], "radius": 3.0, "toScene": "village_forest", "toTile": [26, 80] },
-			{ "tile": [58, 53], "radius": 2.5, "toScene": "oz_castle_interior", "toTile": _land("oz_castle_interior") },
+			{ "tile": [58, 57], "radius": 2.5, "toScene": "oz_castle_interior", "toTile": _land("oz_castle_interior") },
 		]
 	if scene_id == "oz_castle_interior":
 		# 翡翠城堡室内（12×12）：返回门放在前开口边缘中线（room_front_tile → (24,30)）。
-		# 落点 (58,56) 在广场（poi_emerald），离城堡进门 (58,53) = 3 > 2.5（防出门即弹回）。
-		return [{ "tile": _front(scene_id), "radius": 2.5, "toScene": "oz", "toTile": [58, 56] }]
+		# 落点 (58,60) 在南侧广场（poi_emerald 58,59），离城堡进门 (58,57) = 3 > 2.5（防出门即弹回）。
+		return [{ "tile": _front(scene_id), "radius": 2.5, "toScene": "oz", "toTile": [58, 60] }]
 	if scene_id == "home_interior":
 		# 室内重做：返回门放在房间【前开口边缘】中线（room_front_tile；home 9×9 → (23,27)）——前墙不建
 		# （朝相机那面开着，见 RoomStage），前开口 = max y = origin+N-1。走向前开口 = 走出家门。radius 2.5

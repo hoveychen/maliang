@@ -397,8 +397,8 @@ export const WIZARD_OF_OZ: StoryBook = {
       voiceId: 'zh-CN-YunyangNeural',
       visualDescription:
         'a shiny tin man made of riveted silver metal with a small funnel hat, a red heart painted on his chest, round gentle eyes and a soft smile, a tiny oil can at his side, friendly and not scary, standing upright like a person',
-      // 黄砖路尽头翡翠城广场近端（P3 _paint_oz 翡翠城锚点）。
-      position: { tileX: 56, tileY: 54 },
+      // 翡翠城堡(7×7 @ 58,53)南侧广场（tile-dimensional 重排后，原 (56,54) 已落进城堡 footprint）。
+      position: { tileX: 56, tileY: 59 },
       greetingStyle: 'gentle',
     },
   ],

@@ -133,8 +133,8 @@ func _init() -> void:
 	fails += _check("oz 载入 ok", oz["ok"], true)
 	fails += _check("oz 入口广场(14,14)留平 h0", TerrainMap.tile_height(Vector2i(14, 14)), 0)
 	fails += _check("oz 玉米地(36,34)留平 h0", TerrainMap.tile_height(Vector2i(36, 34)), 0)
-	fails += _check("oz 翡翠城堡(58,50)在高台顶 h3", TerrainMap.tile_height(Vector2i(58, 50)), 3)
-	fails += _check("oz 铁皮人(56,54)在高台顶 h3", TerrainMap.tile_height(Vector2i(56, 54)), 3)
+	fails += _check("oz 翡翠城堡(58,53)在高台顶 h3", TerrainMap.tile_height(Vector2i(58, 53)), 3)
+	fails += _check("oz 铁皮人(56,59)在广场 h3", TerrainMap.tile_height(Vector2i(56, 59)), 3)
 	fails += _check("oz 路中缓丘顶(44,42) h2", TerrainMap.tile_height(Vector2i(44, 42)), 2)
 	# 全场可爬性：任意 4-相邻的非水 tile 高差必须 ≤1（step_allowed 上限），oz 无意为之的陡崖
 	var oz_cliff := 0

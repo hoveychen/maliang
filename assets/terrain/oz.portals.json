@@ -1,0 +1,26 @@
+[
+  {
+    "radius": 3.0,
+    "tile": [
+      16,
+      20
+    ],
+    "toScene": "village_forest",
+    "toTile": [
+      26,
+      80
+    ]
+  },
+  {
+    "radius": 2.5,
+    "tile": [
+      58,
+      57
+    ],
+    "toScene": "oz_castle_interior",
+    "toTile": [
+      22,
+      22
+    ]
+  }
+]

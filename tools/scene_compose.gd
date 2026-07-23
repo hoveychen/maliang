@@ -81,11 +81,12 @@ const SDF_PROPS_VF := [
 	# 七矮人的碗（原烘在户外操场，house-interiors 已移进 snow_interior 室内餐桌旁，见 SNOW_INTERIOR_FURNITURE）。
 ]
 
-## 第一季册 5《绿野仙踪》独立场景（oz，75 格）的手工地标：翡翠城 = 黄砖路尽头的翡翠城堡
-## （span-3 emerald_castle 立在翡翠广场北缘草地上，广场/黄砖路留给铁皮人 56,54 与小朋友）。
-## 坐标见 docs/season-1-outline.md §4。P4 起用专属奥兹 prop（emerald_castle 替原 3 座 house）。
+## 第一季册 5《绿野仙踪》独立场景（oz，75 格）的手工地标：翡翠城 = 黄砖路尽头的翡翠城堡。
+## tile-dimensional：emerald_castle footprint 由 span-3 提到真实 7×7（分档表「城堡类 7×7」），
+## 锚点从 (58,50) 南移到台地中央 (58,53)——7×7 全落 height-3 台地（x[55,61]×y[50,56] 已核平），
+## 南侧 y57..60 留给铁皮人与小朋友的广场；门朝南(+y)迎黄砖路。坐标见 docs/season-1-outline.md §4。
 const LANDMARKS_OZ := [
-	{ "item": "emerald_castle", "tile": Vector2i(58, 50), "yaw": 180.0, "search": 3 },  # 翡翠城堡：黄砖路尽头、广场北缘（门朝南迎路）
+	{ "item": "emerald_castle", "tile": Vector2i(58, 53), "yaw": 180.0, "search": 3 },  # 翡翠城堡(7×7)：翡翠台地中央、门朝南、南留广场
 ]
 
 ## oz 的 SDF 可动物件：黄砖路两处路牌（入口 + 玉米地岔口，呼应「找回家的路」）+ 玉米地一支风车点缀。
@@ -166,14 +167,14 @@ const ITEM_FOOTPRINT := {
 	"well": Vector2i(3, 3), "windmill": Vector2i(3, 3),
 	"house_0": Vector2i(3, 3), "house_1": Vector2i(3, 3), "house_2": Vector2i(3, 3), "house_3": Vector2i(3, 3),
 	"walking_hut": Vector2i(3, 3), "hop_mailbox": Vector2i(3, 3),
-	"emerald_castle": Vector2i(3, 3),
+	"emerald_castle": Vector2i(7, 7),  # tile-dimensional：城堡类 7×7（与 server items.ts / builtin_items.json 同步）
 	"dwarf_cottage": Vector2i(3, 3),  # 七矮人合住小木屋（dwarf-cottage 计划）
 	# 室内家具真实比例（interior-camera-and-size，与 server items.ts 同步）：床 1×2、桌 2×2、沙发 2×1。
 	# 其余家具（椅/书架/灯/盆栽/熊/茶几/电视）1×1，走默认，不必列。
 	"toy_bed_single": Vector2i(1, 2), "toy_bed_bunk": Vector2i(1, 2),
 	"toy_table": Vector2i(2, 2), "toy_sofa": Vector2i(2, 1),
 }
-const ITEM_PATH_OK := { "well": true }
+const ITEM_PATH_OK := { "well": true, "emerald_castle": true }  # 城堡立翡翠黄砖广场上（Emerald City 铺装城，非挡路）
 
 ## 散布判定结果 → 物品 id（变体由外观 hash 选，与运行时 _skin 同款算式）。
 const DECO_NONE := 0
@@ -367,8 +368,8 @@ static func _deco_kind_oz(gt: Vector2i) -> int:
 		if posmod(gt.x + gt.y, 2) == 0 and roll < 55:
 			return DECO_CORN
 		return DECO_TUFT if roll < 30 else DECO_NONE
-	# 翡翠城广场周边（56,54 半径 8）：整洁疏树
-	if _tor_dist(gt, Vector2i(56, 54)) <= 8.0:
+	# 翡翠城广场周边（城堡 7×7 中央 58,53 起南侧广场，半径 9 罩住城堡+广场）：整洁疏树
+	if _tor_dist(gt, Vector2i(58, 55)) <= 9.0:
 		if roll < 6:
 			return DECO_TREE
 		return DECO_TUFT if roll < 16 else DECO_NONE
