@@ -93,3 +93,16 @@
 - 不引入进世界的 seed/瞬移后门（与 R6 冲突）。
 - 不动游戏客户端/服务端业务代码（纯 harness 工具层）。
 - 不做 flow 的可视化编排/DAG（真有需要再议）。
+
+## 7. 后续演进（2026-07-23 老板拍板）：CLI 砍成与 MCP 对等的单一 CLI
+
+> 背景：flow 已能注册，但 agent（尤其 headless dispatch）常不知道有现成 flow → 手搓重走前置。先把「有 flow」的提示推到 agent 起手就见的面（MCP `observe/state/access` 描述 + 回包 `flows_hint`/`available_flows`；CLI 同口径，合 main `a8dface`）。随后老板要求把 CLI **砍成与 MCP 对等的单一 CLI**（合 main `11d6ae5`）——起因：CLI 长期堆着 legacy 盲坐标/设备子命令，agent 被反复要求砍却「阳奉阴违」。
+
+**决策（老板拍板）：**
+- **只保留一个 CLI**：`test/e2e/pilot_cli.py`。原 `pilot_runner.py` 删，其 `run_flow`/`run_script`/`load_run` 折入 pilot_cli.py。MCP（`flow_runner.ts`）/web（`serve_web.ts`）/CLI 三入口仍经**同一个** `pilot_cli.py`（`list-flows`/`run-flow`）子进程——单一执行路径不变。
+- **命令面 = 与 MCP 10 工具对等 + 流程引擎**：感知/动作 `state`/`access`/`actions`/`do`/`observe`/`say`/`wait`/`shot`（curated 走 `MonkeyHarness` 玩家 SDK，无 god op），加 `list-flows`/`run-flow`（`MonkeyHarness`）/`run-script`（完整 `Harness` 逃生口）。
+- **22 个 legacy 子命令全砍**（`ui`/`tap`/`drag`/`swipe`/`long-press`/`pinch`/`click`/`phone`/`pick`/`pickup`/`scene`/`teleport`/`accept`/`replay`/`retry`/`talk-fairy`/`talk-npc`/`wait-world`/`wait-banner`/`wait-speaking`/`reset-budget`/`reset-intro`）+ `inject`。capability 不丢：`talk/scene/pick/phone/pickup/accept` 经 `do <action_id>`（与 MCP 一致）；真正的盲坐标/设备手势（`h.tap()/h.drag()/h.teleport()/h.reset_budget()` 等）只在 `run-script` + 完整 `Harness` SDK 里——`harness.py` 的 `Harness(MonkeyHarness)` 子类正好是这条 god-op 边界。
+- **`say` 自动补 `inject`**：改在 `scripts/debug_cmd_server.gd` 的 `_do_say`（ASR 非 ScriptedAsr 时先 `_do_inject` 再喂）——单一来源同时覆盖 MCP+CLI+脚本，`say` 单命令即可用（MCP 无独立 inject 工具也能说）。这解掉了「字面对齐 MCP 10 工具会让 say 用不了」的岔路。
+- **argparse 约束**：全局 `--host/--port` 必须在子命令**之前**（subparser 规则）；`flow_runner.ts` 的 `CLI_PATH`/`buildRunnerArgs` 已按此排。
+
+**非目标（沿用 §6）**：run-script 逃生口不是给 agent 日常用的——它是回归脚本/设备摄影脚本的入口，legacy/device 手势刻意只落在这条路，不回到 curated 命令面。
