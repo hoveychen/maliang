@@ -80,6 +80,25 @@ export async function listFlows(opts: RunnerOpts): Promise<Record<string, unknow
   return parseRunnerJson(r.stdout);
 }
 
+// 把 listFlows 的完整回包压成 observe 首连要带的极简摘要（纯函数,给 node:test）。
+// observe 是 agent 起手最先够到的工具,却只字不提 flow——这里把「有哪些现成 flow、现在哪条能跑」
+// 直接推进 observe 回包,让 agent 在决定手搓前就看见「这事有现成流程」的信号。
+export type FlowBrief = { name: string; kind: unknown; available: boolean | null; desc?: string };
+export function compactFlows(listResult: Record<string, unknown> | null | undefined): FlowBrief[] {
+  const flows = Array.isArray((listResult as Record<string, unknown>)?.flows)
+    ? ((listResult as Record<string, unknown>).flows as Record<string, unknown>[])
+    : [];
+  return flows.map((f) => {
+    const avail = (f?.available as Record<string, unknown> | undefined)?.ok;
+    return {
+      name: String(f?.name ?? ""),
+      kind: f?.kind ?? null,
+      available: avail === true ? true : avail === false ? false : null,
+      desc: f?.desc ? String(f.desc) : undefined,
+    };
+  });
+}
+
 // 按名跑 flow（子进程 --flow，连 opts 指定的游戏口）。回 runner 的 {ok,flow,ran,coverage,delta,duration} 或 {ok:false,error}。
 // 超时给足：enter_world 冷启导航实测 ~26s,回归链更久 → 缺省 240s。
 export async function runFlow(

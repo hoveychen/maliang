@@ -5,12 +5,19 @@
 // 协议：stdout 只走 JSON-RPC，日志一律 stderr。
 import { TcpClient, type Reply } from "./tcp_client.ts";
 import { diffState, type State } from "./delta.ts";
-import { listFlows, runFlow } from "./flow_runner.ts";
+import { listFlows, runFlow, compactFlows, type FlowBrief } from "./flow_runner.ts";
 
 const HOST = process.env.MALIANG_HARNESS_HOST || "127.0.0.1";
 const PORT = Number(process.env.MALIANG_HARNESS_PORT || "8578");
 const client = new TcpClient(HOST, PORT);
 let lastState: State | null = null;
+// observe 首连拉一次现成 flow 摘要缓存（拉到非空即缓存，之后不再拉；拉不到下次 observe 再试）。
+let flowsBrief: FlowBrief[] | null = null;
+
+// 观察工具通用「推」：agent 起手最先够到 observe/state/access，却看不到「这事有现成 flow」。
+// 把这句钉进这三个工具的回包里，让它在决定手搓前就撞见信号（描述里也写了同一句）。
+const FLOWS_HINT =
+  "★ 要跑完整链路先 list_flows：进世界/onboarding/造物起名等前置多半已有现成 flow 可复用（run_flow 跑），别手搓重走。";
 
 function log(...a: unknown[]): void {
   process.stderr.write("[harness-mcp] " + a.map((x) => String(x)).join(" ") + "\n");
@@ -84,7 +91,18 @@ async function toolObserve(): Promise<Reply> {
   const state = await client.send({ op: "state" });
   lastState = state as State;
   const actions = await client.send({ op: "actions" });
-  return { ok: true, state, actions: actions.actions ?? [] };
+  // 把「有哪些现成 flow、现在哪条能跑」推进 observe 回包（best-effort：拉不到只带静态 hint，绝不让 observe 挂）。
+  if (!flowsBrief) {
+    try {
+      const brief = compactFlows(await listFlows({ host: HOST, port: PORT }));
+      if (brief.length) flowsBrief = brief;
+    } catch {
+      /* 游戏没连上 / 无 python：只带静态 hint，下次 observe 再试 */
+    }
+  }
+  const out: Reply = { ok: true, state, actions: actions.actions ?? [], flows_hint: FLOWS_HINT };
+  if (flowsBrief && flowsBrief.length) out.available_flows = flowsBrief;
+  return out;
 }
 
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
@@ -141,12 +159,16 @@ function textContent(obj: unknown): Content {
 const TOOLS = [
   {
     name: "observe",
-    description: "感知当前状态 + 可用动作（一次读全再决策）。返回 {state, actions}。",
+    description:
+      "感知当前状态 + 可用动作（一次读全再决策）。返回 {state, actions, flows_hint, available_flows?}。" +
+      "★ 要跑完整链路先看 available_flows / list_flows：进世界/onboarding/造物起名等前置多半已有现成 flow 可复用，别手搓重走。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "access",
-    description: "无障碍元素列表：3D 实体（NPC/仙子/POI/portal/道具）+ 2D 控件，各带稳定 id、屏幕矩形、可用动作。",
+    description:
+      "无障碍元素列表：3D 实体（NPC/仙子/POI/portal/道具）+ 2D 控件，各带稳定 id、屏幕矩形、可用动作。" +
+      "★ 跑链路前先 list_flows 看有没有现成流程（进世界/onboarding/造物等前置已有 flow 可复用），别手搓重走。",
     inputSchema: {
       type: "object",
       properties: { texts: { type: "boolean", description: "附带可读 Label 文本" } },
@@ -160,7 +182,9 @@ const TOOLS = [
   },
   {
     name: "state",
-    description: "结构化状态快照（fsm_state/player_tile/npcs/bag/phone/creation… 全量）。",
+    description:
+      "结构化状态快照（fsm_state/player_tile/npcs/bag/phone/creation… 全量）。" +
+      "★ 跑链路前先 list_flows 看有没有现成流程可复用，别手搓重走前置。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
