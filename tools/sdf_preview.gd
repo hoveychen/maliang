@@ -70,7 +70,7 @@ func _run() -> void:
 	var out := _arg("--out", "/tmp/%s.png" % id)
 	_elev = float(_arg("--elev", "45"))
 	_azim = float(_arg("--azim", "30"))
-	var prop := SdfProp.from_json_file("res://assets/sdf_props/%s.json" % id)
+	var prop: SdfProp = SdfProp.from_json_file("res://assets/sdf_props/%s.json" % id)
 	if prop == null:
 		push_error("[preview] 解析失败: %s" % id)
 		quit(1)

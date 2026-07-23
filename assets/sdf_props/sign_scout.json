@@ -6,7 +6,7 @@
     "#6e4a32"
   ],
   "blend": 0.2,
-  "outline": 0.04,
+  "outline": 0.0,
   "parts": [
     {
       "shape": "capsule",

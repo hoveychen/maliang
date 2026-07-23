@@ -2,7 +2,7 @@
   "name": "portal_arch",
   "palette": ["#6e4a32", "#b58cf0", "#ffe08a"],
   "blend": 0.16,
-  "outline": 0.04,
+  "outline": 0.0,
   "color_k": 0.08,
   "parts": [
     {"shape": "capsule", "pos": [-1.05, 1.35, 0], "r": 0.14, "len": 2.5, "color": 0},

@@ -6,7 +6,7 @@
     "#f4ead4"
   ],
   "blend": 0.22,
-  "outline": 0.04,
+  "outline": 0.0,
   "parts": [
     {
       "shape": "capsule",

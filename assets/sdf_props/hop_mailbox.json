@@ -6,7 +6,7 @@
     "#e8574b"
   ],
   "blend": 0.26,
-  "outline": 0.04,
+  "outline": 0.0,
   "parts": [
     {
       "shape": "sphere",
