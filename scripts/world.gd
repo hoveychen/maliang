@@ -3281,7 +3281,12 @@ func _unhandled_input(event: InputEvent) -> void:
 					if _is_indoor():
 						_place_tile = _clamp_tile_to_room(_place_tile) # 室内：夹进房间地板，别摆到墙外暗 void
 					if _place_is_edge:
-						_place_edge = _nearest_edge(g)
+						if _is_indoor():
+							var w := _snap_to_room_wall(_place_tile) # 室内贴纸吸到最近的墙
+							_place_tile = Vector2i(w.x, w.y)
+							_place_edge = w.z
+						else:
+							_place_edge = _nearest_edge(g)
 					_refresh_place_ghost()
 		return
 	# 调试：选中角色后按 Enter/空格。点点→造角色；其他→本地 move_to（离线演示）。
@@ -3989,6 +3994,7 @@ var _place_is_edge := false         ## true=贴纸（贴 tile 边），false=til
 var _place_tile := Vector2i.ZERO    ## 当前目标 tile（锚点）
 var _place_yaw := 0.0               ## tile 物品朝向 0/90/180/270
 var _place_edge := TerrainMap.EDGE_S ## 贴纸选中的边（吸附光标最近边）
+var _place_wall_lift := 0.0          ## 壁挂预览抬高（米）：室内周界墙边=墙高中段，其余=0 贴地
 var _place_legal := false           ## 当前位置是否合法（决定绿/红 + 能否确认）
 var _place_ghost: MeshInstance3D    ## footprint 高亮片（贴弯曲地表，随世界滚动重摆）
 var _place_nub: MeshInstance3D      ## 朝向指示小块（footprint 正面半格外）
@@ -6133,12 +6139,18 @@ func _begin_placement(item_id: String) -> void:
 	_place_edge = TerrainMap.EDGE_S
 	var anchor: Vector2 = player["logical"] if not player.is_empty() else focus_logical
 	if _place_is_edge:
-		var espot := _find_sticker_spot(WorldGrid.to_tile(WorldGrid.wrap_pos(anchor)))
-		if espot.z >= 0:
-			_place_tile = Vector2i(espot.x, espot.y)
-			_place_edge = espot.z
+		if _is_indoor():
+			# 室内：默认吸到离玩家最近的房间墙（beginplacement 也用墙面吸附，与点地一致）。
+			var w := _snap_to_room_wall(_clamp_tile_to_room(WorldGrid.to_tile(WorldGrid.wrap_pos(anchor))))
+			_place_tile = Vector2i(w.x, w.y)
+			_place_edge = w.z
 		else:
-			_place_tile = WorldGrid.to_tile(WorldGrid.wrap_pos(anchor))
+			var espot := _find_sticker_spot(WorldGrid.to_tile(WorldGrid.wrap_pos(anchor)))
+			if espot.z >= 0:
+				_place_tile = Vector2i(espot.x, espot.y)
+				_place_edge = espot.z
+			else:
+				_place_tile = WorldGrid.to_tile(WorldGrid.wrap_pos(anchor))
 	else:
 		var spot := _find_item_spot(WorldGrid.to_tile(WorldGrid.wrap_pos(anchor + Vector2(3.0, 2.0))))
 		_place_tile = spot if spot.x >= 0 else WorldGrid.to_tile(WorldGrid.wrap_pos(anchor))
@@ -6256,6 +6268,24 @@ func _rotate_placement() -> void:
 func _yaw_to_arg(yaw: float) -> int:
 	return int(round(fposmod(yaw, 360.0) / 360.0 * 256.0)) % 256
 
+## 室内壁挂吸附（home-wall-decor P2）：把目标 tile 吸到最近的房间周界墙 → (tile.x, tile.y, side)。
+## 三面墙：后墙 N(y=min)、左墙 W(x=min)、右墙 E(x=max)；前墙(S,y=max)不建、不参与。want 已夹进
+## 房间格。取到三墙的最近者，并列偏好后墙。占用的墙边不在此避让——合法性检查会红标，孩子沿墙
+## 另点即可（零挫败）。
+func _snap_to_room_wall(want: Vector2i) -> Vector3i:
+	var minx := ROOM_ORIGIN_TILE.x
+	var miny := ROOM_ORIGIN_TILE.y
+	var maxx := ROOM_ORIGIN_TILE.x + ROOM_N - 1
+	var maxy := ROOM_ORIGIN_TILE.y + ROOM_N - 1
+	var d_back := want.y - miny    # 到后墙
+	var d_left := want.x - minx    # 到左墙
+	var d_right := maxx - want.x   # 到右墙
+	if d_back <= d_left and d_back <= d_right:
+		return Vector3i(clampi(want.x, minx, maxx), miny, TerrainMap.EDGE_N)
+	if d_left <= d_right:
+		return Vector3i(minx, clampi(want.y, miny, maxy), TerrainMap.EDGE_W)
+	return Vector3i(maxx, clampi(want.y, miny, maxy), TerrainMap.EDGE_E)
+
 ## 点地落在 _place_tile 内的相对位置 → 最近的边（贴纸吸附）。+x=东 +y=南。
 func _nearest_edge(ground: Vector2) -> int:
 	var w := WorldGrid.wrap_pos(ground)
@@ -6299,9 +6329,15 @@ func _refresh_place_ghost() -> void:
 	var ts := WorldGrid.TILE_SIZE
 	var center_tile := Vector2(float(_place_tile.x) + 0.5, float(_place_tile.y) + 0.5)
 	if _place_is_edge:
-		# 贴纸：1×1 tile 上一条贴边的薄条（长边沿该边，往边法线外挪半格）。
 		var along_x := _place_edge == TerrainMap.EDGE_N or _place_edge == TerrainMap.EDGE_S
-		(_place_ghost.mesh as BoxMesh).size = Vector3(ts * 0.9, 0.14, 0.4) if along_x else Vector3(0.4, 0.14, ts * 0.9)
+		# 室内周界墙边：竖直面板贴墙（沿墙宽、竖 STICKER_H、薄）、抬到墙高；其余：贴地薄条。
+		var is_wall := _is_indoor() and ChunkManager.is_room_wall_edge(_place_tile, _place_edge, ROOM_ORIGIN_TILE, ROOM_N)
+		if is_wall:
+			(_place_ghost.mesh as BoxMesh).size = Vector3(ts * 0.9, ChunkManager.STICKER_H, 0.1) if along_x else Vector3(0.1, ChunkManager.STICKER_H, ts * 0.9)
+			_place_wall_lift = ChunkManager.WALL_STICKER_CENTER
+		else:
+			(_place_ghost.mesh as BoxMesh).size = Vector3(ts * 0.9, 0.14, 0.4) if along_x else Vector3(0.4, 0.14, ts * 0.9)
+			_place_wall_lift = 0.0
 		var off := Vector2.ZERO
 		match _place_edge:
 			TerrainMap.EDGE_N: off = Vector2(0.0, -0.5)
@@ -6311,6 +6347,7 @@ func _refresh_place_ghost() -> void:
 		center_tile += off
 		_place_nub.visible = false
 	else:
+		_place_wall_lift = 0.0  # tile 物品贴地，清掉可能残留的壁挂抬高
 		var span := ItemCatalog.footprint(_place_item_id, _yaw_to_arg(_place_yaw))
 		var origin := Vector2(float(_place_tile.x) - float(span.x - 1) / 2.0, float(_place_tile.y) - float(span.y - 1) / 2.0)
 		center_tile = origin + Vector2(float(span.x), float(span.y)) * 0.5
@@ -6334,7 +6371,9 @@ func _update_place_ghost() -> void:
 		return
 	var d := WorldGrid.shortest_delta(focus_logical, _place_ghost_logical)
 	var ty := float(TerrainMap.tile_height(_place_tile)) * TerrainMap.STEP_HEIGHT
-	_place_on_bent_ground(_place_ghost, Vector3(d.x, ty + 0.08, d.y))
+	# 壁挂预览抬到墙高中段（_place_wall_lift>0）；其余贴地（+0.08 悬浮防 z-fight）。
+	var gy := _place_wall_lift if _place_wall_lift > 0.0 else ty + 0.08
+	_place_on_bent_ground(_place_ghost, Vector3(d.x, gy, d.y))
 
 ## HUD 提示 + 「放这里」按钮按合法性启用/灰显。
 func _update_placement_hint() -> void:
