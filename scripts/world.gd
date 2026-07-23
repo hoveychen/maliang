@@ -6005,13 +6005,17 @@ func _prewarm_packs(wid: String, sid: String, rebuild_after := false) -> void:
 		if typeof(p) != TYPE_DICTIONARY:
 			continue
 		var h := String((p as Dictionary).get("hash", ""))
-		if h.is_empty() or pm.is_mounted(h):
-			continue # 已挂载：不重下不重挂（故到达 ensure_mounted = 确属新挂载）
+		var pname := String((p as Dictionary).get("name", "")) # 包名：供守卫按名判挂载（PackRegistry.pack_of 同名）
+		if h.is_empty():
+			continue
+		if pm.is_mounted(h):
+			pm.note_mounted_name(pname) # 已挂载：补记包名（启动期 _mount_cached 只见 hash 无名），不重下不重挂
+			continue
 		var path := await api.fetch_pack(h) # 已缓存秒回本地路径；未缓存则下载
 		if path.is_empty():
 			any_failed = true # 下载失败（离线等）：缺包由 chunk_manager 守卫跳过，不崩
 			continue
-		if pm.ensure_mounted(h):
+		if pm.ensure_mounted(h, pname):
 			mounted_any = true
 	if rebuild_after and mounted_any and chunk_manager != null:
 		chunk_manager.rebuild() # 后台预取：新包到位，重铺让主题 prop 补出来（load_resource 现能解析）
@@ -6025,11 +6029,12 @@ func _prewarm_packs(wid: String, sid: String, rebuild_after := false) -> void:
 ## 内容包离线提示的一次性闸（content-pck-distribution P4）：避免每次进场景都弹，一个会话提示一次即可。
 var _pack_offline_hinted := false
 
-## 非场景内容包后台预取（content-pck-distribution P5）：voice/bgm 不进场景 palette、不由
-## _prewarm_packs（manifest 驱动）覆盖，故 intro 期单独按包名从 GET /packs 拉。best-effort：
-## 拉不到不影响主线——story/item 语音缺失走 file_exists 兜底回落 live TTS，bgm 缺段由
-## _poll_bgm_load 跳过（carefree 留主包照放）。故不弹离线提示、不重铺区块（内容包不含地形 prop）。
-## 内容寻址永久缓存：下过一次即永久离线可用。一会话跑一次即可（_content_packs_prefetched 闸）。
+## 非场景内容包后台预取（content-pck-distribution P5）：bgm/voice_* 及 build_parts/stickers 不进场景
+## palette、不由 _prewarm_packs（manifest 驱动）覆盖，故 intro 期单独按包名从 GET /packs 拉。best-effort：
+## 拉不到不影响主线——story/item 语音缺失走 file_exists 兜底回落 live TTS，bgm 缺段由 _poll_bgm_load
+## 跳过（carefree 留主包照放），build_parts/stickers 缺则守卫跳过（拼装零件/背包贴纸暂空，联网后自愈）。
+## 故不弹离线提示、不重铺区块（内容包不含地形 prop）。内容寻址永久缓存：下过一次即永久离线可用。
+## 一会话跑一次即可（_content_packs_prefetched 闸）。
 var _content_packs_prefetched := false
 
 func _prefetch_content_packs() -> void:
@@ -6042,14 +6047,25 @@ func _prefetch_content_packs() -> void:
 	var index := await api.fetch_packs_index()
 	for name in index:
 		var n := String(name)
-		if n != "bgm" and not n.begins_with("voice_"):
-			continue # 主题模型包走场景 manifest（_prewarm_packs），这里只管非场景内容包
+		# 只管【非场景内容包】：主题模型包(toyroom/scifi/…)由场景 manifest 驱动 _prewarm_packs 按需挂。
+		# bgm/voice_* 不进任何场景 palette；build_parts(拼装小游戏零件)与 stickers(手机背包收藏预览)也不由
+		# 场景摆放触发挂载（stickers 另在其被摆进场景时由 manifest 兜一次，这里保证背包预览恒可用）——
+		# 故一并在此按包名预取，否则导出包里这两个包永无挂载路径 → 守卫恒跳过、零件/贴纸不渲染。
+		if n != "bgm" and not n.begins_with("voice_") and n != "build_parts" and n != "stickers":
+			continue
 		var h := String((index[name] as Dictionary).get("hash", ""))
-		if h.is_empty() or pm.is_mounted(h):
+		if h.is_empty():
+			continue
+		if pm.is_mounted(h):
+			pm.note_mounted_name(n) # 已挂载：补记包名（供守卫按名判挂载）
 			continue
 		var path := await api.fetch_pack(h) # 已缓存秒回；未缓存则下载（弱网失败返回空，跳过）
 		if not path.is_empty():
-			pm.ensure_mounted(h)
+			pm.ensure_mounted(h, n)
+	# bgm 内容包（cheery/happy）现已挂载 → 让 world 起播时跳过的两首补进轮播（不打断当前段）。
+	# game_audio 由 _setup_audio 无条件先建，intro 路径也在（best-effort：无则跳过）。
+	if game_audio != null:
+		game_audio.refresh_content_bgm()
 
 func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包

@@ -41,7 +41,33 @@ func _initialize() -> void:
 	_check("PackMounter 未挂载默认 false", pm.is_mounted("nope_%d" % Time.get_ticks_usec()), false)
 	_check("PackMounter 缺文件 ensure_mounted 返回 false", pm.ensure_mounted("missing_%d" % Time.get_ticks_usec()), false)
 	_check("PackMounter 空 hash ensure_mounted 返回 false", pm.ensure_mounted(""), false)
+
+	# --- PackMounter 按名挂载记账（content-pck 守卫的地基：守卫按包名判「能否安全 load」）---
+	# 缺文件挂载失败 → 不记名（离线时守卫仍应回 false，不误放行去碰 ResourceLoader 污染缓存）。
+	pm.ensure_mounted("missing_named_%d" % Time.get_ticks_usec(), "ghost_pack")
+	_check("挂载失败不记名 → is_pack_mounted false", pm.is_pack_mounted("ghost_pack"), false)
+	# note_mounted_name：把包名记进账（hash 已挂但当时没带名字的补记路径）。
+	pm.note_mounted_name("toyroom")
+	_check("note_mounted_name 后 is_pack_mounted true", pm.is_pack_mounted("toyroom"), true)
+	_check("未记名的包 is_pack_mounted false", pm.is_pack_mounted("winter"), false)
+	# 空名 no-op（不污染名字账；is_pack_mounted("") 恒 false）。
+	pm.note_mounted_name("")
+	_check("空名 note_mounted_name no-op", pm.is_pack_mounted(""), false)
+	# pack_available：编辑器/headless（从项目目录跑，本测试即是）恒 true——保证 headless 回测不被挂载守卫误跳。
+	_check("headless 下 pack_available 恒 true（未挂的包也是）", pm.pack_available("winter"), true)
 	pm.free()
+
+	# --- PackRegistry.pack_of：渲染键 → 所属包名（守卫据此分辨 base 主包 vs 内容包）---
+	_check("pack_of 未注册键返回空", PackRegistry.pack_of("__no_such_key__"), "")
+	var keys := PackRegistry.all_keys()
+	if keys.is_empty():
+		printerr("  FAIL pack_of 有注册键: all_keys 为空（index.json 未载入?）")
+		_fails += 1
+	else:
+		var sample := String(keys[0])
+		if String(PackRegistry.pack_of(sample)).is_empty():
+			printerr("  FAIL pack_of 已注册键 %s 应返回非空 pack 名" % sample)
+			_fails += 1
 
 	print("test_pack_cache: %d fail(s)" % _fails)
 	quit(_fails)

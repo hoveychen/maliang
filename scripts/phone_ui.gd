@@ -1706,8 +1706,12 @@ func _speak_item_name(item_id: String, def: Dictionary) -> void:
 	if not name_asset.is_empty():
 		_play_name_voice(name_asset)
 		return
+	# 预烧念名（154 内置物名）打进 "voice_items" 内容包(.pck)。包未挂载时【绝不】碰 ResourceLoader
+	# （exists/load 都会污染 ResourceCache，挂上后也 load 不出，见记忆 content-pck-android-load-stage-failure）——
+	# 直接回落运行时 TTS。挂载后（intro 期 _prefetch_content_packs 已下）才走预烧。
 	var baked := "res://assets/voice/items/%s.wav" % item_id
-	if ResourceLoader.exists(baked):
+	var pm: Node = _w.get_node_or_null(^"/root/PackMounter") if _w != null else null # PhoneUi 非 Node，经 world 取
+	if pm != null and pm.pack_available("voice_items") and ResourceLoader.exists(baked):
 		var stream: AudioStream = load(baked)
 		if stream != null:
 			_play_item_stream(stream)

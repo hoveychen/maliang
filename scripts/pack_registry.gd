@@ -93,6 +93,12 @@ static func scale(key: String) -> float:
 	ensure_loaded()
 	return float(_entries.get(key, {}).get("scale", 1.0))
 
+## 该渲染键所属资产包名（pack.json 所在目录名，如 "base"/"toyroom"/"stickers"）。未注册返回 ""。
+## "base" = 主包内（打进 APK，恒在）；其余 = 可分发内容包（.pck，须挂载后才在 res:// 里）。
+static func pack_of(key: String) -> String:
+	ensure_loaded()
+	return String(_entries.get(key, {}).get("pack", ""))
+
 ## 运行时按需 load() 资源并缓存（baked→ArrayMesh，scatter/node→PackedScene）。
 ## 路径错/资源缺返回 null，调用方须容错（与旧 preload 表不同，运行时才知道加载成败）。
 static func load_resource(key: String) -> Resource:
@@ -105,12 +111,34 @@ static func load_resource(key: String) -> Resource:
 		return null
 	if _res_cache.has(path):
 		return _res_cache[path]
+	# 内容包(.pck)分发守卫：该键属某内容包（非 base 主包）且其包【尚未挂载】时，绝不调 load()。
+	# 未挂就碰 ResourceLoader 会污染 ResourceCache——之后即便挂上包，默认/REPLACE 缓存模式的 load 也
+	# 永远返回被污染的 null（只有重启才自愈）。真根因见记忆 content-pck-android-load-stage-failure
+	# （2026-07-23 华为真机 CACHE_IGNORE 对照铁证）。返 null（不缓存）走与「资源缺」相同的降级路径；
+	# 预热器挂载该包后 chunk 重铺重走本函数，此时 _pack_loadable→true → load 干净成功。
+	if not _pack_loadable(String((entry as Dictionary).get("pack", ""))):
+		return null
 	var res := load(path)
 	if res == null:
 		push_warning("[packs] 渲染键 %s 资源载入失败：%s" % [key, path])
 		return null
 	_res_cache[path] = res
 	return res
+
+## 该 pack 的资源现在能否安全 load。base/空名=主包恒可；其余内容包委托 PackMounter.pack_available
+## （编辑器/headless 恒 true；导出包须已挂载）。取不到 PackMounter（脱离 autoload 的孤立测试）时，
+## 编辑器直载、导出保守跳过（不污染缓存）。
+static func _pack_loadable(pack_name: String) -> bool:
+	if pack_name.is_empty() or pack_name == "base":
+		return true
+	var loop := Engine.get_main_loop()
+	if loop is SceneTree:
+		# autoload 是 root 的直接子节点，按名取（从 root 自身用绝对 "/root/..." 会报
+		# "absolute paths from outside the active scene tree"，见 game-pilot 回测）。
+		var pm := (loop as SceneTree).root.get_node_or_null(^"PackMounter")
+		if pm != null:
+			return pm.pack_available(pack_name)
+	return OS.has_feature("editor")
 
 ## 某个 pack 声明的所有渲染键（守门测试用；无该 pack 返回空）。
 static func keys_in_pack(pack_name: String) -> Array:
