@@ -1,169 +1,2227 @@
 [
-  { "id": "tree_puff_a", "worldId": null, "name": "蓬蓬树·甲", "renderRef": "baked:tree_puff_a", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "tree_puff_b", "worldId": null, "name": "蓬蓬树·乙", "renderRef": "baked:tree_puff_b", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "tree_puff_c", "worldId": null, "name": "蓬蓬树·丙", "renderRef": "baked:tree_puff_c", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "bush_puff", "worldId": null, "name": "圆灌木", "renderRef": "baked:bush_puff", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "rock_0", "worldId": null, "name": "岩石·甲", "renderRef": "kaykit:rock_0", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "rock_1", "worldId": null, "name": "岩石·乙", "renderRef": "kaykit:rock_1", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "rock_2", "worldId": null, "name": "岩石·丙", "renderRef": "kaykit:rock_2", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "tuft_0", "worldId": null, "name": "草丛·甲", "renderRef": "kaykit:tuft_0", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": false, "wander": 0 },
-  { "id": "tuft_1", "worldId": null, "name": "草丛·乙", "renderRef": "kaykit:tuft_1", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": false, "wander": 0 },
-  { "id": "house_0", "worldId": null, "name": "蓝顶民居", "renderRef": "kaykit:house_0", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "house_1", "worldId": null, "name": "红顶民居", "renderRef": "kaykit:house_1", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "house_2", "worldId": null, "name": "黄顶民居", "renderRef": "kaykit:house_2", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "house_3", "worldId": null, "name": "绿顶民居", "renderRef": "kaykit:house_3", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "well", "worldId": null, "name": "水井", "renderRef": "kaykit:well", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": true, "wander": 0 },
-  { "id": "windmill", "worldId": null, "name": "风车", "renderRef": "kaykit:windmill", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "walking_hut", "worldId": null, "name": "走路小屋", "renderRef": "sdf_res:walking_hut", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 1.6 },
-  { "id": "hop_mailbox", "worldId": null, "name": "蹦跳信箱", "renderRef": "sdf_res:hop_mailbox", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 1.2 },
-  { "id": "nodding_flower", "worldId": null, "name": "点头花", "renderRef": "sdf_res:nodding_flower", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "pinwheel", "worldId": null, "name": "纸风车", "renderRef": "sdf_res:pinwheel", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "paper_note", "worldId": null, "name": "纸条", "renderRef": "sdf_res:paper_note", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "crayon", "worldId": null, "name": "蜡笔", "renderRef": "sdf_res:crayon", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "village_sign", "worldId": null, "name": "村口路牌", "renderRef": "sdf_res:village_sign", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "race_flag", "worldId": null, "name": "赛跑小旗", "renderRef": "sdf_res:race_flag", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0 },
-  { "id": "corn_stalk", "worldId": null, "name": "玉米秆", "renderRef": "sdf_res:corn_stalk", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "emerald_castle", "worldId": null, "name": "翡翠城堡", "renderRef": "sdf_res:emerald_castle", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "dwarf_bowl", "worldId": null, "name": "小矮人的碗", "renderRef": "sdf_res:dwarf_bowl", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0 },
-  { "id": "dwarf_cottage", "worldId": null, "name": "矮人小屋", "renderRef": "sdf_res:dwarf_cottage", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0 },
-  { "id": "robot_animated", "worldId": null, "name": "机器人", "renderRef": "scifi:robot_animated", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "robot_enemy", "worldId": null, "name": "守卫机器人", "renderRef": "scifi:robot_enemy", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "robot_flying", "worldId": null, "name": "飞行机器人", "renderRef": "scifi:robot_flying", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "robot_legs_gun", "worldId": null, "name": "巡逻机器人", "renderRef": "scifi:robot_legs_gun", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "robot_flying_gun", "worldId": null, "name": "哨戒机", "renderRef": "scifi:robot_flying_gun", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "robot_large", "worldId": null, "name": "大型机器人", "renderRef": "scifi:robot_large", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "mech", "worldId": null, "name": "机甲", "renderRef": "scifi:mech", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "scifi_hangar", "worldId": null, "name": "机库", "renderRef": "scifi:hangar_smallA", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "scifi_generator", "worldId": null, "name": "发电机", "renderRef": "scifi:machine_generatorLarge", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "scifi_satellite", "worldId": null, "name": "卫星天线", "renderRef": "scifi:satelliteDish_large", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "scifi_barrel", "worldId": null, "name": "燃料桶", "renderRef": "scifi:barrel", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "scifi_crystals", "worldId": null, "name": "能量晶簇", "renderRef": "scifi:rock_crystals", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["scifi"] },
-  { "id": "toy_bear", "worldId": null, "name": "玩具熊", "renderRef": "furniture:bear", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_bed_single", "worldId": null, "name": "单人床", "renderRef": "furniture:bedSingle", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_bed_bunk", "worldId": null, "name": "双层床", "renderRef": "furniture:bedBunk", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_bookcase", "worldId": null, "name": "书架", "renderRef": "furniture:bookcaseOpen", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_sofa", "worldId": null, "name": "沙发", "renderRef": "furniture:loungeSofa", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_chair", "worldId": null, "name": "圆背椅", "renderRef": "furniture:chairRounded", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_table", "worldId": null, "name": "桌子", "renderRef": "furniture:table", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_coffee_table", "worldId": null, "name": "茶几", "renderRef": "furniture:tableCoffee", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_lamp", "worldId": null, "name": "落地灯", "renderRef": "furniture:lampRoundFloor", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_plant", "worldId": null, "name": "盆栽", "renderRef": "furniture:pottedPlant", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_tv", "worldId": null, "name": "电视机", "renderRef": "furniture:televisionModern", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "toy_box", "worldId": null, "name": "纸箱", "renderRef": "furniture:cardboardBoxOpen", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["toyroom"] },
-  { "id": "city_shop_a", "worldId": null, "name": "临街商铺·甲", "renderRef": "city:building-a", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_shop_b", "worldId": null, "name": "临街商铺·乙", "renderRef": "city:building-b", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_shop_c", "worldId": null, "name": "临街商铺·丙", "renderRef": "city:building-c", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_shop_d", "worldId": null, "name": "临街商铺·丁", "renderRef": "city:building-d", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_shop_e", "worldId": null, "name": "临街商铺·戊", "renderRef": "city:building-e", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_shop_f", "worldId": null, "name": "临街商铺·己", "renderRef": "city:building-f", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_shop_g", "worldId": null, "name": "临街商铺·庚", "renderRef": "city:building-g", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_tower_a", "worldId": null, "name": "高楼·甲", "renderRef": "city:building-skyscraper-a", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_tower_b", "worldId": null, "name": "高楼·乙", "renderRef": "city:building-skyscraper-b", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_tower_c", "worldId": null, "name": "高楼·丙", "renderRef": "city:building-skyscraper-c", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_tower_d", "worldId": null, "name": "高楼·丁", "renderRef": "city:building-skyscraper-d", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "city_tower_e", "worldId": null, "name": "高楼·戊", "renderRef": "city:building-skyscraper-e", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["city"] },
-  { "id": "kit_fridge", "worldId": null, "name": "冰箱", "renderRef": "kitchen:kitchenFridge", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_stove", "worldId": null, "name": "灶台", "renderRef": "kitchen:kitchenStove", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_sink", "worldId": null, "name": "水槽", "renderRef": "kitchen:kitchenSink", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_microwave", "worldId": null, "name": "微波炉", "renderRef": "kitchen:kitchenMicrowave", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_cabinet", "worldId": null, "name": "橱柜", "renderRef": "kitchen:kitchenCabinet", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_cabinet_drawer", "worldId": null, "name": "抽屉柜", "renderRef": "kitchen:kitchenCabinetDrawer", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_coffee", "worldId": null, "name": "咖啡机", "renderRef": "kitchen:kitchenCoffeeMachine", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_blender", "worldId": null, "name": "榨汁机", "renderRef": "kitchen:kitchenBlender", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_toaster", "worldId": null, "name": "烤面包机", "renderRef": "kitchen:toaster", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_hood", "worldId": null, "name": "抽油烟机", "renderRef": "kitchen:hoodModern", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_bar", "worldId": null, "name": "吧台", "renderRef": "kitchen:kitchenBar", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "kit_stool", "worldId": null, "name": "吧凳", "renderRef": "kitchen:stoolBar", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["kitchen"] },
-  { "id": "mv_home_a", "worldId": null, "name": "民居·甲", "renderRef": "medieval:building_home_A_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_home_b", "worldId": null, "name": "民居·乙", "renderRef": "medieval:building_home_B_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_blacksmith", "worldId": null, "name": "铁匠铺", "renderRef": "medieval:building_blacksmith_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_market", "worldId": null, "name": "集市", "renderRef": "medieval:building_market_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_tavern", "worldId": null, "name": "酒馆", "renderRef": "medieval:building_tavern_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_church", "worldId": null, "name": "教堂", "renderRef": "medieval:building_church_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_windmill", "worldId": null, "name": "风车", "renderRef": "medieval:building_windmill_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_watermill", "worldId": null, "name": "水车", "renderRef": "medieval:building_watermill_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_lumbermill", "worldId": null, "name": "伐木场", "renderRef": "medieval:building_lumbermill_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_mine", "worldId": null, "name": "矿场", "renderRef": "medieval:building_mine_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mv_well", "worldId": null, "name": "水井", "renderRef": "medieval:building_well_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_town"] },
-  { "id": "mk_castle", "worldId": null, "name": "城堡", "renderRef": "medieval:building_castle_blue", "footprintW": 5, "footprintH": 5, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_barracks", "worldId": null, "name": "兵营", "renderRef": "medieval:building_barracks_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_archery", "worldId": null, "name": "箭馆", "renderRef": "medieval:building_archeryrange_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_tower_a", "worldId": null, "name": "塔楼·甲", "renderRef": "medieval:building_tower_A_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_tower_b", "worldId": null, "name": "塔楼·乙", "renderRef": "medieval:building_tower_B_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_tower_base", "worldId": null, "name": "塔基", "renderRef": "medieval:building_tower_base_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_catapult", "worldId": null, "name": "投石塔", "renderRef": "medieval:building_tower_catapult_blue", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_gate", "worldId": null, "name": "城门", "renderRef": "medieval:wall_gate", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_gate_closed", "worldId": null, "name": "闭合城门", "renderRef": "medieval:wall_gate_closed", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_wall", "worldId": null, "name": "城墙", "renderRef": "medieval:wall_straight", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_wall_corner", "worldId": null, "name": "城墙拐角", "renderRef": "medieval:wall_corner", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "mk_watchtower", "worldId": null, "name": "瞭望塔", "renderRef": "medieval:watchtower", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["medieval_kingdom"] },
-  { "id": "sea_fish_a", "worldId": null, "name": "小鱼·甲", "renderRef": "underwater:fish_a", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["underwater"] },
-  { "id": "sea_fish_b", "worldId": null, "name": "小鱼·乙", "renderRef": "underwater:fish_b", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["underwater"] },
-  { "id": "sea_fish_c", "worldId": null, "name": "热带鱼", "renderRef": "underwater:fish_c", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["underwater"] },
-  { "id": "sea_dolphin", "worldId": null, "name": "海豚", "renderRef": "underwater:dolphin", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["underwater"] },
-  { "id": "sea_whale", "worldId": null, "name": "鲸鱼", "renderRef": "underwater:whale", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["underwater"] },
-  { "id": "sea_manta", "worldId": null, "name": "蝠鲼", "renderRef": "underwater:manta", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["underwater"] },
-  { "id": "sea_shark", "worldId": null, "name": "鲨鱼", "renderRef": "underwater:shark", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["underwater"] },
-  { "id": "snow_snowman", "worldId": null, "name": "雪人", "renderRef": "winter:snowman", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_snowman_hat", "worldId": null, "name": "戴帽雪人", "renderRef": "winter:snowman_hat", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_tree_a", "worldId": null, "name": "雪松·甲", "renderRef": "winter:tree_snow_a", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_tree_b", "worldId": null, "name": "雪松·乙", "renderRef": "winter:tree_snow_b", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_tree_c", "worldId": null, "name": "雪松·丙", "renderRef": "winter:tree_snow_c", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_tree_lit", "worldId": null, "name": "装饰雪树", "renderRef": "winter:tree_decorated_snow", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_reindeer", "worldId": null, "name": "驯鹿", "renderRef": "winter:reindeer", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_sled", "worldId": null, "name": "雪橇", "renderRef": "winter:sled", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_pile", "worldId": null, "name": "雪堆", "renderRef": "winter:snow_pile", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_present_a", "worldId": null, "name": "礼物盒·方", "renderRef": "winter:present_a", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_present_b", "worldId": null, "name": "礼物盒·圆", "renderRef": "winter:present_b", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "snow_nutcracker", "worldId": null, "name": "胡桃夹子", "renderRef": "winter:nutcracker", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["winter"] },
-  { "id": "hosp_bed", "worldId": null, "name": "病床", "renderRef": "hospital:wardBed", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_bed_wide", "worldId": null, "name": "双人病床", "renderRef": "hospital:wardBedWide", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_bedside", "worldId": null, "name": "床头柜", "renderRef": "hospital:bedside", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_visitor_chair", "worldId": null, "name": "陪护椅", "renderRef": "hospital:visitorChair", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_wait_bench", "worldId": null, "name": "候诊椅", "renderRef": "hospital:waitBench", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_nurse_desk", "worldId": null, "name": "护士站", "renderRef": "hospital:nurseDesk", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_doc_chair", "worldId": null, "name": "医生椅", "renderRef": "hospital:docChair", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_sink", "worldId": null, "name": "洗手池", "renderRef": "hospital:handSink", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_med_cabinet", "worldId": null, "name": "药品柜", "renderRef": "hospital:medCabinet", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_supply_cabinet", "worldId": null, "name": "器械柜", "renderRef": "hospital:supplyCabinet", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_waste_bin", "worldId": null, "name": "医疗垃圾桶", "renderRef": "hospital:wasteBin", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "hosp_floor_lamp", "worldId": null, "name": "落地灯", "renderRef": "hospital:floorLamp", "footprintW": 1, "footprintH": 1, "blocking": true, "pathOk": false, "wander": 0, "themes": ["hospital"] },
-  { "id": "roman_arch", "worldId": null, "name": "拱门", "renderRef": "roman:roman_arch", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["roman"] },
-  { "id": "roman_wall", "worldId": null, "name": "石墙", "renderRef": "roman:roman_wall", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["roman"] },
-  { "id": "roman_wall_corner", "worldId": null, "name": "石墙拐角", "renderRef": "roman:roman_wall_corner", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["roman"] },
-  { "id": "roman_watchtower", "worldId": null, "name": "哨塔", "renderRef": "roman:roman_watchtower", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["roman"] },
-  { "id": "roman_tower", "worldId": null, "name": "石塔", "renderRef": "roman:roman_tower", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["roman"] },
-  { "id": "roman_tower_b", "worldId": null, "name": "瞭望石塔", "renderRef": "roman:roman_tower_b", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["roman"] },
-  { "id": "roman_column_base", "worldId": null, "name": "石柱基", "renderRef": "roman:roman_column_base", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["roman"] },
-  { "id": "roman_fort", "worldId": null, "name": "罗马要塞", "renderRef": "roman:roman_fort", "footprintW": 5, "footprintH": 5, "blocking": true, "pathOk": false, "wander": 0, "themes": ["roman"] },
-  { "id": "cn_pagoda", "worldId": null, "name": "宝塔", "renderRef": "ancient_china:pagoda", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["ancient_china"] },
-  { "id": "cn_archway", "worldId": null, "name": "牌坊", "renderRef": "ancient_china:torii", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["ancient_china"] },
-  { "id": "cn_pavilion", "worldId": null, "name": "古亭", "renderRef": "ancient_china:shrine_a", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["ancient_china"] },
-  { "id": "cn_shrine", "worldId": null, "name": "神龛", "renderRef": "ancient_china:shrine_b", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["ancient_china"] },
-  { "id": "dino_trex", "worldId": null, "name": "霸王龙", "renderRef": "dino:trex", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["jurassic"] },
-  { "id": "dino_raptor", "worldId": null, "name": "迅猛龙", "renderRef": "dino:raptor", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["jurassic"] },
-  { "id": "dino_triceratops", "worldId": null, "name": "三角龙", "renderRef": "dino:triceratops", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["jurassic"] },
-  { "id": "dino_parasaur", "worldId": null, "name": "鸭嘴龙", "renderRef": "dino:parasaur", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["jurassic"] },
-  { "id": "dino_stego", "worldId": null, "name": "剑龙", "renderRef": "dino:stego", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["jurassic"] },
-  { "id": "dino_apato", "worldId": null, "name": "腕龙", "renderRef": "dino:apato", "footprintW": 3, "footprintH": 3, "blocking": true, "pathOk": false, "wander": 0, "themes": ["jurassic"] },
-  { "id": "sticker_sun", "worldId": null, "name": "太阳贴纸", "renderRef": "sticker:sun", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_flower", "worldId": null, "name": "花朵贴纸", "renderRef": "sticker:flower", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_star", "worldId": null, "name": "星星贴纸", "renderRef": "sticker:star", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_rainbow", "worldId": null, "name": "彩虹贴纸", "renderRef": "sticker:rainbow", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_heart", "worldId": null, "name": "爱心贴纸", "renderRef": "sticker:heart", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_butterfly", "worldId": null, "name": "蝴蝶贴纸", "renderRef": "sticker:butterfly", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_moon", "worldId": null, "name": "月亮贴纸", "renderRef": "sticker:moon", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_cloud", "worldId": null, "name": "云朵贴纸", "renderRef": "sticker:cloud", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_strawberry", "worldId": null, "name": "草莓贴纸", "renderRef": "sticker:strawberry", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_smile", "worldId": null, "name": "笑脸贴纸", "renderRef": "sticker:smile", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_flag", "worldId": null, "name": "小旗贴纸", "renderRef": "sticker:flag", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "sticker_mushroom", "worldId": null, "name": "蘑菇贴纸", "renderRef": "sticker:mushroom", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge" },
-  { "id": "story_straw", "worldId": null, "name": "草垛纪念贴纸", "renderRef": "sticker:story_straw", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
-  { "id": "story_plank", "worldId": null, "name": "木板纪念贴纸", "renderRef": "sticker:story_plank", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
-  { "id": "story_brick", "worldId": null, "name": "砖房纪念贴纸", "renderRef": "sticker:story_brick", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
-  { "id": "story_basket", "worldId": null, "name": "点心篮纪念贴纸", "renderRef": "sticker:story_basket", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
-  { "id": "story_snow", "worldId": null, "name": "小矮人的碗纪念贴纸", "renderRef": "sticker:story_snow", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
-  { "id": "story_ruby", "worldId": null, "name": "红宝石鞋纪念贴纸", "renderRef": "sticker:story_ruby", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
-  { "id": "story_emerald", "worldId": null, "name": "翡翠城纪念贴纸", "renderRef": "sticker:story_emerald", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true },
-  { "id": "story_cheer_flag", "worldId": null, "name": "加油小旗纪念贴纸", "renderRef": "sticker:story_cheer_flag", "footprintW": 1, "footprintH": 1, "blocking": false, "pathOk": true, "wander": 0, "mount": "edge", "souvenir": true }
+  {
+    "id": "tree_puff_a",
+    "worldId": null,
+    "name": "蓬蓬树·甲",
+    "renderRef": "baked:tree_puff_a",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "tree_puff_b",
+    "worldId": null,
+    "name": "蓬蓬树·乙",
+    "renderRef": "baked:tree_puff_b",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "tree_puff_c",
+    "worldId": null,
+    "name": "蓬蓬树·丙",
+    "renderRef": "baked:tree_puff_c",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "bush_puff",
+    "worldId": null,
+    "name": "圆灌木",
+    "renderRef": "baked:bush_puff",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "rock_0",
+    "worldId": null,
+    "name": "岩石·甲",
+    "renderRef": "kaykit:rock_0",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "rock_1",
+    "worldId": null,
+    "name": "岩石·乙",
+    "renderRef": "kaykit:rock_1",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "rock_2",
+    "worldId": null,
+    "name": "岩石·丙",
+    "renderRef": "kaykit:rock_2",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "tuft_0",
+    "worldId": null,
+    "name": "草丛·甲",
+    "renderRef": "kaykit:tuft_0",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "tuft_1",
+    "worldId": null,
+    "name": "草丛·乙",
+    "renderRef": "kaykit:tuft_1",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "house_0",
+    "worldId": null,
+    "name": "蓝顶民居",
+    "renderRef": "kaykit:house_0",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "house_1",
+    "worldId": null,
+    "name": "红顶民居",
+    "renderRef": "kaykit:house_1",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "house_2",
+    "worldId": null,
+    "name": "黄顶民居",
+    "renderRef": "kaykit:house_2",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "house_3",
+    "worldId": null,
+    "name": "绿顶民居",
+    "renderRef": "kaykit:house_3",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "well",
+    "worldId": null,
+    "name": "水井",
+    "renderRef": "kaykit:well",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": true,
+    "wander": 0
+  },
+  {
+    "id": "windmill",
+    "worldId": null,
+    "name": "风车",
+    "renderRef": "kaykit:windmill",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "walking_hut",
+    "worldId": null,
+    "name": "走路小屋",
+    "renderRef": "sdf_res:walking_hut",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 1.6
+  },
+  {
+    "id": "hop_mailbox",
+    "worldId": null,
+    "name": "蹦跳信箱",
+    "renderRef": "sdf_res:hop_mailbox",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 1.2
+  },
+  {
+    "id": "nodding_flower",
+    "worldId": null,
+    "name": "点头花",
+    "renderRef": "sdf_res:nodding_flower",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "pinwheel",
+    "worldId": null,
+    "name": "纸风车",
+    "renderRef": "sdf_res:pinwheel",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "paper_note",
+    "worldId": null,
+    "name": "纸条",
+    "renderRef": "sdf_res:paper_note",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "crayon",
+    "worldId": null,
+    "name": "蜡笔",
+    "renderRef": "sdf_res:crayon",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "village_sign",
+    "worldId": null,
+    "name": "村口路牌",
+    "renderRef": "sdf_res:village_sign",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "race_flag",
+    "worldId": null,
+    "name": "赛跑小旗",
+    "renderRef": "sdf_res:race_flag",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0
+  },
+  {
+    "id": "corn_stalk",
+    "worldId": null,
+    "name": "玉米秆",
+    "renderRef": "sdf_res:corn_stalk",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "emerald_castle",
+    "worldId": null,
+    "name": "翡翠城堡",
+    "renderRef": "sdf_res:emerald_castle",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "dwarf_bowl",
+    "worldId": null,
+    "name": "小矮人的碗",
+    "renderRef": "sdf_res:dwarf_bowl",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0
+  },
+  {
+    "id": "dwarf_cottage",
+    "worldId": null,
+    "name": "矮人小屋",
+    "renderRef": "sdf_res:dwarf_cottage",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0
+  },
+  {
+    "id": "robot_animated",
+    "worldId": null,
+    "name": "机器人",
+    "renderRef": "scifi:robot_animated",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "robot_enemy",
+    "worldId": null,
+    "name": "守卫机器人",
+    "renderRef": "scifi:robot_enemy",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "robot_flying",
+    "worldId": null,
+    "name": "飞行机器人",
+    "renderRef": "scifi:robot_flying",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "robot_legs_gun",
+    "worldId": null,
+    "name": "巡逻机器人",
+    "renderRef": "scifi:robot_legs_gun",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "robot_flying_gun",
+    "worldId": null,
+    "name": "哨戒机",
+    "renderRef": "scifi:robot_flying_gun",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "robot_large",
+    "worldId": null,
+    "name": "大型机器人",
+    "renderRef": "scifi:robot_large",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "mech",
+    "worldId": null,
+    "name": "机甲",
+    "renderRef": "scifi:mech",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "scifi_hangar",
+    "worldId": null,
+    "name": "机库",
+    "renderRef": "scifi:hangar_smallA",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "scifi_generator",
+    "worldId": null,
+    "name": "发电机",
+    "renderRef": "scifi:machine_generatorLarge",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "scifi_satellite",
+    "worldId": null,
+    "name": "卫星天线",
+    "renderRef": "scifi:satelliteDish_large",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "scifi_barrel",
+    "worldId": null,
+    "name": "燃料桶",
+    "renderRef": "scifi:barrel",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "scifi_crystals",
+    "worldId": null,
+    "name": "能量晶簇",
+    "renderRef": "scifi:rock_crystals",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "scifi"
+    ]
+  },
+  {
+    "id": "toy_bear",
+    "worldId": null,
+    "name": "玩具熊",
+    "renderRef": "furniture:bear",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_bed_single",
+    "worldId": null,
+    "name": "单人床",
+    "renderRef": "furniture:bedSingle",
+    "footprintW": 1,
+    "footprintH": 2,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_bed_bunk",
+    "worldId": null,
+    "name": "双层床",
+    "renderRef": "furniture:bedBunk",
+    "footprintW": 1,
+    "footprintH": 2,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_bookcase",
+    "worldId": null,
+    "name": "书架",
+    "renderRef": "furniture:bookcaseOpen",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_sofa",
+    "worldId": null,
+    "name": "沙发",
+    "renderRef": "furniture:loungeSofa",
+    "footprintW": 2,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_chair",
+    "worldId": null,
+    "name": "圆背椅",
+    "renderRef": "furniture:chairRounded",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_table",
+    "worldId": null,
+    "name": "桌子",
+    "renderRef": "furniture:table",
+    "footprintW": 2,
+    "footprintH": 2,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_coffee_table",
+    "worldId": null,
+    "name": "茶几",
+    "renderRef": "furniture:tableCoffee",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_lamp",
+    "worldId": null,
+    "name": "落地灯",
+    "renderRef": "furniture:lampRoundFloor",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_plant",
+    "worldId": null,
+    "name": "盆栽",
+    "renderRef": "furniture:pottedPlant",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_tv",
+    "worldId": null,
+    "name": "电视机",
+    "renderRef": "furniture:televisionModern",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "toy_box",
+    "worldId": null,
+    "name": "纸箱",
+    "renderRef": "furniture:cardboardBoxOpen",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "toyroom"
+    ]
+  },
+  {
+    "id": "city_shop_a",
+    "worldId": null,
+    "name": "临街商铺·甲",
+    "renderRef": "city:building-a",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_b",
+    "worldId": null,
+    "name": "临街商铺·乙",
+    "renderRef": "city:building-b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_c",
+    "worldId": null,
+    "name": "临街商铺·丙",
+    "renderRef": "city:building-c",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_d",
+    "worldId": null,
+    "name": "临街商铺·丁",
+    "renderRef": "city:building-d",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_e",
+    "worldId": null,
+    "name": "临街商铺·戊",
+    "renderRef": "city:building-e",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_f",
+    "worldId": null,
+    "name": "临街商铺·己",
+    "renderRef": "city:building-f",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_shop_g",
+    "worldId": null,
+    "name": "临街商铺·庚",
+    "renderRef": "city:building-g",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_a",
+    "worldId": null,
+    "name": "高楼·甲",
+    "renderRef": "city:building-skyscraper-a",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_b",
+    "worldId": null,
+    "name": "高楼·乙",
+    "renderRef": "city:building-skyscraper-b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_c",
+    "worldId": null,
+    "name": "高楼·丙",
+    "renderRef": "city:building-skyscraper-c",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_d",
+    "worldId": null,
+    "name": "高楼·丁",
+    "renderRef": "city:building-skyscraper-d",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "city_tower_e",
+    "worldId": null,
+    "name": "高楼·戊",
+    "renderRef": "city:building-skyscraper-e",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "city"
+    ]
+  },
+  {
+    "id": "kit_fridge",
+    "worldId": null,
+    "name": "冰箱",
+    "renderRef": "kitchen:kitchenFridge",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_stove",
+    "worldId": null,
+    "name": "灶台",
+    "renderRef": "kitchen:kitchenStove",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_sink",
+    "worldId": null,
+    "name": "水槽",
+    "renderRef": "kitchen:kitchenSink",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_microwave",
+    "worldId": null,
+    "name": "微波炉",
+    "renderRef": "kitchen:kitchenMicrowave",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_cabinet",
+    "worldId": null,
+    "name": "橱柜",
+    "renderRef": "kitchen:kitchenCabinet",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_cabinet_drawer",
+    "worldId": null,
+    "name": "抽屉柜",
+    "renderRef": "kitchen:kitchenCabinetDrawer",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_coffee",
+    "worldId": null,
+    "name": "咖啡机",
+    "renderRef": "kitchen:kitchenCoffeeMachine",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_blender",
+    "worldId": null,
+    "name": "榨汁机",
+    "renderRef": "kitchen:kitchenBlender",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_toaster",
+    "worldId": null,
+    "name": "烤面包机",
+    "renderRef": "kitchen:toaster",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_hood",
+    "worldId": null,
+    "name": "抽油烟机",
+    "renderRef": "kitchen:hoodModern",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_bar",
+    "worldId": null,
+    "name": "吧台",
+    "renderRef": "kitchen:kitchenBar",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "kit_stool",
+    "worldId": null,
+    "name": "吧凳",
+    "renderRef": "kitchen:stoolBar",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "kitchen"
+    ]
+  },
+  {
+    "id": "mv_home_a",
+    "worldId": null,
+    "name": "民居·甲",
+    "renderRef": "medieval:building_home_A_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_home_b",
+    "worldId": null,
+    "name": "民居·乙",
+    "renderRef": "medieval:building_home_B_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_blacksmith",
+    "worldId": null,
+    "name": "铁匠铺",
+    "renderRef": "medieval:building_blacksmith_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_market",
+    "worldId": null,
+    "name": "集市",
+    "renderRef": "medieval:building_market_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_tavern",
+    "worldId": null,
+    "name": "酒馆",
+    "renderRef": "medieval:building_tavern_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_church",
+    "worldId": null,
+    "name": "教堂",
+    "renderRef": "medieval:building_church_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_windmill",
+    "worldId": null,
+    "name": "风车",
+    "renderRef": "medieval:building_windmill_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_watermill",
+    "worldId": null,
+    "name": "水车",
+    "renderRef": "medieval:building_watermill_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_lumbermill",
+    "worldId": null,
+    "name": "伐木场",
+    "renderRef": "medieval:building_lumbermill_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_mine",
+    "worldId": null,
+    "name": "矿场",
+    "renderRef": "medieval:building_mine_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mv_well",
+    "worldId": null,
+    "name": "水井",
+    "renderRef": "medieval:building_well_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_town"
+    ]
+  },
+  {
+    "id": "mk_castle",
+    "worldId": null,
+    "name": "城堡",
+    "renderRef": "medieval:building_castle_blue",
+    "footprintW": 5,
+    "footprintH": 5,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_barracks",
+    "worldId": null,
+    "name": "兵营",
+    "renderRef": "medieval:building_barracks_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_archery",
+    "worldId": null,
+    "name": "箭馆",
+    "renderRef": "medieval:building_archeryrange_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_tower_a",
+    "worldId": null,
+    "name": "塔楼·甲",
+    "renderRef": "medieval:building_tower_A_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_tower_b",
+    "worldId": null,
+    "name": "塔楼·乙",
+    "renderRef": "medieval:building_tower_B_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_tower_base",
+    "worldId": null,
+    "name": "塔基",
+    "renderRef": "medieval:building_tower_base_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_catapult",
+    "worldId": null,
+    "name": "投石塔",
+    "renderRef": "medieval:building_tower_catapult_blue",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_gate",
+    "worldId": null,
+    "name": "城门",
+    "renderRef": "medieval:wall_gate",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_gate_closed",
+    "worldId": null,
+    "name": "闭合城门",
+    "renderRef": "medieval:wall_gate_closed",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_wall",
+    "worldId": null,
+    "name": "城墙",
+    "renderRef": "medieval:wall_straight",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_wall_corner",
+    "worldId": null,
+    "name": "城墙拐角",
+    "renderRef": "medieval:wall_corner",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "mk_watchtower",
+    "worldId": null,
+    "name": "瞭望塔",
+    "renderRef": "medieval:watchtower",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "medieval_kingdom"
+    ]
+  },
+  {
+    "id": "sea_fish_a",
+    "worldId": null,
+    "name": "小鱼·甲",
+    "renderRef": "underwater:fish_a",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_fish_b",
+    "worldId": null,
+    "name": "小鱼·乙",
+    "renderRef": "underwater:fish_b",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_fish_c",
+    "worldId": null,
+    "name": "热带鱼",
+    "renderRef": "underwater:fish_c",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_dolphin",
+    "worldId": null,
+    "name": "海豚",
+    "renderRef": "underwater:dolphin",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_whale",
+    "worldId": null,
+    "name": "鲸鱼",
+    "renderRef": "underwater:whale",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_manta",
+    "worldId": null,
+    "name": "蝠鲼",
+    "renderRef": "underwater:manta",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "sea_shark",
+    "worldId": null,
+    "name": "鲨鱼",
+    "renderRef": "underwater:shark",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "underwater"
+    ]
+  },
+  {
+    "id": "snow_snowman",
+    "worldId": null,
+    "name": "雪人",
+    "renderRef": "winter:snowman",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_snowman_hat",
+    "worldId": null,
+    "name": "戴帽雪人",
+    "renderRef": "winter:snowman_hat",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_tree_a",
+    "worldId": null,
+    "name": "雪松·甲",
+    "renderRef": "winter:tree_snow_a",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_tree_b",
+    "worldId": null,
+    "name": "雪松·乙",
+    "renderRef": "winter:tree_snow_b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_tree_c",
+    "worldId": null,
+    "name": "雪松·丙",
+    "renderRef": "winter:tree_snow_c",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_tree_lit",
+    "worldId": null,
+    "name": "装饰雪树",
+    "renderRef": "winter:tree_decorated_snow",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_reindeer",
+    "worldId": null,
+    "name": "驯鹿",
+    "renderRef": "winter:reindeer",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_sled",
+    "worldId": null,
+    "name": "雪橇",
+    "renderRef": "winter:sled",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_pile",
+    "worldId": null,
+    "name": "雪堆",
+    "renderRef": "winter:snow_pile",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_present_a",
+    "worldId": null,
+    "name": "礼物盒·方",
+    "renderRef": "winter:present_a",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_present_b",
+    "worldId": null,
+    "name": "礼物盒·圆",
+    "renderRef": "winter:present_b",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "snow_nutcracker",
+    "worldId": null,
+    "name": "胡桃夹子",
+    "renderRef": "winter:nutcracker",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "winter"
+    ]
+  },
+  {
+    "id": "hosp_bed",
+    "worldId": null,
+    "name": "病床",
+    "renderRef": "hospital:wardBed",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_bed_wide",
+    "worldId": null,
+    "name": "双人病床",
+    "renderRef": "hospital:wardBedWide",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_bedside",
+    "worldId": null,
+    "name": "床头柜",
+    "renderRef": "hospital:bedside",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_visitor_chair",
+    "worldId": null,
+    "name": "陪护椅",
+    "renderRef": "hospital:visitorChair",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_wait_bench",
+    "worldId": null,
+    "name": "候诊椅",
+    "renderRef": "hospital:waitBench",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_nurse_desk",
+    "worldId": null,
+    "name": "护士站",
+    "renderRef": "hospital:nurseDesk",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_doc_chair",
+    "worldId": null,
+    "name": "医生椅",
+    "renderRef": "hospital:docChair",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_sink",
+    "worldId": null,
+    "name": "洗手池",
+    "renderRef": "hospital:handSink",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_med_cabinet",
+    "worldId": null,
+    "name": "药品柜",
+    "renderRef": "hospital:medCabinet",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_supply_cabinet",
+    "worldId": null,
+    "name": "器械柜",
+    "renderRef": "hospital:supplyCabinet",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_waste_bin",
+    "worldId": null,
+    "name": "医疗垃圾桶",
+    "renderRef": "hospital:wasteBin",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "hosp_floor_lamp",
+    "worldId": null,
+    "name": "落地灯",
+    "renderRef": "hospital:floorLamp",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "hospital"
+    ]
+  },
+  {
+    "id": "roman_arch",
+    "worldId": null,
+    "name": "拱门",
+    "renderRef": "roman:roman_arch",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_wall",
+    "worldId": null,
+    "name": "石墙",
+    "renderRef": "roman:roman_wall",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_wall_corner",
+    "worldId": null,
+    "name": "石墙拐角",
+    "renderRef": "roman:roman_wall_corner",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_watchtower",
+    "worldId": null,
+    "name": "哨塔",
+    "renderRef": "roman:roman_watchtower",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_tower",
+    "worldId": null,
+    "name": "石塔",
+    "renderRef": "roman:roman_tower",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_tower_b",
+    "worldId": null,
+    "name": "瞭望石塔",
+    "renderRef": "roman:roman_tower_b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_column_base",
+    "worldId": null,
+    "name": "石柱基",
+    "renderRef": "roman:roman_column_base",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "roman_fort",
+    "worldId": null,
+    "name": "罗马要塞",
+    "renderRef": "roman:roman_fort",
+    "footprintW": 5,
+    "footprintH": 5,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "roman"
+    ]
+  },
+  {
+    "id": "cn_pagoda",
+    "worldId": null,
+    "name": "宝塔",
+    "renderRef": "ancient_china:pagoda",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "ancient_china"
+    ]
+  },
+  {
+    "id": "cn_archway",
+    "worldId": null,
+    "name": "牌坊",
+    "renderRef": "ancient_china:torii",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "ancient_china"
+    ]
+  },
+  {
+    "id": "cn_pavilion",
+    "worldId": null,
+    "name": "古亭",
+    "renderRef": "ancient_china:shrine_a",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "ancient_china"
+    ]
+  },
+  {
+    "id": "cn_shrine",
+    "worldId": null,
+    "name": "神龛",
+    "renderRef": "ancient_china:shrine_b",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "ancient_china"
+    ]
+  },
+  {
+    "id": "dino_trex",
+    "worldId": null,
+    "name": "霸王龙",
+    "renderRef": "dino:trex",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_raptor",
+    "worldId": null,
+    "name": "迅猛龙",
+    "renderRef": "dino:raptor",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_triceratops",
+    "worldId": null,
+    "name": "三角龙",
+    "renderRef": "dino:triceratops",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_parasaur",
+    "worldId": null,
+    "name": "鸭嘴龙",
+    "renderRef": "dino:parasaur",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_stego",
+    "worldId": null,
+    "name": "剑龙",
+    "renderRef": "dino:stego",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "dino_apato",
+    "worldId": null,
+    "name": "腕龙",
+    "renderRef": "dino:apato",
+    "footprintW": 3,
+    "footprintH": 3,
+    "blocking": true,
+    "pathOk": false,
+    "wander": 0,
+    "themes": [
+      "jurassic"
+    ]
+  },
+  {
+    "id": "sticker_sun",
+    "worldId": null,
+    "name": "太阳贴纸",
+    "renderRef": "sticker:sun",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_flower",
+    "worldId": null,
+    "name": "花朵贴纸",
+    "renderRef": "sticker:flower",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_star",
+    "worldId": null,
+    "name": "星星贴纸",
+    "renderRef": "sticker:star",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_rainbow",
+    "worldId": null,
+    "name": "彩虹贴纸",
+    "renderRef": "sticker:rainbow",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_heart",
+    "worldId": null,
+    "name": "爱心贴纸",
+    "renderRef": "sticker:heart",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_butterfly",
+    "worldId": null,
+    "name": "蝴蝶贴纸",
+    "renderRef": "sticker:butterfly",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_moon",
+    "worldId": null,
+    "name": "月亮贴纸",
+    "renderRef": "sticker:moon",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_cloud",
+    "worldId": null,
+    "name": "云朵贴纸",
+    "renderRef": "sticker:cloud",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_strawberry",
+    "worldId": null,
+    "name": "草莓贴纸",
+    "renderRef": "sticker:strawberry",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_smile",
+    "worldId": null,
+    "name": "笑脸贴纸",
+    "renderRef": "sticker:smile",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_flag",
+    "worldId": null,
+    "name": "小旗贴纸",
+    "renderRef": "sticker:flag",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "sticker_mushroom",
+    "worldId": null,
+    "name": "蘑菇贴纸",
+    "renderRef": "sticker:mushroom",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge"
+  },
+  {
+    "id": "story_straw",
+    "worldId": null,
+    "name": "草垛纪念贴纸",
+    "renderRef": "sticker:story_straw",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge",
+    "souvenir": true
+  },
+  {
+    "id": "story_plank",
+    "worldId": null,
+    "name": "木板纪念贴纸",
+    "renderRef": "sticker:story_plank",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge",
+    "souvenir": true
+  },
+  {
+    "id": "story_brick",
+    "worldId": null,
+    "name": "砖房纪念贴纸",
+    "renderRef": "sticker:story_brick",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge",
+    "souvenir": true
+  },
+  {
+    "id": "story_basket",
+    "worldId": null,
+    "name": "点心篮纪念贴纸",
+    "renderRef": "sticker:story_basket",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge",
+    "souvenir": true
+  },
+  {
+    "id": "story_snow",
+    "worldId": null,
+    "name": "小矮人的碗纪念贴纸",
+    "renderRef": "sticker:story_snow",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge",
+    "souvenir": true
+  },
+  {
+    "id": "story_ruby",
+    "worldId": null,
+    "name": "红宝石鞋纪念贴纸",
+    "renderRef": "sticker:story_ruby",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge",
+    "souvenir": true
+  },
+  {
+    "id": "story_emerald",
+    "worldId": null,
+    "name": "翡翠城纪念贴纸",
+    "renderRef": "sticker:story_emerald",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge",
+    "souvenir": true
+  },
+  {
+    "id": "story_cheer_flag",
+    "worldId": null,
+    "name": "加油小旗纪念贴纸",
+    "renderRef": "sticker:story_cheer_flag",
+    "footprintW": 1,
+    "footprintH": 1,
+    "blocking": false,
+    "pathOk": true,
+    "wander": 0,
+    "mount": "edge",
+    "souvenir": true
+  }
 ]

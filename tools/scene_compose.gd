@@ -159,15 +159,18 @@ const VILLAGER_INTERIOR_IDS := [
 
 ## 内置物品的占地/压路语义（与 server items.ts BUILTIN_ITEMS 必须同步；
 ## P4 起客户端渲染层也从这里取 footprint——单一副本，别在别处再抄）。
-const ITEM_SPAN := {
-	"well": 3, "windmill": 3,
-	"house_0": 3, "house_1": 3, "house_2": 3, "house_3": 3,
-	"walking_hut": 3, "hop_mailbox": 3,
-	"emerald_castle": 3,
-	"dwarf_cottage": 3,  # 七矮人合住小木屋（dwarf-cottage 计划）
-	# 室内家具 3×3（house-interiors，与 server items.ts 的 span 同步）：床/桌/沙发。
-	# 其余家具（椅/书架/灯/盆栽/熊/茶几/电视）span 1，走默认，不必列。
-	"toy_bed_single": 3, "toy_table": 3, "toy_sofa": 3,
+## 内置物品占地（W×H tile，与 server items.ts footprintW/H 同步）。非方形家具（床/沙发）W≠H；
+## 未列的默认 1×1。奇数边锚点居中、偶数边 NW 锚点（见 _place_anchor，与 server footprintOrigin 对齐）。
+const ITEM_FOOTPRINT := {
+	"well": Vector2i(3, 3), "windmill": Vector2i(3, 3),
+	"house_0": Vector2i(3, 3), "house_1": Vector2i(3, 3), "house_2": Vector2i(3, 3), "house_3": Vector2i(3, 3),
+	"walking_hut": Vector2i(3, 3), "hop_mailbox": Vector2i(3, 3),
+	"emerald_castle": Vector2i(3, 3),
+	"dwarf_cottage": Vector2i(3, 3),  # 七矮人合住小木屋（dwarf-cottage 计划）
+	# 室内家具真实比例（interior-camera-and-size，与 server items.ts 同步）：床 1×2、桌 2×2、沙发 2×1。
+	# 其余家具（椅/书架/灯/盆栽/熊/茶几/电视）1×1，走默认，不必列。
+	"toy_bed_single": Vector2i(1, 2), "toy_bed_bunk": Vector2i(1, 2),
+	"toy_table": Vector2i(2, 2), "toy_sofa": Vector2i(2, 1),
 }
 const ITEM_PATH_OK := { "well": true }
 
@@ -294,19 +297,25 @@ static func yaw_to_arg(deg: float) -> int:
 ## 找不到空位就放弃（确定性，不摆歪）。
 static func _place_anchor(item_ref: PackedByteArray, item_arg: PackedByteArray, palette: PackedStringArray, entry: Dictionary) -> void:
 	var id: String = entry["item"]
-	var span: int = ITEM_SPAN.get(id, 1)
-	var reserve := (span - 1) / 2
+	var fp: Vector2i = ITEM_FOOTPRINT.get(id, Vector2i.ONE)
+	var yaw := float(entry["yaw"])
+	# 朝向旋转后的 footprint（90°/270° 交换 W/H，与 server rotatedFootprint 一致）。
+	var quadrant := roundi(fposmod(yaw, 360.0) / 90.0) % 4
+	if quadrant == 1 or quadrant == 3:
+		fp = Vector2i(fp.y, fp.x)
+	# 锚点展开原点（奇数居中、偶数 NW；与 server footprintOrigin: x-((w-1)>>1) 对齐）。
+	var reserve := Vector2i((fp.x - 1) >> 1, (fp.y - 1) >> 1)
 	var path_ok: bool = ITEM_PATH_OK.get(id, false)
 	var n := WorldGrid.GRID_TILES
 	for r in range(int(entry["search"]) + 1):
 		for t in _ring(entry["tile"], r):
-			var origin: Vector2i = t - Vector2i(reserve, reserve)
-			if not OccupancyMap.prop_area_ok(origin, span, span, path_ok, false):
+			var origin: Vector2i = t - reserve
+			if not OccupancyMap.prop_area_ok(origin, fp.x, fp.y, path_ok, false):
 				continue
-			OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(origin), span * 2, span * 2)
+			OccupancyMap.occupy_rect(OccupancyMap.tile_to_cell(origin), fp.x * 2, fp.y * 2)
 			var i := posmod(t.y, n) * n + posmod(t.x, n)
 			item_ref[i] = _pal_ref(palette, id)
-			item_arg[i] = yaw_to_arg(float(entry["yaw"]))
+			item_arg[i] = yaw_to_arg(yaw)
 			return
 
 ## palette 引用：首用即登记，返回 1 起的索引。
