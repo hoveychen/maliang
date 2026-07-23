@@ -43,6 +43,7 @@ UNIT_TESTS=(
   test_terrain_atlas
   test_scifi_items
   test_pack_registry
+  test_world_predownload
   test_item_thumbnailer
   test_item_3d_viewer
   test_autotile
@@ -184,6 +185,7 @@ run_test test_boot_scene_filter    --fixed-fps 10 --quit-after 40
 run_test test_stage_camera        --fixed-fps 10 --quit-after 110
 run_test_village test_stage_staging       --fixed-fps 10 --quit-after 130
 run_test test_stage_ball          --fixed-fps 10 --quit-after 90
+run_test test_download_gate        --fixed-fps 30 --quit-after 55
 run_test test_visual_menu          --fixed-fps 10 --quit-after 60
 run_test test_visual_loading       --fixed-fps 10 --quit-after 90
 run_test test_visual_fairy         --fixed-fps 10 --quit-after 100

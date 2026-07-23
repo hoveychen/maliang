@@ -5279,6 +5279,10 @@ func _filter_boot_characters(all: Array) -> Array:
 func _bootstrap() -> void:
 	var fetched := await _bootstrap_fetch()
 	await _bootstrap_apply(fetched)
+	# 全量预下载门（world-full-predownload-gate P3）：非 intro 路径（返回用户）也补一道门——
+	# 揭幕后若内容包还没全挂（新设备首进），出下载页挡住、下完才放行；缓存命中秒过不出页。
+	# intro 路径不走 _bootstrap（intro_director 单独调 fetch/apply + gate），故这里只作用于非 intro。
+	await _run_predownload_gate(world_id)
 
 ## 拉取半段：get_world + 实体定义就位 + 角色素材并发预取。**只落缓存/内存与数据，不动场景任何节点**
 ## （ItemCatalog.set_defs 是纯数据、_prefetch_characters 只写 asset 缓存）——故 intro 可后台跑这段而
@@ -6029,43 +6033,55 @@ func _prewarm_packs(wid: String, sid: String, rebuild_after := false) -> void:
 ## 内容包离线提示的一次性闸（content-pck-distribution P4）：避免每次进场景都弹，一个会话提示一次即可。
 var _pack_offline_hinted := false
 
-## 非场景内容包后台预取（content-pck-distribution P5）：bgm/voice_* 及 build_parts/stickers 不进场景
-## palette、不由 _prewarm_packs（manifest 驱动）覆盖，故 intro 期单独按包名从 GET /packs 拉。best-effort：
-## 拉不到不影响主线——story/item 语音缺失走 file_exists 兜底回落 live TTS，bgm 缺段由 _poll_bgm_load
-## 跳过（carefree 留主包照放），build_parts/stickers 缺则守卫跳过（拼装零件/背包贴纸暂空，联网后自愈）。
-## 故不弹离线提示、不重铺区块（内容包不含地形 prop）。内容寻址永久缓存：下过一次即永久离线可用。
-## 一会话跑一次即可（_content_packs_prefetched 闸）。
+## 世界级全量内容包预下载编排器（world-full-predownload-gate P2）；null=尚未起过。P3 的下载页
+## 连它的 progress_changed/finished 显示真进度并 gating。RefCounted，world 持一引用保活。
+var _predownload: WorldPredownload = null
+
+## 世界内容包全量预下载（world-full-predownload-gate P2，取代原「非场景包」预取）：拉
+## GET /worlds/:wid/packs（服务端已算好并集：所有场景主题包 ∪ 核心包 bgm/voice_items/build_parts/
+## stickers ∪ 在场故事册 voice_story_*、去重），逐包 fetch_pack + 挂载，已挂(is_mounted)跳过。
+## 编排逻辑收进 WorldPredownload；这里只负责起它并在收尾补 bgm 轮播。best-effort：弱网缺包各守卫
+## 兜底（story/item 语音回落 live TTS，bgm 缺段跳过，build_parts/stickers 缺则守卫跳过），联网后自愈。
+## 内容寻址永久缓存：下过一次即永久离线可用（二次启动 _mount_cached 挂上、is_mounted 全跳过）。
+## 一会话跑一次即可（_content_packs_prefetched 闸）；wid 缺省回落 self.world_id。
 var _content_packs_prefetched := false
 
-func _prefetch_content_packs() -> void:
+func _prefetch_content_packs(wid := "") -> void:
 	if api == null or _content_packs_prefetched:
 		return
 	_content_packs_prefetched = true
 	var pm := get_node_or_null(^"/root/PackMounter") # 无 class_name autoload，按节点路径取（见 _prewarm_packs 注释）
 	if pm == null:
 		return
-	var index := await api.fetch_packs_index()
-	for name in index:
-		var n := String(name)
-		# 只管【非场景内容包】：主题模型包(toyroom/scifi/…)由场景 manifest 驱动 _prewarm_packs 按需挂。
-		# bgm/voice_* 不进任何场景 palette；build_parts(拼装小游戏零件)与 stickers(手机背包收藏预览)也不由
-		# 场景摆放触发挂载（stickers 另在其被摆进场景时由 manifest 兜一次，这里保证背包预览恒可用）——
-		# 故一并在此按包名预取，否则导出包里这两个包永无挂载路径 → 守卫恒跳过、零件/贴纸不渲染。
-		if n != "bgm" and not n.begins_with("voice_") and n != "build_parts" and n != "stickers":
-			continue
-		var h := String((index[name] as Dictionary).get("hash", ""))
-		if h.is_empty():
-			continue
-		if pm.is_mounted(h):
-			pm.note_mounted_name(n) # 已挂载：补记包名（供守卫按名判挂载）
-			continue
-		var path := await api.fetch_pack(h) # 已缓存秒回；未缓存则下载（弱网失败返回空，跳过）
-		if not path.is_empty():
-			pm.ensure_mounted(h, n)
+	if _predownload == null:
+		_predownload = WorldPredownload.new()
+	var use_wid := wid if not wid.is_empty() else world_id
+	await _predownload.run(api, pm, use_wid)
 	# bgm 内容包（cheery/happy）现已挂载 → 让 world 起播时跳过的两首补进轮播（不打断当前段）。
 	# game_audio 由 _setup_audio 无条件先建，intro 路径也在（best-effort：无则跳过）。
 	if game_audio != null:
 		game_audio.refresh_content_bgm()
+
+## 全量预下载门（world-full-predownload-gate P3）：intro 结束 / 返回用户进世界后调用。若该世界要用的
+## 内容包还没全挂上（首启弱网）→ 起【专属下载页】挡在已揭幕的世界之上，下完才 await 返回（放行）；
+## 已全挂（缓存命中/秒下完）→ 不出页秒进（二次启动）。离线/无 PackMounter → 不挡（各守卫跳过缺包）。
+func _run_predownload_gate(wid := "") -> void:
+	var use_wid := wid if not wid.is_empty() else world_id
+	var pm := get_node_or_null(^"/root/PackMounter")
+	if api == null or pm == null:
+		return
+	if _predownload == null:
+		_predownload = WorldPredownload.new()
+	_prefetch_content_packs(use_wid) # 起首轮下载（intro 路径可能已起；一次性闸 + run 自守，重复安全）
+	if _predownload.all_mounted:
+		return # 缓存命中/已下完：不出下载页
+	var gate := DownloadGate.new()
+	gate.name = "DownloadGate"
+	add_child(gate)
+	gate.begin(_predownload, func() -> void: _predownload.run(api, pm, use_wid))
+	await gate.done
+	if game_audio != null:
+		game_audio.refresh_content_bgm() # 重试轮里补挂的 bgm 段并进轮播（幂等）
 
 func _on_item_created(data: Dictionary) -> void:
 	_apply_wallet(data.get("wallet")) # 造物扣了 1 朵花，同步最新钱包

@@ -601,6 +601,17 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     return { packs: store.listPacks().map(({ name, rec }) => ({ name, hash: rec.hash, bytes: rec.bytes })) };
   });
 
+  // 某世界【全量预下载门】清单（world-full-predownload-gate P1）：进世界前一次拉齐【这个世界要用的】
+  // 所有内容包——所有场景 manifest 并集 + 核心包(bgm/voice_items/build_parts/stickers) + 在场故事册
+  // voice_story_*，去重返回 { packs: [{name,hash,bytes}] }。客户端凭此逐包 fetch_pack + 挂载再放行；
+  // 单一真相源（服务端算并集，客户端不逐场景累加）。只列已登记的包（未登记优雅缺失）。无需鉴权。
+  app.get<{ Params: { wid: string } }>('/worlds/:wid/packs', async (req, reply) => {
+    if (!store.getWorld(req.params.wid)) {
+      return reply.code(404).send({ error: 'world not found' });
+    }
+    return { packs: store.worldPacks(req.params.wid) };
+  });
+
   // 内容包入库（content-pck-distribution P2）：部署脚本把某主题打好的 .pck 推上来，存进内容寻址
   // 资产库（复用 putAsset / GET /assets/:hash，零新下载基建）并登记 name→{hash,bytes,keys}。
   // keys = 该包 pack.json 的 entries 键（部署脚本读出后传入；服务端运行时读不到 assets/packs/*.json）。

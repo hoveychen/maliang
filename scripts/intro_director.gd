@@ -108,6 +108,12 @@ func _run() -> void:
 		await _world.call("_bootstrap_apply", _fetched)
 		_world.set("_player_restore_pending", false)
 
+	# ④' 全量预下载门（world-full-predownload-gate P3）：转正后若该世界内容包还没全挂上（首启弱网），
+	# 上专属下载页挡住、下完才放行；已全挂（缓存命中）秒过、不出页。传 ""——world.world_id 已由上面的
+	# _bootstrap_apply 置好，gate 回落读它。离线/无世界（world_id 空）→ gate 内部直接返回不挡。
+	if is_instance_valid(_world):
+		await _world.call("_run_predownload_gate", "")
+
 	# ⑤ 记住 intro 已看过（下次不再演教学）。
 	PlayerProfile.mark_intro_seen()
 	_done = true
@@ -361,8 +367,10 @@ func _prefetch_packs_bg() -> void:
 	if wid.is_empty():
 		return # 离线/无世界：无包可预取，转正走离线兜底
 	await _world.call("_prewarm_packs", wid, String(_world.get("_scene_id")), true)
-	# 非场景内容包（voice/bgm，P5）：进场景后台补拉——不卡主线，best-effort（缺失各有兜底）。
-	await _world.call("_prefetch_content_packs")
+	# 世界级全量内容包预下载（world-full-predownload-gate P2）：拉齐该世界所有场景主题包 + 核心包 +
+	# 在场故事册语音，逐包下载挂载。best-effort（缺失各有兜底），P3 会据其进度 gating。显式传 wid——
+	# world.world_id 由 _bootstrap_apply 置，此协程并行可能早于它，别读 self 的空 world_id。
+	await _world.call("_prefetch_content_packs", wid)
 
 ## 等 fetch 完成或到超时（弱网兜底）；skip 时也顶多等到 fetch 完（转正需要素材）——
 ## 但若 skip 且 fetch 未完，仍走超时兜底避免卡住。
