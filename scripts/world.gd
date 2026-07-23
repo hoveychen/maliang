@@ -523,7 +523,10 @@ func _ready() -> void:
 	_load_packaged_terrain()
 	ItemCatalog.apply_static_occupancy()
 	_setup_camera()
-	_setup_npcs()
+	# intro 模式不预生散点 demo 村民——建造演出会用神笔把具名种子村民一个个「画」出来（intro_spawn_seed），
+	# 否则 _setup_npcs 的固定散点村民与画出来的会重 id。pending 此刻仍为真（下面才在 intro 分流处消费）。
+	if not IntroDirector.pending:
+		_setup_npcs()
 	_setup_player()
 	_setup_fairy_offline()
 	_setup_hud()
@@ -5623,6 +5626,32 @@ func intro_spawn_seed(idx: int, logical: Vector2) -> Vector2:
 		"paper_action": "pop_in", "paper_action_t": 0.0 })
 	OccupancyMap.char_register(did, lg, 2)
 	return lg
+
+## intro 编排：让某个具名种子村民做一个纸片动作（登场后打招呼挥手=wave）。按 SEED[idx] 的 slug 定位 demo_<slug>。
+func intro_seed_act(idx: int, action: String) -> void:
+	var seed_list: Array = VillagerAssets.SEED
+	if seed_list.is_empty():
+		return
+	var did := "demo_%s" % String((seed_list[idx % seed_list.size()] as Dictionary)["slug"])
+	for n in npcs:
+		if String((n as Dictionary).get("id", "")) == did:
+			n["paper_action"] = action
+			n["paper_action_t"] = 0.0
+			return
+
+## intro 编排：画完的具名种子村民活起来（起就近漂移漫游，与 _setup_npcs 的返回用户世界一致）。
+## 幂等：已被执行器驱动的不重复起。
+func intro_start_seed_wander() -> void:
+	for n in npcs:
+		if not String((n as Dictionary).get("id", "")).begins_with("demo_"):
+			continue
+		var driven := false
+		for ex in _executors:
+			if (ex as BehaviorExecutor).drives(n):
+				driven = true
+				break
+		if not driven:
+			_start_ambient_wander(n)
 
 ## benchmark 全程（Benchmark _ready/finish 开关）：锁玩家移动输入（相机/主角不动，防小朋友测试时
 ## 拖动世界干扰负载）+ 仙子注魔定格（含闭嘴，语音让位注魔旁白）。村民【不】冻结——见 _step_executors：

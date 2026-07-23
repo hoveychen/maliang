@@ -214,10 +214,11 @@ run_test test_npc_idle_anim        --fixed-fps 10 --quit-after 80
 run_test test_villager_assets      --fixed-fps 10 --quit-after 40
 run_test_village test_bootstrap_split      --fixed-fps 10 --quit-after 60
 run_test test_intro_capabilities   --fixed-fps 10 --quit-after 120
-run_test test_intro_director       --fixed-fps 10 --quit-after 600
-run_test test_intro_tutorial       --fixed-fps 10 --quit-after 1200
+# intro 重做后建造演出更长（点点逐个画 3 个村民 + 各自招呼旁白），quit-after 上调留足余量：
+run_test test_intro_director       --fixed-fps 10 --quit-after 900
+run_test test_intro_tutorial       --fixed-fps 10 --quit-after 1500
 run_test test_intro_skip           --fixed-fps 10 --quit-after 60
-run_test test_intro_benchmark      --fixed-fps 60 --quit-after 3600
+run_test test_intro_benchmark      --fixed-fps 60 --quit-after 6000
 run_test test_world_notice         --fixed-fps 10 --quit-after 40
 run_test test_player_anchors       --fixed-fps 10 --quit-after 30
 run_test test_remote_player_anchors --fixed-fps 10 --quit-after 30
