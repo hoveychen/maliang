@@ -108,7 +108,7 @@ async function toolObserve(): Promise<Reply> {
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<Content[]> {
-  // 流程中心两工具经 pilot_runner 子进程跑（子进程自建 TCP 连接），不占 MCP 自己的连接。
+  // 流程中心两工具经 pilot_cli.py 子进程跑（子进程自建 TCP 连接），不占 MCP 自己的连接。
   // list_flows 更不需要游戏在线 → 放在 ensureConnected 之前，游戏没起也能列。
   if (name === "list_flows") return [textContent(await listFlows({ host: HOST, port: PORT }))];
   if (name === "run_flow") {
@@ -247,7 +247,7 @@ const TOOLS = [
   {
     name: "run_flow",
     description:
-      "按名跑一条注册流程(经 pilot_runner 子进程,单一执行路径)：先按 depends 拓扑序跑前置链(如 enter_world 真进世界)," +
+      "按名跑一条注册流程(经 pilot_cli.py run-flow 子进程,单一执行路径)：先按 depends 拓扑序跑前置链(如 enter_world 真进世界)," +
       "再按 args_schema 校验并传参跑本体。回 {ran:[{name,kind,status,dt}], coverage{used_setup,skipped,bypassed_regression}, delta, duration}。" +
       "coverage 让『哪条流程被复用/跳过、有没有真跑到回归』显式可见——绝不静默丢回归。",
     inputSchema: {

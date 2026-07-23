@@ -2,8 +2,8 @@
 """Flow Registry 内核（game-pilot 可复用流程中心 P1）：加载/校验 flows/registry.json、按名解析、
 按 `depends` 拓扑排序（含环检测）、按 `args_schema` 校验入参。
 
-MCP（P2）/ serve_web（P3）/ CLI（pilot_runner）三个入口都经这里解析出「要跑哪些 flow、什么顺序」，
-再交给 pilot_runner 逐个 run(h,**args)——单一执行路径（设计 §4 A2）。
+MCP（P2）/ serve_web（P3）/ CLI（pilot_cli）三个入口都经这里解析出「要跑哪些 flow、什么顺序」，
+再交给 pilot_cli.py 逐个 run(h,**args)——单一执行路径（设计 §4 A2）。
 
 清单每条 flow 的字段（设计 §4）：
     name         唯一标识，按名调用

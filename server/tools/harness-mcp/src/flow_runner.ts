@@ -1,5 +1,5 @@
 // Flow Registry 的 MCP/web 侧执行桥（Flow Registry P2）。
-// 设计 §4 A2：MCP/web/CLI 三入口都经同一个 pilot_runner.py 子进程跑 flow——单一执行路径。
+// 设计 §4 A2：MCP/web/CLI 三入口都经同一个 pilot_cli.py 子进程跑 flow——单一执行路径。
 // 这里只做「拼 argv → spawn python → 解析回来的 JSON」，不重实现 flow 逻辑。
 // 纯函数（buildRunnerArgs / parseRunnerJson）抽出来给 node:test 单测，spawn 那层薄到不用测。
 import { spawn } from "node:child_process";
@@ -7,29 +7,30 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const PYTHON = process.env.MALIANG_PYTHON || "python3";
-// src/ → harness-mcp → tools → server → repo 根 → test/e2e/pilot_runner.py
-export const RUNNER_PATH = path.resolve(
+// src/ → harness-mcp → tools → server → repo 根 → test/e2e/pilot_cli.py
+// flow 引擎已折进唯一 CLI pilot_cli.py（原 pilot_runner.py 删）——MCP/web/CLI 仍同一执行路径。
+export const CLI_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "..", "..", "..", "..", "test", "e2e", "pilot_runner.py",
+  "..", "..", "..", "..", "test", "e2e", "pilot_cli.py",
 );
 
 export type RunnerOpts = { host: string; port: number };
 
-// 拼 pilot_runner 的 argv（纯函数，可单测）。mode="list" 默认带可用性(连游戏取 state 标 available)；
-// mode="flow" 带 --flow/--args/--port。
+// 拼 pilot_cli 的 argv（纯函数，可单测）。全局 --host/--port 必须在子命令**之前**（argparse subparser 规则）。
+// mode="list" → `list-flows --with-availability`；mode="flow" → `run-flow <name> [--args ...]`。
 export function buildRunnerArgs(
   mode: "list" | "flow",
   opts: RunnerOpts,
   flow?: { name: string; args?: Record<string, unknown> },
 ): string[] {
-  const argv = [RUNNER_PATH];
+  const argv = [CLI_PATH, "--host", opts.host, "--port", String(opts.port)];
   if (mode === "list") {
     // 带可用性：连 opts 指定的游戏口取 state，给每条 flow 标 available{ok,reasons}（现在能不能跑）。
-    argv.push("--list", "--with-availability", "--host", opts.host, "--port", String(opts.port));
+    argv.push("list-flows", "--with-availability");
     return argv;
   }
   if (!flow?.name) throw new Error("run_flow 需要 flow name");
-  argv.push("--flow", flow.name, "--json", "--host", opts.host, "--port", String(opts.port));
+  argv.push("run-flow", flow.name);
   if (flow.args && Object.keys(flow.args).length > 0) {
     argv.push("--args", JSON.stringify(flow.args));
   }
