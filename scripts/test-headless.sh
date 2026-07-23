@@ -115,6 +115,7 @@ UNIT_TESTS=(
   test_player_pathfind_range
   test_room_stage
   test_room_render_branch
+  test_indoor_camera_reset
   test_spawn_anchor
   test_terrain_load
   test_terrain_v2

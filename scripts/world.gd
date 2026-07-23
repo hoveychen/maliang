@@ -796,6 +796,13 @@ func _apply_indoor_render(scene_id: String) -> void:
 		focus_logical = _room_center_logical()
 		_target_pitch = INDOOR_CAM_PITCH
 		_target_dist = INDOOR_CAM_DIST
+	else:
+		# 出室内复位到室外默认（GOD）：进屋把 pitch/dist 设成了 INDOOR 收束值，而室外的相机分支
+		# （_process 里 `elif not player.is_empty()`）只改 focus、不碰 pitch/dist（好让玩家缩放留存），
+		# 故出屋后镜头会卡在室内的陡俯角+远距离。之前只有对话退出(_exit_interaction)会复位，
+		# 纯走 portal 出门不复位 → 「摄像头位置不对」。这里在进/出室内切换处一次性复位。
+		_target_pitch = GOD_PITCH_DEG
+		_target_dist = GOD_DIST
 
 ## 当前是否室内场景。
 func _is_indoor() -> bool:
