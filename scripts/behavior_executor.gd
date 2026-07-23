@@ -47,6 +47,10 @@ var _state := "idle" ## idle | move | wait | follow | done
 var _wait_t := 0.0
 var _move_to := Vector2.ZERO
 var _arrive_override := 0.0 ## 当前指令的到达半径覆盖（0 = 用默认 ARRIVE）
+## A* 搜索上限：NPC 走位皆近程（wander/跟随/送信），1500 够用、远目标早认输走直线（见 _plan_path 注释）。
+## 玩家跨图长走（点远处/走进远传送门/跟点点引路到远景）是合法用例，由 setup 的 plan_max_iter 抬高，
+## 否则长路 find_path 认输返空、玩家退化成直线滑动撞障不动（house-interiors 真机 snow 走不到的真因）。
+var _plan_max_iter := 1500
 
 # 寻路状态：waypoint 队列 + 无路直线回退 + 被挡等待/重算
 var _waypoints := PackedVector2Array()
@@ -88,6 +92,7 @@ func setup(target: Dictionary, script: Dictionary, resolver := Callable(), deliv
 	_target = target
 	_commands = script.get("commands", [])
 	_loop = bool(script.get("loop", false))
+	_plan_max_iter = int(script.get("plan_max_iter", 1500))
 	_resolver = resolver
 	_deliverer = deliverer
 	_loc_resolver = loc_resolver
@@ -263,8 +268,9 @@ func _begin_move() -> void:
 
 ## 派发一次异步寻路：主线程拍占用图快照，worker 线程跑 A*（离主线程，不阻塞帧）。
 ## 单飞——已有在途任务就不叠（跟随/送信按间隔重复调用时沿用旧队列直到新路算回）。
-## 搜索上限 1500：NPC 走位都是近程（wander 半径 7m/跟随/送信到人旁），全图长搜索只
-## 服务「目标不可达」病态用例，早认输走直线滑动、观感一致。
+## 搜索上限 _plan_max_iter（NPC 默认 1500，玩家由 setup plan_max_iter 抬高）：NPC 走位都是近程
+## （wander 半径 7m/跟随/送信到人旁），1500 够、全图长搜索只服务「目标不可达」病态用例早认输走
+## 直线滑动；玩家跨图长走是合法用例，需更高上限（见 _plan_max_iter 声明处）。
 ## （Pathfinder 的 budgeted 单帧预算不再需要——A* 已不占主线程，改单飞控在途量。）
 func _plan_path() -> void:
 	if _plan_task != -1:
@@ -279,7 +285,7 @@ func _plan_path() -> void:
 ## worker 线程体：只读不可变快照跑 A*，绝不碰任何节点/活占用图/SceneTree；
 ## 结果写 _plan_result，主线程在 is_task_completed 为真后（内存屏障）才读。
 func _run_plan(from: Vector2, to: Vector2, sp: int, id: String, snap: OccSnapshot) -> void:
-	_plan_result = Pathfinder.find_path(from, to, sp, id, true, 1500, false, snap)
+	_plan_result = Pathfinder.find_path(from, to, sp, id, true, _plan_max_iter, false, snap)
 
 ## 主线程回收：孤儿任务 + 自己的在途任务；完成则搬结果、更新直线兜底标记。
 func _poll_plan() -> void:
