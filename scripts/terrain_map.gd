@@ -518,6 +518,12 @@ static func _paint_village_forest() -> void:
 	_paint_polyline_type([
 		Vector2(20.5, 40.5), Vector2(28.5, 46.5), Vector2(40.5, 50.5),
 		Vector2(52.5, 56.5), Vector2(60.5, 60.5), Vector2(66.5, 64.5)], 1.0, T_PATH)
+	# ---- 通往七矮人操场·小屋的小径（house-interiors：小屋是唯一没有明路的地标，藏在密林里、
+	#      从村核到它要穿一大片密林——路虽寻得到但又长又绕、孩子也难发现。给它一条从村北林口
+	#      蜿蜒下到操场的明路，与外婆家穿林小径/跑道大道同款，直达 poi_forest_deep 空地）----
+	_paint_polyline_type([
+		Vector2(20.5, 40.5), Vector2(24.5, 52.5), Vector2(28.5, 64.5),
+		Vector2(30.5, 76.5), Vector2(30.5, 84.5)], 1.1, T_PATH)
 
 	# ---- 右缘跑道（龟兔预留）：南北向直跑道，清一条明路 ----
 	_paint_rect_type(87, 8, 89, 92, T_PATH)
