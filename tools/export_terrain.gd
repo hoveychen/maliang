@@ -10,6 +10,7 @@ extends SceneTree
 ## 物品层由 tools/scene_compose.gd 组装。格式见 server/src/terrain.ts（两边必须同步改）。
 
 const COMPOSE := preload("res://tools/scene_compose.gd")
+const WORLD := preload("res://scripts/world.gd")   ## 房间几何单一真相：room_front_tile/room_back_landing/room_n_for
 const HEADER_BYTES := 11
 
 ## 各场景网格边长（tile 数）——须与 server/src/terrain.ts PRESET_GRIDS 一致。
@@ -24,8 +25,8 @@ const SCENE_GRIDS := {
 
 ## 4 村民农舍 + 外婆家的室内门（house-interiors P3，「所有房子都可进」的量产）。每栋房子在 village_forest
 ## 门口一格开一座进门 portal（entrance，走到的可走草地 tile，见 tools 探针）→ 各自室内；室内前开口
-## (24,30) 原路返回、落在 return（村里房子门外一格）。室内落点统一 (24,22)（房间 [19..30] 后排，离室内
-## 返回门 8 tile >radius，防弹回）。返回落点 return 离 entrance ≥3 tile 防出门即弹回。家具见
+## （room_front_tile，9×9 → (23,27)）原路返回、落在 return（村里房子门外一格）。室内落点 = room_back_landing
+## （9×9 → (23,22)，后排中线，离返回门 >radius 防弹回）。返回落点 return 离 entrance ≥3 tile 防出门即弹回。家具见
 ## scene_compose.gd VILLAGER_HOME_FURNITURE（5 栋共用一套 cozy 小客厅——非老板明点，克制）。
 const VILLAGER_PORTALS := {
 	"villager_home_1_interior": { "entrance": [13, 8],  "return": [9, 9] },    # house_0 (11,10)
@@ -155,23 +156,33 @@ static func build_poi_json_village() -> Array:
 ## 第一季册 5《绿野仙踪》复活休眠的多场景基建：主场景 village_forest 的森林深处开一座通往 oz 的门，
 ## 孩子往森林深处走 → 传送到「远方」奥兹黄砖路入口；oz 入口小广场旁一座门原路返回村庄。
 ## 落点都选目标场景可走 tile、且与对向 portal tile 错开 >radius（防落地即弹回；arm/disarm 见 world.gd _step_portal）。
+## 进屋落点 [x,y]（室内后排中线，按目标室内的房间尺寸派生；单一真相 = world.gd）。
+static func _land(interior_id: String) -> Array:
+	var t: Vector2i = WORLD.room_back_landing(interior_id)
+	return [t.x, t.y]
+
+## 室内返回门 tile [x,y]（前开口边缘中线，按该室内房间尺寸派生）。
+static func _front(interior_id: String) -> Array:
+	var t: Vector2i = WORLD.room_front_tile(interior_id)
+	return [t.x, t.y]
+
 static func build_portal_json(scene_id: String) -> Array:
 	if scene_id == "village_forest":
 		# 森林深处那座门去 oz；村核玩家自己家门口进室内；森林深处七矮人小屋门口进 snow_interior。
 		# 家门口 portal (24,26) 在玩家家（LANDMARKS_VF player_home 24,24）南侧门口，radius 3 =「走近家门就进屋」；
-		# 落点 (24,22) 在室内房间偏后（房间 [19..30]，见 world.gd ROOM_*），离室内返回门 (24,30) = 8 tile > radius（防落地即弹回）。
+		# 落点 = 目标室内后排中线（home_interior 9×9 → (23,22)），离该室内返回门远，防落地即弹回。
 		# 七矮人小屋 dwarf_cottage 锚点 (30,94) footprint [29-31,93-95]、门朝北迎操场；进门 portal (30,92)
-		# 在门正前方一格草地（户外床已移进室内、此处已空），radius 2.5；落点 (24,22) = 室内后排，离室内返回门 (24,30) = 8 > 2.5。
+		# 在门正前方一格草地（户外床已移进室内、此处已空），radius 2.5；落点 = snow_interior(12×12) 后排 (24,22)。
 		var vf_portals := [
 			{ "tile": [30, 78], "radius": 3.0, "toScene": "oz", "toTile": [14, 14] },
-			{ "tile": [24, 26], "radius": 3.0, "toScene": "home_interior", "toTile": [24, 22] },
-			{ "tile": [30, 92], "radius": 2.5, "toScene": "snow_interior", "toTile": [24, 22] },
+			{ "tile": [24, 26], "radius": 3.0, "toScene": "home_interior", "toTile": _land("home_interior") },
+			{ "tile": [30, 92], "radius": 2.5, "toScene": "snow_interior", "toTile": _land("snow_interior") },
 		]
-		# 4 村民农舍 + 外婆家的进门 portal（P3 量产）：门口 entrance → 各自室内，落室内后排 (24,22)。
+		# 4 村民农舍 + 外婆家的进门 portal（P3 量产）：门口 entrance → 各自室内，落各室内后排中线（9×9 → (23,22)）。
 		for interior_id in VILLAGER_PORTALS:
 			vf_portals.append({
 				"tile": VILLAGER_PORTALS[interior_id]["entrance"], "radius": 2.5,
-				"toScene": interior_id, "toTile": [24, 22] })
+				"toScene": interior_id, "toTile": _land(interior_id) })
 		return vf_portals
 	if scene_id == "oz":
 		# 原路回村 + 翡翠城堡进门（house-interiors P2）。城堡 emerald_castle 锚点 (58,50) footprint
@@ -179,24 +190,25 @@ static func build_portal_json(scene_id: String) -> Array:
 		# radius 2.5；落点 (24,22) = 室内后排，离室内返回门 (24,30) = 8 > 2.5（防弹回）。
 		return [
 			{ "tile": [16, 20], "radius": 3.0, "toScene": "village_forest", "toTile": [26, 80] },
-			{ "tile": [58, 53], "radius": 2.5, "toScene": "oz_castle_interior", "toTile": [24, 22] },
+			{ "tile": [58, 53], "radius": 2.5, "toScene": "oz_castle_interior", "toTile": _land("oz_castle_interior") },
 		]
 	if scene_id == "oz_castle_interior":
-		# 翡翠城堡室内：返回门放在前开口边缘 (24,30)（房间 [19..30]）。
+		# 翡翠城堡室内（12×12）：返回门放在前开口边缘中线（room_front_tile → (24,30)）。
 		# 落点 (58,56) 在广场（poi_emerald），离城堡进门 (58,53) = 3 > 2.5（防出门即弹回）。
-		return [{ "tile": [24, 30], "radius": 2.5, "toScene": "oz", "toTile": [58, 56] }]
+		return [{ "tile": _front(scene_id), "radius": 2.5, "toScene": "oz", "toTile": [58, 56] }]
 	if scene_id == "home_interior":
-		# 室内重做：返回门放在房间【前开口边缘】(24,30)——前墙不建（朝相机那面开着，见 RoomStage），
-		# 房间 [19..30]（ROOM_N=12），前开口 = max y = 30。走向前开口 = 走出家门。radius 2.5 是前门中央的门口范围；
-		# 落点 (24,31) 在村里家门外院子，离村里家门口 portal (24,26) = 5 tile > radius（防出门即被弹回屋）。
-		return [{ "tile": [24, 30], "radius": 2.5, "toScene": "village_forest", "toTile": [24, 31] }]
+		# 室内重做：返回门放在房间【前开口边缘】中线（room_front_tile；home 9×9 → (23,27)）——前墙不建
+		# （朝相机那面开着，见 RoomStage），前开口 = max y = origin+N-1。走向前开口 = 走出家门。radius 2.5
+		# 是前门中央范围；落点 (24,31) 在村里家门外院子，离村里家门口 portal (24,26) = 5 tile > radius（防出门弹回）。
+		return [{ "tile": _front(scene_id), "radius": 2.5, "toScene": "village_forest", "toTile": [24, 31] }]
 	if scene_id == "snow_interior":
-		# 七矮人小屋室内：返回门放在前开口边缘 (24,30)（同 home_interior，房间 [19..30]）。
-		# 落点 (30,89) 在村森林操场（小屋北侧、户外家具已移走的空地），离村里进门 portal (30,92) = 3 > 2.5（防出门即弹回）。
-		return [{ "tile": [24, 30], "radius": 2.5, "toScene": "village_forest", "toTile": [30, 89] }]
+		# 七矮人小屋室内（12×12）：返回门放在前开口边缘中线（room_front_tile → (24,30)）。
+		# 落点 (30,89) 在村森林操场（小屋北侧、户外家具已移走的空地），离村里进门 portal (30,92) = 3 > 2.5（防出门弹回）。
+		return [{ "tile": _front(scene_id), "radius": 2.5, "toScene": "village_forest", "toTile": [30, 89] }]
 	if VILLAGER_PORTALS.has(scene_id):
-		# 村民农舍/外婆家室内：前开口 (24,30) 原路返回村，落在 return（房子门外一格，离 entrance ≥3 tile 防弹回）。
-		return [{ "tile": [24, 30], "radius": 2.5, "toScene": "village_forest",
+		# 村民农舍/外婆家室内（9×9）：前开口中线 (room_front_tile → (23,27)) 原路返回村，
+		# 落在 return（房子门外一格，离 entrance ≥3 tile 防弹回）。
+		return [{ "tile": _front(scene_id), "radius": 2.5, "toScene": "village_forest",
 			"toTile": VILLAGER_PORTALS[scene_id]["return"] }]
 	return []
 

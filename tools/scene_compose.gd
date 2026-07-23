@@ -138,14 +138,16 @@ const OZ_CASTLE_INTERIOR_FURNITURE := [
 
 ## 村民农舍 + 外婆家室内共用的一套 cozy 小客厅家具（house-interiors P3 量产，克制——「所有房子都可进」
 ## 的默认补充，非老板明点）。5 栋房子室内内容一致（只是各自返回门通向不同的村里门口），故一套即可。
-## 房间 [19..30]²；床后-左、餐桌+两椅居中、书架后-右、盆栽点缀；留后排 (24,22) 落地点 + 到前门走道。
+## 房间 9×9 [19..27]²（interior-camera-and-size：普通人家缩到温馨 9×9）；床后-左、餐桌+两椅居中偏前、
+## 书架后-右、盆栽前-右点缀。刻意留：后排中线 (23,22) 落地点（进门站位）清空 + 绕过餐桌到前门 (23,27) 的路。
+## 坐标全在房间内、span-3 家具 footprint 逐格核过不出界、不压落地点。
 const VILLAGER_HOME_FURNITURE := [
-	{ "item": "toy_bed_single", "tile": Vector2i(20, 20), "yaw": 180.0, "search": 1 },  # 后-左床
-	{ "item": "toy_bookcase",   "tile": Vector2i(28, 20), "yaw": 270.0, "search": 1 },  # 后-右书架
-	{ "item": "toy_table",      "tile": Vector2i(24, 25), "yaw": 0.0,   "search": 1 },  # 中央餐桌
-	{ "item": "toy_chair",      "tile": Vector2i(21, 25), "yaw": 90.0,  "search": 1 },  # 桌左椅
-	{ "item": "toy_chair",      "tile": Vector2i(27, 25), "yaw": 270.0, "search": 1 },  # 桌右椅
-	{ "item": "toy_plant",      "tile": Vector2i(28, 29), "yaw": 270.0, "search": 1 },  # 前-右盆栽
+	{ "item": "toy_bed_single", "tile": Vector2i(20, 20), "yaw": 180.0, "search": 1 },  # 后-左床（span3 [19..21]²）
+	{ "item": "toy_bookcase",   "tile": Vector2i(26, 20), "yaw": 270.0, "search": 1 },  # 后-右书架
+	{ "item": "toy_table",      "tile": Vector2i(23, 24), "yaw": 0.0,   "search": 1 },  # 中央餐桌（span3 [22..24]×[23..25]）
+	{ "item": "toy_chair",      "tile": Vector2i(21, 24), "yaw": 90.0,  "search": 1 },  # 桌左椅
+	{ "item": "toy_chair",      "tile": Vector2i(25, 24), "yaw": 270.0, "search": 1 },  # 桌右椅
+	{ "item": "toy_plant",      "tile": Vector2i(26, 26), "yaw": 270.0, "search": 1 },  # 前-右盆栽
 ]
 
 ## 用 VILLAGER_HOME_FURNITURE 的室内场景 id（4 农舍 + 外婆家）。与 export_terrain.gd VILLAGER_PORTALS
