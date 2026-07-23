@@ -186,8 +186,9 @@ func _draw_seed_characters() -> void:
 		_world.call("intro_fairy_act", "wave")
 		# ② 旁白点名画这个角色
 		await _narrate(String(spec["draw"]))
-		# ③ 角色缩放弹出登场
+		# ③ 角色缩放弹出登场 + 笔尖白闪（P4 中档 VFX）
 		_world.call("intro_spawn_seed", i, pos)
+		_world.call("intro_draw_flash", pos, 2.4)
 		await _sleep(POP_SETTLE)
 		# ④ 角色挥手 + 播它的招呼语音（IntroNarrator 同目录按 id 找 WAV；各角色各自音色）
 		_world.call("intro_seed_act", i, "wave")

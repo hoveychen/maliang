@@ -60,6 +60,13 @@ func _tick() -> void:
 			# 释放编排：回漂移跟随
 			scene.call("intro_fairy_release")
 			_check("release 后不再 arrived", bool(scene.call("intro_fairy_arrived")), false)
+			# P4 中档 VFX：笔尖白闪——生成一簇 IntroFlash 精灵
+			_check("闪光前无 IntroFlash 残留", _count_flash(), 0)
+			scene.call("intro_draw_flash", Vector2(6.0, 0.0), 2.4)
+		44:
+			_check("intro_draw_flash 生成了闪光精灵（中央+火花）", _count_flash() >= 4, true)
+		70: # 闪光 dur≤0.5s（<7 帧@fixed-fps10）后 tween 回调 queue_free → 清空
+			_check("闪光 tween 结束后自清理", _count_flash(), 0)
 			_finish()
 
 func _test_spawn_seed() -> void:
@@ -89,6 +96,14 @@ func _find_fairy() -> void:
 		if bool((n as Dictionary).get("is_fairy", false)):
 			fairy = n
 	_check("找到点点", not fairy.is_empty(), true)
+
+func _count_flash() -> int:
+	# 同名兄弟节点 Godot 会重命名成 @IntroFlash@N，故用子串匹配而非前缀。
+	var c := 0
+	for ch in scene.get_children():
+		if "IntroFlash" in String(ch.name):
+			c += 1
+	return c
 
 func _count_npc(id: Variant) -> int:
 	var c := 0

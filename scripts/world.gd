@@ -5639,6 +5639,47 @@ func intro_seed_act(idx: int, action: String) -> void:
 			n["paper_action_t"] = 0.0
 			return
 
+## intro 中档 VFX（P4，老板决策②）：角色弹出瞬间在画点炸一记「笔尖白闪」——ic_sparkle 广告牌短暂放大+
+## 淡出（提亮成白炽），外加几片小火花朝四周飞散。纯视觉、tween 自清理、离线可用。中档＝几片精灵而非
+## 完整粒子系统。缺 ic_sparkle 素材则静默跳过（登场照常，只是少了闪光）。
+func intro_draw_flash(logical: Vector2, height: float = 2.4) -> void:
+	var tex := UiAssets.tex("ic_sparkle")
+	if tex == null:
+		return
+	var d := WorldGrid.shortest_delta(focus_logical, logical)
+	var ty := float(TerrainMap.tile_height(WorldGrid.to_tile(logical))) * TerrainMap.STEP_HEIGHT
+	var origin := Vector3(d.x, ty + height, d.y)
+	_spawn_flash_sprite(0, tex, origin, 0.0, 2.6, 0.95, 0.45, Vector3.ZERO)  # 中央大闪
+	var n := 5
+	for i in n:  # 四周小火花飞散
+		var ang := TAU * float(i) / float(n)
+		var drift := Vector3(cos(ang), 0.35 + sin(ang) * 0.3, sin(ang)) * 1.3
+		_spawn_flash_sprite(i + 1, tex, origin, ang, 1.1, 0.7, 0.5, drift)
+
+## 一片白闪精灵：广告牌 + 不受光 + 提亮成白炽，scale 弹出放大 + alpha 淡出（可选朝 drift 飞散），末尾自释放。
+## idx 使名字唯一（同名兄弟 Godot 会丢名回退成 @Sprite3D@N，headless 测试就认不出了）。
+func _spawn_flash_sprite(idx: int, tex: Texture2D, origin: Vector3, roll: float, peak: float,
+		start_a: float, dur: float, drift: Vector3) -> void:
+	var s := Sprite3D.new()
+	s.name = "IntroFlash%d" % idx  # headless 测试凭前缀确认闪光确实生成并自清理
+	s.texture = tex
+	s.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	s.shaded = false
+	s.transparent = true
+	s.pixel_size = 0.012
+	s.modulate = Color(2.2, 2.2, 2.2, start_a)  # 超白提亮＝白炽闪光感
+	s.rotation.z = roll
+	add_child(s)
+	_place_on_bent_ground(s, origin)
+	s.scale = Vector3.ONE * 0.2
+	var tw := s.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(s, "scale", Vector3.ONE * peak, dur).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(s, "modulate:a", 0.0, dur).set_ease(Tween.EASE_IN)
+	if drift != Vector3.ZERO:
+		tw.tween_property(s, "position", s.position + drift, dur).set_ease(Tween.EASE_OUT)
+	tw.chain().tween_callback(s.queue_free)
+
 ## intro 编排：画完的具名种子村民活起来（起就近漂移漫游，与 _setup_npcs 的返回用户世界一致）。
 ## 幂等：已被执行器驱动的不重复起。
 func intro_start_seed_wander() -> void:
