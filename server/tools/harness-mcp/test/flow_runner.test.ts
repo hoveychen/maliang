@@ -1,17 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildRunnerArgs, parseRunnerJson, compactFlows, RUNNER_PATH } from "../src/flow_runner.ts";
+import { buildRunnerArgs, parseRunnerJson, compactFlows, CLI_PATH } from "../src/flow_runner.ts";
 
-test("buildRunnerArgs list：--list --with-availability + host/port（连游戏标 available）", () => {
+test("buildRunnerArgs list：全局 host/port 在子命令前 + list-flows --with-availability", () => {
   const a = buildRunnerArgs("list", { host: "127.0.0.1", port: 8578 });
-  assert.equal(a[0], RUNNER_PATH);
-  assert.deepEqual(a.slice(1), ["--list", "--with-availability", "--host", "127.0.0.1", "--port", "8578"]);
+  assert.equal(a[0], CLI_PATH);
+  assert.deepEqual(a.slice(1), ["--host", "127.0.0.1", "--port", "8578", "list-flows", "--with-availability"]);
 });
 
-test("buildRunnerArgs flow：带 --flow/--json/--host/--port，无参不加 --args", () => {
+test("buildRunnerArgs flow：全局 host/port 在前 + run-flow <name>，无参不加 --args", () => {
   const a = buildRunnerArgs("flow", { host: "127.0.0.1", port: 8578 }, { name: "enter_world" });
-  assert.equal(a[0], RUNNER_PATH);
-  assert.deepEqual(a.slice(1), ["--flow", "enter_world", "--json", "--host", "127.0.0.1", "--port", "8578"]);
+  assert.equal(a[0], CLI_PATH);
+  assert.deepEqual(a.slice(1), ["--host", "127.0.0.1", "--port", "8578", "run-flow", "enter_world"]);
 });
 
 test("buildRunnerArgs flow：有参把 args 序列化成 JSON 追加 --args", () => {

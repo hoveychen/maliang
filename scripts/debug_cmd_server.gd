@@ -419,8 +419,15 @@ func _do_say(text: String) -> Dictionary:
 	if vc == null:
 		return {"ok": false, "error": "no active VoiceCapture (current)"}
 	var asr: Object = vc._asr
+	# say=真人说一句：若 ASR 还不是 ScriptedAsr（无 enqueue），先自动 inject 再喂——
+	# 让 say 单命令即可用，不必先手动 inject（MCP 无独立 inject 工具也能 say）。
 	if asr == null or not asr.has_method("enqueue"):
-		return {"ok": false, "error": "asr 不是 ScriptedAsr（harness 未注入？需 user://asr_harness 标志）"}
+		var inj := _do_inject()
+		if not bool(inj.get("ok", false)):
+			return {"ok": false, "error": "say 自动 inject 失败: " + str(inj.get("error", "?"))}
+		asr = vc._asr
+	if asr == null or not asr.has_method("enqueue"):
+		return {"ok": false, "error": "asr 不是 ScriptedAsr（inject 后仍不可用；非 debug 构建？）"}
 	asr.call("enqueue", text)
 	# 门禁：没开聆听窗 / 门禁不放行 → 不喂（正确复现「没在听时说了没用」）。
 	if not vc.is_open() or not bool(vc.should_capture.call()):
