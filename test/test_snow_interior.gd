@@ -32,6 +32,10 @@ func _init() -> void:
 	fails += _check("全格木地板", non_floor, 0)
 
 	# ── authored 家具：7 床 + 1 桌 + 7 碗，全在房间 [19..30]² 内 ────────────
+	# 房间 8×8 [19..26]²（interior-camera-and-size：真实比例 1×2 床后从 12×12 缩到 8×8）
+	var rn := World.room_n_for("snow_interior")
+	var lo := 19
+	var hi := 19 + rn - 1
 	var beds := 0
 	var tables := 0
 	var bowls := 0
@@ -41,7 +45,7 @@ func _init() -> void:
 			var id := TerrainMap.tile_item_id(Vector2i(x, y))
 			if id.is_empty():
 				continue
-			if x < 19 or x > 30 or y < 19 or y > 30:
+			if x < lo or x > hi or y < lo or y > hi:
 				out_of_room += 1
 			match id:
 				"toy_bed_single": beds += 1
@@ -50,18 +54,18 @@ func _init() -> void:
 	fails += _check("7 张单人床", beds, 7)
 	fails += _check("1 张餐桌", tables, 1)
 	fails += _check("7 个碗", bowls, 7)
-	fails += _check("所有家具锚点落房间 [19..30]² 内", out_of_room, 0)
+	fails += _check("所有家具锚点落房间 8×8 内", out_of_room, 0)
 
-	# ── 返回门（前开口边缘 (24,30)）与防弹回 ────────────────────────────────
+	# ── 返回门（前开口边缘中线）与防弹回 ────────────────────────────────────
 	WorldGrid.configure(50)
 	var portals := World.parse_server_portals(EX.build_portal_json("snow_interior"))
 	fails += _check("室内 1 座返回门", portals.size(), 1)
 	if not portals.is_empty():
 		fails += _check("返回门 → 村庄", portals[0]["to_scene"], "village_forest")
-		fails += _check("返回门 tile = (24,30) 前开口边缘", portals[0]["tile"], Vector2i(24, 30))
+		fails += _check("返回门 tile = 前开口边缘中线", portals[0]["tile"], World.room_front_tile("snow_interior"))
 		fails += _check("返回门落点 = (30,89)", portals[0]["to_tile"], Vector2i(30, 89))
-		# 进屋落点 (24,22) 离返回门 8 tile > radius 2.5，不该命中（防弹回）
-		var at_enter := WorldGrid.from_tile_center(Vector2i(24, 22))
+		# 进屋落点（后排）离返回门 > radius 2.5，不该命中（防弹回）
+		var at_enter := WorldGrid.from_tile_center(World.room_back_landing("snow_interior"))
 		fails += _check("进屋落点不在返回门半径内（防弹回）", World.portal_hit(portals, at_enter).is_empty(), true)
 
 	# ── 空 POI / 空住户 ────────────────────────────────────────────────────

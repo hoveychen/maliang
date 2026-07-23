@@ -18,8 +18,9 @@ func _init() -> void:
 	var home_door := _find(vf, "home_interior")
 	fails += _check("VF 有进玩家家室内的门", not home_door.is_empty(), true)
 	if not home_door.is_empty():
+		# home_interior 现为 9×9，落点 = 后排中线 (23,22)（room_back_landing 派生）。
 		fails += _check("家门 tile = (24,26)", home_door["tile"], Vector2i(24, 26))
-		fails += _check("家门落点 = (24,22)", home_door["to_tile"], Vector2i(24, 22))
+		fails += _check("家门落点 = 室内后排中线", home_door["to_tile"], World.room_back_landing("home_interior"))
 		# 站在家门 tile 上 → 命中该门
 		var at_door := WorldGrid.from_tile_center(Vector2i(24, 26))
 		fails += _check("踏进家门半径命中室内门", World.portal_hit(vf, at_door)["to_scene"], "home_interior")
@@ -42,13 +43,16 @@ func _init() -> void:
 	var hi := World.parse_server_portals(EX.build_portal_json("home_interior"))
 	fails += _check("室内解析出 1 座返回门", hi.size(), 1)
 	if not hi.is_empty():
+		# home_interior 9×9 [19..27]：返回门在前开口边缘中线 (23,27)，进屋落点后排 (23,22)。
+		var front := World.room_front_tile("home_interior")
+		var land := World.room_back_landing("home_interior")
 		fails += _check("室内门 → 村庄", hi[0]["to_scene"], "village_forest")
-		fails += _check("室内门 tile = (24,30) 前开口边缘（房间 [19..30]）", hi[0]["tile"], Vector2i(24, 30))
+		fails += _check("室内门 tile = 前开口边缘中线", hi[0]["tile"], front)
 		fails += _check("室内门落点 = (24,31)", hi[0]["to_tile"], Vector2i(24, 31))
-		var at_exit := WorldGrid.from_tile_center(Vector2i(24, 30))
+		var at_exit := WorldGrid.from_tile_center(front)
 		fails += _check("踏进出口半径命中村庄门", World.portal_hit(hi, at_exit)["to_scene"], "village_forest")
-		# 进室内的落点 (24,22) → 离出口 6 tile > radius 2.5，不该命中（防弹回）
-		var at_enter := WorldGrid.from_tile_center(Vector2i(24, 22))
+		# 进室内的落点（后排）离出口 > radius 2.5，不该命中（防弹回）
+		var at_enter := WorldGrid.from_tile_center(land)
 		fails += _check("进屋落点不在出口半径内（防弹回）", World.portal_hit(hi, at_enter).is_empty(), true)
 
 	print("test_home_interior_portal: ", "PASS" if fails == 0 else "FAIL(%d)" % fails)

@@ -25,7 +25,10 @@ func _init() -> void:
 				non_floor += 1
 	fails += _check("全格木地板", non_floor, 0)
 
-	# ── authored 家具：8 件，全在房间 [19..30]² 内 ────────────────────────────
+	# ── authored 家具：5 件（沙发/书架/灯/桌/盆栽），全在房间 8×8 [19..26]² 内 ──
+	var rn := World.room_n_for("oz_castle_interior")
+	var lo := 19
+	var hi := 19 + rn - 1
 	var furn := 0
 	var out_of_room := 0
 	for y in range(n):
@@ -34,10 +37,10 @@ func _init() -> void:
 			if id.is_empty():
 				continue
 			furn += 1
-			if x < 19 or x > 30 or y < 19 or y > 30:
+			if x < lo or x > hi or y < lo or y > hi:
 				out_of_room += 1
-	fails += _check("城堡室内 8 件家具", furn, 8)
-	fails += _check("家具全落房间 [19..30]² 内", out_of_room, 0)
+	fails += _check("城堡室内 5 件家具", furn, 5)
+	fails += _check("家具全落房间 8×8 内", out_of_room, 0)
 
 	# ── oz 侧进城堡门 + 室内返回门（防弹回）─────────────────────────────────
 	WorldGrid.configure(75)  # oz 预设
@@ -58,9 +61,9 @@ func _init() -> void:
 	fails += _check("室内 1 座返回门", inside.size(), 1)
 	if not inside.is_empty():
 		fails += _check("返回门 → oz", inside[0]["to_scene"], "oz")
-		fails += _check("返回门 tile = (24,30)", inside[0]["tile"], Vector2i(24, 30))
+		fails += _check("返回门 tile = 前开口边缘中线", inside[0]["tile"], World.room_front_tile("oz_castle_interior"))
 		fails += _check("返回门落点 = (58,56)", inside[0]["to_tile"], Vector2i(58, 56))
-		var at_enter := WorldGrid.from_tile_center(Vector2i(24, 22))
+		var at_enter := WorldGrid.from_tile_center(World.room_back_landing("oz_castle_interior"))
 		fails += _check("进屋落点不在返回门半径内（防弹回）", World.portal_hit(inside, at_enter).is_empty(), true)
 
 	fails += _check("oz_castle_interior 无 POI", EX.build_poi_json("oz_castle_interior").size(), 0)

@@ -77,12 +77,13 @@ export const BUILTIN_ITEMS: readonly ItemDef[] = [
   // ── 玩具房间主题（world-themes P4；全 CC0：Kenney Furniture Kit）──
   // renderRef 'furniture:<Kenney 原名>' → 客户端 assets/packs/toyroom/pack.json（node 类）
   themed('toy_bear', '玩具熊', 'furniture:bear', 1, true, ['toyroom']),
-  themed('toy_bed_single', '单人床', 'furniture:bedSingle', 3, true, ['toyroom']),
-  themed('toy_bed_bunk', '双层床', 'furniture:bedBunk', 3, true, ['toyroom']),
+  // 真实比例家具（interior-camera-and-size）：床/沙发矩形、桌方形，footprint 从 span-3(6m) 缩到真实尺寸。
+  themedWH('toy_bed_single', '单人床', 'furniture:bedSingle', 1, 2, true, ['toyroom']),  // 1×2 格 = 2m×4m
+  themedWH('toy_bed_bunk', '双层床', 'furniture:bedBunk', 1, 2, true, ['toyroom']),      // 同单人床占地
   themed('toy_bookcase', '书架', 'furniture:bookcaseOpen', 1, true, ['toyroom']),
-  themed('toy_sofa', '沙发', 'furniture:loungeSofa', 3, true, ['toyroom']),
+  themedWH('toy_sofa', '沙发', 'furniture:loungeSofa', 2, 1, true, ['toyroom']),          // 2×1 格 = 4m×2m
   themed('toy_chair', '圆背椅', 'furniture:chairRounded', 1, true, ['toyroom']),
-  themed('toy_table', '桌子', 'furniture:table', 3, true, ['toyroom']),
+  themedWH('toy_table', '桌子', 'furniture:table', 2, 2, true, ['toyroom']),              // 2×2 格 = 4m×4m
   themed('toy_coffee_table', '茶几', 'furniture:tableCoffee', 1, true, ['toyroom']),
   themed('toy_lamp', '落地灯', 'furniture:lampRoundFloor', 1, true, ['toyroom']),
   themed('toy_plant', '盆栽', 'furniture:pottedPlant', 1, true, ['toyroom']),
@@ -259,6 +260,12 @@ function builtin(id: string, name: string, renderRef: string, span: number, bloc
 /** 主题布景（带 themes 软标签；语义同 builtin，仅多一个分类标签，供造世界引导按主题过滤）。 */
 function themed(id: string, name: string, renderRef: string, span: number, blocking: boolean, themes: string[]): ItemDef {
   return { id, worldId: null, name, renderRef, footprintW: span, footprintH: span, blocking, pathOk: false, wander: 0, themes };
+}
+
+/** 非方形主题布景：footprint 宽/高分开（真实比例家具，如床 1×2）。footprintOrigin 对偶数边按 NW 锚点
+ *  展开、rotatedFootprint 对 90°/270° 交换 W/H——两者本就支持非方形/偶数，此处首次启用。 */
+function themedWH(id: string, name: string, renderRef: string, w: number, h: number, blocking: boolean, themes: string[]): ItemDef {
+  return { id, worldId: null, name, renderRef, footprintW: w, footprintH: h, blocking, pathOk: false, wander: 0, themes };
 }
 
 /** 未来机器人主题便捷封装（themes 恒为 ['scifi']）。 */

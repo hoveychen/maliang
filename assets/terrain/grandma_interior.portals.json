@@ -2,8 +2,8 @@
   {
     "radius": 2.5,
     "tile": [
-      24,
-      30
+      21,
+      24
     ],
     "toScene": "village_forest",
     "toTile": [
