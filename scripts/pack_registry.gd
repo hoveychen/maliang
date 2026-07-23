@@ -20,11 +20,14 @@ const PACKS_DIR := "res://assets/packs"
 static var _entries: Dictionary = {}
 ## 资源路径 → 已 load() 的 Resource（ArrayMesh / PackedScene）。跨 chunk 复用，不重复读盘。
 static var _res_cache: Dictionary = {}
+## 渲染键 → 资产原始（scale=1）水平/竖直 AABB。实例化一次量得后常驻，供 fit_scale 派生视觉缩放。
+static var _aabb_cache: Dictionary = {}
 static var _loaded := false
 
 static func reset() -> void:
 	_entries = {}
 	_res_cache = {}
+	_aabb_cache = {}
 	_loaded = false
 
 ## 幂等扫描：读 index.json → 逐 pack 读 pack.json → 合并 entries。缺文件/格式错静默降级
@@ -89,9 +92,59 @@ static func category(key: String) -> String:
 	return String(_entries.get(key, {}).get("category", ""))
 
 ## 实例化/合批缩放（node 建筑；baked/scatter 的散布抖动缩放另由 chunk_manager._jitter_scale 定）。
+## 【全量纲化过渡期保留】pack.json 的手调裸倍数——node 类视觉现由 fit_scale(按 footprint 派生)
+## 取代（见 tile-dimensional-system）；此函数仅剩 raw_aabb 取不到时的降级兜底/散布类沿用。
 static func scale(key: String) -> float:
 	ensure_loaded()
 	return float(_entries.get(key, {}).get("scale", 1.0))
+
+## 资产原始（scale=1）AABB，跨轴累积各 MeshInstance3D 的 mesh AABB（按其相对场景根的变换，
+## 而非 chunk_manager._visual_extent 那个忽略子节点偏移的近似——派生缩放要求精确）。实例化一次量得
+## 后缓存常驻。资源缺/未挂载（load_resource 返 null）时返回**空 AABB 且不缓存**：与内容包分发守卫
+## 同哲学，挂载后 chunk 重铺会重量（缓存空 AABB 会像 content-pck 那样永久污染，故不缓存）。
+static func raw_aabb(key: String) -> AABB:
+	ensure_loaded()
+	if _aabb_cache.has(key):
+		return _aabb_cache[key]
+	var res := load_resource(key)
+	if not (res is PackedScene):
+		return AABB()  # 未挂载/非场景：不缓存，留待重铺重量
+	var inst := (res as PackedScene).instantiate()
+	var acc := {}
+	_accumulate_aabb(inst, Transform3D.IDENTITY, acc)
+	inst.free()
+	var out: AABB = acc.get("aabb", AABB())
+	_aabb_cache[key] = out
+	return out
+
+## 递归累积树内所有 MeshInstance3D 的 mesh AABB（8 角点经累积变换），并到一个总 AABB。
+static func _accumulate_aabb(node: Node, xform: Transform3D, acc: Dictionary) -> void:
+	var t := xform
+	if node is Node3D:
+		t = xform * (node as Node3D).transform
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+		var a := (node as MeshInstance3D).mesh.get_aabb()
+		for i in range(8):
+			var corner := a.position + Vector3(
+				a.size.x * float(i & 1),
+				a.size.y * float((i >> 1) & 1),
+				a.size.z * float((i >> 2) & 1))
+			var p := t * corner
+			if acc.has("aabb"):
+				acc["aabb"] = (acc["aabb"] as AABB).expand(p)
+			else:
+				acc["aabb"] = AABB(p, Vector3.ZERO)
+	for c in node.get_children():
+		_accumulate_aabb(c, t, acc)
+
+## 视觉缩放派生（全量纲化核心）：等比缩放使资产水平 AABB 恰好填满 footprint(W×H tile) 的 fill 比例。
+## 取两水平轴的 min 保证既不溢出格子、又保持资产原始长宽比（uniform scale，与 inst.scale=ONE×sc 一致）。
+## 严格「视觉=碰撞」：footprint 即尺寸唯一真相。AABB 无效（未挂载/空 mesh）时回落 1.0 不崩。
+static func fit_scale(ab: AABB, fp_w: float, fp_h: float, fill := 0.9) -> float:
+	if ab.size.x <= 0.0 or ab.size.z <= 0.0:
+		return 1.0
+	var tile := WorldGrid.TILE_SIZE
+	return fill * minf(fp_w * tile / ab.size.x, fp_h * tile / ab.size.z)
 
 ## 该渲染键所属资产包名（pack.json 所在目录名，如 "base"/"toyroom"/"stickers"）。未注册返回 ""。
 ## "base" = 主包内（打进 APK，恒在）；其余 = 可分发内容包（.pck，须挂载后才在 res:// 里）。
