@@ -159,22 +159,16 @@ const VILLAGER_INTERIOR_IDS := [
 	"villager_home_3_interior", "villager_home_4_interior", "grandma_interior",
 ]
 
-## 内置物品的占地/压路语义（与 server items.ts BUILTIN_ITEMS 必须同步；
-## P4 起客户端渲染层也从这里取 footprint——单一副本，别在别处再抄）。
-## 内置物品占地（W×H tile，与 server items.ts footprintW/H 同步）。非方形家具（床/沙发）W≠H；
-## 未列的默认 1×1。奇数边锚点居中、偶数边 NW 锚点（见 _place_anchor，与 server footprintOrigin 对齐）。
-const ITEM_FOOTPRINT := {
-	"well": Vector2i(3, 3), "windmill": Vector2i(3, 3),
-	"house_0": Vector2i(3, 3), "house_1": Vector2i(3, 3), "house_2": Vector2i(3, 3), "house_3": Vector2i(3, 3),
-	"walking_hut": Vector2i(3, 3), "hop_mailbox": Vector2i(3, 3),
-	"emerald_castle": Vector2i(7, 7),  # tile-dimensional：城堡类 7×7（与 server items.ts / builtin_items.json 同步）
-	"dwarf_cottage": Vector2i(3, 3),  # 七矮人合住小木屋（dwarf-cottage 计划）
-	# 室内家具真实比例（interior-camera-and-size，与 server items.ts 同步）：床 1×2、桌 2×2、沙发 2×1。
-	# 其余家具（椅/书架/灯/盆栽/熊/茶几/电视）1×1，走默认，不必列。
-	"toy_bed_single": Vector2i(1, 2), "toy_bed_bunk": Vector2i(1, 2),
-	"toy_table": Vector2i(2, 2), "toy_sofa": Vector2i(2, 1),
-}
-const ITEM_PATH_OK := { "well": true, "emerald_castle": true }  # 城堡立翡翠黄砖广场上（Emerald City 铺装城，非挡路）
+## footprint / pathOk 语义的【单一真相】= builtin_items.json（server BUILTIN_ITEMS 对拍副本，
+## 经 ItemCatalog 读取）。tile-dimensional P5：删掉本文件曾经的 ITEM_FOOTPRINT/ITEM_PATH_OK 手工副本
+## ——它在 P2 分档后漂移过（well/windmill 分档缩到 2×2、这份副本仍是旧 3×3），改读下发 def 杜绝再漂。
+## _place_anchor 从 ItemCatalog.get_def(id) 取 footprintW/H 与 pathOk。
+##
+## CLIENT_PLACE_ON_PATH：compose 放置层【专属】的「可落在路/黄砖上」放行，语义不同于 server 的碰撞 pathOk。
+## emerald_castle：server pathOk=false（城堡不是可穿行路面，且 server buildStaticOccupancy 本就只拒 T_PATH、
+## 不拒黄砖），但翡翠城堡刻意立在翡翠黄砖【广场】上（Emerald City 铺装城）；compose 的 prop_area_ok 把
+## 黄砖当「路」一律排除以保明路，故这里对城堡单独放行，让它能落在广场。（若将来更多地标要立在铺装广场上再加。）
+const CLIENT_PLACE_ON_PATH := { "emerald_castle": true }
 
 ## 散布判定结果 → 物品 id（变体由外观 hash 选，与运行时 _skin 同款算式）。
 const DECO_NONE := 0
@@ -299,7 +293,9 @@ static func yaw_to_arg(deg: float) -> int:
 ## 找不到空位就放弃（确定性，不摆歪）。
 static func _place_anchor(item_ref: PackedByteArray, item_arg: PackedByteArray, palette: PackedStringArray, entry: Dictionary) -> void:
 	var id: String = entry["item"]
-	var fp: Vector2i = ITEM_FOOTPRINT.get(id, Vector2i.ONE)
+	ItemCatalog.ensure_builtin()  # 单一真相：footprint/pathOk 从下发 def（离线兜底 builtin_items.json）取，不再抄副本
+	var def := ItemCatalog.get_def(id)
+	var fp := Vector2i(int(def.get("footprintW", 1)), int(def.get("footprintH", 1)))
 	var yaw := float(entry["yaw"])
 	# 朝向旋转后的 footprint（90°/270° 交换 W/H，与 server rotatedFootprint 一致）。
 	var quadrant := roundi(fposmod(yaw, 360.0) / 90.0) % 4
@@ -307,7 +303,7 @@ static func _place_anchor(item_ref: PackedByteArray, item_arg: PackedByteArray, 
 		fp = Vector2i(fp.y, fp.x)
 	# 锚点展开原点（奇数居中、偶数 NW；与 server footprintOrigin: x-((w-1)>>1) 对齐）。
 	var reserve := Vector2i((fp.x - 1) >> 1, (fp.y - 1) >> 1)
-	var path_ok: bool = ITEM_PATH_OK.get(id, false)
+	var path_ok: bool = bool(def.get("pathOk", false)) or CLIENT_PLACE_ON_PATH.has(id)
 	var n := WorldGrid.GRID_TILES
 	for r in range(int(entry["search"]) + 1):
 		for t in _ring(entry["tile"], r):
