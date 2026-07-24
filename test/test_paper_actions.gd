@@ -26,7 +26,7 @@ func _initialize() -> void:
 
 ## 纯函数层：全部 20 种动作的动画数学逐一体检。
 func _test_action_pose_math() -> void:
-	_check("action table has 26 entries", BehaviorExecutor.ACTION_DUR.size(), 26)
+	_check("action table has 27 entries", BehaviorExecutor.ACTION_DUR.size(), 27)
 	for a in BehaviorExecutor.ACTION_DUR:
 		var dur := float(BehaviorExecutor.ACTION_DUR[a])
 		var moved := false

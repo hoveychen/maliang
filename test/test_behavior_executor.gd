@@ -227,7 +227,7 @@ func _init() -> void:
 	fails += _check("unknown action falls back to wave", String(d12.get("paper_action", "")), "wave")
 
 	# 20 种动作全在时长表里、且每种都能原样写进契约键（不被 fallback 吞掉）
-	fails += _check("action table has 26 entries", BehaviorExecutor.ACTION_DUR.size(), 26)
+	fails += _check("action table has 27 entries", BehaviorExecutor.ACTION_DUR.size(), 27)
 	for a in BehaviorExecutor.ACTION_DUR:
 		var da := { "logical": l_start, "id": "actor_%s" % a }
 		var exa := BehaviorExecutor.new()
