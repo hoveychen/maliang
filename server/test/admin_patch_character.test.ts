@@ -16,7 +16,7 @@ function char(worldId: string, id: string, sceneId: string): Character {
   };
 }
 
-test('admin PATCH 角色：修 sceneId/position/spriteAsset + 逐项校验 + token 门禁', async () => {
+test('admin PATCH 角色：修 sceneId/position/spriteAsset/voiceId + 逐项校验 + token 门禁', async () => {
   const store = new WorldStore();
   process.env.MALIANG_ADMIN_TOKEN = 'sesame';
   const app = await buildServer({ adapters: createMockAdapters(), store });
@@ -52,6 +52,13 @@ test('admin PATCH 角色：修 sceneId/position/spriteAsset + 逐项校验 + tok
     assert.equal(c.sceneId, 'forest');
     assert.deepEqual(c.position, { tileX: 53, tileY: 28 });
     assert.equal(c.appearance.spriteAsset, asset);
+
+    // voiceId：非法（不在音色目录）→ 400 且不落库；合法 → 200 并写进 character_defs（定义层，intro-voice-pin）
+    assert.equal((await app.inject({ method: 'PATCH', url, headers: H, body: { voiceId: 'bogus-voice' } })).statusCode, 400);
+    assert.equal(store.getCharacter('w1', 'c1')?.voiceId, 'v', 'voiceId 校验失败不落库');
+    const vres = await app.inject({ method: 'PATCH', url, headers: H, body: { voiceId: 'zh-CN-YunxiNeural' } });
+    assert.equal(vres.statusCode, 200);
+    assert.equal(store.getCharacter('w1', 'c1')?.voiceId, 'zh-CN-YunxiNeural', 'voiceId 落库');
 
     // 修完 positions_report 的 guard 语义应认新场景：forest 上报收、village 上报拒
     assert.equal(store.setCharacterTile('w1', 'c1', { tileX: 54, tileY: 28 }, 'forest'), true);

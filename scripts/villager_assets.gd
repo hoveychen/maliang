@@ -16,15 +16,21 @@ extends RefCounted
 ## 换图集后同步更新下方 meta 常量，并重跑 godot --headless --import 生成 .import。
 ## prod seed 村民形象换代时这些本地图集不会自动更新，需手动重取。
 
-## 每个 seed 村民：本地图集路径 + 展示名 + prod spriteAsset（转正对齐用）+ 播放 meta。
+## 每个 seed 村民：本地图集路径 + 展示名 + prod spriteAsset（转正对齐用）+ voice_id + 播放 meta。
 ## meta 字段直接喂 PaperCharacter.play_anim（cols/rows/frameCount/fps/cellW/cellH + clips 段区间）。
 ## 图集是 idle+talking 两段（离线 demo NPC 不出声，只会播 idle 段；转正联网后会说话动嘴）。
+##
+## voice_id = 这个具名种子村民的【canonical 运行期音色】，单一真相。三处必须一致，否则孩子在 intro
+## 听到的招呼声进游戏后会变（违「预制音色=运行期音色」契约）：
+##   ① 本字段  ② 服务端 character_defs.voiceId（prod template 世界）  ③ intro 招呼预制 WAV（assets/voice/intro/greet_*，见 lines.json 逐行 voice）
+## 选声理由：兔=活泼少女 Xiaoyi、狐=阳光少年 Yunxi（不能用 Yunxia，那是点点/仙子音色，会狐≡仙子撞声）、鹿=温暖 Xiaoxiao。
 const SEED := [
 	{
 		"slug": "wuwu_rabbit",
 		"name": "舞舞兔",
 		"atlas": "res://assets/villagers/wuwu_rabbit.webp",
 		"sprite_asset": "142b170f7f4c8e54",
+		"voice_id": "zh-CN-XiaoyiNeural",
 		"meta": { "cols": 8, "rows": 8, "frameCount": 62, "fps": 8, "cellW": 244, "cellH": 256,
 			"clips": { "idle": { "start": 0, "count": 31 }, "talking": { "start": 31, "count": 31 } } },
 	},
@@ -33,6 +39,7 @@ const SEED := [
 		"name": "灵狐小围巾",
 		"atlas": "res://assets/villagers/linghu_fox.webp",
 		"sprite_asset": "92e458df1ff0711d",
+		"voice_id": "zh-CN-YunxiNeural",
 		"meta": { "cols": 8, "rows": 8, "frameCount": 62, "fps": 8, "cellW": 272, "cellH": 256,
 			"clips": { "idle": { "start": 0, "count": 31 }, "talking": { "start": 31, "count": 31 } } },
 	},
@@ -41,6 +48,7 @@ const SEED := [
 		"name": "花环小鹿",
 		"atlas": "res://assets/villagers/huahuan_deer.webp",
 		"sprite_asset": "22ce958273165bbf",
+		"voice_id": "zh-CN-XiaoxiaoNeural",
 		"meta": { "cols": 8, "rows": 8, "frameCount": 62, "fps": 8, "cellW": 204, "cellH": 256,
 			"clips": { "idle": { "start": 0, "count": 31 }, "talking": { "start": 31, "count": 31 } } },
 	},

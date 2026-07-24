@@ -97,7 +97,7 @@ import { completeTaskOnEvent, completeWishOnAbility, beginWishTrial, completeWis
 import { ensureTaskChain, pendingChainStep } from './task_chain.ts';
 import { pickComplaint, REFINE_HINT, REFINE_HINT_2 } from './refinements.ts';
 import { leakPoolFor, reuseHint } from './wishes.ts';
-import { backfillVoices, FAIRY_VOICE, voiceForPlayer } from './voice_catalog.ts';
+import { backfillVoices, FAIRY_VOICE, isKnownVoice, voiceForPlayer } from './voice_catalog.ts';
 import { WorldHub } from './world_hub.ts';
 import { StageDirector, DEFAULT_MAX_CONCURRENT_STAGES, type StageStartOpts } from './stage_session.ts';
 import { buildDebut, buildStoryStageOpts, DebutError } from './stage_debut.ts';
@@ -411,14 +411,16 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
     },
   );
 
-  // 管理端点：修数据用的角色 PATCH——sceneId / position / spriteAsset 按需改（scene-drag-guard P2）。
+  // 管理端点：修数据用的角色 PATCH——sceneId / position / spriteAsset / voiceId 按需改（scene-drag-guard P2）。
   // positions_report 已拒绝跨场景拖拽，角色换场景（如把被拖走的森林村民搬回去）走这里；
   // spriteAsset 用于把误 regen 的形象指回库里仍在的旧资产（regen-sprite 没有 undo）。
-  // 全部字段可选、逐项校验：sceneId 必须已入库，position 必须界内，spriteAsset 必须在资产库。
+  // voiceId 用于把角色运行期音色钉到正确的目录音色（intro-voice-pin：修「预制音色=运行期音色」失配，
+  // 如灵狐被误分到点点的 Yunxia 音色 → 改回 Yunxi）。voiceId 是 character_defs 定义层字段，改一处传所有世界。
+  // 全部字段可选、逐项校验：sceneId 必须已入库，position 必须界内，spriteAsset 必须在资产库，voiceId 必须在音色目录。
   // 必须配 MALIANG_ADMIN_TOKEN。
   app.patch<{
     Params: { id: string; cid: string };
-    Body: { sceneId?: string; position?: { tileX?: number; tileY?: number }; spriteAsset?: string } | null;
+    Body: { sceneId?: string; position?: { tileX?: number; tileY?: number }; spriteAsset?: string; voiceId?: string } | null;
   }>('/admin/worlds/:id/characters/:cid', async (req, reply) => {
     const token = process.env.MALIANG_ADMIN_TOKEN;
     if (!token || req.headers['x-admin-token'] !== token) {
@@ -444,6 +446,12 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       }
       char.appearance.spriteAsset = b.spriteAsset;
     }
+    if (b.voiceId !== undefined) {
+      if (typeof b.voiceId !== 'string' || !isKnownVoice(b.voiceId)) {
+        return reply.code(400).send({ error: `voice not in catalog: ${String(b.voiceId)}` });
+      }
+      char.voiceId = b.voiceId;
+    }
     store.saveCharacter(char);
     return {
       id: char.id,
@@ -451,6 +459,7 @@ export async function buildServer(deps: ServerDeps = {}): Promise<FastifyInstanc
       sceneId: char.sceneId,
       position: char.position,
       spriteAsset: char.appearance.spriteAsset,
+      voiceId: char.voiceId,
     };
   });
 
